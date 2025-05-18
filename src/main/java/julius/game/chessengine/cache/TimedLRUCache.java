@@ -41,7 +41,11 @@ public class TimedLRUCache<K, V> extends LinkedHashMap<K, V> {
         if (elapsedTime == null) {
             return false; // or handle this case as needed
         }
-        return size() > maxSize || System.currentTimeMillis() - elapsedTime > maxAge;
+        boolean shouldRemove = size() > maxSize || System.currentTimeMillis() - elapsedTime > maxAge;
+        if (shouldRemove) {
+            timeMap.remove(eldest.getKey());
+        }
+        return shouldRemove;
     }
     /**
      * Associates the specified value with the specified key in this cache. If the cache previously
