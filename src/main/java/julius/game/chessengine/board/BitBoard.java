@@ -10,6 +10,7 @@ import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
 
 import java.util.Objects;
+import java.util.Arrays;
 
 import static julius.game.chessengine.board.MoveHelper.createMoveInt;
 import static julius.game.chessengine.helper.BitHelper.*;
@@ -41,6 +42,7 @@ public class BitBoard {
     private long whitePieces = 0L;
     private long blackPieces = 0L;
     private long allPieces = 0L;
+    private PieceType[] pieceBoard = new PieceType[64];
 
     // This variable needs to be set whenever a move is made
     //TODO only write to it if en passant is possible then you can also hash it
@@ -86,6 +88,7 @@ public class BitBoard {
         this.blackRookH8Moved = blackRookH8Moved;
         this.whiteKingHasCastled = whiteKingHasCastled;
         this.blackKingHasCastled = blackKingHasCastled;
+        initPieceBoardFromBitboards();
     }
 
     public BitBoard() {
@@ -129,6 +132,8 @@ public class BitBoard {
 
         this.blackKingHasCastled = other.blackKingHasCastled;
         this.whiteKingHasCastled = other.whiteKingHasCastled;
+
+        this.pieceBoard = Arrays.copyOf(other.pieceBoard, other.pieceBoard.length);
     }
 
 
@@ -191,6 +196,31 @@ public class BitBoard {
         allPieces = whitePieces | blackPieces;
 
         lastMoveDoubleStepPawnIndex = 0;
+        initPieceBoardFromBitboards();
+    }
+
+    private void initPieceBoardFromBitboards() {
+        Arrays.fill(pieceBoard, null);
+        setPieces(whitePawns, PieceType.PAWN);
+        setPieces(blackPawns, PieceType.PAWN);
+        setPieces(whiteKnights, PieceType.KNIGHT);
+        setPieces(blackKnights, PieceType.KNIGHT);
+        setPieces(whiteBishops, PieceType.BISHOP);
+        setPieces(blackBishops, PieceType.BISHOP);
+        setPieces(whiteRooks, PieceType.ROOK);
+        setPieces(blackRooks, PieceType.ROOK);
+        setPieces(whiteQueens, PieceType.QUEEN);
+        setPieces(blackQueens, PieceType.QUEEN);
+        setPieces(whiteKing, PieceType.KING);
+        setPieces(blackKing, PieceType.KING);
+    }
+
+    private void setPieces(long bitboard, PieceType type) {
+        while (bitboard != 0) {
+            int index = Long.numberOfTrailingZeros(bitboard);
+            pieceBoard[index] = type;
+            bitboard &= bitboard - 1;
+        }
     }
 
     // Method to get the bitboard for a specific piece type and color
@@ -216,6 +246,18 @@ public class BitBoard {
                 default -> 0;
             };
         }
+    }
+
+    private PieceType pieceTypeFromBits(int pieceTypeBits) {
+        return switch (pieceTypeBits) {
+            case 1 -> PieceType.PAWN;
+            case 2 -> PieceType.KNIGHT;
+            case 3 -> PieceType.BISHOP;
+            case 4 -> PieceType.ROOK;
+            case 5 -> PieceType.QUEEN;
+            case 6 -> PieceType.KING;
+            default -> null;
+        };
     }
 
     private void setBitboardForPiece(int pieceTypeBits, boolean isWhite, long bitboard) {
@@ -610,6 +652,7 @@ public class BitBoard {
         int promotionPieceTypeBits = MoveHelper.derivePromotionPieceTypeBits(move); // Extract the next 3 bits
 
         long pieceBitboard = intToPiecesBitboard(pieceTypeBits, isWhite);
+        PieceType movingPiece = pieceTypeFromBits(pieceTypeBits);
 
         if (isCapture) {
             clearSquare(toIndex, !isWhite);
@@ -636,6 +679,9 @@ public class BitBoard {
             rookBitboard = moveBit(rookBitboard, rookFromIndex, rookToIndex);
             setBitboardForPiece(4, isWhite, rookBitboard);
 
+            pieceBoard[rookFromIndex] = null;
+            pieceBoard[rookToIndex] = PieceType.ROOK;
+
             // Mark the rook as moved
             markRookAsMoved(rookFromIndex);
         }
@@ -643,6 +689,8 @@ public class BitBoard {
         // Move the piece
         pieceBitboard = moveBit(pieceBitboard, fromIndex, toIndex);
         setBitboardForPiece(pieceTypeBits, isWhite, pieceBitboard);
+
+        pieceBoard[fromIndex] = null;
 
         if (promotionPieceTypeBits != 0) {
             // Clear the pawn from the promotion square
@@ -652,6 +700,9 @@ public class BitBoard {
             long promotionPieceBitboard = intToPiecesBitboard(promotionPieceTypeBits, isWhite);
             promotionPieceBitboard |= (1L << toIndex); // Place the promotion piece on the promotion square
             setBitboardForPiece(promotionPieceTypeBits, isWhite, promotionPieceBitboard);
+            pieceBoard[toIndex] = pieceTypeFromBits(promotionPieceTypeBits);
+        } else {
+            pieceBoard[toIndex] = movingPiece;
         }
 
         // Mark the king as moved if it was a king move
@@ -703,34 +754,13 @@ public class BitBoard {
             if ((blackQueens & (1L << index)) != 0L) blackQueens &= mask;  // Corrected line for queen
             blackKing &= mask; // Only clear if the king is actually on the square
         }
+        pieceBoard[index] = null;
         updateAggregatedBitboards();
     }
 
 
     public PieceType getPieceTypeAtIndex(int index) {
-        long positionMask = 1L << index;
-
-        if ((allPieces & positionMask) == 0) {
-            return null;
-        }
-
-        if ((whitePieces & positionMask) != 0) {
-            if ((whitePawns & positionMask) != 0) return PieceType.PAWN;
-            if ((whiteKnights & positionMask) != 0) return PieceType.KNIGHT;
-            if ((whiteBishops & positionMask) != 0) return PieceType.BISHOP;
-            if ((whiteRooks & positionMask) != 0) return PieceType.ROOK;
-            if ((whiteQueens & positionMask) != 0) return PieceType.QUEEN;
-            if ((whiteKing & positionMask) != 0) return PieceType.KING;
-        } else {
-            if ((blackPawns & positionMask) != 0) return PieceType.PAWN;
-            if ((blackKnights & positionMask) != 0) return PieceType.KNIGHT;
-            if ((blackBishops & positionMask) != 0) return PieceType.BISHOP;
-            if ((blackRooks & positionMask) != 0) return PieceType.ROOK;
-            if ((blackQueens & positionMask) != 0) return PieceType.QUEEN;
-            if ((blackKing & positionMask) != 0) return PieceType.KING;
-        }
-
-        return null;
+        return pieceBoard[index];
     }
 
     public Color getPieceColorAtIndex(int index) {
@@ -1105,8 +1135,9 @@ public class BitBoard {
         // If the move was a double pawn push, remove the last move double step pawn position
         undoGameState(fromIndex, toIndex, pieceTypeBits, isKingFirstMove, isRookFirstMove, isWhite, doubleStepPawnIndex);
 
-        // Update the aggregated bitboards
+        // Update the aggregated bitboards and piece board
         updateAggregatedBitboards();
+        initPieceBoardFromBitboards();
         whitesTurn = !whitesTurn;
     }
 
