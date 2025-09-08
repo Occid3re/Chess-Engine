@@ -8,7 +8,6 @@ import java.util.Arrays;
 public class MoveList {
     private int[] moves;
     private int moveCount;
-    private static final int INITIAL_SIZE = 30;
     private static final int MAX_SIZE = 218; // Maximum number of legal moves
 
     private String stringRepresentation;
@@ -16,36 +15,30 @@ public class MoveList {
 
 
     public MoveList() {
-        this.moves = new int[INITIAL_SIZE];
+        // Pre-allocate the maximum required size to avoid costly resizes during
+        // move generation. This significantly speeds up move generation by
+        // eliminating array reallocation and copy overhead.
+        this.moves = new int[MAX_SIZE];
         this.moveCount = 0;
     }
 
     // Deep copy constructor
     public MoveList(MoveList original) {
         this.moveCount = original.moveCount;
-        this.moves = new int[original.moves.length];
+        // Ensure the cloned list also has the full capacity so that it can be
+        // reused without triggering resizes.
+        this.moves = new int[MAX_SIZE];
         System.arraycopy(original.moves, 0, this.moves, 0, original.moveCount);
     }
 
     public void add(int move) {
-        if (moveCount >= moves.length) {
-            resizeArray();
-        }
+        // Since the array is pre-allocated to the maximum size, we can skip
+        // expensive bounds checks and resizes. The check against MAX_SIZE is
+        // kept as a safety measure.
         if (moveCount < MAX_SIZE) {
-            moves[moveCount] = move;
-            moveCount++;
+            moves[moveCount++] = move;
         }
         isStringRepresentationStale = true;
-    }
-
-    private void resizeArray() {
-        if (moves.length >= MAX_SIZE) {
-            return; // Do not resize beyond the maximum size
-        }
-        int newSize = Math.min(moves.length * 2, MAX_SIZE);
-        int[] newArray = new int[newSize];
-        System.arraycopy(moves, 0, newArray, 0, moveCount); // Copy only used elements
-        moves = newArray;
     }
 
     public int size() {
