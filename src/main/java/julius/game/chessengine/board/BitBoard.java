@@ -146,6 +146,10 @@ public class BitBoard {
         this.pieceBoard = Arrays.copyOf(other.pieceBoard, other.pieceBoard.length);
     }
 
+    public void setLastMoveDoubleStepPawnIndex(int index) {
+        this.lastMoveDoubleStepPawnIndex = index;
+    }
+
 
     public boolean hasInsufficientMaterial() {
         // Early return if any side has pawns, rooks, or queens, as these can achieve checkmate
