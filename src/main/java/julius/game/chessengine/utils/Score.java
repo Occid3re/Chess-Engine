@@ -1,6 +1,7 @@
 package julius.game.chessengine.utils;
 
 import julius.game.chessengine.board.BitBoard;
+import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.GameStateEnum;
 import lombok.Data;
 import lombok.extern.log4j.Log4j2;
@@ -491,9 +492,23 @@ public class Score {
     }
 
     public void updateMobilityScores(BitBoard bitBoard) {
-        int movesWhite = bitBoard.generateAllPossibleMoves(true).size();
-        int movesBlack = bitBoard.generateAllPossibleMoves(false).size();
+        int movesWhite = countLegalMoves(bitBoard, true);
+        int movesBlack = countLegalMoves(bitBoard, false);
         updateMobilityScores(movesWhite, movesBlack);
+    }
+
+    private int countLegalMoves(BitBoard board, boolean white) {
+        MoveList moves = board.generateAllPossibleMoves(white);
+        int legal = 0;
+        for (int i = 0; i < moves.size(); i++) {
+            int move = moves.getMove(i);
+            BitBoard copy = new BitBoard(board);
+            copy.performMove(move);
+            if (!copy.isInCheck(white)) {
+                legal++;
+            }
+        }
+        return legal;
     }
 
     public void updateKingSafety(BitBoard bitBoard) {
