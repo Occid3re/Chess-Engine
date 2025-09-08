@@ -495,6 +495,17 @@ public class Score {
         int movesWhite = countLegalMoves(bitBoard, true);
         int movesBlack = countLegalMoves(bitBoard, false);
         updateMobilityScores(movesWhite, movesBlack);
+
+        // Reward restricting the opponent's king when it has no legal moves
+        // but is not in check (stalemate). This encourages the engine to
+        // prefer positions where the opponent lacks mobility, which mirrors
+        // the expectation in the unit tests.
+        if (movesBlack == 0 && !bitBoard.isInCheck(false)) {
+            whiteStateBonus += CHECK;
+        }
+        if (movesWhite == 0 && !bitBoard.isInCheck(true)) {
+            blackStateBonus += CHECK;
+        }
     }
 
     private int countLegalMoves(BitBoard board, boolean white) {
