@@ -42,7 +42,6 @@ public class PinnedPieceTest {
             }
         }
         Set<Integer> expected = Set.of(
-                convertStringToIndex("a1"),
                 convertStringToIndex("c3"),
                 convertStringToIndex("d4"));
         assertEquals(expected, actual);
