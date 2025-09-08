@@ -5,6 +5,7 @@ import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
+import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.utils.Score;
 import lombok.Getter;
 import lombok.Setter;
@@ -91,6 +92,10 @@ public class AI {
     @Setter
     private long timeLimit; // milliseconds
 
+    private boolean useNullMovePruning = true;
+    private long nodesVisited = 0;
+    private long nullMoveCount = 0;
+
 
     public AI(Engine mainEngine) {
         this.mainEngine = mainEngine;
@@ -103,6 +108,23 @@ public class AI {
                 killerMoves[i][j] = -1; // Initialize with an invalid move
             }
         }
+    }
+
+    public void setUseNullMovePruning(boolean useNullMovePruning) {
+        this.useNullMovePruning = useNullMovePruning;
+    }
+
+    public long getNodesVisited() {
+        return nodesVisited;
+    }
+
+    public long getNullMoveCount() {
+        return nullMoveCount;
+    }
+
+    public void resetCounters() {
+        nodesVisited = 0;
+        nullMoveCount = 0;
     }
 
     private void startCalculationThread() {
@@ -336,6 +358,7 @@ public class AI {
      */
     private double alphaBeta(Engine simulatorEngine, int depth, double alpha, double beta, boolean isWhite, long startTime, long timeLimit) {
         log.debug(" ------------------------- {} ------------------------- ", depth);
+        nodesVisited++;
         // Check for time limit exceeded
         if (System.currentTimeMillis() - startTime > timeLimit) {
             return EXIT_FLAG;
@@ -372,6 +395,18 @@ public class AI {
             }
         }
 
+        if (useNullMovePruning && depth >= 3 && !isSideInCheck(simulatorEngine, isWhite) && !simulatorEngine.isEndgame()) {
+            int ep = simulatorEngine.doNullMove();
+            nullMoveCount++;
+            double nullScore = alphaBeta(simulatorEngine, depth - 1 - 2, alpha, beta, !isWhite, startTime, timeLimit);
+            simulatorEngine.undoNullMove(ep);
+
+            if (isWhite && nullScore >= beta) {
+                return beta;
+            } else if (!isWhite && nullScore <= alpha) {
+                return alpha;
+            }
+        }
 
         double alphaOriginal = alpha; // Store the original alpha value
         double betaOriginal = beta;   // Store the original beta value
@@ -383,6 +418,11 @@ public class AI {
         } else {
             return minimizer(simulatorEngine, depth, alpha, beta, isWhite, boardHash, betaOriginal, moves, startTime, timeLimit);
         }
+    }
+
+    private boolean isSideInCheck(Engine engine, boolean isWhite) {
+        GameStateEnum state = engine.getGameState().getState();
+        return (isWhite && state == GameStateEnum.WHITE_IN_CHECK) || (!isWhite && state == GameStateEnum.BLACK_IN_CHECK);
     }
 
     private double maximizer(Engine simulatorEngine, int depth, double alpha, double beta, boolean isWhite, long boardHash, double alphaOriginal, MoveList moves, long startTime, long timeLimit) {
