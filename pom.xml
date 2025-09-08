@@ -41,7 +41,7 @@
 		<dependency>
 			<groupId>org.springframework</groupId>
 			<artifactId>spring-webmvc</artifactId>
-			<version>6.0.13</version>
+			<version>6.1.13</version>
 		</dependency>
 
 		<!-- https://mvnrepository.com/artifact/org.spockframework/spock-core -->
