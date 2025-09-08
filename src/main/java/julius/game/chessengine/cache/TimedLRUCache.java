@@ -57,16 +57,51 @@ public class TimedLRUCache<K, V> extends LinkedHashMap<K, V> {
      * @return the previous value associated with the key, or null if there was no mapping for the key
      */
     @Override
-    public V put(K key, V value) {
+    public synchronized V put(K key, V value) {
         timeMap.put(key, System.currentTimeMillis());
         return super.put(key, value);
+    }
+
+    /**
+     * Retrieves a value from the cache. Accessing an entry updates its
+     * position in the LRU order.
+     *
+     * @param key key whose associated value is to be returned
+     * @return the value associated with the specified key, or {@code null}
+     *         if the cache contains no mapping for the key
+     */
+    @Override
+    public synchronized V get(Object key) {
+        return super.get(key);
+    }
+
+    /**
+     * Checks whether a key is present in the cache.
+     *
+     * @param key key whose presence in this cache is to be tested
+     * @return {@code true} if this cache contains a mapping for the
+     *         specified key
+     */
+    @Override
+    public synchronized boolean containsKey(Object key) {
+        return super.containsKey(key);
+    }
+
+    /**
+     * Returns the number of key-value mappings in this cache.
+     *
+     * @return the number of entries in the cache
+     */
+    @Override
+    public synchronized int size() {
+        return super.size();
     }
 
     /**
      * Cleans up the cache by removing entries that are older than the maximum allowed age.
      * This method should be called periodically to ensure timely removal of old entries.
      */
-    public void cleanup() {
+    public synchronized void cleanup() {
         long now = System.currentTimeMillis();
         for (Iterator<Map.Entry<K, Long>> it = timeMap.entrySet().iterator(); it.hasNext();) {
             Map.Entry<K, Long> entry = it.next();
