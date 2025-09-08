@@ -245,6 +245,22 @@ public class Engine {
         return bitBoard.whitesTurn;
     }
 
+    public int doNullMove() {
+        int prev = bitBoard.getLastMoveDoubleStepPawnIndex();
+        bitBoard.setLastMoveDoubleStepPawnIndex(0);
+        bitBoard.whitesTurn = !bitBoard.whitesTurn;
+        generateLegalMoves();
+        gameState.updateState(bitBoard, legalMoves, false);
+        return prev;
+    }
+
+    public void undoNullMove(int previousDoubleStep) {
+        bitBoard.whitesTurn = !bitBoard.whitesTurn;
+        bitBoard.setLastMoveDoubleStepPawnIndex(previousDoubleStep);
+        generateLegalMoves();
+        gameState.updateState(bitBoard, legalMoves, false);
+    }
+
     public void undoLastMove() {
         if (!line.isEmpty()) {
             gameState.undo(bitBoard.getBoardStateHash());
