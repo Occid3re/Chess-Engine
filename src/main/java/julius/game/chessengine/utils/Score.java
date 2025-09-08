@@ -545,34 +545,33 @@ public class Score {
     }
 
     public void updateMobilityScores(BitBoard bitBoard) {
-        int movesWhite = countLegalMoves(bitBoard, true);
-        int movesBlack = countLegalMoves(bitBoard, false);
+        // Count pseudo-legal moves for a fast mobility estimate. This avoids
+        // the expensive per-move legality checks that slowed down search.
+        int movesWhite = bitBoard.generateAllPossibleMoves(true).size();
+        int movesBlack = bitBoard.generateAllPossibleMoves(false).size();
         updateMobilityScores(movesWhite, movesBlack);
 
-        // Reward restricting the opponent's king when it has no legal moves
-        // but is not in check (stalemate). This encourages the engine to
-        // prefer positions where the opponent lacks mobility, which mirrors
-        // the expectation in the unit tests.
-        if (movesBlack == 0 && !bitBoard.isInCheck(false)) {
+        // Detect stalemate by verifying if any legal moves exist. We only
+        // search until the first legal move is found, keeping the check cheap.
+        if (!hasAnyLegalMove(bitBoard, false) && !bitBoard.isInCheck(false)) {
             whiteStateBonus += CHECK;
         }
-        if (movesWhite == 0 && !bitBoard.isInCheck(true)) {
+        if (!hasAnyLegalMove(bitBoard, true) && !bitBoard.isInCheck(true)) {
             blackStateBonus += CHECK;
         }
     }
 
-    private int countLegalMoves(BitBoard board, boolean white) {
+    private boolean hasAnyLegalMove(BitBoard board, boolean white) {
         MoveList moves = board.generateAllPossibleMoves(white);
-        int legal = 0;
         for (int i = 0; i < moves.size(); i++) {
             int move = moves.getMove(i);
             BitBoard copy = new BitBoard(board);
             copy.performMove(move);
             if (!copy.isInCheck(white)) {
-                legal++;
+                return true;
             }
         }
-        return legal;
+        return false;
     }
 
     public void updateKingSafety(BitBoard bitBoard) {
