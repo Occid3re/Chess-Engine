@@ -37,11 +37,15 @@ public class TimedLRUCache<K, V> extends LinkedHashMap<K, V> {
      */
     @Override
     protected synchronized boolean removeEldestEntry(Map.Entry<K, V> eldest) {
-        Long elapsedTime = timeMap.get(eldest.getKey());
-        if (elapsedTime == null) {
-            return false; // or handle this case as needed
+        Long addedAt = timeMap.get(eldest.getKey());
+        if (addedAt == null) {
+            return false; // should not happen, but keep the entry if we have no timestamp
         }
-        return size() > maxSize || System.currentTimeMillis() - elapsedTime > maxAge;
+        boolean remove = size() > maxSize || System.currentTimeMillis() - addedAt > maxAge;
+        if (remove) {
+            timeMap.remove(eldest.getKey());
+        }
+        return remove;
     }
     /**
      * Associates the specified value with the specified key in this cache. If the cache previously
@@ -63,12 +67,14 @@ public class TimedLRUCache<K, V> extends LinkedHashMap<K, V> {
      * This method should be called periodically to ensure timely removal of old entries.
      */
     public void cleanup() {
-        timeMap.keySet().removeIf(key -> System.currentTimeMillis() - timeMap.get(key) > maxAge);
-        timeMap.forEach((key, value) -> {
-            if (System.currentTimeMillis() - value > maxAge) {
-                remove(key);
+        long now = System.currentTimeMillis();
+        for (Iterator<Map.Entry<K, Long>> it = timeMap.entrySet().iterator(); it.hasNext();) {
+            Map.Entry<K, Long> entry = it.next();
+            if (now - entry.getValue() > maxAge) {
+                it.remove();
+                super.remove(entry.getKey());
             }
-        });
+        }
     }
 
 }
