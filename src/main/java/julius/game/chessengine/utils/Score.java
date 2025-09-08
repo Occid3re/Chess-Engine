@@ -13,6 +13,7 @@ import static julius.game.chessengine.helper.PawnHelper.*;
 import static julius.game.chessengine.helper.QueenHelper.QUEEN_POSITIONAL_VALUES;
 import static julius.game.chessengine.helper.RookHelper.*;
 import static julius.game.chessengine.helper.BitHelper.FileMasks;
+import static julius.game.chessengine.helper.BitHelper.RankMasks;
 
 @Data
 @Log4j2
@@ -56,6 +57,8 @@ public class Score {
     private int blackDoubledPawnPenalty = 0;
     private int whiteIsolatedPawnPenalty = 0;
     private int blackIsolatedPawnPenalty = 0;
+    private int whitePassedPawnBonus = 0;
+    private int blackPassedPawnBonus = 0;
     private int whiteRooksHalfOpenFileBonus = 0;
     private int blackRooksHalfOpenFileBonus = 0;
     private int whiteRooksOpenFileBonus = 0;
@@ -92,7 +95,7 @@ public class Score {
     // Pawn bonuses and penalties
     private static final int DOUBLED_PAWN_PENALTY = -20; // Example penalty value for doubled pawns
     private static final int ISOLATED_PAWN_PENALTY = -10; // Penalty for isolated pawns
-    private static final int PASSED_PAWN_BONUS = 60;     // Bonus for passed pawns
+    public static final int PASSED_PAWN_BONUS = 60;     // Bonus for passed pawns
 
     // Other bonuses and penalties
     private static final int NOT_CASTLED_AND_ROOK_MOVE_PENALTY = -50;
@@ -149,6 +152,8 @@ public class Score {
         this.blackDoubledPawnPenalty = other.blackDoubledPawnPenalty;
         this.whiteIsolatedPawnPenalty = other.whiteIsolatedPawnPenalty;
         this.blackIsolatedPawnPenalty = other.blackIsolatedPawnPenalty;
+        this.whitePassedPawnBonus = other.whitePassedPawnBonus;
+        this.blackPassedPawnBonus = other.blackPassedPawnBonus;
         this.whiteRooksHalfOpenFileBonus = other.whiteRooksHalfOpenFileBonus;
         this.blackRooksHalfOpenFileBonus = other.blackRooksHalfOpenFileBonus;
         this.whiteRooksOpenFileBonus = other.whiteRooksOpenFileBonus;
@@ -206,6 +211,8 @@ public class Score {
         updateDoubledPawnPenaltyBlack(blackPawns);
         updateIsolatedPawnPenaltyWhite(whitePawns);
         updateIsolatedPawnPenaltyBlack(blackPawns);
+        updatePassedPawnBonusWhite(whitePawns, blackPawns);
+        updatePassedPawnBonusBlack(blackPawns, whitePawns);
 
         updateRookHalfOpenFileBonusWhite(whiteRooks, whitePawns, blackPawns);
         updateRookHalfOpenFileBonusBlack(blackRooks, blackPawns, whitePawns);
@@ -266,6 +273,7 @@ public class Score {
         totalWhiteScore += whiteCenterPawnBonus;
         totalWhiteScore += whiteDoubledPawnPenalty;
         totalWhiteScore += whiteIsolatedPawnPenalty;
+        totalWhiteScore += whitePassedPawnBonus;
 
         totalWhiteScore += whiteRooksHalfOpenFileBonus;
         totalWhiteScore += whiteRooksOpenFileBonus;
@@ -303,6 +311,7 @@ public class Score {
         totalBlackScore += blackCenterPawnBonus;
         totalBlackScore += blackDoubledPawnPenalty;
         totalBlackScore += blackIsolatedPawnPenalty;
+        totalBlackScore += blackPassedPawnBonus;
 
         totalBlackScore += blackRooksHalfOpenFileBonus;
         totalBlackScore += blackRooksOpenFileBonus;
@@ -372,6 +381,50 @@ public class Score {
 
     public void updateIsolatedPawnPenaltyBlack(long blackPawns) {
         blackIsolatedPawnPenalty = countIsolatedPawns(blackPawns) * ISOLATED_PAWN_PENALTY;
+    }
+
+    public void updatePassedPawnBonusWhite(long whitePawns, long blackPawns) {
+        whitePassedPawnBonus = calculatePassedPawnBonus(whitePawns, blackPawns, true);
+    }
+
+    public void updatePassedPawnBonusBlack(long blackPawns, long whitePawns) {
+        blackPassedPawnBonus = calculatePassedPawnBonus(blackPawns, whitePawns, false);
+    }
+
+    private int calculatePassedPawnBonus(long pawns, long opponentPawns, boolean isWhite) {
+        int bonus = 0;
+        long remaining = pawns;
+        while (remaining != 0) {
+            long pawn = remaining & -remaining;
+            remaining ^= pawn;
+            int square = Long.numberOfTrailingZeros(pawn);
+            int file = square % 8;
+            int rank = square / 8 + 1;
+            long fileMask = FileMasks[file];
+            if (file > 0) {
+                fileMask |= FileMasks[file - 1];
+            }
+            if (file < 7) {
+                fileMask |= FileMasks[file + 1];
+            }
+            long forwardMask = 0L;
+            if (isWhite) {
+                for (int r = rank + 1; r <= 8; r++) {
+                    forwardMask |= RankMasks[r - 1];
+                }
+                if ((opponentPawns & (fileMask & forwardMask)) == 0) {
+                    bonus += PASSED_PAWN_BONUS * (rank - 1);
+                }
+            } else {
+                for (int r = rank - 1; r >= 1; r--) {
+                    forwardMask |= RankMasks[r - 1];
+                }
+                if ((opponentPawns & (fileMask & forwardMask)) == 0) {
+                    bonus += PASSED_PAWN_BONUS * (8 - rank);
+                }
+            }
+        }
+        return bonus;
     }
 
     public void updateRookHalfOpenFileBonusWhite(long whiteRooks, long whitePawns, long blackPawns) {
