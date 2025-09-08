@@ -1,2 +1,4 @@
 chess-engine-1.0.0 wins: 34, chess-engine-1.0.1 wins: 42, Draws: 24
 chess-engine-1.0.0 wins: 0, chess-engine-2.0.0 wins: 100, Draws: 0
+
+white: chess-engine-3.0.0 wins: 36, black: chess-engine-3.0.1 wins: 42, Draws: 24
