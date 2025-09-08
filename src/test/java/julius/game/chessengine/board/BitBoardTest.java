@@ -2,6 +2,7 @@ package julius.game.chessengine.board;
 
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.utils.Color;
+import julius.game.chessengine.figures.PieceType;
 import lombok.extern.log4j.Log4j2;
 import org.junit.jupiter.api.Test;
 
@@ -47,6 +48,44 @@ public class BitBoardTest {
         b.logBoard();
 
         assertEquals(a.getBoardStateHash(), b.getBoardStateHash());
+    }
+
+    @Test
+    public void testEnPassantIndexOnlyWhenCapturePossible() {
+        BitBoard board = new BitBoard();
+
+        int e2 = convertStringToIndex("e2");
+        int e4 = convertStringToIndex("e4");
+        int move = MoveHelper.createMoveInt(e2, e4, PieceType.PAWN, true,
+                false, false, false, null, null, false, false,
+                board.getLastMoveDoubleStepPawnIndex());
+        board.performMove(move);
+
+        // No black pawn can capture the pawn on e4, so en passant index should be 0
+        assertEquals(0, board.getLastMoveDoubleStepPawnIndex());
+
+        // Make a series of moves to place a white pawn next to a black pawn that double steps
+        int a7 = convertStringToIndex("a7");
+        int a6 = convertStringToIndex("a6");
+        move = MoveHelper.createMoveInt(a7, a6, PieceType.PAWN, false,
+                false, false, false, null, null, false, false,
+                board.getLastMoveDoubleStepPawnIndex());
+        board.performMove(move);
+
+        int e5 = convertStringToIndex("e5");
+        move = MoveHelper.createMoveInt(e4, e5, PieceType.PAWN, true,
+                false, false, false, null, null, false, false,
+                board.getLastMoveDoubleStepPawnIndex());
+        board.performMove(move);
+
+        int d7 = convertStringToIndex("d7");
+        int d5 = convertStringToIndex("d5");
+        move = MoveHelper.createMoveInt(d7, d5, PieceType.PAWN, false,
+                false, false, false, null, null, false, false,
+                board.getLastMoveDoubleStepPawnIndex());
+        board.performMove(move);
+
+        assertEquals(d5, board.getLastMoveDoubleStepPawnIndex());
     }
 
     @Test
