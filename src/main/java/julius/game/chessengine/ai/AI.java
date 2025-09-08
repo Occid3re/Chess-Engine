@@ -69,6 +69,13 @@ public class AI {
     private final int[][] killerMoves; // 2D array for killer moves, initialized in the constructor
     private final int numKillerMoves = 2;
 
+    /**
+     * History heuristic table. Indexed by from and to square (0-63), it stores a
+     * score indicating how often a quiet move has caused a beta cutoff. Higher
+     * scores mean the move should be ordered earlier in the move list.
+     */
+    private final int[][] historyTable; // [from][to]
+
     // Late move reduction configuration
     private static final int LMR_MOVE_INDEX_THRESHOLD = 3; // Moves after this index may be reduced
     private static final int LMR_DEPTH_REDUCTION = 1; // How much to reduce the search depth
@@ -114,6 +121,9 @@ public class AI {
                 killerMoves[i][j] = -1; // Initialize with an invalid move
             }
         }
+
+        // Initialize history table with zeros
+        this.historyTable = new int[64][64];
     }
 
     public void setUseNullMovePruning(boolean useNullMovePruning) {
@@ -153,6 +163,7 @@ public class AI {
         mainEngine.startNewGame();
         depthThreshold = 1;
         lastDepthThresholdAdjustmentTime = 0;
+        clearHistoryTable();
     }
 
     public void stopCalculation() {
@@ -234,6 +245,7 @@ public class AI {
 
     private void performCalculation() {
         log.debug(" --- TranspositionTable[{}] --- ", transpositionTable.size());
+        decayHistoryTable();
         Engine simulatorEngine = mainEngine.createSimulation();
         long boardStateHash = simulatorEngine.getBoardStateHash();
         log.debug("boardStateBeforeCalculation {}, currentBoardState {}", beforeCalculationBoardState, currentBoardState);
@@ -493,6 +505,7 @@ public class AI {
             alpha = Math.max(alpha, eval);
             if (beta <= alpha) {
                 updateKillerMoves(depth, move);
+                incrementHistory(move, depth);
                 log.debug(" Maxi New Killer Move is {}", Move.convertIntToMove(move));
                 break; // Alpha-beta pruning
             }
@@ -573,6 +586,7 @@ public class AI {
             beta = Math.min(beta, eval);
             if (alpha >= beta) {
                 updateKillerMoves(depth, move);
+                incrementHistory(move, depth);
                 log.debug("Mini New Killer Move is {}", Move.convertIntToMove(move));
                 break;
             }
@@ -594,39 +608,25 @@ public class AI {
 
 
     private ArrayList<Integer> sortMovesByEfficiency(MoveList moves, Engine simulatorEngine, boolean isWhite, int currentDepth, long startTime, long timeLimit) {
-        Map<Integer, Double> scoreCache = new HashMap<>();
         PriorityQueue<Integer> sortedMoves = new PriorityQueue<>(
                 Comparator.comparingDouble((Integer moveInt) -> {
-                    // Check if the move is a killer move and prioritize it
-
+                    // Prioritize killer moves
                     for (int killerMove : killerMoves[currentDepth]) {
                         if (moveInt == killerMove) {
-                            log.debug("KILLER_MOVE_SCORE" + KILLER_MOVE_SCORE);
-                            return KILLER_MOVE_SCORE; //adjust as needed
+                            return KILLER_MOVE_SCORE;
                         }
                     }
 
+                    // Prioritize captures using MVV-LVA
                     int mvvLvaScore = calculateMvvLvaScore(moveInt);
                     if (mvvLvaScore != 0) {
-                        return mvvLvaScore; // Prioritize based on MVV-LVA score
+                        return mvvLvaScore;
                     }
 
-                    if (scoreCache.containsKey(moveInt)) {
-                        return scoreCache.get(moveInt);
-                    }
-
-                    // If not a killer move, proceed with existing scoring method
-                    Long boardStateHash = simulatorEngine.getBoardStateHashAfterMove(moveInt);
-                    TranspositionTableEntry entry = transpositionTable.get(boardStateHash);
-                    if (entry != null && entry.depth >= currentDepth) {
-                        return isWhite ? entry.score : -entry.score;
-                    } else {
-                        simulatorEngine.performMove(moveInt);
-                        double score = evaluateBoard(simulatorEngine, isWhite, startTime, timeLimit);
-                        simulatorEngine.undoLastMove();
-                        scoreCache.put(moveInt, score);
-                        return score;
-                    }
+                    // History heuristic for quiet moves
+                    int from = moveInt & 0x3F;
+                    int to = (moveInt >> 6) & 0x3F;
+                    return historyTable[from][to];
                 }).reversed()
         );
 
@@ -786,6 +786,29 @@ public class AI {
             }
         }
         return false;
+    }
+
+    private void incrementHistory(int move, int depth) {
+        if (MoveHelper.isCapture(move)) {
+            return; // history heuristic tracks only quiet moves
+        }
+        int from = move & 0x3F;
+        int to = (move >> 6) & 0x3F;
+        historyTable[from][to] += depth * depth;
+    }
+
+    private void decayHistoryTable() {
+        for (int i = 0; i < 64; i++) {
+            for (int j = 0; j < 64; j++) {
+                historyTable[i][j] >>= 1; // divide by 2
+            }
+        }
+    }
+
+    private void clearHistoryTable() {
+        for (int i = 0; i < 64; i++) {
+            Arrays.fill(historyTable[i], 0);
+        }
     }
 
     private int calculateMvvLvaScore(int move) {
