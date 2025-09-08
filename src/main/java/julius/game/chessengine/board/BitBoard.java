@@ -275,20 +275,6 @@ public class BitBoard {
         allPieces = whitePieces | blackPieces;
     }
 
-    private long generatePawnAttacksLeft() {
-        long pawns = whitesTurn ? whitePawns : blackPawns;
-        return whitesTurn ? (pawns & ~FileMasks[0]) << 7 : (pawns & ~FileMasks[0]) >>> 9;
-    }
-
-    private long generatePawnAttacksRight() {
-        long pawns = whitesTurn ? whitePawns : blackPawns;
-        return whitesTurn ? (pawns & ~FileMasks[7]) << 9 : (pawns & ~FileMasks[7]) >>> 7;
-    }
-
-    private long generateAllPawnAttacks() {
-        return generatePawnAttacksLeft() | generatePawnAttacksRight();
-    }
-
     private void generatePawnMoves(boolean whitesTurn, MoveList moves) {
         long pawns = whitesTurn ? whitePawns : blackPawns;
 
@@ -298,8 +284,8 @@ public class BitBoard {
         long singleStepForward = whitesTurn ? pawns << 8 : pawns >>> 8;
         singleStepForward &= emptySquares;
 
-        long attacksLeft = generatePawnAttacksLeft();
-        long attacksRight = generatePawnAttacksRight();
+        long attacksLeft = whitesTurn ? (pawns & ~FileMasks[0]) << 7 : (pawns & ~FileMasks[0]) >>> 9;
+        long attacksRight = whitesTurn ? (pawns & ~FileMasks[7]) << 9 : (pawns & ~FileMasks[7]) >>> 7;
 
         long doubleStepForward;
         if (whitesTurn) {
