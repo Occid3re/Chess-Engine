@@ -4,6 +4,7 @@ import julius.game.chessengine.helper.BishopHelper;
 import julius.game.chessengine.helper.RookHelper;
 import lombok.extern.log4j.Log4j2;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Assertions;
 
 import java.util.Set;
 
@@ -63,7 +64,7 @@ public class MagicTest {
             // Log the results for comparisom
 
             // Assert that the moves match
-            assert moves == magicMoves : "Move generation mismatch for square " + square;
+            Assertions.assertEquals(moves, magicMoves, "Move generation mismatch for square " + square);
         }
     }
 
@@ -94,7 +95,7 @@ public class MagicTest {
             log.info("Magic Moves: {}", magicMoves);*/
 
             // Assert that the moves match
-            assert moves == magicMoves : "Move generation mismatch for square " + square;
+            Assertions.assertEquals(moves, magicMoves, "Move generation mismatch for square " + square);
         }
     }
 
