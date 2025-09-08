@@ -28,7 +28,7 @@ public class Move {
     //same like pieceType
 
 
-    //  from      to   pieceColor   pieceType      sp     pp   isKingsfirstMove isRooksFirstMove  isCheck  isCheckMate   isAmbigousMove
+    //  from      to   pieceColor   pieceType      sp     pp   isKingsfirstMove isRooksFirstMove  isCheck  isCheckMate   isAmbiguousMove
     //<111111> <111111>   <1>         <111>       <11>   <000>        <1>             <1>           <1>         <1>           <1>
 
     // Getters for all the fields
