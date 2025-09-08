@@ -44,6 +44,9 @@ public class BitBoard {
     private long allPieces = 0L;
     private PieceType[] pieceBoard = new PieceType[64];
 
+    // Reusable buffer for move generation to avoid frequent allocations.
+    private final MoveList moveGenerationBuffer = new MoveList();
+
     // This variable needs to be set whenever a move is made
     //TODO only write to it if en passant is possible then you can also hash it
     @Getter
@@ -298,7 +301,10 @@ public class BitBoard {
     }
 
     public MoveList generateAllPossibleMoves(boolean whitesTurn) {
-        MoveList moves = new MoveList();
+        // Reuse the internal buffer to cut down on object creation and garbage
+        // collection pressure during heavy search operations.
+        MoveList moves = moveGenerationBuffer;
+        moves.clear();
 
         generatePawnMoves(whitesTurn, moves);
         generateKnightMoves(whitesTurn, moves);
