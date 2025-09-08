@@ -11,6 +11,7 @@ import static julius.game.chessengine.helper.KnightHelper.KNIGHT_POSITIONAL_VALU
 import static julius.game.chessengine.helper.PawnHelper.*;
 import static julius.game.chessengine.helper.QueenHelper.QUEEN_POSITIONAL_VALUES;
 import static julius.game.chessengine.helper.RookHelper.*;
+import static julius.game.chessengine.helper.BitHelper.FileMasks;
 
 @Data
 @Log4j2
@@ -39,9 +40,13 @@ public class Score {
     private int whiteQueensAmountScore = 0;
     private int blackQueensAmountScore = 0;
 
-    //agility
-    private int agilityWhite = 0;
-    private int agilityBlack = 0;
+    // Mobility
+    private int whiteMobilityScore = 0;
+    private int blackMobilityScore = 0;
+
+    // King safety
+    private int whiteKingSafetyScore = 0;
+    private int blackKingSafetyScore = 0;
 
     // Initialize bonuses and penalties
     private int whiteCenterPawnBonus = 0;
@@ -96,6 +101,13 @@ public class Score {
     private static final int ROOK_HALF_OPEN_FILE_BONUS = 25;
     private static final int ROOK_OPEN_FILE_BONUS = 12;
 
+    private static final int MOBILITY_BONUS = 5;
+    private static final int MISSING_PAWN_SHIELD_PENALTY = -15;
+    private static final int KING_ATTACK_PENALTY = -10;
+
+    private static final long NOT_A_FILE = ~FileMasks[0];
+    private static final long NOT_H_FILE = ~FileMasks[7];
+
     // Constants for the initial positions of each piece type
     private static final long INITIAL_WHITE_KNIGHT_POSITION = 0x0000000000000042L; // Knights on b1 and g1
     private static final long INITIAL_BLACK_KNIGHT_POSITION = 0x4200000000000000L; // Knights on b8 and g8
@@ -125,8 +137,10 @@ public class Score {
         this.whiteQueensAmountScore = other.whiteQueensAmountScore;
         this.blackQueensAmountScore = other.blackQueensAmountScore;
 
-        this.agilityWhite = other.agilityWhite;
-        this.agilityBlack = other.agilityBlack;
+        this.whiteMobilityScore = other.whiteMobilityScore;
+        this.blackMobilityScore = other.blackMobilityScore;
+        this.whiteKingSafetyScore = other.whiteKingSafetyScore;
+        this.blackKingSafetyScore = other.blackKingSafetyScore;
 
         this.whiteCenterPawnBonus = other.whiteCenterPawnBonus;
         this.blackCenterPawnBonus = other.blackCenterPawnBonus;
@@ -165,8 +179,7 @@ public class Score {
      * Score mechanisms of the Game
      */
     public void initializeScore(BitBoard bitBoard) {
-/*        int agilityWhite = bitBoard.generateAllPossibleMoves(true).size();
-        int agilityBlack = bitBoard.generateAllPossibleMoves(false).size();*/
+        cachedScoreDifference = null;
 
         long whitePawns = bitBoard.getWhitePawns();
         long blackPawns = bitBoard.getBlackPawns();
@@ -222,7 +235,12 @@ public class Score {
         updateStartingSquarePenaltyWhite(whiteKnights, whiteBishops, whiteRooks);
         updateStartingSquarePenaltyBlack(blackKnights, blackBishops, blackRooks);
 
-        /*        updateAgilityBonus(agilityWhite, agilityBlack);*/
+        // Mobility and king safety
+        updateMobilityScores(bitBoard);
+        updateKingSafety(bitBoard);
+
+        calculateTotalWhiteScore();
+        calculateTotalBlackScore();
     }
 
 
@@ -259,6 +277,9 @@ public class Score {
         totalWhiteScore += whiteKingsPosition;
         totalWhiteScore += whiteStartingSquarePenalty;
 
+        totalWhiteScore += whiteMobilityScore;
+        totalWhiteScore += whiteKingSafetyScore;
+
         totalWhiteScore += whiteStateBonus;
 
         whiteScore = totalWhiteScore;
@@ -292,6 +313,9 @@ public class Score {
         totalBlackScore += blackQueensPosition;
         totalBlackScore += blackKingsPosition;
         totalBlackScore += blackStartingSquarePenalty;
+
+        totalBlackScore += blackMobilityScore;
+        totalBlackScore += blackKingSafetyScore;
 
         totalBlackScore += blackStateBonus;
 
@@ -461,17 +485,59 @@ public class Score {
         }
     }
 
-    public void updateAgilityBonus(int movesWhite, int movesBlack) {
-        agilityWhite = movesWhite * 10;
-        agilityBlack = movesBlack * 10;
+    public void updateMobilityScores(int movesWhite, int movesBlack) {
+        whiteMobilityScore = movesWhite * MOBILITY_BONUS;
+        blackMobilityScore = movesBlack * MOBILITY_BONUS;
     }
 
-    public void updateAgilityBonusWhite(int movesWhite) {
-        agilityWhite = movesWhite * 10;
+    public void updateMobilityScores(BitBoard bitBoard) {
+        int movesWhite = bitBoard.generateAllPossibleMoves(true).size();
+        int movesBlack = bitBoard.generateAllPossibleMoves(false).size();
+        updateMobilityScores(movesWhite, movesBlack);
     }
 
-    public void updateAgilityBonusBlack(int movesBlack) {
-        agilityBlack = movesBlack * 10;
+    public void updateKingSafety(BitBoard bitBoard) {
+        boolean isEndgame = bitBoard.isEndgame();
+        long whiteKing = bitBoard.getWhiteKing();
+        long blackKing = bitBoard.getBlackKing();
+        long whitePawns = bitBoard.getWhitePawns();
+        long blackPawns = bitBoard.getBlackPawns();
+
+        long whiteAttacks = bitBoard.generateAttackBitboard(true);
+        long blackAttacks = bitBoard.generateAttackBitboard(false);
+
+        whiteKingSafetyScore = evaluateKingSafety(whiteKing, whitePawns, blackAttacks, true, isEndgame);
+        blackKingSafetyScore = evaluateKingSafety(blackKing, blackPawns, whiteAttacks, false, isEndgame);
+    }
+
+    private int evaluateKingSafety(long king, long friendlyPawns, long enemyAttacks, boolean isWhite, boolean isEndgame) {
+        if (king == 0) {
+            return 0;
+        }
+        int kingIndex = Long.numberOfTrailingZeros(king);
+        long forwardMask = 0L;
+        if (isWhite) {
+            forwardMask |= (king << 8);
+            if ((king & NOT_A_FILE) != 0) forwardMask |= (king << 7);
+            if ((king & NOT_H_FILE) != 0) forwardMask |= (king << 9);
+        } else {
+            forwardMask |= (king >>> 8);
+            if ((king & NOT_A_FILE) != 0) forwardMask |= (king >>> 9);
+            if ((king & NOT_H_FILE) != 0) forwardMask |= (king >>> 7);
+        }
+
+        int missing = 3 - Long.bitCount(friendlyPawns & forwardMask);
+        int shieldPenalty = missing * MISSING_PAWN_SHIELD_PENALTY;
+
+        long kingZone = KING_ATTACKS[kingIndex];
+        int attacks = Long.bitCount(enemyAttacks & kingZone);
+        int attackPenalty = attacks * KING_ATTACK_PENALTY;
+
+        int total = shieldPenalty + attackPenalty;
+        if (isEndgame) {
+            total /= 2;
+        }
+        return total;
     }
 
     private int applyPositionalValues(long bitboard, int[] positionalValues) {
