@@ -69,6 +69,11 @@ public class AI {
     private final int[][] killerMoves; // 2D array for killer moves, initialized in the constructor
     private final int numKillerMoves = 2;
 
+    // Late move reduction configuration
+    private static final int LMR_MOVE_INDEX_THRESHOLD = 3; // Moves after this index may be reduced
+    private static final int LMR_DEPTH_REDUCTION = 1; // How much to reduce the search depth
+    private static final int LMR_MIN_DEPTH = 3; // Apply only when enough depth remains
+
     private ScheduledExecutorService scheduler;
     private Thread calculationThread;
 
@@ -93,6 +98,7 @@ public class AI {
     private long timeLimit; // milliseconds
 
     private boolean useNullMovePruning = true;
+    private boolean useLateMoveReductions = true;
     private long nodesVisited = 0;
     private long nullMoveCount = 0;
 
@@ -112,6 +118,10 @@ public class AI {
 
     public void setUseNullMovePruning(boolean useNullMovePruning) {
         this.useNullMovePruning = useNullMovePruning;
+    }
+
+    public void setUseLateMoveReductions(boolean useLateMoveReductions) {
+        this.useLateMoveReductions = useLateMoveReductions;
     }
 
     public long getNodesVisited() {
@@ -430,7 +440,9 @@ public class AI {
         double maxEval = Double.NEGATIVE_INFINITY;
         int bestMoveAtThisNode = -1; // Variable to track the best move at this node
 
-        for (int move : sortMovesByEfficiency(moves, simulatorEngine, isWhite, depth, startTime, timeLimit)) {
+        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, simulatorEngine, isWhite, depth, startTime, timeLimit);
+        for (int index = 0; index < orderedMoves.size(); index++) {
+            int move = orderedMoves.get(index);
             simulatorEngine.performMove(move);
             long newBoardHash = simulatorEngine.getBoardStateHash();
 
@@ -440,13 +452,29 @@ public class AI {
             if (entry != null && entry.depth >= depth) {
                 eval = entry.score; // Use the score from the transposition table
             } else {
-                eval = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhite, startTime, timeLimit);
+                int nextDepth = depth - 1;
+                boolean reduced = false;
+                if (useLateMoveReductions && depth >= LMR_MIN_DEPTH && index >= LMR_MOVE_INDEX_THRESHOLD
+                        && !MoveHelper.isCapture(move) && !isKillerMove(depth, move)) {
+                    nextDepth = depth - 1 - LMR_DEPTH_REDUCTION;
+                    reduced = true;
+                }
+
+                eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, startTime, timeLimit);
 
                 if (eval == EXIT_FLAG || positionChanged()) {
-                    // If time limit exceeded, exit the loop
                     simulatorEngine.undoLastMove();
                     log.info("maxi Position changed");
                     return EXIT_FLAG;
+                }
+
+                if (reduced && eval > alpha) {
+                    eval = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhite, startTime, timeLimit);
+                    if (eval == EXIT_FLAG || positionChanged()) {
+                        simulatorEngine.undoLastMove();
+                        log.info("maxi Position changed");
+                        return EXIT_FLAG;
+                    }
                 }
             }
 
@@ -494,7 +522,9 @@ public class AI {
         double minEval = Double.POSITIVE_INFINITY;
         int bestMoveAtThisNode = -1; // Track the best move at this node
 
-        for (int move : sortMovesByEfficiency(moves, simulatorEngine, isWhite, depth, startTime, timeLimit)) {
+        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, simulatorEngine, isWhite, depth, startTime, timeLimit);
+        for (int index = 0; index < orderedMoves.size(); index++) {
+            int move = orderedMoves.get(index);
             simulatorEngine.performMove(move);
             long newBoardHash = simulatorEngine.getBoardStateHash();
             double eval;
@@ -503,12 +533,29 @@ public class AI {
             if (entry != null && entry.depth >= depth) {
                 eval = entry.score;
             } else {
-                eval = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhite, startTime, timeLimit);
+                int nextDepth = depth - 1;
+                boolean reduced = false;
+                if (useLateMoveReductions && depth >= LMR_MIN_DEPTH && index >= LMR_MOVE_INDEX_THRESHOLD
+                        && !MoveHelper.isCapture(move) && !isKillerMove(depth, move)) {
+                    nextDepth = depth - 1 - LMR_DEPTH_REDUCTION;
+                    reduced = true;
+                }
+
+                eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, startTime, timeLimit);
 
                 if (eval == EXIT_FLAG || positionChanged()) {
                     log.info("mini Position changed");
                     simulatorEngine.undoLastMove();
                     return EXIT_FLAG;
+                }
+
+                if (reduced && eval < beta) {
+                    eval = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhite, startTime, timeLimit);
+                    if (eval == EXIT_FLAG || positionChanged()) {
+                        log.info("mini Position changed");
+                        simulatorEngine.undoLastMove();
+                        return EXIT_FLAG;
+                    }
                 }
             }
 
@@ -727,6 +774,18 @@ public class AI {
             killerMoves[depth][i] = killerMoves[depth][i - 1];
         }
         killerMoves[depth][0] = move; // Insert new killer move at the top
+    }
+
+    private boolean isKillerMove(int depth, int move) {
+        if (depth >= killerMoves.length) {
+            return false;
+        }
+        for (int killerMove : killerMoves[depth]) {
+            if (killerMove == move) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private int calculateMvvLvaScore(int move) {
