@@ -341,22 +341,18 @@ public class BitBoard {
     }
 
     private void addPawnMoves(MoveList moves, long bitboard, int shift, boolean isCapture, boolean whitesTurn) {
-        int direction = whitesTurn ? 1 : -1;
         while (bitboard != 0) {
             int toIndex = Long.numberOfTrailingZeros(bitboard);
-            int toRow = toIndex / 8;
             int fromIndex = whitesTurn ? toIndex - shift : toIndex + shift;
 
-            // Calculate if the move is a promotion only once per loop iteration
-            boolean isPromotion = (whitesTurn && toRow == 7) || (!whitesTurn && toRow == 0);
+            // Determine if the move results in a promotion by checking the target rank
+            boolean isPromotion = whitesTurn ? toIndex >= 56 : toIndex < 8;
             PieceType capturedType = isCapture ? getPieceTypeAtIndex(toIndex) : null;
 
-            if (checkForInitialDoubleSquareMove(fromIndex, toIndex, direction)) {
-                if (isPromotion) {
-                    addPromotionMoves(moves, fromIndex, toIndex, whitesTurn, isCapture, capturedType);
-                } else {
-                    moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, isCapture, false, false, null, capturedType, false, false, lastMoveDoubleStepPawnIndex));
-                }
+            if (isPromotion) {
+                addPromotionMoves(moves, fromIndex, toIndex, whitesTurn, isCapture, capturedType);
+            } else {
+                moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, isCapture, false, false, null, capturedType, false, false, lastMoveDoubleStepPawnIndex));
             }
 
             bitboard &= bitboard - 1; // Clear the processed bit
@@ -368,31 +364,6 @@ public class BitBoard {
         for (PieceType promotionPiece : promotionPieces) {
             moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, isCapture, false, false, promotionPiece, capturedType, false, false, lastMoveDoubleStepPawnIndex));
         }
-    }
-
-
-    private boolean checkForInitialDoubleSquareMove(int fromIndex, int toIndex, int direction) {
-        int fromRow = fromIndex / 8;
-        int toRow = toIndex / 8;
-        int yDiff = toRow - fromRow; // No need for Math.abs as pawns only move forward
-
-        // Check for capture
-        if (yDiff == direction && ((fromIndex + toIndex) % 2 != 0)) {
-            return isOccupiedByOpponent(toIndex, whitesTurn);
-        }
-
-        // Check for single forward move
-        if (yDiff == direction) {
-            return !isOccupied(toIndex);
-        }
-
-        // Check for double forward move
-        if (yDiff == 2 * direction) {
-            int inBetweenIndex = fromIndex + 8 * direction;
-            return !isOccupied(toIndex) && !isOccupied(inBetweenIndex);
-        }
-
-        return false;
     }
 
 
@@ -739,20 +710,26 @@ public class BitBoard {
     public PieceType getPieceTypeAtIndex(int index) {
         long positionMask = 1L << index;
 
-        if ((whitePawns & positionMask) != 0) return PieceType.PAWN;
-        if ((blackPawns & positionMask) != 0) return PieceType.PAWN;
-        if ((whiteKnights & positionMask) != 0) return PieceType.KNIGHT;
-        if ((blackKnights & positionMask) != 0) return PieceType.KNIGHT;
-        if ((whiteBishops & positionMask) != 0) return PieceType.BISHOP;
-        if ((blackBishops & positionMask) != 0) return PieceType.BISHOP;
-        if ((whiteRooks & positionMask) != 0) return PieceType.ROOK;
-        if ((blackRooks & positionMask) != 0) return PieceType.ROOK;
-        if ((whiteQueens & positionMask) != 0) return PieceType.QUEEN;
-        if ((blackQueens & positionMask) != 0) return PieceType.QUEEN;
-        if ((whiteKing & positionMask) != 0) return PieceType.KING;
-        if ((blackKing & positionMask) != 0) return PieceType.KING;
+        if ((allPieces & positionMask) == 0) {
+            return null;
+        }
 
-        // No piece found at this position
+        if ((whitePieces & positionMask) != 0) {
+            if ((whitePawns & positionMask) != 0) return PieceType.PAWN;
+            if ((whiteKnights & positionMask) != 0) return PieceType.KNIGHT;
+            if ((whiteBishops & positionMask) != 0) return PieceType.BISHOP;
+            if ((whiteRooks & positionMask) != 0) return PieceType.ROOK;
+            if ((whiteQueens & positionMask) != 0) return PieceType.QUEEN;
+            if ((whiteKing & positionMask) != 0) return PieceType.KING;
+        } else {
+            if ((blackPawns & positionMask) != 0) return PieceType.PAWN;
+            if ((blackKnights & positionMask) != 0) return PieceType.KNIGHT;
+            if ((blackBishops & positionMask) != 0) return PieceType.BISHOP;
+            if ((blackRooks & positionMask) != 0) return PieceType.ROOK;
+            if ((blackQueens & positionMask) != 0) return PieceType.QUEEN;
+            if ((blackKing & positionMask) != 0) return PieceType.KING;
+        }
+
         return null;
     }
 
