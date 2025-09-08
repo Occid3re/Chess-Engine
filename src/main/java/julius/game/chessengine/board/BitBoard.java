@@ -42,6 +42,9 @@ public class BitBoard {
     private long whitePieces = 0L;
     private long blackPieces = 0L;
     private long allPieces = 0L;
+    /** Bitboards caching the squares attacked by each side. */
+    private long whiteAttackMap = 0L;
+    private long blackAttackMap = 0L;
     private PieceType[] pieceBoard = new PieceType[64];
 
     // Reusable buffer for move generation to avoid frequent allocations.
@@ -306,6 +309,12 @@ public class BitBoard {
         MoveList moves = moveGenerationBuffer;
         moves.clear();
 
+        // Pre-compute attack maps for both sides once and reuse them during move
+        // generation.  This avoids repeatedly recalculating the same information
+        // for castling checks and attack lookups.
+        whiteAttackMap = generateAttackBitboard(true);
+        blackAttackMap = generateAttackBitboard(false);
+
         generatePawnMoves(whitesTurn, moves);
         generateKnightMoves(whitesTurn, moves);
         generateBishopMoves(whitesTurn, moves);
@@ -314,6 +323,63 @@ public class BitBoard {
         generateKingMoves(whitesTurn, moves);
 
         return moves;
+    }
+
+    /**
+     * Generates a bitboard of all squares attacked by the given side.
+     */
+    public long generateAttackBitboard(boolean colorWhite) {
+        long attacks = 0L;
+
+        // Pawn attacks
+        if (colorWhite) {
+            attacks |= ((whitePawns & ~FileMasks[0]) << 7);
+            attacks |= ((whitePawns & ~FileMasks[7]) << 9);
+        } else {
+            attacks |= ((blackPawns & ~FileMasks[7]) >>> 7);
+            attacks |= ((blackPawns & ~FileMasks[0]) >>> 9);
+        }
+
+        // Knight attacks
+        long knights = colorWhite ? whiteKnights : blackKnights;
+        while (knights != 0) {
+            int index = Long.numberOfTrailingZeros(knights);
+            attacks |= knightAttackBitmask(index);
+            knights &= knights - 1;
+        }
+
+        // Bishop attacks
+        long bishops = colorWhite ? whiteBishops : blackBishops;
+        while (bishops != 0) {
+            int index = Long.numberOfTrailingZeros(bishops);
+            attacks |= bishopAttackBitmask(index);
+            bishops &= bishops - 1;
+        }
+
+        // Rook attacks
+        long rooks = colorWhite ? whiteRooks : blackRooks;
+        while (rooks != 0) {
+            int index = Long.numberOfTrailingZeros(rooks);
+            attacks |= rookAttackBitmask(index);
+            rooks &= rooks - 1;
+        }
+
+        // Queen attacks
+        long queens = colorWhite ? whiteQueens : blackQueens;
+        while (queens != 0) {
+            int index = Long.numberOfTrailingZeros(queens);
+            attacks |= queenAttackBitmask(index);
+            queens &= queens - 1;
+        }
+
+        // King attacks
+        long king = colorWhite ? whiteKing : blackKing;
+        if (king != 0) {
+            int index = Long.numberOfTrailingZeros(king);
+            attacks |= KING_ATTACKS[index];
+        }
+
+        return attacks;
     }
 
     // Method to set the bitboard for a specific piece type and color
@@ -539,8 +605,9 @@ public class BitBoard {
 
 
     private boolean canKingCastle(boolean whitesTurn) {
-        // The king must not have moved and must not be in check
-        return hasKingNotMoved(whitesTurn) && !isInCheck(whitesTurn);
+        // The king must not have moved and must not currently be under attack
+        int kingIndex = findKingIndex(whitesTurn);
+        return hasKingNotMoved(whitesTurn) && !isSquareUnderAttack(kingIndex, whitesTurn);
     }
 
     private boolean canCastleKingside(boolean colorWhite, int kingPositionIndex) {
@@ -587,64 +654,8 @@ public class BitBoard {
     }
 
     private boolean isSquareUnderAttack(int index, boolean colorWhite) {
-        boolean opponentColorWhite = !colorWhite;
-        return canPawnAttackIndex(index, opponentColorWhite) ||
-                canKnightAttackIndex(index, opponentColorWhite) ||
-                canBishopAttackIndex(index, opponentColorWhite) ||
-                canRookAttackIndex(index, opponentColorWhite) ||
-                canQueenAttackIndex(index, opponentColorWhite) ||
-                canKingAttackIndex(index, opponentColorWhite);
-    }
-
-    private boolean canPawnAttackIndex(int index, boolean colorWhite) {
-        // Bitboard of pawns of the given color
-        long pawnsBitboard = colorWhite ? whitePawns : blackPawns;
-
-        // Calculate potential attacker squares
-        long attackFromLeft = 0L, attackFromRight = 0L;
-        if (colorWhite) {
-            // For white pawns: check squares from which a black pawn could attack
-            attackFromLeft = (index % 8 != 0) ? (1L << (index - 9)) : 0;
-            attackFromRight = (index % 8 != 7) ? (1L << (index - 7)) : 0;
-        } else {
-            // For black pawns: check squares from which a white pawn could attack
-            attackFromLeft = (index % 8 != 0) ? (1L << (index + 7)) : 0;
-            attackFromRight = (index % 8 != 7) ? (1L << (index + 9)) : 0;
-        }
-
-        // Check if any of these squares is occupied by a pawn of the given color
-        return (pawnsBitboard & (attackFromLeft | attackFromRight)) != 0;
-    }
-
-
-    private boolean canKnightAttackIndex(int index, boolean colorWhite) {
-        long knightsBitboard = colorWhite ? whiteKnights : blackKnights;
-        long knightAttacks = knightAttackBitmask(index);
-        return (knightAttacks & knightsBitboard) != 0;
-    }
-
-    private boolean canBishopAttackIndex(int index, boolean colorWhite) {
-        long bishopsBitboard = colorWhite ? whiteBishops : blackBishops;
-        long bishopAttacks = bishopAttackBitmask(index);
-        return (bishopAttacks & bishopsBitboard) != 0;
-    }
-
-    private boolean canRookAttackIndex(int index, boolean colorWhite) {
-        long rooksBitboard = colorWhite ? whiteRooks : blackRooks;
-        long rookAttacks = rookAttackBitmask(index);
-        return (rookAttacks & rooksBitboard) != 0;
-    }
-
-    private boolean canQueenAttackIndex(int index, boolean colorWhite) {
-        long queensBitboard = colorWhite ? whiteQueens : blackQueens;
-        long queenAttacks = queenAttackBitmask(index);
-        return (queenAttacks & queensBitboard) != 0;
-    }
-
-    private boolean canKingAttackIndex(int index, boolean colorWhite) {
-        long kingsBitboard = colorWhite ? whiteKing : blackKing;
-        long kingAttacks = KING_ATTACKS[index];
-        return (kingAttacks & kingsBitboard) != 0;
+        long attacks = colorWhite ? blackAttackMap : whiteAttackMap;
+        return (attacks & (1L << index)) != 0;
     }
 
     public void performMove(int move) {
@@ -858,23 +869,8 @@ public class BitBoard {
 
     public boolean isInCheck(boolean whitesTurn) {
         int kingPosition = findKingIndex(whitesTurn);
-
-        if (canQueenAttackKing(kingPosition, whitesTurn)) {
-            return true;
-        }
-        if (canRookAttackKing(kingPosition, whitesTurn)) {
-            return true;
-        }
-        if (canBishopAttackKing(kingPosition, whitesTurn)) {
-            return true;
-        }
-        if (canKnightAttackKing(kingPosition, whitesTurn)) {
-            return true;
-        }
-        if (canPawnAttackKing(kingPosition, whitesTurn)) {
-            return true;
-        }
-        return canKingAttackKing(kingPosition, whitesTurn);
+        long opponentAttacks = generateAttackBitboard(!whitesTurn);
+        return (opponentAttacks & (1L << kingPosition)) != 0;
     }
 
 
@@ -943,54 +939,8 @@ public class BitBoard {
         return Long.numberOfTrailingZeros(kingBitboard);
     }
 
-    // Example for one attack check - similar methods needed for other piece types
-    private boolean canPawnAttackKing(int kingIndex, boolean kingColorWhite) {
-        int pawnAttackDirection = kingColorWhite ? 1 : -1;
-        int kingRank = kingIndex / 8;
-        int kingFile = kingIndex % 8;
-        boolean pawnColorBlack = !kingColorWhite; // Pawns that can attack must be of opposite color
-
-        int attackRank = kingRank + pawnAttackDirection;
-
-        if (attackRank < 0 || attackRank > 7) {
-            return false;
-        }
-
-        // Check for pawn attack from the left diagonal
-        if (kingFile > 0) {
-            int leftAttackIndex = attackRank * 8 + kingFile - 1;
-            if (isOccupiedByPawn(leftAttackIndex, pawnColorBlack)) {
-                return true;
-            }
-        }
-
-        // Check for pawn attack from the right diagonal
-        if (kingFile < 7) {
-            int rightAttackIndex = attackRank * 8 + kingFile + 1;
-            return isOccupiedByPawn(rightAttackIndex, pawnColorBlack);
-        }
-
-        return false;
-    }
-
-    private boolean canKnightAttackKing(int kingIndex, boolean kingColorWhite) {
-        long knightAttacks = knightAttackBitmask(kingIndex);
-        long opponentKnights = !kingColorWhite ? whiteKnights : blackKnights;
-        return (knightAttacks & opponentKnights) != 0;
-    }
-
     private long knightAttackBitmask(int positionIndex) {
         return KnightHelper.knightMoveTable[positionIndex];
-    }
-
-    private boolean canBishopAttackKing(int kingIndex, boolean kingColorWhite) {
-        long bishopAttacks = bishopAttackBitmask(kingIndex);
-
-        // Determine the opponent's bishops bitboard based on the king's color
-        long opponentBishops = kingColorWhite ? blackBishops : whiteBishops;
-
-        // Check if the opponent has bishops that can attack the king's position
-        return (bishopAttacks & opponentBishops) != 0;
     }
 
     private long bishopAttackBitmask(int positionIndex) {
@@ -1005,17 +955,6 @@ public class BitBoard {
     }
 
 
-    private boolean canRookAttackKing(int kingIndex, boolean kingColorWhite) {
-        // Generate the rook attack bitmask from the king's position
-        long rookAttacks = rookAttackBitmask(kingIndex);
-
-        // Determine the opponent's rooks bitboard based on the king's color
-        long opponentRooks = kingColorWhite ? blackRooks : whiteRooks;
-
-        // Check if the opponent has rooks that can attack the king's position
-        return (rookAttacks & opponentRooks) != 0;
-    }
-
     private long rookAttackBitmask(int positionIndex) {
         long mask = rookHelper.rookMasks[positionIndex];
         long magic = rookHelper.rookMagics[positionIndex];
@@ -1028,16 +967,6 @@ public class BitBoard {
     }
 
 
-    private boolean canQueenAttackKing(int kingIndex, boolean kingColorWhite) {
-        long queenAttacks = queenAttackBitmask(kingIndex);
-
-        // Determine the opponent's queens bitboard based on the king's color
-        long opponentQueens = kingColorWhite ? blackQueens : whiteQueens;
-
-        // Check if the opponent has queens that can attack the king's position
-        return (queenAttacks & opponentQueens) != 0;
-    }
-
     private long queenAttackBitmask(int positionIndex) {
         // The queen's attack bitmask is a combination of the rook's and bishop's attack bitmasks
         long rookAttacks = rookAttackBitmask(positionIndex);
@@ -1047,15 +976,6 @@ public class BitBoard {
         return rookAttacks | bishopAttacks;
     }
 
-    private boolean canKingAttackKing(int kingIndex, boolean kingColorWhite) {
-        long kingAttacks = KING_ATTACKS[kingIndex];
-
-        // Determine the opponent's king bitboard based on the king's color
-        long opponentKing = kingColorWhite ? blackKing : whiteKing;
-
-        // Check if the opponent's king is on one of the squares that the current king can attack
-        return (kingAttacks & opponentKing) != 0;
-    }
 
     public void logBoard() {
         StringBuilder logBoard = new StringBuilder();
