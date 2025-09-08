@@ -12,7 +12,6 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -29,8 +28,42 @@ public class AI {
     private final Engine mainEngine;
 
     public static final double EXIT_FLAG = Double.MAX_VALUE;
-    private static final ConcurrentHashMap<Long, TranspositionTableEntry> transpositionTable = new ConcurrentHashMap<>();
-    private static final ConcurrentHashMap<Long, CaptureTranspositionTableEntry> captureTranspositionTable = new ConcurrentHashMap<>();
+
+    /**
+     * Maximum number of entries kept in the main transposition table.
+     * This prevents unbounded memory growth during long search sessions.
+     */
+    private static final int TRANSPOSITION_TABLE_MAX_ENTRIES = 1_000_000;
+
+    /**
+     * Maximum number of entries kept in the capture transposition table.
+     */
+    private static final int CAPTURE_TRANSPOSITION_TABLE_MAX_ENTRIES = 500_000;
+
+    /**
+     * Transposition table with LRU eviction policy. The map is synchronized to
+     * allow concurrent access from the search threads while keeping the memory
+     * footprint bounded.
+     */
+    private static final Map<Long, TranspositionTableEntry> transpositionTable =
+            Collections.synchronizedMap(new LinkedHashMap<Long, TranspositionTableEntry>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<Long, TranspositionTableEntry> eldest) {
+                    return size() > TRANSPOSITION_TABLE_MAX_ENTRIES;
+                }
+            });
+
+    /**
+     * Separate table for capture searches. Also bounded with LRU eviction to
+     * avoid unbounded growth.
+     */
+    private static final Map<Long, CaptureTranspositionTableEntry> captureTranspositionTable =
+            Collections.synchronizedMap(new LinkedHashMap<Long, CaptureTranspositionTableEntry>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<Long, CaptureTranspositionTableEntry> eldest) {
+                    return size() > CAPTURE_TRANSPOSITION_TABLE_MAX_ENTRIES;
+                }
+            });
 
     private final int[][] killerMoves; // 2D array for killer moves, initialized in the constructor
     private final int numKillerMoves = 2;
