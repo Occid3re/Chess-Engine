@@ -17,6 +17,8 @@ import static julius.game.chessengine.helper.BitHelper.*;
 import static julius.game.chessengine.helper.BitboardHelper.lineBetweenIndices;
 import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
 import static julius.game.chessengine.helper.KnightHelper.knightMoveTable;
+import static julius.game.chessengine.helper.PawnMoveTables.PAWN_ATTACKS;
+import static julius.game.chessengine.helper.PawnMoveTables.PAWN_PUSHES;
 
 @Log4j2
 @Getter
@@ -390,34 +392,52 @@ public class BitBoard {
     }
 
     private void generatePawnMoves(boolean whitesTurn, MoveList moves) {
-        long pawns = whitesTurn ? whitePawns : blackPawns;
-
+        long pawnBitboard = whitesTurn ? whitePawns : blackPawns;
+        long pawns = pawnBitboard;
         long opponentPieces = whitesTurn ? blackPieces : whitePieces;
         long emptySquares = ~(whitePieces | blackPieces);
+        int colorIndex = whitesTurn ? 0 : 1;
 
-        long singleStepForward = whitesTurn ? pawns << 8 : pawns >>> 8;
-        singleStepForward &= emptySquares;
+        while (pawns != 0) {
+            int fromIndex = Long.numberOfTrailingZeros(pawns);
+            pawns &= pawns - 1;
 
-        long attacksLeft = whitesTurn ? (pawns & ~FileMasks[0]) << 7 : (pawns & ~FileMasks[0]) >>> 9;
-        long attacksRight = whitesTurn ? (pawns & ~FileMasks[7]) << 9 : (pawns & ~FileMasks[7]) >>> 7;
+            long singlePush = PAWN_PUSHES[colorIndex][fromIndex] & emptySquares;
+            if (singlePush != 0) {
+                int toIndex = Long.numberOfTrailingZeros(singlePush);
+                boolean isPromotion = whitesTurn ? toIndex >= 56 : toIndex < 8;
+                if (isPromotion) {
+                    addPromotionMoves(moves, fromIndex, toIndex, whitesTurn, false, null);
+                } else {
+                    moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, false, false, false, null, null, false, false, lastMoveDoubleStepPawnIndex));
+                }
 
-        long doubleStepForward;
-        if (whitesTurn) {
-            doubleStepForward = ((pawns & RankMasks[1]) << 8 & emptySquares) << 8 & emptySquares;
-        } else {
-            doubleStepForward = ((pawns & RankMasks[6]) >>> 8 & emptySquares) >>> 8 & emptySquares;
+                int rank = fromIndex / 8;
+                if ((whitesTurn && rank == 1) || (!whitesTurn && rank == 6)) {
+                    long doublePush = PAWN_PUSHES[colorIndex][toIndex] & emptySquares;
+                    if (doublePush != 0) {
+                        int doubleTo = Long.numberOfTrailingZeros(doublePush);
+                        moves.add(createMoveInt(fromIndex, doubleTo, PieceType.PAWN, whitesTurn, false, false, false, null, null, false, false, lastMoveDoubleStepPawnIndex));
+                    }
+                }
+            }
+
+            long attacks = PAWN_ATTACKS[colorIndex][fromIndex] & opponentPieces;
+            while (attacks != 0) {
+                int toIndex = Long.numberOfTrailingZeros(attacks);
+                PieceType capturedType = getPieceTypeAtIndex(toIndex);
+                boolean isPromotion = whitesTurn ? toIndex >= 56 : toIndex < 8;
+                if (isPromotion) {
+                    addPromotionMoves(moves, fromIndex, toIndex, whitesTurn, true, capturedType);
+                } else {
+                    moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, true, false, false, null, capturedType, false, false, lastMoveDoubleStepPawnIndex));
+                }
+                attacks &= attacks - 1;
+            }
         }
 
-        attacksLeft &= opponentPieces;
-        attacksRight &= opponentPieces;
-
-        addPawnMoves(moves, singleStepForward, 8, false, whitesTurn);
-        addPawnMoves(moves, doubleStepForward, 16, false, whitesTurn);
-        addPawnMoves(moves, attacksLeft, whitesTurn ? 7 : 9, true, whitesTurn);
-        addPawnMoves(moves, attacksRight, whitesTurn ? 9 : 7, true, whitesTurn);
-
         if (lastMoveDoubleStepPawnIndex != 0) {
-            generateEnPassantMoves(moves, pawns, whitesTurn);
+            generateEnPassantMoves(moves, pawnBitboard, whitesTurn);
         }
 
     }
@@ -452,25 +472,6 @@ public class BitBoard {
     private void addEnPassantMove(MoveList moves, int fromIndex, int toIndex, boolean whitesTurn) {
         moves.add(
                 createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, true, false, true, null, PieceType.PAWN, false, false, lastMoveDoubleStepPawnIndex));
-    }
-
-    private void addPawnMoves(MoveList moves, long bitboard, int shift, boolean isCapture, boolean whitesTurn) {
-        while (bitboard != 0) {
-            int toIndex = Long.numberOfTrailingZeros(bitboard);
-            int fromIndex = whitesTurn ? toIndex - shift : toIndex + shift;
-
-            // Determine if the move results in a promotion by checking the target rank
-            boolean isPromotion = whitesTurn ? toIndex >= 56 : toIndex < 8;
-            PieceType capturedType = isCapture ? getPieceTypeAtIndex(toIndex) : null;
-
-            if (isPromotion) {
-                addPromotionMoves(moves, fromIndex, toIndex, whitesTurn, isCapture, capturedType);
-            } else {
-                moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, isCapture, false, false, null, capturedType, false, false, lastMoveDoubleStepPawnIndex));
-            }
-
-            bitboard &= bitboard - 1; // Clear the processed bit
-        }
     }
 
     private void addPromotionMoves(MoveList moves, int fromIndex, int toIndex, boolean whitesTurn, boolean isCapture, PieceType capturedType) {
