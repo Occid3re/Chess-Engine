@@ -708,7 +708,13 @@ public class BitBoard {
         }
 
         if (pieceTypeBits == 1 && Math.abs(fromIndex / 8 - toIndex / 8) == 2) {
-            lastMoveDoubleStepPawnIndex = toIndex;
+            // A pawn moved two squares forward. Only expose the en passant
+            // target square if an opposing pawn could actually capture it.
+            long enemyPawns = isWhite ? blackPawns : whitePawns;
+            int file = toIndex % 8;
+            boolean leftEnemy = file > 0 && ((enemyPawns & (1L << (toIndex - 1))) != 0);
+            boolean rightEnemy = file < 7 && ((enemyPawns & (1L << (toIndex + 1))) != 0);
+            lastMoveDoubleStepPawnIndex = (leftEnemy || rightEnemy) ? toIndex : 0;
         } else {
             lastMoveDoubleStepPawnIndex = 0;
         }
