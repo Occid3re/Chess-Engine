@@ -1,211 +1,306 @@
-import subprocess
-import requests
-import time
+import argparse
 import os
 import re
+import subprocess
+import time
+from typing import Optional, Dict, Any
 
-def find_latest_jar(directory_path):
-    jar_files = [f for f in os.listdir(directory_path) if f.endswith('.jar') and re.match(r'chess-engine-\d+\.\d+\.\d+\.jar', f)]
-    jar_files.sort(reverse=True)  # Sort the files by name in reverse, assuming newer versions have higher numbers
+import requests
+
+#py -3 EngineBattle.py --jar1 E:/ChessEngines/chess-engine-3.0.0.jar --jar2 E:/ChessEngines/chess-engine-3.0.1.jar
+
+# ----------------------------
+# Utilities
+# ----------------------------
+
+def find_latest_jar(directory_path: str) -> Optional[str]:
+    """
+    Return the newest chess-engine-<semver>.jar filename (not full path) from directory_path,
+    or None if none found.
+    """
+    if not os.path.isdir(directory_path):
+        return None
+    jar_files = [
+        f for f in os.listdir(directory_path)
+        if f.endswith('.jar') and re.match(r'chess-engine-\d+\.\d+\.\d+\.jar', f)
+    ]
+    # Sort by semantic version if present; name sort descending is usually fine when names encode semver.
+    jar_files.sort(reverse=True)
     return jar_files[0] if jar_files else None
 
-def get_file_name_without_extension(file_path):
-    base_name = os.path.basename(file_path)  # Get the file name from the path
-    file_name_without_extension = os.path.splitext(base_name)[0]  # Remove the extension
-    return file_name_without_extension
 
-def start_java_process(jar_path, jar_port):
-   with open(os.devnull, 'w') as devnull:
-      return subprocess.Popen(['java', '-jar', jar_path, '--server.port=' + jar_port], stdout=devnull, stderr=devnull)
+def get_file_name_without_extension(file_path: str) -> str:
+    base_name = os.path.basename(file_path)
+    return os.path.splitext(base_name)[0]
 
-#def start_java_process(jar_path, jar_port):
-    #return subprocess.Popen(['java', '-jar', jar_path, '--server.port=' + str(jar_port)])
 
-# Function to make a move on a chess engine
-def make_move(engine_url, from_pos, to_pos):
-    #print(f"{engine_url}: {from_pos}:{to_pos}")
-    response = requests.patch(f"{engine_url}/chess/figure/move/{from_pos}/{to_pos}")
-    return response.json()  # Assuming the response is in JSON format
+def start_java_process(jar_path: str, port: int) -> subprocess.Popen:
+    """
+    Start the Spring Boot JAR on a given port with stdout/stderr suppressed.
+    """
+    if not os.path.isfile(jar_path):
+        raise FileNotFoundError(f"JAR not found: {jar_path}")
+    with open(os.devnull, 'w') as devnull:
+        return subprocess.Popen(
+            ['java', '-jar', jar_path, f'--server.port={port}'],
+            stdout=devnull, stderr=devnull
+        )
 
-# Function to check if the server is running
-def is_server_running(url):
+
+def is_server_running(base_url: str, timeout_s: float = 1.5) -> bool:
+    """
+    Consider the server up if either /actuator/health (if present) or / responds with HTTP 200.
+    """
     try:
-        response = requests.get(url)
-        return response.status_code == 200
-    except requests.ConnectionError:
+        # Prefer actuator if enabled
+        r = requests.get(base_url.rstrip('/') + '/actuator/health', timeout=timeout_s)
+        if r.status_code == 200:
+            return True
+    except requests.RequestException:
+        pass
+    try:
+        r = requests.get(base_url, timeout=timeout_s)
+        return r.status_code == 200
+    except requests.RequestException:
         return False
-    
-# Function to set time limit on a chess engine
-def set_time_limit(engine_url, time_limit):
-    response = requests.patch(f"{engine_url}/chess/autoplay/timelimit/{time_limit}")
-    return response.status_code == 200
 
-# Function to start autoplay for a given color on a chess engine
-def start_autoplay(engine_url, ai_color):
-    # Start autoplay with the AI's color
-    response = requests.patch(f"{engine_url}/chess/autoplay/{ai_color}")
-    return response.status_code == 200
 
-# Function to get the last move from a chess engine
-def get_last_move(engine_url):
-    response = requests.get(f"{engine_url}/chess/autoplay/lastMove")
-    if response.status_code == 200:
-        #print(f"{engine_url}: {response.json()}")
-        return response.json() 
+def wait_until_up(base_url: str, deadline_s: float) -> bool:
+    """
+    Poll until the server responds OK or deadline passes.
+    """
+    end = time.time() + deadline_s
+    while time.time() < end:
+        if is_server_running(base_url):
+            return True
+        time.sleep(0.3)
+    return False
+
+
+# ----------------------------
+# Engine API helpers
+# ----------------------------
+
+def make_move(engine_url: str, frm: str, to: str, timeout_s: float = 3.0) -> Dict[str, Any]:
+    r = requests.patch(f"{engine_url}/chess/figure/move/{frm}/{to}", timeout=timeout_s)
+    r.raise_for_status()
+    return r.json()
+
+
+def set_time_limit(engine_url: str, time_limit: int, timeout_s: float = 3.0) -> bool:
+    r = requests.patch(f"{engine_url}/chess/autoplay/timelimit/{time_limit}", timeout=timeout_s)
+    return r.ok
+
+
+def start_autoplay(engine_url: str, ai_color: str, timeout_s: float = 3.0) -> bool:
+    r = requests.patch(f"{engine_url}/chess/autoplay/{ai_color}", timeout=timeout_s)
+    return r.ok
+
+
+def get_last_move(engine_url: str, timeout_s: float = 3.0) -> Optional[Dict[str, Any]]:
+    r = requests.get(f"{engine_url}/chess/autoplay/lastMove", timeout=timeout_s)
+    if r.ok:
+        try:
+            return r.json()
+        except ValueError:
+            return None
     return None
 
-# Function to check game state
-def check_game_state(state):
+
+def reset_board(engine_url: str, timeout_s: float = 5.0) -> bool:
+    r = requests.put(f"{engine_url}/chess/reset", timeout=timeout_s)
+    return r.ok
+
+
+def check_game_state(state: Optional[str]) -> Optional[str]:
     if state == "WHITE_WON":
         return "white"
-    elif state == "BLACK_WON":
+    if state == "BLACK_WON":
         return "black"
-    elif state == "DRAW":
+    if state == "DRAW":
         return "draw"
     return None
 
-# Function to reset the board on a chess engine
-def reset_board(engine_url):
-    response = requests.put(f"{engine_url}/chess/reset")
-    return response.status_code == 200
 
-target_directory = "target"
-jar_file_name = find_latest_jar(target_directory)
+# ----------------------------
+# Match runner
+# ----------------------------
 
-# Paths to the JAR files and ports
-jar1_path = "D:/Chess-Engines/v2/chess-engine-2.9.0.jar"
+def run_matches(jar1_path: str,
+                jar2_path: str,
+                port1: int = 8080,
+                port2: int = 8082,
+                games: int = 100,
+                engine_time_limit: int = 50,
+                move_timeout_s: float = 3.0,
+                startup_deadline_s: float = 30.0,
+                poll_sleep_s: float = 0.05) -> None:
+    """
+    Launch two engines and have them play N games by copying moves between them.
+    """
+    engine1_url = f"http://localhost:{port1}"
+    engine2_url = f"http://localhost:{port2}"
 
-if jar_file_name:
-    jar2_path = os.path.join(target_directory, jar_file_name)
-    print("JAR Path:", jar2_path)
-else:
-    print("No JAR file found in target directory")
+    print(f"Launching engines:\n  {jar1_path} -> {engine1_url}\n  {jar2_path} -> {engine2_url}")
 
-jar1_port = "8080"
-jar2_port = "8082"
-
-# Start the Java processes
-engine1_process = start_java_process(jar1_path, jar1_port)
-engine2_process = start_java_process(jar2_path, jar2_port)
-
-# Give the servers some time to start
-time.sleep(10)  # Adjust this time as needed
-time_limit = 50
-
-# URLs of the chess engine APIs
-engine1_url = "http://localhost:" + jar1_port
-engine2_url = "http://localhost:" + jar2_port
-
-# Initialize win/draw counters
-engine1_wins, engine2_wins, draws = 0, 0, 0
-
-last_move_made_by_engine1 = None
-last_move_made_by_engine2 = None
-
-# Time limit for making a move (in seconds)
-move_time_limit = 3
-
-# Check if both servers are running
-if not is_server_running(engine1_url):
-    print(f"{engine1_url} is not running.")
-    exit(1)
-
-if not is_server_running(engine2_url):
-    print(f"{engine2_url} is not running.")
-    exit(1)
-
-print("Both servers are running. Ready to play.")
-
-# Main loop to play 1000 games
-for game_number in range(1, 101):
-    print(f"Starting game {game_number}")
-
-    # Resetting last move time for each engine at the start of the game
-    last_move_time_engine1 = time.time()
-    last_move_time_engine2 = time.time()
-    # Assign colors for this game
-    color_engine1, color_engine2 = ("WHITE", "BLACK") if game_number % 2 == 1 else ("BLACK", "WHITE")
-
-    # Set time limit and start autoplay for both engines
-    if not (set_time_limit(engine1_url, time_limit) and set_time_limit(engine2_url, time_limit)):
-        print(f"Failed to set time limits for game {game_number}")
-        break
-
-    if not (start_autoplay(engine1_url, color_engine1) and start_autoplay(engine2_url, color_engine2)):
-        print(f"Failed to start autoplay for game {game_number}")
-        break
+    engine1 = start_java_process(jar1_path, port1)
+    engine2 = start_java_process(jar2_path, port2)
 
     try:
-        # Game loop
-        while True:
-            # Get move from engine 1
-            last_move_engine1 = get_last_move(engine1_url)
-            if last_move_engine1 != last_move_made_by_engine1:
-                last_move_made_by_engine1 = last_move_engine1
-                last_move_time_engine1 = time.time()  # Reset the timer as engine 1 made a move
-                if last_move_engine1 and 'from' in last_move_engine1 and 'to' in last_move_engine1:
-                    make_move(engine2_url, last_move_engine1['from'], last_move_engine1['to'])
+        # Wait until both servers are up (faster and more reliable than fixed sleep)
+        if not wait_until_up(engine1_url, startup_deadline_s):
+            raise RuntimeError(f"Engine 1 did not come up at {engine1_url} within {startup_deadline_s}s")
+        if not wait_until_up(engine2_url, startup_deadline_s):
+            raise RuntimeError(f"Engine 2 did not come up at {engine2_url} within {startup_deadline_s}s")
 
+        print("Both servers are running. Ready to play.")
 
-            # Get move from engine 2
-            last_move_engine2 = get_last_move(engine2_url)
-            if last_move_engine2 != last_move_made_by_engine2:
-                last_move_made_by_engine2 = last_move_engine2
-                last_move_time_engine2 = time.time()  # Reset the timer as engine 2 made a move
-                if last_move_engine2 and 'from' in last_move_engine2 and 'to' in last_move_engine2:
-                    make_move(engine1_url, last_move_engine2['from'], last_move_engine2['to'])
+        engine1_wins = engine2_wins = draws = 0
 
-            # Check if engine 1 has exceeded the move time limit
-            if time.time() - last_move_time_engine1 > move_time_limit:
-                engine2_wins += 1
-                print(f"{get_file_name_without_extension(jar1_path)} failed to make a move in time.")
+        for game_number in range(1, games + 1):
+            print(f"\n=== Starting game {game_number} ===")
+
+            # Reset boards to a clean start each game
+            if not (reset_board(engine1_url) and reset_board(engine2_url)):
+                print(f"Failed to reset one of the boards for game {game_number}; aborting.")
                 break
 
-            # Check if engine 2 has exceeded the move time limit
-            if time.time() - last_move_time_engine2 > move_time_limit:
-                engine1_wins += 1
-                print(f"{get_file_name_without_extension(jar2_path)} failed to make a move in time.")
+            # Reset per-game trackers
+            last_move_made_by_engine1 = None
+            last_move_made_by_engine2 = None
+            last_move_time_engine1 = time.time()
+            last_move_time_engine2 = time.time()
+
+            color_engine1, color_engine2 = ("WHITE", "BLACK") if game_number % 2 == 1 else ("BLACK", "WHITE")
+
+            # Configure engine search time and start autoplay for both
+            if not (set_time_limit(engine1_url, engine_time_limit) and set_time_limit(engine2_url, engine_time_limit)):
+                print(f"Failed to set time limits for game {game_number}; aborting.")
                 break
 
-            # Check game state
-            game_state = None
-            if last_move_engine1 and 'currentState' in last_move_engine1:
-                game_state = check_game_state(last_move_engine1['currentState'])
-            elif last_move_engine2 and 'currentState' in last_move_engine2:
-                game_state = check_game_state(last_move_engine2['currentState'])
+            if not (start_autoplay(engine1_url, color_engine1) and start_autoplay(engine2_url, color_engine2)):
+                print(f"Failed to start autoplay for game {game_number}; aborting.")
+                break
 
-            if game_state:
-                # Update counters based on game state and the color each engine played
-                if color_engine1 == "WHITE":
-                    if game_state == "white":
-                        engine1_wins += 1
-                    elif game_state == "black":
+            try:
+                # Game loop
+                while True:
+                    # Poll engine 1
+                    last_move_engine1 = get_last_move(engine1_url)
+                    if last_move_engine1 and last_move_engine1 != last_move_made_by_engine1:
+                        last_move_made_by_engine1 = last_move_engine1
+                        last_move_time_engine1 = time.time()
+                        if 'from' in last_move_engine1 and 'to' in last_move_engine1:
+                            make_move(engine2_url, last_move_engine1['from'], last_move_engine1['to'])
+
+                    # Poll engine 2
+                    last_move_engine2 = get_last_move(engine2_url)
+                    if last_move_engine2 and last_move_engine2 != last_move_made_by_engine2:
+                        last_move_made_by_engine2 = last_move_engine2
+                        last_move_time_engine2 = time.time()
+                        if 'from' in last_move_engine2 and 'to' in last_move_engine2:
+                            make_move(engine1_url, last_move_engine2['from'], last_move_engine2['to'])
+
+                    # Move timeouts (engine failed to reply within move_timeout_s)
+                    now = time.time()
+                    if now - last_move_time_engine1 > move_timeout_s:
                         engine2_wins += 1
-                else:
-                    if game_state == "white":
-                        engine2_wins += 1
-                    elif game_state == "black":
+                        print(f"{get_file_name_without_extension(jar1_path)} failed to move in time.")
+                        break
+                    if now - last_move_time_engine2 > move_timeout_s:
                         engine1_wins += 1
+                        print(f"{get_file_name_without_extension(jar2_path)} failed to move in time.")
+                        break
 
-                if game_state == "draw":
-                    draws += 1
-                
+                    # Game end by state
+                    game_state = None
+                    if last_move_engine1 and 'currentState' in last_move_engine1:
+                        game_state = check_game_state(last_move_engine1['currentState'])
+                    elif last_move_engine2 and 'currentState' in last_move_engine2:
+                        game_state = check_game_state(last_move_engine2['currentState'])
+
+                    if game_state:
+                        if color_engine1 == "WHITE":
+                            if game_state == "white":
+                                engine1_wins += 1
+                            elif game_state == "black":
+                                engine2_wins += 1
+                        else:
+                            if game_state == "white":
+                                engine2_wins += 1
+                            elif game_state == "black":
+                                engine1_wins += 1
+                        if game_state == "draw":
+                            draws += 1
+                        break
+
+                    time.sleep(poll_sleep_s)  # be kind to the CPU
+
+            except KeyboardInterrupt:
+                print("Game interrupted by user.")
                 break
-    except KeyboardInterrupt:
-        print("Game interrupted.")
-        break
-    # Output game result counters
-    print(f"{get_file_name_without_extension(jar1_path)} wins: {engine1_wins}, {get_file_name_without_extension(jar2_path)} wins: {engine2_wins}, Draws: {draws}")
-    # Reset both boards after a game
-    if not (reset_board(engine1_url) and reset_board(engine2_url)):
-        print(f"Failed to reset boards after game {game_number}")
-        break
+
+            print(f"{get_file_name_without_extension(jar1_path)} wins: {engine1_wins}, "
+                  f"{get_file_name_without_extension(jar2_path)} wins: {engine2_wins}, "
+                  f"Draws: {draws}")
+
+    finally:
+        # Ensure both engines are stopped
+        for proc, label in [(engine1, "engine1"), (engine2, "engine2")]:
+            if proc and proc.poll() is None:
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=5)
+                except Exception:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+        print("Chess engines terminated.")
 
 
+# ----------------------------
+# CLI
+# ----------------------------
 
-# Terminate the Java processes
-engine1_process.terminate()
-engine2_process.terminate()
-engine1_process.wait()
-engine2_process.wait()
-print("Chess engines terminated.")
+def main():
+    parser = argparse.ArgumentParser(description="Play head-to-head matches between two HTTP chess engines.")
+    parser.add_argument("--jar1", default="D:/Chess-Engines/v2/chess-engine-2.9.0.jar",
+                        help="Path to reference engine JAR (v2).")
+    parser.add_argument("--jar2", default=None,
+                        help="Path to new engine JAR (defaults to latest chess-engine-*.jar in ./target)")
+    parser.add_argument("--target-dir", default="target", help="Directory to search for newest engine JAR.")
+    parser.add_argument("--port1", type=int, default=8080)
+    parser.add_argument("--port2", type=int, default=8082)
+    parser.add_argument("--games", type=int, default=100)
+    parser.add_argument("--engine-time-limit", type=int, default=50,
+                        help="Time limit configured on the engine (seconds per move/search window).")
+    parser.add_argument("--move-timeout", type=float, default=3.0,
+                        help="Wall-clock tolerance before declaring the other engine wins.")
+    parser.add_argument("--startup-deadline", type=float, default=30.0,
+                        help="Seconds to wait for each server to become reachable.")
+    args = parser.parse_args()
+
+    # Resolve jar2 if not provided
+    jar2_path = args.jar2
+    if jar2_path is None:
+        latest = find_latest_jar(args.target_dir)
+        if not latest:
+            raise SystemExit(f"No JAR file found in {args.target_dir} matching chess-engine-<semver>.jar")
+        jar2_path = os.path.join(args.target_dir, latest)
+        print(f"Using latest JAR in {args.target_dir}: {jar2_path}")
+
+    run_matches(
+        jar1_path=args.jar1,
+        jar2_path=jar2_path,
+        port1=args.port1,
+        port2=args.port2,
+        games=args.games,
+        engine_time_limit=args.engine_time_limit,
+        move_timeout_s=args.move_timeout,
+        startup_deadline_s=args.startup_deadline
+    )
+
+
+if __name__ == "__main__":
+    main()
