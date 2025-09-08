@@ -9,8 +9,8 @@ import julius.game.chessengine.utils.Color;
 import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
 
-import java.util.Objects;
 import java.util.Arrays;
+import java.util.Objects;
 
 import static julius.game.chessengine.board.MoveHelper.createMoveInt;
 import static julius.game.chessengine.helper.BitHelper.*;
@@ -44,7 +44,9 @@ public class BitBoard {
     private long whitePieces = 0L;
     private long blackPieces = 0L;
     private long allPieces = 0L;
-    /** Bitboards caching the squares attacked by each side. */
+    /**
+     * Bitboards caching the squares attacked by each side.
+     */
     private long whiteAttackMap = 0L;
     private long blackAttackMap = 0L;
     private PieceType[] pieceBoard = new PieceType[64];
