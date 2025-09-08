@@ -131,8 +131,8 @@ public class Engine {
         legalMovesCache.put(boardStateHash, this.legalMoves);
 
         int size = legalMovesCache.size();
-        if(size > MAX_SIZE + 100) {
-            throw new RuntimeException(String.format("LegalMovesCache size %s is larger then MAX_SIZE %s", size, MAX_SIZE));
+        if (size > MAX_SIZE) {
+            throw new RuntimeException(String.format("LegalMovesCache size %s is larger than MAX_SIZE %s", size, MAX_SIZE));
         }
     }
 
