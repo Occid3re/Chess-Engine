@@ -1,193 +1,298 @@
 package julius.game.chessengine.engine;
 
-import com.jcabi.aspects.Cacheable;
-import julius.game.chessengine.board.Board;
-import julius.game.chessengine.board.Field;
-import julius.game.chessengine.board.Position;
-import julius.game.chessengine.figures.Figure;
-import julius.game.chessengine.figures.King;
+import julius.game.chessengine.ai.OpeningBook;
+import julius.game.chessengine.board.*;
+import julius.game.chessengine.cache.TimedLRUCache;
+import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.utils.Color;
-import lombok.Data;
+import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
 
-import java.util.Collections;
-import java.util.List;
-import java.util.Random;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
 import java.util.stream.Collectors;
 
-@Data
 @Service
 @Log4j2
 public class Engine {
 
-    private Board board = new Board();
-    private GameState gameState = new GameState();
-    private boolean whitesTurn = true;
+    private static final int MAX_SIZE = 5_000_000;
+    private static final int MAX_AGE = 10_000;
+
+    private TimedLRUCache<Long, MoveList> legalMovesCache = new TimedLRUCache<>(MAX_SIZE, MAX_AGE);
+
+    @Getter
+    private OpeningBook openingBook;
+
+    private boolean legalMovesNeedUpdate = true;
+    private MoveList legalMoves;
+
+    @Getter
+    private ArrayList<Integer> line = new ArrayList<>();
+    private ArrayList<Integer> redoLine = new ArrayList<>();
+    private BitBoard bitBoard = new BitBoard();
+    @Getter
+    private GameState gameState = new GameState(bitBoard);
+
+    public Engine() {
+        startNewGame();
+    }
+
+    public Engine(Engine other) {
+        this.bitBoard = new BitBoard(other.bitBoard); // Assuming BitBoard's constructor is a deep copy constructor
+        this.gameState = new GameState(other.gameState); // Assuming GameState's constructor is a deep copy constructor
+        this.line = new ArrayList<>(other.line);
+        this.redoLine = new ArrayList<>(other.redoLine);
+        //this.legalMoves = new MoveList(other.legalMoves);
+        this.legalMoves = other.legalMoves;
+        this.legalMovesNeedUpdate = other.legalMovesNeedUpdate;
+        this.openingBook = other.openingBook;
+        this.legalMovesCache = other.legalMovesCache;
+    }
+
+    public MoveList getAllLegalMoves() {
+        if (gameState.isGameOver()) {
+            if (legalMoves == null) {
+                legalMoves = new MoveList();  // Create only if null
+            } else {
+                legalMoves.clear();  // Clear existing list instead of creating a new one
+            }
+        } else if (legalMovesNeedUpdate) {
+            generateLegalMoves();
+        }
+        return legalMoves;
+    }
+
+    public void performMove(int move) {
+        boolean isOpeningMove = false;
+        if (!gameState.isGameOver()) {
+            long boardStateHashBeforeMove = getBoardStateHash();
+            bitBoard.performMove(move);
+            if(openingBook.containsMoveAndBoardStateHash(boardStateHashBeforeMove, move)) {
+                isOpeningMove = true;
+            }
+            generateLegalMoves();
+            gameState.update(bitBoard, legalMoves, move, isOpeningMove);
+            line.add(move);
+        }
+    }
+
+    public void importBoardFromFen(String fen) {
+        this.bitBoard = FEN.translateFENtoBitBoard(fen);
+        this.gameState = new GameState(bitBoard);
+        generateLegalMoves();
+        gameState.updateState(bitBoard, legalMoves, false);
+    }
+
+    public synchronized Engine createSimulation() {
+        // Safe copy
+        return new Engine(this);
+    }
 
     public void startNewGame() {
-        board = new Board();
-        whitesTurn = true;
-        gameState = new GameState();
+        bitBoard = new BitBoard();
+        gameState = new GameState(bitBoard);
+        legalMovesNeedUpdate = true;
+        line = new ArrayList<>();
+        redoLine = new ArrayList<>();
+        this.openingBook = OpeningBook.getInstance();
+        legalMovesCache = new TimedLRUCache<>(MAX_SIZE, MAX_AGE);
     }
 
-    public GameState moveRandomFigure(String color) {
-        List<MoveField> moveFields = getAllPossibleMoveFieldsForPlayerColor(board, color);
+    private void generateLegalMoves() {
+
+        long boardStateHash = getBoardStateHash();
+
+        if (legalMovesCache.containsKey(boardStateHash)) {
+            // Use the cached moves
+            this.legalMoves = legalMovesCache.get(boardStateHash);
+            return;
+        }
+
+        if (gameState.isGameOver()) {
+            this.legalMoves = new MoveList();
+            legalMovesNeedUpdate = false;
+            return;
+        }
+
+        BitBoard simulation = new BitBoard(bitBoard); // Only one instance
+        MoveList moves = bitBoard.getAllCurrentPossibleMoves();
+
+        this.legalMoves = new MoveList();
+        for (int i = 0; i < moves.size(); i++) {
+            int move = moves.getMove(i);
+            simulation.performMove(move);
+            if (!simulation.isInCheck(MoveHelper.isWhitesMove(move))) {
+                this.legalMoves.add(move);
+            }
+            simulation.undoMove(move); // Revert to original state after checking
+        }
+        legalMovesNeedUpdate = false;
+        legalMovesCache.put(boardStateHash, this.legalMoves);
+
+        int size = legalMovesCache.size();
+        if(size > MAX_SIZE + 100) {
+            throw new RuntimeException(String.format("LegalMovesCache size %s is larger then MAX_SIZE %s", size, MAX_SIZE));
+        }
+    }
+
+    // Each of these methods would need to be implemented to handle the specific move generation for each piece type.
+    public List<Move> getMovesFromIndex(int fromIndex) {
+
+        MoveList legalMoves = getAllLegalMoves();
+
+        List<Move> movesFromIndex = new ArrayList<>();
+
+        for (int i = 0; i < legalMoves.size(); i++) {
+            int m = legalMoves.getMove(i);
+            int from = MoveHelper.deriveFromIndex(m); // Extract the first 6 bits
+            if (from == fromIndex) {
+                movesFromIndex.add(Move.convertIntToMove(m));
+            }
+        }
+
+        return movesFromIndex;
+    }
+
+    public void moveRandomFigure(boolean isWhite) {
+        // Now, the color parameter is used to determine which moves to generate
+        MoveList moves = getAllLegalMoves();
+
+        if (moves.size() == 0) {
+            throw new RuntimeException("No moves possible for " + (isWhite ? "White" : "Black"));
+        }
 
         Random rand = new Random();
-        MoveField randomMoveField = rand
-                .ints(0, moveFields.size())
-                .mapToObj(moveFields::get)
-                .findAny().orElseThrow(() -> new RuntimeException("No random moves possible"));
+        int randomMove = moves.getMove(rand.nextInt(moves.size()));
 
-        Figure randomFigure = board.getFigureForPosition(randomMoveField.getFromPosition());
-        String fromPosition = randomFigure.positionToString();
-        String toPosition = randomMoveField.toPositionToString();
+        // Execute the move on the bitboard
+        performMove(randomMove);
 
-        return moveFigure(board, fromPosition, toPosition);
     }
 
-    public GameState moveFigure(Board board, String fromPosition, String toPosition) {
-        Figure figureToMove = board.getFigureForString(fromPosition);
-        Field toField = board.getFieldForString(toPosition);
-        try {
-            if (isPlayersTurnAndIsNotInStateCheckAfterMove(board, figureToMove, toField)) {
-                moveOrAttackFigure(board, figureToMove, toField);
-                whitesTurn = !whitesTurn;
-                //board.logBoard();
-            }
-        } catch (IllegalStateException e) {
-            log.info(e.getMessage());
+    public GameState moveFigure(int fromIndex, int toIndex, int promotionPiece) {
+        return moveFigure(bitBoard, fromIndex, toIndex, promotionPiece);
+    }
+
+    //always queen
+    public void moveFigure(int fromIndex, int toIndex) {
+        moveFigure(bitBoard, fromIndex, toIndex, 5);
+    }
+
+    public GameState moveFigure(BitBoard bitBoard, int fromIndex, int toIndex, int promotionPiece) {
+        // Determine the piece type and color from the bitboard based on the 'from' position
+        PieceType pieceType = bitBoard.getPieceTypeAtIndex(fromIndex);
+        Color color = bitBoard.getPieceColorAtIndex(fromIndex);
+
+        if (pieceType == null || color == null) {
+            throw new IllegalStateException("No piece at the starting position");
         }
-        updateGameState();
+
+        // Check if it's the correct player's turn
+        Color pieceColor = bitBoard.getPieceColorAtIndex(fromIndex);
+        if ((pieceColor == Color.WHITE && !bitBoard.whitesTurn) || (pieceColor == Color.BLACK && bitBoard.whitesTurn)) {
+            bitBoard.logBoard();
+            throw new IllegalStateException("It's not " + pieceColor + "'s turn");
+        }
+
+        int move = getMove(fromIndex, toIndex, promotionPiece);
+
+        if (move == -1) {
+            log.warn("Move not legal!");
+        } else {
+            // Perform the move on the bitboard
+            performMove(move);
+        }
+
         return gameState;
     }
 
-    @Cacheable(lifetime = 30, unit = TimeUnit.SECONDS)
-    public List<MoveField> getAllPossibleMoveFieldsForPlayerColor(Board board, String color) {
+    private int getMove(int fromIndex, int toIndex, int promotionPiece) {
+        MoveList legalMoves = getAllLegalMoves();
 
-        return board.getFigures().stream()
-                .filter(figure -> color.equals(figure.getColor()))
-                .flatMap(figure -> figure.getPossibleMoveFields(board).stream())
-                .filter(moveField -> !isInStateCheckAfterMove(board, moveField, color))
+        int move = -1;
+
+        for (int i = 0; i < legalMoves.size(); i++) {
+            int m = legalMoves.getMove(i);
+            int from = MoveHelper.deriveFromIndex(m); // Extract the first 6 bits
+            int to = MoveHelper.deriveToIndex(m); // Extract the next 6 bits
+            int promotionPieceTypeBits = MoveHelper.derivePromotionPieceTypeBits(m);
+
+            if (from == fromIndex && to == toIndex && (promotionPieceTypeBits == 0 | promotionPieceTypeBits == promotionPiece)) {
+                move = m;
+            }
+        }
+        return move;
+    }
+
+    public List<Position> getPossibleMovesForPosition(int fromIndex) {
+        return getMovesFromIndex(fromIndex).stream()
+                .map(Move::getTo)
                 .collect(Collectors.toList());
     }
 
-    public List<Position> getPossibleMovesForPosition(Board board, String fromPosition) {
-        try {
-            Figure figure = board.getFigureForString(fromPosition);
-            if(figure.getColor().equals(Color.WHITE) == whitesTurn) {
-                return figure.getPossibleMoveFields(board).stream()
-                        .filter(moveField -> !isInStateCheckAfterMove(board, moveField, figure.getColor()))
-                        .map(MoveField::getToField)
-                        .map(Field::getPosition)
-                        .collect(Collectors.toList());
-            }
-            else {
-                return Collections.emptyList();
-            }
-        } catch (RuntimeException e) {
-            log.info(e.getMessage());
-            return Collections.emptyList();
-        }
-    }
 
-    private boolean isInStateCheck(Board board, String color) {
-        return board.getKings().stream().filter(king -> color.equals(king.getColor()))
-                .anyMatch(King::isInStateCheck);
-    }
-
-    public boolean isInStateCheckMate(Board board, String color) {
-        return isInStateCheck(board, color) && getAllPossibleMoveFieldsForPlayerColor(board, color).size() == 0 ;
-    }
-
-    public double simulateMoveAndGetEfficiency(Board board, MoveField moveField, String currentPlayerColor, String color, int levelOfDepth, double mostEfficientMove) {
-        double efficiency = 0;
-        int iteration = 0;
-
-        Board simulatedBoard = simulateMoveAndGetDummyBoard(board, moveField);
-        int scoreDifference = simulatedBoard.getScore().getScoreDifference(color);
-        efficiency += scoreDifference;
-
-        while (iteration < levelOfDepth && efficiency > mostEfficientMove) {
-
-
-            //log.info("Iteration: (" + (iteration + 1) + "/" + levelOfDepth + ")");
-            double mostEfficientMoveScoreDifference =
-                    getMostEfficientMoveScoreDifference(Color.getOpponentColor(color), levelOfDepth, currentPlayerColor, simulatedBoard, efficiency);
-
-            if (Color.getOpponentColor(color).equals(currentPlayerColor)) {
-                efficiency += mostEfficientMoveScoreDifference;
-            } else {
-                efficiency -= mostEfficientMoveScoreDifference;
-            }
-            iteration++;
-        }
-
-        /*log.info("Efficiency: " + efficiency + " From: " + moveField.fromPositionToString() + " To: " + moveField.toPositionToString() + " Player: " + color +
-                " MostEfficientMove: " + mostEfficientMove);*/
-
-        return efficiency;
-    }
-
-    private double getMostEfficientMoveScoreDifference(String color, int levelOfDepth, String currentPlayerColor, Board simulatedBoard, double mostEfficientMove) {
-        List<MoveField> opponentMoves = getAllPossibleMoveFieldsForPlayerColor(simulatedBoard, color);
-        return opponentMoves.stream()
-                        .mapToDouble(move -> simulateMoveAndGetEfficiency(simulatedBoard, move, currentPlayerColor, color, levelOfDepth-1, mostEfficientMove))
-                        .max().orElseThrow(() -> new RuntimeException("No moves available for " + color));
+    public synchronized long getBoardStateHash() {
+        return bitBoard.getBoardStateHash();
     }
 
 
-    public Board simulateMoveAndGetDummyBoard(Board board, MoveField moveField) {
-        Board dummyBoard = generateDummyBoard(board);
-        Figure figureToMove = dummyBoard.getFigureForPosition(moveField.getFromPosition());
-        moveOrAttackFigure(dummyBoard, figureToMove, moveField.getToField());
-
-        return dummyBoard;
+    public void logBoard() {
+        bitBoard.logBoard();
     }
 
-    @Cacheable(lifetime = 30, unit = TimeUnit.SECONDS)
-    private boolean isInStateCheckAfterMove(Board board, MoveField moveField, String color) {
-        Board checkBoard = simulateMoveAndGetDummyBoard(board, moveField);
-        return isInStateCheck(checkBoard, color);
+    public boolean whitesTurn() {
+        return bitBoard.whitesTurn;
     }
 
-    private void moveOrAttackFigure(Board board, Figure figureToMove, Field toField) {
-        String color = figureToMove.getColor();
-        if (board.isEnemyOnField(toField, color)) {
-            board.getScore().add(board.getFigureForPosition(toField.getPosition()).getPoints(), color);
-            figureToMove.attack(board, toField);
+    public void undoLastMove() {
+        if (!line.isEmpty()) {
+            gameState.undo(bitBoard.getBoardStateHash());
+            Integer undoMove = line.getLast();
+            this.bitBoard.undoMove(undoMove);
+            gameState.updateScore(bitBoard, undoMove);
+            generateLegalMoves();
+            redoLine.add(undoMove);
+            line.removeLast();
         } else {
-            figureToMove.move(board, toField);
+            throw new IllegalStateException("undoLastMoveWasNotPossible, line is empty");
         }
     }
 
-   /* private Board generateDummyBoard(Board board) {
-        String fen = FEN.translateBoardToFEN(board).getRenderBoard();
-        Score copyScore = new Score(board.getScore().getScoreWhite(), board.getScore().getScoreBlack());
-        return new Board(fen, copyScore);
-    }*/
-
-    private Board generateDummyBoard(Board board) {
-        return new Board(board);
+    public void redoMove() {
+        if (!redoLine.isEmpty()) {
+            performMove(redoLine.getLast());
+            redoLine.removeLast();
+        } else {
+            throw new IllegalStateException("redoLastMoveWasNotPossible, redoLine is empty");
+        }
     }
 
-    private boolean isPlayersTurnAndIsNotInStateCheckAfterMove(Board board, Figure figureToMove, Field toField) {
-        String playerColor = figureToMove.getColor();
-        return playerColor.equals(Color.WHITE) == whitesTurn && !isInStateCheckAfterMove(board, new MoveField(figureToMove.getCurrentField(), toField), playerColor);
+    public Integer getLastMove() {
+        if (!line.isEmpty()) {
+            return line.getLast();
+        } else {
+            return -1;
+        }
     }
 
-    private void updateGameState() {
-        if (getAllPossibleMoveFieldsForPlayerColor(board, Color.WHITE).size() == 0 && isInStateCheck(board, Color.WHITE)) {
-            gameState.setState("BLACK WON");
-        }
-        else if (getAllPossibleMoveFieldsForPlayerColor(board, Color.BLACK).size() == 0 && isInStateCheck(board, Color.BLACK)) {
-            gameState.setState("WHITE WON");
-        }
-        else if(getAllPossibleMoveFieldsForPlayerColor(board, Color.WHITE).size() == 0 || getAllPossibleMoveFieldsForPlayerColor(board, Color.BLACK).size() == 0) {
-            gameState.setState("DRAW");
-        }
+    public FEN translateBoardToFen() {
+        return FEN.translateBoardToFEN(bitBoard);
+    }
+
+    public Long getBoardStateHashAfterMove(int move) {
+        // Step 1: Create a deep copy of the current board state
+        BitBoard boardCopy = new BitBoard(this.bitBoard);
+
+        // Step 2: Simulate the move on the copied board
+        boardCopy.performMove(move); // Assuming 'false' means no need to update the score
+
+        // Step 3: Return the computed hash
+        return boardCopy.getBoardStateHash();
+    }
+
+    public boolean isEndgame() {
+        return bitBoard.isEndgame();
     }
 
 }

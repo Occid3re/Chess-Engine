@@ -17,12 +17,17 @@ public class Position {
         this.y = y;
     }
 
-    public boolean isPositionInFields(List<Field> fields) {
-        return fields.stream()
-                .anyMatch(field -> this.equals(field.getPosition()));
+    public Position(Position other) {
+        this.x = other.x;
+        this.y = other.y;
     }
 
     public String toString() {
         return x + String.valueOf(y);
     }
+
+
+
+
+
 }

@@ -1,0 +1,240 @@
+/* General Styles */
+body {
+    background-color: #00008B; /* Dark blue */
+    animation: colorChange 20s infinite alternate;
+    box-shadow: inset 0 0 30px rgba(0, 255, 0, 0.5); /* Subtle glow */
+}
+
+@keyframes colorChange {
+    0%, 100% { background-color: #00008B; }
+    25% { background-color: #003366; }
+    50% { background-color: rgb(0, 0, 0); }
+    75% { background-color: #006400; }
+}
+
+/* Section and Container Styles */
+#section1, #section2, #section3 {
+    margin: 0 auto;
+    width: 1024px;
+    transition: all 0.5s ease; /* Smooth transition */
+}
+
+/* Header Glitch Animation Styles */
+#header {
+    box-shadow: 0px 0px 10px 5px #00eeff;
+    font-family: 'Orbitron', sans-serif; /* Futuristic font */
+    color: #32CD32; /* Neon green color */
+    position: relative;
+    animation: glitch 1s linear infinite;
+}
+
+/* Keyframes for the glitch animation */
+@keyframes glitch {
+    0% {
+        text-shadow: 1px -1px #ff00ff, -1px 1px #00ffff;
+        transform: translate(0);
+    }
+    20% {
+        text-shadow: 2px -2px #ff00ff, -2px 2px #00ffff;
+        transform: translate(-2px, 2px);
+    }
+    40% {
+        text-shadow: 1px -1px #ff00ff, -1px 1px #00ffff;
+        transform: translate(0);
+    }
+    60% {
+        text-shadow: 2px -2px #ff00ff, -2px 2px #00ffff;
+        transform: translate(2px, -2px);
+    }
+    80% {
+        text-shadow: 1px -1px #ff00ff, -1px 1px #00ffff;
+        transform: translate(0);
+    }
+    100% {
+        text-shadow: 2px -2px #ff00ff, -2px 2px #00ffff;
+        transform: translate(-2px, 2px);
+    }
+}
+
+#section1 {
+    margin-top: 30px;
+}
+
+#section2 {
+    margin-bottom: 50px; /* Adds space below Section 2 */
+}
+
+
+
+#section1 > div, #section3 > div {
+    margin: 0 auto;
+    width: 512px;
+    text-align: center;
+    color: #32CD32;
+    background-color: rgba(0, 0, 0, 0.5);
+    text-shadow: 0px 0px 5px #32CD32; /* Reduced glow */
+}
+
+#section2 > div {
+    margin: 0 auto;
+    width: 512px;
+}
+
+/* Slider Container */
+#sliderContainer {
+    display: flex;
+    align-items: center;
+    justify-content: center; /* Center slider in container */
+    padding: 10px; /* Add some padding */
+    background-color: rgba(0, 0, 0, 0.5); /* Semi-transparent black background */
+    border-radius: 10px; /* Rounded corners */
+    box-shadow: 0px 0px 10px 5px #00eeff;
+    margin-top: 1px; /* Space from the board */
+}
+
+/* Styling the Slider */
+#autoplaySlider {
+    -webkit-appearance: none; /* Override default browser appearance */
+    width: 100%; /* Full width of the container */
+    height: 8px; /* Slider thickness */
+    background: #003366; /* Dark base color */
+    outline: none; /* Remove outline */
+    opacity: 0.7; /* Semi-transparency */
+    transition: opacity .2s; /* Smooth transition for hover effect */
+    border-radius: 5px; /* Rounded slider */
+}
+
+#autoplaySlider::-webkit-slider-thumb {
+    -webkit-appearance: none; /* Override default appearance */
+    appearance: none;
+    width: 25px; /* Width of the thumb */
+    height: 25px; /* Height of the thumb */
+    background: #32CD32; /* Neon green thumb */
+    cursor: pointer; /* Cursor on hover */
+    border-radius: 50%; /* Circular thumb */
+    box-shadow: 0 0 10px #ff00ff; /* Neon glow effect */
+}
+
+#autoplaySlider::-moz-range-thumb {
+    width: 25px;
+    height: 25px;
+    background: #32CD32;
+    cursor: pointer;
+    border-radius: 50%;
+    box-shadow: 0 0 10px #ff00ff;
+}
+
+/* Styling the Slider Value Display */
+#sliderValue {
+    color: #32CD32; /* Neon green text */
+    font-family: 'Orbitron', sans-serif; /* Futuristic font */
+    margin-left: 10px; /* Space from the slider */
+    text-shadow: 0 0 5px #32CD32; /* Text glow effect */
+}
+
+
+#section3 {
+    width: 800px; /* or any other value smaller than 512px */
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+}
+
+#section3 > * {
+    margin: 0 10px; /* Adjust spacing as needed */
+}
+
+
+.arrow {
+    /* Basic styling for arrows */
+    background-color: #f0f0f0;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 5px 10px;
+    margin: 5px;
+    flex-grow: 0; /* Prevents arrows from growing */
+}
+
+
+#scoreAndLineContainer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex-grow: 0; /* Allows this container to take up more space */
+}
+
+#scoreAndLineContainer > * {
+    margin: 5px; /* Adjust spacing as needed */
+}
+
+.slider {
+    width: 100%; /* Adjust as needed */
+    margin: 10px 0;
+}
+
+
+#board {
+    width: 512px;
+}
+
+/* Top Bar Styles */
+.top-bar ul {
+    list-style: none; /* Removes default list styling */
+    padding: 0;
+    margin: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.top-bar li {
+    margin: 0 5px; /* Adjust spacing between menu items */
+}
+
+/* Button Styles */
+.btn {
+    margin: 0 5px;
+    padding: 5px 10px;
+    background-color: #00FF00; /* Bright neon green */
+    color: black; /* Contrasting text color */
+    border: 2px solid #32CD32; /* Neon green border */
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s ease, transform 0.2s ease;
+    text-shadow: 0px 0px 5px #32CD32; /* Neon glow text effect */
+    box-shadow: 0px 0px 10px #32CD32; /* Outer glow for depth */
+}
+
+.btn:hover {
+    background-color: #29a329; /* Slightly darker green on hover */
+    transform: scale(1.05); /* Slight increase in size on hover */
+}
+
+/* Specific Buttons */
+#resetBoard, #computerMove, #undoMove, #autoPlay, #viewDetails, #playWhite, #playBlack, #importFEN {
+    background-color: #32CD32; /* Unified button color */
+}
+
+#score, #calculatedLine {
+    text-align: center;
+    font-size: large;
+    color: lime;
+    background-color: rgba(0, 0, 0, 0.5);
+    font-family: 'Orbitron', sans-serif;
+    margin-bottom: 20px;
+    padding: 10px;
+}
+
+.game-section {
+    margin: 0 auto;
+    width: 512px;
+    color: lime;
+    border: 3px solid lime;
+    background-color: rgba(0, 0, 0, 0.5);
+    box-shadow: 0px 5px 10px rgba(0, 255, 0, 0.3); /* More subtle shadow */
+    padding: 20px;
+    transition: transform 0.3s ease; /* Smooth scaling on hover */
+}

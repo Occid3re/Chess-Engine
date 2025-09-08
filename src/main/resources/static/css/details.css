@@ -1,0 +1,106 @@
+/* Modal Content Styling */
+.modal-content {
+    padding: 15px; /* Adjust padding */
+    max-height: 70vh; /* Adjust maximum height */
+    width: auto; /* Auto width or a specific width */
+    background-color: #0f0f0f; /* Dark background */
+    color: #32CD32; /* Neon green text */
+    border: 3px solid #ff00ff; /* Neon pink border */
+    box-shadow: 0 0 20px #ff00ff; /* Neon pink glow */
+    border-radius: 15px; /* Rounded corners */
+    font-family: 'Orbitron', sans-serif; /* Futuristic font */
+    text-shadow: 0 0 10px #ff00ff; /* Text glow effect */
+    overflow-y: auto; /* Enable vertical scrolling */
+    backdrop-filter: blur(5px); /* Blur effect on background */
+}
+
+/* Close Button Styling */
+.close {
+    position: absolute; /* Absolute positioning */
+    top: 10px; /* Adjust top position */
+    right: 15px; /* Adjust right position */
+    color: #ff0000; /* Bright red color for close button */
+    text-shadow: 0 0 10px #ff0000; /* Bright red glow effect */
+    float: right;
+    cursor: pointer;
+    font-size: 1.5em;
+}
+
+.close:hover, .close:focus {
+    color: #fff;
+    text-shadow: 0 0 15px #fff;
+}
+
+/* Scrollbar Styling for Modal Content */
+.modal-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.modal-content::-webkit-scrollbar-track {
+    background: #111; /* Dark track */
+}
+
+.modal-content::-webkit-scrollbar-thumb {
+    background: #00ff00; /* Neon green thumb */
+    border-radius: 4px;
+}
+
+.modal-content::-webkit-scrollbar-thumb:hover {
+    background: #ff00ff; /* Neon pink thumb on hover */
+}
+
+/* Modal Background Styling */
+.modal {
+    overflow: hidden; /* Hide overflow */
+}
+
+/* Styling Text and Lists Inside Modal */
+.modal-content p, .modal-content ul, .modal-content li {
+    margin-bottom: 10px; /* Adjusted spacing */
+    line-height: 1.4; /* Adjusted line height */
+}
+
+.modal-content ul {
+    list-style-type: circle; /* Circular bullet points */
+    padding-left: 25px;
+    color: #ff00ff; /* Neon pink text */
+}
+
+.modal-content li::before {
+    content: "→ "; /* Arrow bullet point */
+    color: #00ff00; /* Neon green bullet points */
+}
+
+/* Table Styling */
+.details-table {
+    margin: 10px 0; /* Adjusted table margin */
+    border-collapse: collapse;
+    width: 100%;
+    margin-top: 15px;
+    text-align: left;
+    border: 2px solid #32CD32; /* Neon green border */
+}
+
+.details-table th, .details-table td {
+    padding: 8px; /* Adjusted cell padding */
+    border: 1px solid #32CD32; /* Neon green border */
+    background-color: #000000; /* Dark background for cells */
+    color: #32CD32; /* Neon green text */
+}
+
+.details-table th {
+    background-color: #023602; /* Neon pink background for headers */
+    color: #ffffff;
+    text-shadow: 0 0 5px #ff00ff; /* Neon pink text glow */
+}
+
+.details-table tr:hover {
+    background-color: #003366; /* Alien dark turquoise on hover */
+    color: #ff00ff; /* Neon pink text on hover */
+    transition: background-color 0.3s, color 0.3s; /* Smooth transition */
+}
+
+/* Enhance the futuristic and alien feel of the modal */
+.modal-content {
+    background-image: linear-gradient(to bottom right, #0f0f0f, #003366); /* Gradient background */
+}

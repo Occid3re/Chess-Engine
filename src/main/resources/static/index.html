@@ -1,49 +1,73 @@
 <!doctype html>
-<style></style>
-
 <html lang="de">
 <head>
     <meta charset="utf-8">
-
-    <title>Alien-Chess-Engine</title>
+    <title>Alieknek</title>
     <meta name="description" content="The HTML5 Herald">
     <meta name="author" content="SitePoint">
     <link rel="stylesheet" href="css/bootstrap.min.css">
     <link rel="stylesheet" href="css/chessboard-1.0.0.min.css">
+    <link rel="stylesheet" href="css/details.css">
     <link rel="stylesheet" href="css/styles.css?v=1.0">
-
-    <style> 
-        body {
-          background-image: url("img/background.jpg");
-          background-color: #cccccc;
-        }
-    </style>
-
 </head>
-
 <body>
     <main>
-        <section id = "section1" style="margin: 0 auto; width: 1024px;">
-            <div style="margin:0 auto; width:512px; text-align: center; color:greenyellow; border: 3px solid greenyellow; background-color: black;">
-                <h1 id = "header">Alien-Chess-Engine</h1>
+        <nav class="top-bar">
+            <ul>
+                <li><a href="#" class="btn" id="playWhite">Play as White</a></li>
+                <li><a href="#" class="btn" id="playBlack">Play as Black</a></li>
+                <li><a href="#" class="btn" id="resetBoard">Reset Board</a></li>
+                <li><a href="#" class="btn" id="computerMove">Computer Move</a></li>
+                <li><a href="#" class="btn" id="importFEN">Import from FEN</a></li>
+                <li><a href="#" class="btn" id="autoPlay">Autoplay</a></li>
+                <li><a href="#" class="btn" id="viewDetails">View Details</a></li>
+                <li><a href="#" class="btn" id="PGN">PGN</a></li>
+            </ul>
+        </nav>
+
+        <section id="section1">
+            <div>
+                <h1 id="header">ALIEKNEK 1.0</h1>
             </div>
         </section>
-        <section id = "section2" style="margin:0 auto; width:1024px;">
-            <div style="margin:0 auto; width:512px; border:3px solid greenyellow;">
-                <div id="board" style="width:512px;"></div>
-            </div>
-            <div style="margin:0 auto; width:512px; color:greenyellow; border: 3px solid greenyellow; background-color: black;">
-                <button class = "btn btn-danger" id = "resetBoard">Reset Board</button>
-                <button class = "btn btn-success" id = "computerMove">Computer Move</button>
-                <div id = "scoreWhite" style="font-size: large; color: greenyellow; background-color: black;"></div>
-                <div id = "scoreBlack" style="font-size: large; color: greenyellow; background-color: black;"></div>
+
+        <section id="section2">
+            <div>
+                <div id="board"></div>
+                <div id="sliderContainer">
+                    <input type="range" id="autoplaySlider" min="50" max="60000" value="50" class="slider">
+                    <span id="sliderValue">50</span>ms
+                </div>
             </div>
         </section>
+
+        <section id="section3" class="game-section">
+            <button class="btn arrow" id="undoMove">←</button>
+            
+            <div id="scoreAndLineContainer">
+                <div id="score">Score</div>
+                <div id="calculatedLine">Calculated Line: <span></span></div>
+                <div class="record-move-checkbox">
+                    <input type="checkbox" id="recordOpeningMove" />
+                    <label for="recordOpeningMove">Record Opening Move</label>
+                </div>
+            </div>
+            <button class="btn arrow" id="redoMove">→</button>
+        </section>
+        
     </main>
+    <div id="detailsModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Game Details</h2>
+            <div id="gameDetails"></div>
+        </div>
+    </div>
+    <script src="js/jquery-3.4.1.min.js"></script>
+    <script src="js/prettify.min.js"></script>
+    <script src="js/chessboard-1.0.0.min.js"></script>
+    <script src="js/chess-data-fetching.js"></script>
+    <script src="js/ui-interactions.js"></script>
+    <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.min.js"></script>
 </body>
 </html>
-
-<script src="js/jquery-3.4.1.min.js"></script>
-<script src="js/prettify.min.js"></script>
-<script src="js/chessboard-1.0.0.min.js"></script>
-<script src="js/ffb.js"></script>

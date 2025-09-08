@@ -1,63 +1,49 @@
 package julius.game.chessengine.figures;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.jcabi.aspects.Cacheable;
-import julius.game.chessengine.board.Board;
-import julius.game.chessengine.board.Field;
 import julius.game.chessengine.board.Position;
-import julius.game.chessengine.engine.MoveField;
-import lombok.Data;
+import julius.game.chessengine.utils.Color;
 
-import java.util.List;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
+public class Figure {
+    private PieceType pieceType;
+    private Color color;
+    private Position position;
 
-@Data
-public abstract class Figure {
-
-    private String type;
-    private String color;
-    private Field currentField;
-    private int points;
-
-    //Constructor
-    public Figure(String color, String type, Field currentField, int points) {
+    public Figure(PieceType pieceType, Color color, Position position) {
+        this.pieceType = pieceType;
         this.color = color;
-        this.type = type;
-        this.currentField = currentField;
-        this.points = points;
+        this.position = position;
     }
 
-    //Methods
-    abstract public Board move(Board board, Field toField);
-
-    abstract public Board attack(Board board, Field toField);
-
-    @Cacheable(lifetime = 30, unit = TimeUnit.SECONDS)
-    abstract public List<Field> getPossibleFields(Board board);
-
-    @JsonIgnore
-    public Position getCurrentPosition() {
-        return this.currentField.getPosition();
+    public PieceType getPieceType() {
+        return pieceType;
     }
 
-    @JsonIgnore
-    public char getPosX() {
-        return getCurrentPosition().getX();
+    public void setPieceType(PieceType pieceType) {
+        this.pieceType = pieceType;
     }
 
-    @JsonIgnore
-    public int getPosY() {
-        return getCurrentPosition().getY();
+    public Color getColor() {
+        return color;
     }
 
-    @JsonIgnore
-    public String positionToString() {return getCurrentField().positionToString();}
-
-    public List<MoveField> getPossibleMoveFields(Board board) {
-        return getPossibleFields(board).stream()
-                .map(toField -> new MoveField(currentField, toField))
-                .collect(Collectors.toList());
+    public void setColor(Color color) {
+        this.color = color;
     }
 
+    public Position getPosition() {
+        return position;
+    }
+
+    public void setPosition(Position position) {
+        this.position = position;
+    }
+
+    @Override
+    public String toString() {
+        return "Figure{" +
+                "pieceType=" + pieceType +
+                ", color=" + color +
+                ", position=" + position +
+                '}';
+    }
 }

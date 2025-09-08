@@ -1,0 +1,56 @@
+Starting POS --> PERFT depth (1-4)
+12.11.23 Time taken for move calculation: 7032.143599 m
+15.11.23 Time taken for move calculation: 3771.4069 ms
+-- after Bishops with Bitboard
+15.11.23 Time taken for move calculation: 3568.6194 ms
+-- after using boolean isWhite instead of Color.White == color
+15.11.23 Time taken for move calculation: 3289.5339 ms
+-- after removing Move objects and using integer moves
+16.11.23 Time taken for move calculation: 1909.3527 ms
+-- after initial implementation of draw mechanism
+18.11.23 Time taken for move calculation: 5797.1654 ms :-(
+-- after implementing better GameState mechanism
+18.11.23 Time taken for move calculation: 2763.0737 ms
+-- after implementing better Score mechanism
+18.11.23 Time taken for move calculation: 2257.0605 ms
+-- after implementing Knight Move-table and removing Agility from Score
+20.11.23 Time taken for move calculation: 2004.0165 ms
+20.11.23 Time taken for move calculation: 1960.3816 ms
+-- after using magic bitboards and precomputed tables for isInCheck calculations
+22.11.23 Time taken for move calculation: 736.7081 ms
+-- after changing the simulate board strategy when checking for move legality
+25.11.23 Time taken for move calculation: 706.9718 ms
+-- after caching legal Moves
+25.11.23 Time taken for move calculation: 566.8795 ms
+
+POS_2 --> PERFTPos_2 depth (1-4)
+12.11.23 Time taken for move calculation: 275747.8732 ms
+15.11.23 Time taken for move calculation: 136994.5455 ms
+-- after Bishops with Bitboard
+15.11.23 Time taken for move calculation: 133066.9204 ms
+-- after using boolean isWhite instead of Color.White == color
+15.11.23 Time taken for move calculation: 127014.3807 ms
+-- after removing Move objects and using integer moves
+16.11.23 Time taken for move calculation: 76797.8816 ms
+-- after initial implementation of draw mechanism
+18.11.23 Time taken for move calculation: 218854.1965 ms :-(
+-- after implementing better GameState mechanism
+18.11.23 Time taken for move calculation: 107199.0896 ms
+-- after implementing better Score mechanism
+18.11.23 Time taken for move calculation: 84176.7309 ms
+-- after implementing Knight Move-table and removing Agility from Score
+20.11.23 Time taken for move calculation: 78019.2258 ms
+20.11.23 Time taken for move calculation: 74726.0707 ms
+-- after using magic bitboards and precomputed tables for isInCheck calculations
+22.11.23 Time taken for move calculation: 23597.4693 ms
+-- after changing the simulate board strategy when checking for move legality
+25.11.23 Time taken for move calculation: 21709.5729 ms
+-- after caching legal Moves
+25.11.23 Time taken for move calculation: 11469.72 ms
+
+------------------------------------------------------------------------------------------------------------------------
+PERFT
+    25.11.23
+        (1-4) Time taken for move calculation: 924.8749 ms
+        (1-5) Time taken for move calculation: 11663.5057 ms
+        (1-6) Time taken for move calculation: 272329.9402 ms
