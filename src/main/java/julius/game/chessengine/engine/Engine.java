@@ -118,11 +118,17 @@ public class Engine {
         BitBoard simulation = new BitBoard(bitBoard); // Only one instance
         MoveList moves = bitBoard.getAllCurrentPossibleMoves();
 
+        boolean kingInCheck = bitBoard.isInCheck(bitBoard.isWhitesTurn());
         this.legalMoves = new MoveList();
         for (int i = 0; i < moves.size(); i++) {
             int move = moves.getMove(i);
             simulation.performMove(move);
-            if (!simulation.isInCheck(MoveHelper.isWhitesMove(move))) {
+            boolean isKingMove = MoveHelper.derivePieceTypeBits(move) == 6;
+            if (isKingMove || kingInCheck) {
+                if (!simulation.isInCheck(MoveHelper.isWhitesMove(move))) {
+                    this.legalMoves.add(move);
+                }
+            } else {
                 this.legalMoves.add(move);
             }
             simulation.undoMove(move); // Revert to original state after checking
