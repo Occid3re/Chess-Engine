@@ -5,7 +5,8 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.util.Map;
+
+import julius.game.chessengine.ai.FixedSizeTranspositionTable;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -20,15 +21,14 @@ public class LateMoveReductionTest {
                 engine.whitesTurn(), System.currentTimeMillis(), Long.MAX_VALUE);
     }
 
-    @SuppressWarnings("unchecked")
     private void clearTranspositionTables() throws Exception {
         Field mainField = AI.class.getDeclaredField("transpositionTable");
         mainField.setAccessible(true);
-        ((Map<Long, ?>) mainField.get(null)).clear();
+        ((FixedSizeTranspositionTable<?>) mainField.get(null)).clear();
 
         Field captureField = AI.class.getDeclaredField("captureTranspositionTable");
         captureField.setAccessible(true);
-        ((Map<Long, ?>) captureField.get(null)).clear();
+        ((FixedSizeTranspositionTable<?>) captureField.get(null)).clear();
     }
 
     @Test

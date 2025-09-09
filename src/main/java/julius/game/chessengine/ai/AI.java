@@ -42,29 +42,18 @@ public class AI {
     private static final int CAPTURE_TRANSPOSITION_TABLE_MAX_ENTRIES = 500_000;
 
     /**
-     * Transposition table with LRU eviction policy. The map is synchronized to
-     * allow concurrent access from the search threads while keeping the memory
-     * footprint bounded.
+     * Fixed-size transposition table backed by an array with open addressing.
+     * The structure relies on atomic operations for thread safety and does not
+     * grow beyond the predefined capacity.
      */
-    private static final Map<Long, TranspositionTableEntry> transpositionTable =
-            Collections.synchronizedMap(new LinkedHashMap<Long, TranspositionTableEntry>(16, 0.75f, true) {
-                @Override
-                protected boolean removeEldestEntry(Map.Entry<Long, TranspositionTableEntry> eldest) {
-                    return size() > TRANSPOSITION_TABLE_MAX_ENTRIES;
-                }
-            });
+    private static final FixedSizeTranspositionTable<TranspositionTableEntry> transpositionTable =
+            new FixedSizeTranspositionTable<>(TRANSPOSITION_TABLE_MAX_ENTRIES);
 
     /**
-     * Separate table for capture searches. Also bounded with LRU eviction to
-     * avoid unbounded growth.
+     * Separate table for capture searches using the same fixed-size structure.
      */
-    private static final Map<Long, CaptureTranspositionTableEntry> captureTranspositionTable =
-            Collections.synchronizedMap(new LinkedHashMap<Long, CaptureTranspositionTableEntry>(16, 0.75f, true) {
-                @Override
-                protected boolean removeEldestEntry(Map.Entry<Long, CaptureTranspositionTableEntry> eldest) {
-                    return size() > CAPTURE_TRANSPOSITION_TABLE_MAX_ENTRIES;
-                }
-            });
+    private static final FixedSizeTranspositionTable<CaptureTranspositionTableEntry> captureTranspositionTable =
+            new FixedSizeTranspositionTable<>(CAPTURE_TRANSPOSITION_TABLE_MAX_ENTRIES);
 
     private final int[][] killerMoves; // 2D array for killer moves, initialized in the constructor
     private final int numKillerMoves = 2;
@@ -315,8 +304,8 @@ public class AI {
         Set<Long> seenBoardHashes = new HashSet<>();
         int movesPerformed = 0; // Counter for the number of moves performed
 
-        while (transpositionTable.containsKey(currentBoardHash)) {
-            TranspositionTableEntry entry = transpositionTable.get(currentBoardHash);
+        TranspositionTableEntry entry;
+        while ((entry = transpositionTable.get(currentBoardHash)) != null) {
             if (entry.bestMove == -1 || !seenBoardHashes.add(currentBoardHash)) {
                 // Exit if no best move is found or repetition is detected
                 break;
