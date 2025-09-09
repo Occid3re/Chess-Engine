@@ -33,11 +33,11 @@ public class MoveList {
 
     public void add(int move) {
         // Since the array is pre-allocated to the maximum size, we can skip
-        // expensive bounds checks and resizes. The check against MAX_SIZE is
-        // kept as a safety measure.
-        if (moveCount < MAX_SIZE) {
-            moves[moveCount++] = move;
-        }
+        // expensive bounds checks and resizes. Rely on callers to ensure
+        // the list never exceeds MAX_SIZE. The assertion will help catch
+        // violations in development builds.
+        assert moveCount < MAX_SIZE : "MoveList capacity exceeded";
+        moves[moveCount++] = move;
         isStringRepresentationStale = true;
     }
 
