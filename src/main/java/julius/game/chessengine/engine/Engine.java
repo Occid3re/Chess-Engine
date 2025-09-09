@@ -43,11 +43,11 @@ public class Engine {
         this.gameState = new GameState(other.gameState); // Assuming GameState's constructor is a deep copy constructor
         this.line = new ArrayList<>(other.line);
         this.redoLine = new ArrayList<>(other.redoLine);
-        //this.legalMoves = new MoveList(other.legalMoves);
-        this.legalMoves = other.legalMoves;
+        this.legalMoves = other.legalMoves == null ? null : new MoveList(other.legalMoves);
         this.legalMovesNeedUpdate = other.legalMovesNeedUpdate;
         this.openingBook = other.openingBook;
-        this.legalMovesCache = other.legalMovesCache;
+        this.legalMovesCache = new TimedLRUCache<>(MAX_SIZE, MAX_AGE);
+        other.legalMovesCache.forEach((k, v) -> this.legalMovesCache.put(k, new MoveList(v)));
     }
 
     public MoveList getAllLegalMoves() {
