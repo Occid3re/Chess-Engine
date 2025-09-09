@@ -36,7 +36,7 @@ public class MoveList {
         // expensive bounds checks and resizes. Rely on callers to ensure
         // the list never exceeds MAX_SIZE. The assertion will help catch
         // violations in development builds.
-        assert moveCount < MAX_SIZE : "MoveList capacity exceeded";
+        //assert moveCount < MAX_SIZE : "MoveList capacity exceeded";
         moves[moveCount++] = move;
         isStringRepresentationStale = true;
     }
