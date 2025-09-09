@@ -7,6 +7,7 @@ from typing import Optional, Dict, Any
 
 import requests
 
+
 # ----------------------------
 # Utilities
 # ----------------------------
@@ -168,6 +169,96 @@ def manual_award_on_timeout(engine1_name: str, engine2_name: str) -> int:
         print("Please enter '1' or '2'.")
 
 
+def fetch_json_ok(url: str, timeout_s: float = 3.0):
+    try:
+        r = requests.get(url, timeout=timeout_s)
+        if r.status_code == 204:
+            return None
+        r.raise_for_status()
+        return r.json()
+    except requests.RequestException:
+        return None
+
+
+def get_fen_string(engine_url: str) -> Optional[str]:
+    # Prefer new GET /chess/fen
+    try:
+        r = requests.get(f"{engine_url}/chess/fen", timeout=2.0)
+        if r.ok:
+            return r.text.strip()
+    except requests.RequestException:
+        pass
+    # Fallback: /figure/frontend -> try to pull a field that looks like FEN
+    data = fetch_json_ok(f"{engine_url}/chess/figure/frontend", timeout_s=2.5)
+    if isinstance(data, dict):
+        for k in ("fen", "FEN", "string", "value"):
+            v = data.get(k)
+            if isinstance(v, str) and "/" in v and " " in v:
+                return v.strip()
+        # last resort: string-ify the object
+        return str(data)
+    return None
+
+
+def get_state(engine_url: str) -> Optional[Dict[str, Any]]:
+    return fetch_json_ok(f"{engine_url}/chess/state", timeout_s=2.5)
+
+
+def get_pgn_text(engine_url: str) -> Optional[str]:
+    try:
+        r = requests.get(f"{engine_url}/chess/pgn", timeout=3.0)
+        if r.ok:
+            # /chess/pgn returns a JSON object; try common fields
+            try:
+                j = r.json()
+                for k in ("text", "pgn", "PGN", "value"):
+                    if isinstance(j, dict) and isinstance(j.get(k), str):
+                        return j[k].strip()
+                return str(j)
+            except ValueError:
+                return r.text.strip()
+    except requests.RequestException:
+        return None
+    return None
+
+
+def print_timeout_diagnostics(engine_url: str, engine_name: str) -> None:
+    print(f"\n--- Diagnostics for {engine_name} ---")
+    state = get_state(engine_url)
+    fen = get_fen_string(engine_url)
+    status = fetch_json_ok(f"{engine_url}/chess/search/status", timeout_s=2.0)
+
+    if state:
+        gs = state.get("gameState") or {}
+        gs_str = gs.get("state") if isinstance(gs, dict) else str(gs)
+        last = state.get("lastMove")
+        score = state.get("score")
+        pv = state.get("move")
+        print(f"GameState: {gs_str}")
+        print(f"Last move: {last}")
+        print(f"Score:     {score}")
+        print(f"PV:        {pv}")
+    else:
+        print("State:     <unavailable>")
+
+    if status:
+        print("Search:    sideToMove={}".format(status.get("sideToMove")))
+        print("           bestMove={}".format(status.get("bestMove")))
+        print("           timeLimitMs={}".format(status.get("timeLimitMs")))
+        print("           nodesVisited={}".format(status.get("nodesVisited")))
+        print("           nullMoveCount={}".format(status.get("nullMoveCount")))
+        if status.get("pv"):
+            print("           pv={}".format(", ".join(status["pv"])))
+    else:
+        print("Search:    <status endpoint unavailable>")
+
+    if fen:
+        print(f"FEN:       {fen}")
+    else:
+        print("FEN:       <unavailable>")
+    print("--- end diagnostics ---\n")
+
+
 # ----------------------------
 # Match runner
 # ----------------------------
@@ -178,17 +269,9 @@ def run_matches(jar1_path: str,
                 port2: int = 8082,
                 games: int = 100,
                 engine_time_limit: int = 50,
-                move_timeout_s: float = 6.0,   # a bit more forgiving than 3s
+                move_timeout_s: float = 6.0,
                 startup_deadline_s: float = 60.0,
                 poll_sleep_s: float = 0.05) -> None:
-    """
-    Engine1 plays WHITE, Engine2 plays BLACK for the whole run.
-    For fairness, run a second match with JARs swapped.
-
-    Baselines /chess/autoplay/lastMove after each reset and
-    updates the receiver's lastSeen immediately after mirroring
-    to avoid echoing the same move back.
-    """
     engine1_url = f"http://localhost:{port1}"  # WHITE
     engine2_url = f"http://localhost:{port2}"  # BLACK
     engine1_name = get_file_name_without_extension(jar1_path)
@@ -211,23 +294,20 @@ def run_matches(jar1_path: str,
         for game_number in range(1, games + 1):
             print(f"\n=== Starting game {game_number} ===")
 
-            # Reset both boards
             if not (reset_board(engine1_url) and reset_board(engine2_url)):
                 print(f"Failed to reset one of the boards for game {game_number}; aborting.")
                 break
 
-            time.sleep(0.2)  # let /lastMove settle to the new game
+            time.sleep(0.2)
 
-            # Baseline lastMove so we only react to NEW moves this game
-            last1 = get_last_move(engine1_url)  # last seen on Engine1
-            last2 = get_last_move(engine2_url)  # last seen on Engine2
+            last1 = get_last_move(engine1_url)
+            last2 = get_last_move(engine2_url)
 
-            # Configure search clocks
+            # NOTE: Python passes SECONDS; controller converts to ms now.
             if not (set_time_limit(engine1_url, engine_time_limit) and set_time_limit(engine2_url, engine_time_limit)):
                 print(f"Failed to set time limits for game {game_number}; aborting.")
                 break
 
-            # Start autoplayers once per game: E1=WHITE, E2=BLACK
             start_autoplay(engine1_url, "WHITE")
             start_autoplay(engine2_url, "BLACK")
 
@@ -246,14 +326,15 @@ def run_matches(jar1_path: str,
                     deadline = time.time() + move_timeout_s
                     moved = False
                     while time.time() < deadline:
-                        lm1 = get_last_move(engine1_url)
+                        lm1 = get_last_move(engine1_url)  # might be None (204) or a dict
                         if lm1 and lm1 != last1:
-                            last1 = lm1  # consume E1's NEW move
-                            if 'from' in lm1 and 'to' in lm1:
+                            last1 = lm1
+                            if ('from' in lm1 and 'to' in lm1
+                                    and lm1['from'] and lm1['to']):
                                 try:
                                     make_move(engine2_url, lm1['from'], lm1['to'])
-                                    # Mark receiver's lastSeen as the move we just applied
-                                    last2 = {'from': lm1['from'], 'to': lm1['to'], 'currentState': lm1.get('currentState')}
+                                    last2 = {'from': lm1['from'], 'to': lm1['to'],
+                                             'currentState': lm1.get('currentState')}
                                 except requests.HTTPError as e:
                                     print(
                                         f"{engine2_name} rejected move {lm1['from']}-{lm1['to']}. "
@@ -267,6 +348,9 @@ def run_matches(jar1_path: str,
                         time.sleep(poll_sleep_s)
                     if not moved:
                         print(f"{engine1_name} failed to produce a move in time.")
+                        # NEW: dump board + PV so you can judge
+                        print_timeout_diagnostics(engine2_url, engine2_name)
+                        print_timeout_diagnostics(engine1_url, engine1_name)  # optional: see the other side too
                         winner = manual_award_on_timeout(engine1_name, engine2_name)
                         if winner == 1:
                             engine1_wins += 1
@@ -274,9 +358,8 @@ def run_matches(jar1_path: str,
                         else:
                             engine2_wins += 1
                             print(f"Awarded win to {engine2_name} by manual decision.")
-                        break  # end the current game after manual award
+                        break
 
-                    # Check terminal after white move
                     game_state = None
                     if last1 and 'currentState' in last1:
                         game_state = check_game_state(last1['currentState'])
@@ -295,12 +378,13 @@ def run_matches(jar1_path: str,
                     while time.time() < deadline:
                         lm2 = get_last_move(engine2_url)
                         if lm2 and lm2 != last2:
-                            last2 = lm2  # consume E2's NEW move
-                            if 'from' in lm2 and 'to' in lm2:
+                            last2 = lm2
+                            if ('from' in lm2 and 'to' in lm2
+                                    and lm2['from'] and lm2['to']):
                                 try:
                                     make_move(engine1_url, lm2['from'], lm2['to'])
-                                    # Mark receiver's lastSeen as the move we just applied
-                                    last1 = {'from': lm2['from'], 'to': lm2['to'], 'currentState': lm2.get('currentState')}
+                                    last1 = {'from': lm2['from'], 'to': lm2['to'],
+                                             'currentState': lm2.get('currentState')}
                                 except requests.HTTPError as e:
                                     print(
                                         f"{engine1_name} rejected move {lm2['from']}-{lm2['to']}. "
@@ -314,6 +398,9 @@ def run_matches(jar1_path: str,
                         time.sleep(poll_sleep_s)
                     if not moved:
                         print(f"{engine2_name} failed to produce a move in time.")
+                        # NEW: dump board + PV so you can judge
+                        print_timeout_diagnostics(engine2_url, engine2_name)
+                        print_timeout_diagnostics(engine1_url, engine1_name)  # optional: see the other side too
                         winner = manual_award_on_timeout(engine1_name, engine2_name)
                         if winner == 1:
                             engine1_wins += 1
@@ -321,9 +408,8 @@ def run_matches(jar1_path: str,
                         else:
                             engine2_wins += 1
                             print(f"Awarded win to {engine2_name} by manual decision.")
-                        break  # end the current game after manual award
+                        break
 
-                    # Terminal after black move (either side may report)
                     game_state = None
                     if last2 and 'currentState' in last2:
                         game_state = check_game_state(last2['currentState'])
@@ -360,7 +446,6 @@ def run_matches(jar1_path: str,
         print("Chess engines terminated.")
 
 
-
 # ----------------------------
 # CLI
 # ----------------------------
@@ -376,9 +461,9 @@ def main():
     parser.add_argument("--port2", type=int, default=8082)
     parser.add_argument("--games", type=int, default=100)
     parser.add_argument("--engine-time-limit", type=int, default=50,
-                        help="Time limit configured on the engine (seconds per move/search window).")
-    parser.add_argument("--move-timeout", type=float, default=3.0,
-                        help="Wall-clock tolerance before declaring the other engine wins or pausing for manual decision.")
+                        help="Time limit configured on the engine (MILLISECONDS per move/search window).")
+    parser.add_argument("--move-timeout", type=float, default=6.0,
+                        help="Wall-clock tolerance (seconds) before pausing for manual decision.")
     parser.add_argument("--startup-deadline", type=float, default=60.0,
                         help="Seconds to wait for each server to become reachable.")
     args = parser.parse_args()
@@ -398,8 +483,8 @@ def main():
         port1=args.port1,
         port2=args.port2,
         games=args.games,
-        engine_time_limit=args.engine_time_limit,
-        move_timeout_s=args.move_timeout,
+        engine_time_limit=args.engine_time_limit,   # <-- milliseconds, passed through unchanged
+        move_timeout_s=args.move_timeout,          # <-- seconds
         startup_deadline_s=args.startup_deadline
     )
 
