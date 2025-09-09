@@ -83,6 +83,7 @@ public class AI {
     private static final int LMR_MOVE_INDEX_THRESHOLD = 3; // Moves after this index may be reduced
     private static final int LMR_DEPTH_REDUCTION = 1; // How much to reduce the search depth
     private static final int LMR_MIN_DEPTH = 3; // Apply only when enough depth remains
+    private static final int ASPIRATION_WINDOW = 50; // Initial aspiration window size
 
     private ScheduledExecutorService scheduler;
     private Thread calculationThread;
@@ -285,14 +286,46 @@ public class AI {
             return;
         }
 
+        double alpha = Double.NEGATIVE_INFINITY;
+        double beta = Double.POSITIVE_INFINITY;
+
         try {
             for (int currentDepth = depthThreshold; currentDepth <= maxDepth; currentDepth++) {
                 if (shouldStopCalculating(deadline)) {
                     break;
                 }
 
-                MoveAndScore moveAndScore = getBestMove(simulatorEngine, isWhite, currentDepth, deadline);
-                if (moveAndScore != null && isNewBestMove(moveAndScore, bestScore, isWhite)) {
+                MoveAndScore moveAndScore;
+                double localAlpha = alpha;
+                double localBeta = beta;
+                while (true) {
+                    if (shouldStopCalculating(deadline)) {
+                        moveAndScore = null;
+                        break;
+                    }
+
+                    moveAndScore = getBestMove(simulatorEngine, isWhite, currentDepth, deadline, localAlpha, localBeta);
+                    if (moveAndScore == null) {
+                        break;
+                    }
+
+                    double score = moveAndScore.score;
+                    if (score <= localAlpha) {
+                        localAlpha = score - ASPIRATION_WINDOW;
+                    } else if (score >= localBeta) {
+                        localBeta = score + ASPIRATION_WINDOW;
+                    } else {
+                        alpha = score - ASPIRATION_WINDOW;
+                        beta = score + ASPIRATION_WINDOW;
+                        break;
+                    }
+                }
+
+                if (moveAndScore == null) {
+                    break;
+                }
+
+                if (isNewBestMove(moveAndScore, bestScore, isWhite)) {
                     bestScore = moveAndScore.score;
                     bestMove = moveAndScore.move;
                     updateTranspositionTable(boardStateHash, moveAndScore, currentDepth);
@@ -352,9 +385,8 @@ public class AI {
     }
 
 
-    private MoveAndScore getBestMove(Engine simulatorEngine, boolean isWhitesTurn, int depth, long deadline) {
-        double alpha = Double.NEGATIVE_INFINITY;
-        double beta = Double.POSITIVE_INFINITY;
+    private MoveAndScore getBestMove(Engine simulatorEngine, boolean isWhitesTurn, int depth, long deadline,
+                                     double alpha, double beta) {
         int bestMove = -1; // Use an integer to represent the best move
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
 
@@ -391,6 +423,16 @@ public class AI {
             if (isBetterScore(isWhitesTurn, score, bestScore)) {
                 bestScore = score;
                 bestMove = moveInt; // Store the best move as an integer
+            }
+
+            if (isWhitesTurn) {
+                alpha = Math.max(alpha, score);
+            } else {
+                beta = Math.min(beta, score);
+            }
+
+            if (alpha >= beta) {
+                break;
             }
         }
 
@@ -498,12 +540,28 @@ public class AI {
                     reduced = true;
                 }
 
-                eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline);
+                boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
+                double pAlpha = alpha;
+                double pBeta = beta;
+                if (usePvs) {
+                    pBeta = alpha + 1;
+                }
+
+                eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline);
 
                 if (eval == EXIT_FLAG || positionChanged()) {
                     simulatorEngine.undoLastMove();
                     log.info("maxi Position changed");
                     return EXIT_FLAG;
+                }
+
+                if (usePvs && eval > alpha && eval < beta) {
+                    eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline);
+                    if (eval == EXIT_FLAG || positionChanged()) {
+                        simulatorEngine.undoLastMove();
+                        log.info("maxi Position changed");
+                        return EXIT_FLAG;
+                    }
                 }
 
                 if (reduced && eval > alpha) {
@@ -583,12 +641,28 @@ public class AI {
                     reduced = true;
                 }
 
-                eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline);
+                boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
+                double pAlpha = alpha;
+                double pBeta = beta;
+                if (usePvs) {
+                    pAlpha = beta - 1;
+                }
+
+                eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline);
 
                 if (eval == EXIT_FLAG || positionChanged()) {
                     log.info("mini Position changed");
                     simulatorEngine.undoLastMove();
                     return EXIT_FLAG;
+                }
+
+                if (usePvs && eval > alpha && eval < beta) {
+                    eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline);
+                    if (eval == EXIT_FLAG || positionChanged()) {
+                        log.info("mini Position changed");
+                        simulatorEngine.undoLastMove();
+                        return EXIT_FLAG;
+                    }
                 }
 
                 if (reduced && eval < beta) {
