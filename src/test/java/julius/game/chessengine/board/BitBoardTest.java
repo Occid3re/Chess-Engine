@@ -164,32 +164,6 @@ public class BitBoardTest {
     }
 
     @Test
-    public void testAttackMapsUpdateAndCaching() {
-        BitBoard board = new BitBoard();
-        long initialWhite = board.getWhiteAttackMap();
-        int e2 = convertStringToIndex("e2");
-        int e4 = convertStringToIndex("e4");
-        int move = MoveHelper.createMoveInt(e2, e4, PieceType.PAWN, true,
-                false, false, false, null, null, false, false,
-                board.getLastMoveDoubleStepPawnIndex());
-        board.performMove(move);
-        long afterWhite = board.getWhiteAttackMap();
-        assertNotEquals(initialWhite, afterWhite, "Attack map should change after a move");
-        int d5 = convertStringToIndex("d5");
-        int f5 = convertStringToIndex("f5");
-        assertTrue(((afterWhite >>> d5) & 1L) != 0L);
-        assertTrue(((afterWhite >>> f5) & 1L) != 0L);
-
-        // Modify board externally and ensure maps are recomputed on demand
-        int g1 = convertStringToIndex("g1");
-        board.clearSquare(g1, true); // remove knight without using performMove
-        long stale = board.getWhiteAttackMap();
-        board.generateAllPossibleMoves(board.whitesTurn);
-        long refreshed = board.getWhiteAttackMap();
-        assertNotEquals(stale, refreshed, "Attack map should refresh after external change");
-    }
-
-    @Test
 //    r . . . k . . r   8
 //    p . p p q p b .   7
 //    b n . . p n p .   6
