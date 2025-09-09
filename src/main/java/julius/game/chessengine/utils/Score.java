@@ -630,12 +630,12 @@ public class Score {
 
     private boolean areAllPiecesOnStartingSquares(long knights, long bishops, long rooks, boolean isWhite) {
         if (isWhite) {
-            return (knights == INITIAL_WHITE_KNIGHT_POSITION ||
-                    bishops == INITIAL_WHITE_BISHOP_POSITION ||
+            return (knights == INITIAL_WHITE_KNIGHT_POSITION &&
+                    bishops == INITIAL_WHITE_BISHOP_POSITION &&
                     rooks == INITIAL_WHITE_ROOK_POSITION);
         } else {
-            return (knights == INITIAL_BLACK_KNIGHT_POSITION ||
-                    bishops == INITIAL_BLACK_BISHOP_POSITION ||
+            return (knights == INITIAL_BLACK_KNIGHT_POSITION &&
+                    bishops == INITIAL_BLACK_BISHOP_POSITION &&
                     rooks == INITIAL_BLACK_ROOK_POSITION);
         }
     }
