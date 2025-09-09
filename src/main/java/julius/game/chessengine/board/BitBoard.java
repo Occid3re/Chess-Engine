@@ -1192,6 +1192,16 @@ public class BitBoard {
         return totalPieces <= ENDGAME_PIECE_THRESHOLD;
     }
 
+    public int getPhase() {
+        int phase = 0;
+        phase += Long.bitCount(whiteQueens | blackQueens) * 4;
+        phase += Long.bitCount(whiteRooks | blackRooks) * 2;
+        phase += Long.bitCount(whiteBishops | blackBishops);
+        phase += Long.bitCount(whiteKnights | blackKnights);
+        int maxPhase = 24; // material at game start
+        return 256 - (phase * 256 / maxPhase);
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
