@@ -102,8 +102,6 @@ public class AI {
 
     // Game configuration parameters
 
-    private int depthThreshold = 1;
-    private long lastDepthThresholdAdjustmentTime = 0;
     private final int maxDepth = 18; // Adjust the level of depth according to your requirements
 
     @Getter
@@ -167,8 +165,6 @@ public class AI {
         beforeCalculationBoardState = -2;
         calculatedLine = Collections.synchronizedList(new ArrayList<>());
         mainEngine.startNewGame();
-        depthThreshold = 1;
-        lastDepthThresholdAdjustmentTime = 0;
         clearHistoryTable();
     }
 
@@ -208,19 +204,8 @@ public class AI {
     }
 
     public void performMove() {
-        log.debug("DepthThreshold = {}", depthThreshold);
         if (currentBestMove == -1) {
-            // Check if the timeLimit has elapsed since the last depth adjustment
-            long currentTime = System.currentTimeMillis();
-            if (currentTime - lastDepthThresholdAdjustmentTime > timeLimit) {
-                // Decrease the depthThreshold if it hasn't been decreased recently
-                if (depthThreshold > 1) {
-                    depthThreshold--;
-                    lastDepthThresholdAdjustmentTime = currentTime; // Update the time of the last adjustment
-                }
-                // Log an error if no valid current best move is available.
-                log.error("No current best move available. Unable to perform a move.");
-            }
+            log.error("No current best move available. Unable to perform a move.");
             log.error("boardStateBeforeCalculation {}, currentBoardHash {}", beforeCalculationBoardState, currentBoardState);
             log.error("WhitesTurn = {}, isEndgame = {}", mainEngine.whitesTurn(), mainEngine.isEndgame());
             log.error("Gamestate = " + mainEngine.getGameState());
@@ -290,7 +275,7 @@ public class AI {
         double beta = Double.POSITIVE_INFINITY;
 
         try {
-            for (int currentDepth = depthThreshold; currentDepth <= maxDepth; currentDepth++) {
+            for (int currentDepth = 1; currentDepth <= maxDepth; currentDepth++) {
                 if (shouldStopCalculating(deadline)) {
                     break;
                 }
@@ -334,8 +319,6 @@ public class AI {
         } finally {
             if (bestMove != -1) {
                 currentBestMove = bestMove;
-            } else {
-                depthThreshold--;
             }
             fillCalculatedLine(simulatorEngine); // Ensure this is always called at the end
         }
