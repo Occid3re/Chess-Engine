@@ -27,8 +27,8 @@ public class EngineSimulationTest {
 
         Field cacheField = Engine.class.getDeclaredField("legalMovesCache");
         cacheField.setAccessible(true);
-        TimedLRUCache<Long, MoveList> mainCache = (TimedLRUCache<Long, MoveList>) cacheField.get(main);
-        TimedLRUCache<Long, MoveList> simCache = (TimedLRUCache<Long, MoveList>) cacheField.get(sim);
+        TimedLRUCache<MoveList> mainCache = (TimedLRUCache<MoveList>) cacheField.get(main);
+        TimedLRUCache<MoveList> simCache = (TimedLRUCache<MoveList>) cacheField.get(sim);
         assertNotSame(mainCache, simCache);
     }
 }
