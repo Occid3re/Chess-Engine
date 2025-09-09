@@ -584,6 +584,9 @@ public class BitBoard {
 
     private void generateKingMoves(boolean whitesTurn, MoveList moves) {
         long kingBitboard = whitesTurn ? whiteKing : blackKing;
+        if (kingBitboard == 0L) {
+            return; // No king present for the given color; cannot generate moves
+        }
         int kingPositionIndex = Long.numberOfTrailingZeros(kingBitboard);
         long kingAttacks = KING_ATTACKS[kingPositionIndex];
         boolean isFirstKingMove = hasKingNotMoved(whitesTurn);
