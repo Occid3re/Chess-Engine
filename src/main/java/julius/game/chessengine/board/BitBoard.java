@@ -47,6 +47,7 @@ public class BitBoard {
      */
     private long whiteAttackMap = 0L;
     private long blackAttackMap = 0L;
+    private boolean attackMapsDirty = true;
     private PieceType[] pieceBoard = new PieceType[64];
 
     // Reusable buffer for move generation to avoid frequent allocations.
@@ -97,6 +98,7 @@ public class BitBoard {
         this.whiteKingHasCastled = whiteKingHasCastled;
         this.blackKingHasCastled = blackKingHasCastled;
         initPieceBoardFromBitboards();
+        recomputeAttackMaps();
     }
 
     public BitBoard() {
@@ -140,6 +142,9 @@ public class BitBoard {
 
         this.blackKingHasCastled = other.blackKingHasCastled;
         this.whiteKingHasCastled = other.whiteKingHasCastled;
+        this.whiteAttackMap = other.whiteAttackMap;
+        this.blackAttackMap = other.blackAttackMap;
+        this.attackMapsDirty = other.attackMapsDirty;
 
         this.pieceBoard = Arrays.copyOf(other.pieceBoard, other.pieceBoard.length);
     }
@@ -209,6 +214,7 @@ public class BitBoard {
 
         lastMoveDoubleStepPawnIndex = 0;
         initPieceBoardFromBitboards();
+        recomputeAttackMaps();
     }
 
     private void initPieceBoardFromBitboards() {
@@ -225,6 +231,8 @@ public class BitBoard {
         setPieces(blackQueens, PieceType.QUEEN);
         setPieces(whiteKing, PieceType.KING);
         setPieces(blackKing, PieceType.KING);
+
+        attackMapsDirty = true;
     }
 
     private void setPieces(long bitboard, PieceType type) {
@@ -298,6 +306,7 @@ public class BitBoard {
 
         // After setting the bitboard, update the aggregated bitboards
         updateAggregatedBitboards();
+        attackMapsDirty = true;
     }
     // Call these methods within the movePiece method when a king or rook moves
 
@@ -315,11 +324,9 @@ public class BitBoard {
         MoveList moves = moveGenerationBuffer;
         moves.clear();
 
-        // Pre-compute attack maps for both sides once and reuse them during move
-        // generation.  This avoids repeatedly recalculating the same information
-        // for castling checks and attack lookups.
-        whiteAttackMap = generateAttackBitboard(true);
-        blackAttackMap = generateAttackBitboard(false);
+        if (attackMapsDirty) {
+            recomputeAttackMaps();
+        }
 
         generatePawnMoves(whitesTurn, moves);
         generateKnightMoves(whitesTurn, moves);
@@ -393,6 +400,12 @@ public class BitBoard {
         whitePieces = whitePawns | whiteKnights | whiteBishops | whiteRooks | whiteQueens | whiteKing;
         blackPieces = blackPawns | blackKnights | blackBishops | blackRooks | blackQueens | blackKing;
         allPieces = whitePieces | blackPieces;
+    }
+
+    private void recomputeAttackMaps() {
+        whiteAttackMap = generateAttackBitboard(true);
+        blackAttackMap = generateAttackBitboard(false);
+        attackMapsDirty = false;
     }
 
     private void generatePawnMoves(boolean whitesTurn, MoveList moves) {
@@ -733,6 +746,9 @@ public class BitBoard {
     }
 
     private boolean isSquareUnderAttack(int index, boolean colorWhite) {
+        if (attackMapsDirty) {
+            recomputeAttackMaps();
+        }
         long attacks = colorWhite ? blackAttackMap : whiteAttackMap;
         return (attacks & (1L << index)) != 0;
     }
@@ -830,6 +846,7 @@ public class BitBoard {
             clearSquare(capturedPawnIndex, !isWhite);
         }
         updateAggregatedBitboards();
+        recomputeAttackMaps();
         whitesTurn = !whitesTurn;
     }
 
@@ -852,6 +869,7 @@ public class BitBoard {
         }
         pieceBoard[index] = null;
         updateAggregatedBitboards();
+        attackMapsDirty = true;
     }
 
 
@@ -1143,6 +1161,7 @@ public class BitBoard {
         // Update the aggregated bitboards and piece board
         updateAggregatedBitboards();
         initPieceBoardFromBitboards();
+        recomputeAttackMaps();
         whitesTurn = !whitesTurn;
     }
 
