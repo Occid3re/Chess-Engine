@@ -20,12 +20,12 @@ public class SortMovesByEfficiencyBenchmark {
         MoveList moves = engine.getAllLegalMoves();
 
         for (int i = 0; i < 1000; i++) {
-            ai.sortMovesByEfficiency(moves, engine, engine.whitesTurn(), 0, 0, Long.MAX_VALUE);
+            ai.sortMovesByEfficiency(moves, engine.whitesTurn(), 0);
         }
 
         long start = System.nanoTime();
         for (int i = 0; i < 10000; i++) {
-            ai.sortMovesByEfficiency(moves, engine, engine.whitesTurn(), 0, 0, Long.MAX_VALUE);
+            ai.sortMovesByEfficiency(moves, engine.whitesTurn(), 0);
         }
         long elapsed = System.nanoTime() - start;
         System.out.println("sortMovesByEfficiency benchmark: " + (elapsed / 1_000_000) + " ms for 10000 iterations");
