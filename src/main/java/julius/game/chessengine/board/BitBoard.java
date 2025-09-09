@@ -17,8 +17,6 @@ import static julius.game.chessengine.helper.BitHelper.*;
 import static julius.game.chessengine.helper.BitboardHelper.lineBetweenIndices;
 import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
 import static julius.game.chessengine.helper.KnightHelper.knightMoveTable;
-import static julius.game.chessengine.helper.PawnMoveTables.PAWN_ATTACKS;
-import static julius.game.chessengine.helper.PawnMoveTables.PAWN_PUSHES;
 
 @Log4j2
 @Getter
@@ -398,52 +396,120 @@ public class BitBoard {
     }
 
     private void generatePawnMoves(boolean whitesTurn, MoveList moves) {
-        long pawnBitboard = whitesTurn ? whitePawns : blackPawns;
-        long pawns = pawnBitboard;
+        long pawns = whitesTurn ? whitePawns : blackPawns;
         long opponentPieces = whitesTurn ? blackPieces : whitePieces;
-        long emptySquares = ~(whitePieces | blackPieces);
-        int colorIndex = whitesTurn ? 0 : 1;
+        long emptySquares = ~allPieces;
 
-        while (pawns != 0) {
-            int fromIndex = Long.numberOfTrailingZeros(pawns);
-            pawns &= pawns - 1;
+        // ------------------ Single Pushes ------------------
+        long singlePushes = whitesTurn ? (pawns << 8) & emptySquares
+                : (pawns >>> 8) & emptySquares;
 
-            long singlePush = PAWN_PUSHES[colorIndex][fromIndex] & emptySquares;
-            if (singlePush != 0) {
-                int toIndex = Long.numberOfTrailingZeros(singlePush);
-                boolean isPromotion = whitesTurn ? toIndex >= 56 : toIndex < 8;
-                if (isPromotion) {
-                    addPromotionMoves(moves, fromIndex, toIndex, whitesTurn, false, null);
-                } else {
-                    moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, false, false, false, null, null, false, false, lastMoveDoubleStepPawnIndex));
-                }
+        long promotionRank = whitesTurn ? RankMasks[7] : RankMasks[0];
 
-                int rank = fromIndex / 8;
-                if ((whitesTurn && rank == 1) || (!whitesTurn && rank == 6)) {
-                    long doublePush = PAWN_PUSHES[colorIndex][toIndex] & emptySquares;
-                    if (doublePush != 0) {
-                        int doubleTo = Long.numberOfTrailingZeros(doublePush);
-                        moves.add(createMoveInt(fromIndex, doubleTo, PieceType.PAWN, whitesTurn, false, false, false, null, null, false, false, lastMoveDoubleStepPawnIndex));
-                    }
-                }
-            }
-
-            long attacks = PAWN_ATTACKS[colorIndex][fromIndex] & opponentPieces;
-            while (attacks != 0) {
-                int toIndex = Long.numberOfTrailingZeros(attacks);
-                PieceType capturedType = getPieceTypeAtIndex(toIndex);
-                boolean isPromotion = whitesTurn ? toIndex >= 56 : toIndex < 8;
-                if (isPromotion) {
-                    addPromotionMoves(moves, fromIndex, toIndex, whitesTurn, true, capturedType);
-                } else {
-                    moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, true, false, false, null, capturedType, false, false, lastMoveDoubleStepPawnIndex));
-                }
-                attacks &= attacks - 1;
-            }
+        // Non-promotion single pushes
+        long quietPushes = singlePushes & ~promotionRank;
+        long temp = quietPushes;
+        while (temp != 0) {
+            int toIndex = Long.numberOfTrailingZeros(temp);
+            int fromIndex = whitesTurn ? toIndex - 8 : toIndex + 8;
+            moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, false, false, false,
+                    null, null, false, false, lastMoveDoubleStepPawnIndex));
+            temp &= temp - 1;
         }
 
+        // Promotion pushes
+        long promotionPushes = singlePushes & promotionRank;
+        temp = promotionPushes;
+        while (temp != 0) {
+            int toIndex = Long.numberOfTrailingZeros(temp);
+            int fromIndex = whitesTurn ? toIndex - 8 : toIndex + 8;
+            addPromotionMoves(moves, fromIndex, toIndex, whitesTurn, false, null);
+            temp &= temp - 1;
+        }
+
+        // ------------------ Double Pushes ------------------
+        long doublePushes;
+        if (whitesTurn) {
+            long pawnsOnSecond = pawns & RankMasks[1];
+            doublePushes = ((pawnsOnSecond << 8) & emptySquares);
+            doublePushes = (doublePushes << 8) & emptySquares;
+        } else {
+            long pawnsOnSeventh = pawns & RankMasks[6];
+            doublePushes = ((pawnsOnSeventh >>> 8) & emptySquares);
+            doublePushes = (doublePushes >>> 8) & emptySquares;
+        }
+
+        temp = doublePushes;
+        while (temp != 0) {
+            int toIndex = Long.numberOfTrailingZeros(temp);
+            int fromIndex = whitesTurn ? toIndex - 16 : toIndex + 16;
+            moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, false, false, false,
+                    null, null, false, false, lastMoveDoubleStepPawnIndex));
+            temp &= temp - 1;
+        }
+
+        // ------------------ Captures ------------------
+        long leftAttacks, rightAttacks;
+        if (whitesTurn) {
+            leftAttacks = (pawns & ~FileMasks[0]) << 7;
+            rightAttacks = (pawns & ~FileMasks[7]) << 9;
+        } else {
+            leftAttacks = (pawns & ~FileMasks[7]) >>> 7;
+            rightAttacks = (pawns & ~FileMasks[0]) >>> 9;
+        }
+
+        leftAttacks &= opponentPieces;
+        rightAttacks &= opponentPieces;
+
+        long promotionLeft = leftAttacks & promotionRank;
+        long promotionRight = rightAttacks & promotionRank;
+        long captureLeft = leftAttacks & ~promotionRank;
+        long captureRight = rightAttacks & ~promotionRank;
+
+        // Regular captures to the left
+        temp = captureLeft;
+        while (temp != 0) {
+            int toIndex = Long.numberOfTrailingZeros(temp);
+            int fromIndex = whitesTurn ? toIndex - 7 : toIndex + 7;
+            PieceType capturedType = getPieceTypeAtIndex(toIndex);
+            moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, true, false, false,
+                    null, capturedType, false, false, lastMoveDoubleStepPawnIndex));
+            temp &= temp - 1;
+        }
+
+        // Regular captures to the right
+        temp = captureRight;
+        while (temp != 0) {
+            int toIndex = Long.numberOfTrailingZeros(temp);
+            int fromIndex = whitesTurn ? toIndex - 9 : toIndex + 9;
+            PieceType capturedType = getPieceTypeAtIndex(toIndex);
+            moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, true, false, false,
+                    null, capturedType, false, false, lastMoveDoubleStepPawnIndex));
+            temp &= temp - 1;
+        }
+
+        // Promotion captures
+        temp = promotionLeft;
+        while (temp != 0) {
+            int toIndex = Long.numberOfTrailingZeros(temp);
+            int fromIndex = whitesTurn ? toIndex - 7 : toIndex + 7;
+            PieceType capturedType = getPieceTypeAtIndex(toIndex);
+            addPromotionMoves(moves, fromIndex, toIndex, whitesTurn, true, capturedType);
+            temp &= temp - 1;
+        }
+
+        temp = promotionRight;
+        while (temp != 0) {
+            int toIndex = Long.numberOfTrailingZeros(temp);
+            int fromIndex = whitesTurn ? toIndex - 9 : toIndex + 9;
+            PieceType capturedType = getPieceTypeAtIndex(toIndex);
+            addPromotionMoves(moves, fromIndex, toIndex, whitesTurn, true, capturedType);
+            temp &= temp - 1;
+        }
+
+        // ------------------ En Passant ------------------
         if (lastMoveDoubleStepPawnIndex != 0) {
-            generateEnPassantMoves(moves, pawnBitboard, whitesTurn);
+            generateEnPassantMoves(moves, pawns, whitesTurn);
         }
 
     }
