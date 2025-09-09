@@ -63,12 +63,12 @@ public class Engine {
         return legalMoves;
     }
 
-    public void performMove(int move) {
+    public synchronized void performMove(int move) {
         boolean isOpeningMove = false;
         if (!gameState.isGameOver()) {
             long boardStateHashBeforeMove = getBoardStateHash();
             bitBoard.performMove(move);
-            if(openingBook.containsMoveAndBoardStateHash(boardStateHashBeforeMove, move)) {
+            if (openingBook.containsMoveAndBoardStateHash(boardStateHashBeforeMove, move)) {
                 isOpeningMove = true;
             }
             generateLegalMoves();
@@ -170,16 +170,16 @@ public class Engine {
 
     }
 
-    public GameState moveFigure(int fromIndex, int toIndex, int promotionPiece) {
+    public synchronized GameState moveFigure(int fromIndex, int toIndex, int promotionPiece) {
         return moveFigure(bitBoard, fromIndex, toIndex, promotionPiece);
     }
 
     //always queen
-    public void moveFigure(int fromIndex, int toIndex) {
+    public synchronized void moveFigure(int fromIndex, int toIndex) {
         moveFigure(bitBoard, fromIndex, toIndex, 5);
     }
 
-    public GameState moveFigure(BitBoard bitBoard, int fromIndex, int toIndex, int promotionPiece) {
+    public synchronized GameState moveFigure(BitBoard bitBoard, int fromIndex, int toIndex, int promotionPiece) {
         // Determine the piece type and color from the bitboard based on the 'from' position
         PieceType pieceType = bitBoard.getPieceTypeAtIndex(fromIndex);
         Color color = bitBoard.getPieceColorAtIndex(fromIndex);
