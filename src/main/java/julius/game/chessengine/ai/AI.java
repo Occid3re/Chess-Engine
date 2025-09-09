@@ -771,6 +771,12 @@ public class AI {
         }
 
         if (simulatorEngine.getGameState().isInStateDraw()) {
+            double scoreDiff = simulatorEngine.getGameState().getScore().getScoreDifference();
+            if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
+                return DRAW - 1; // discourage draws when ahead
+            } else if ((isWhitesTurn && scoreDiff < 0) || (!isWhitesTurn && scoreDiff > 0)) {
+                return DRAW + 1; // prefer draws when behind
+            }
             return DRAW;
         }
 
@@ -834,6 +840,12 @@ public class AI {
         if (gameState.isInStateDraw()) {
             if (log.isDebugEnabled()) {
                 log.debug("DRAW");
+            }
+            double scoreDiff = gameState.getScore().getScoreDifference();
+            if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
+                return DRAW - 1; // avoid draws when ahead
+            } else if ((isWhitesTurn && scoreDiff < 0) || (!isWhitesTurn && scoreDiff > 0)) {
+                return DRAW + 1; // accept draws when behind
             }
             return DRAW;
         }
