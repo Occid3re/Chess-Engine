@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicReferenceArray;
  *
  * @param <V> type of value stored in the table
  */
-public class FixedSizeTranspositionTable<V> {
+public class FixedSizeTranspositionTable<V> implements TranspositionTable<V> {
 
     private static final class Entry<V> {
         final long key;
@@ -41,6 +41,7 @@ public class FixedSizeTranspositionTable<V> {
         return (int) (key) & mask;
     }
 
+    @Override
     public V get(long key) {
         int idx = index(key);
         for (int i = 0; i < table.length(); i++) {
@@ -56,6 +57,7 @@ public class FixedSizeTranspositionTable<V> {
         return null;
     }
 
+    @Override
     public void put(long key, V value) {
         int idx = index(key);
         Entry<V> newEntry = new Entry<>(key, value);
@@ -79,6 +81,7 @@ public class FixedSizeTranspositionTable<V> {
         table.set(idx, newEntry);
     }
 
+    @Override
     public void clear() {
         for (int i = 0; i < table.length(); i++) {
             table.set(i, null);
@@ -86,6 +89,7 @@ public class FixedSizeTranspositionTable<V> {
         size.set(0);
     }
 
+    @Override
     public int size() {
         return size.get();
     }
