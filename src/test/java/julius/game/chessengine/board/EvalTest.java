@@ -14,7 +14,7 @@ public class EvalTest {
         Engine engine = new Engine();
         AI ai = new AI(engine);
         engine.importBoardFromFen("b4rk1/5ppR/3N4/8/3n4/4B3/5P2/4K3 w - - 0 1");
-        log.info(ai.evaluateBoard(engine, true, System.currentTimeMillis(), 10000000));
+        log.info(ai.evaluateBoard(engine, true, System.currentTimeMillis()));
     }
 
 }

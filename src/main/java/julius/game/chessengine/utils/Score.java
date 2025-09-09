@@ -20,7 +20,7 @@ import static julius.game.chessengine.helper.BitHelper.RankMasks;
 public class Score {
 
     public static final int CHECKMATE = 100000;
-    public static final int CHECK = 1000;
+    public static final int CHECK = 100;
     public static final int DRAW = 0;
 
     public static final int KILLER_MOVE_SCORE = 10000;
