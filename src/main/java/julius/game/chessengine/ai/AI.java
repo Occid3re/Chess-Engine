@@ -84,6 +84,8 @@ public class AI {
     private ScheduledExecutorService scheduler;
     private Thread calculationThread;
 
+    private final Object calculationLock = new Object();
+
     private volatile boolean keepCalculating = true;
 
     private volatile long currentBoardState = -1;
@@ -229,17 +231,31 @@ public class AI {
         log.info("Perform Move");
         mainEngine.performMove(currentBestMove);
         currentBoardState = mainEngine.getBoardStateHash();
+        synchronized (calculationLock) {
+            calculationLock.notifyAll();
+        }
         //currentBestMove = -1; // Reset currentBestMove after performing it
     }
 
     private void calculateLine() {
         log.debug("keepCalculating: {}, interrupted: {}", keepCalculating, Thread.currentThread().isInterrupted());
         while (keepCalculating && !Thread.currentThread().isInterrupted()) {
-            if (positionChanged()) {
-                currentBoardState = mainEngine.getBoardStateHash();
-                beforeCalculationBoardState = mainEngine.getBoardStateHash();
-                performCalculation();
+            synchronized (calculationLock) {
+                while (!positionChanged() && keepCalculating && !Thread.currentThread().isInterrupted()) {
+                    try {
+                        calculationLock.wait();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
             }
+            if (!keepCalculating || Thread.currentThread().isInterrupted()) {
+                break;
+            }
+            currentBoardState = mainEngine.getBoardStateHash();
+            beforeCalculationBoardState = currentBoardState;
+            performCalculation();
         }
     }
 
@@ -757,6 +773,9 @@ public class AI {
 
     public void updateBoardStateHash() {
         currentBoardState = mainEngine.getBoardStateHash();
+        synchronized (calculationLock) {
+            calculationLock.notifyAll();
+        }
     }
 
     private void updateKillerMoves(int depth, int move) {
