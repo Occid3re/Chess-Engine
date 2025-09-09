@@ -22,6 +22,8 @@ import static julius.game.chessengine.helper.KnightHelper.knightMoveTable;
 @Getter
 public class BitBoard {
 
+    private static final PieceType[] PROMOTION_PIECES = {PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT};
+
     BishopHelper bishopHelper = BishopHelper.getInstance();
     RookHelper rookHelper = RookHelper.getInstance();
 
@@ -573,8 +575,7 @@ public class BitBoard {
     }
 
     private void addPromotionMoves(MoveList moves, int fromIndex, int toIndex, boolean whitesTurn, boolean isCapture, PieceType capturedType) {
-        PieceType[] promotionPieces = {PieceType.ROOK, PieceType.QUEEN, PieceType.BISHOP, PieceType.KNIGHT};
-        for (PieceType promotionPiece : promotionPieces) {
+        for (PieceType promotionPiece : PROMOTION_PIECES) {
             moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, isCapture, false, false, promotionPiece, capturedType, false, false, lastMoveDoubleStepPawnIndex));
         }
     }
