@@ -56,6 +56,11 @@ PERFT
         (1-6) Time taken for move calculation: 272329.9402 ms
 
     08.09.25
-        (1-4) Time taken for move calculation: (1-4) Time taken for move calculation: 619.9151 ms
-        (1-5) Time taken for move calculation: (1-5) Time taken for move calculation: 11755.5766 ms
-        (1-6) Time taken for move calculation: (1-6) Time taken for move calculation: 319619.7871 ms
+        (1-4) Time taken for move calculation: 619.9151 ms
+        (1-5) Time taken for move calculation: 11755.5766 ms
+        (1-6) Time taken for move calculation: 319619.7871 ms
+
+    09.09.25
+        (1-4) Time taken for move calculation: 448.8542 ms
+        (1-5) Time taken for move calculation: 9835.2004 ms
+        (1-6) Time taken for move calculation: 277629.0975 ms
