@@ -96,6 +96,7 @@ public class Score {
     private static final int DOUBLED_PAWN_PENALTY = -20; // Example penalty value for doubled pawns
     private static final int ISOLATED_PAWN_PENALTY = -10; // Penalty for isolated pawns
     public static final int PASSED_PAWN_BONUS = 60;     // Bonus for passed pawns
+    public static final int CENTER_PAWN_BONUS = 20;     // Bonus for pawns in the center
 
     // Other bonuses and penalties
     private static final int NOT_CASTLED_AND_ROOK_MOVE_PENALTY = -50;
@@ -200,6 +201,9 @@ public class Score {
         long blackQueens = bitBoard.getBlackQueens();
         long whiteKing = bitBoard.getWhiteKing();
         long blackKing = bitBoard.getBlackKing();
+
+        updateCenterPawnBonusWhite(whitePawns);
+        updateCenterPawnBonusBlack(blackPawns);
 
         initializePawnScore(whitePawns, blackPawns);
         initializeKnightScore(whiteKnights, blackKnights);
@@ -389,6 +393,14 @@ public class Score {
 
     public void updatePassedPawnBonusBlack(long blackPawns, long whitePawns) {
         blackPassedPawnBonus = calculatePassedPawnBonus(blackPawns, whitePawns, false);
+    }
+
+    public void updateCenterPawnBonusWhite(long whitePawns) {
+        whiteCenterPawnBonus = countCenterPawns(whitePawns) * CENTER_PAWN_BONUS;
+    }
+
+    public void updateCenterPawnBonusBlack(long blackPawns) {
+        blackCenterPawnBonus = countCenterPawns(blackPawns) * CENTER_PAWN_BONUS;
     }
 
     private int calculatePassedPawnBonus(long pawns, long opponentPawns, boolean isWhite) {
@@ -647,6 +659,7 @@ public class Score {
         updateIsolatedPawnPenaltyWhite(whitePawns);
         updateDoubledPawnPenaltyWhite(whitePawns);
         updatePawnsPositionBonusWhite(whitePawns);
+        updateCenterPawnBonusWhite(whitePawns);
 
         //check if Rook is now on an HalfOpen/Open File
         updateBlackRookValues(bitBoard);
@@ -660,6 +673,7 @@ public class Score {
         updateIsolatedPawnPenaltyBlack(blackPawns);
         updateDoubledPawnPenaltyBlack(blackPawns);
         updatePawnsPositionBonusBlack(blackPawns);
+        updateCenterPawnBonusBlack(blackPawns);
 
         //check if Rook is now on an HalfOpen/Open File
         updateBlackRookValues(bitBoard);
