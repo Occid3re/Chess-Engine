@@ -161,6 +161,7 @@ public class BitBoardTest {
 
         endTime = System.nanoTime();
         log.info("(1-6) Time taken for move calculation: {} ms", (endTime - startTime) / 1e6);
+
     }
 
     @Test

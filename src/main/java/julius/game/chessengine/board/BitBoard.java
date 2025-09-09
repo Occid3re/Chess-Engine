@@ -47,7 +47,8 @@ public class BitBoard {
      */
     private long whiteAttackMap = 0L;
     private long blackAttackMap = 0L;
-    private boolean attackMapsDirty = true;
+    private boolean whiteAttackDirty = true;
+    private boolean blackAttackDirty = true;
     private PieceType[] pieceBoard = new PieceType[64];
 
     // Reusable buffer for move generation to avoid frequent allocations.
@@ -98,7 +99,8 @@ public class BitBoard {
         this.whiteKingHasCastled = whiteKingHasCastled;
         this.blackKingHasCastled = blackKingHasCastled;
         initPieceBoardFromBitboards();
-        recomputeAttackMaps();
+        recomputeWhiteAttackMap();
+        recomputeBlackAttackMap();
     }
 
     public BitBoard() {
@@ -144,7 +146,8 @@ public class BitBoard {
         this.whiteKingHasCastled = other.whiteKingHasCastled;
         this.whiteAttackMap = other.whiteAttackMap;
         this.blackAttackMap = other.blackAttackMap;
-        this.attackMapsDirty = other.attackMapsDirty;
+        this.whiteAttackDirty = other.whiteAttackDirty;
+        this.blackAttackDirty = other.blackAttackDirty;
 
         this.pieceBoard = Arrays.copyOf(other.pieceBoard, other.pieceBoard.length);
     }
@@ -214,7 +217,8 @@ public class BitBoard {
 
         lastMoveDoubleStepPawnIndex = 0;
         initPieceBoardFromBitboards();
-        recomputeAttackMaps();
+        recomputeWhiteAttackMap();
+        recomputeBlackAttackMap();
     }
 
     private void initPieceBoardFromBitboards() {
@@ -232,7 +236,8 @@ public class BitBoard {
         setPieces(whiteKing, PieceType.KING);
         setPieces(blackKing, PieceType.KING);
 
-        attackMapsDirty = true;
+        whiteAttackDirty = true;
+        blackAttackDirty = true;
     }
 
     private void setPieces(long bitboard, PieceType type) {
@@ -306,7 +311,8 @@ public class BitBoard {
 
         // After setting the bitboard, update the aggregated bitboards
         updateAggregatedBitboards();
-        attackMapsDirty = true;
+        whiteAttackDirty = true;
+        blackAttackDirty = true;
     }
     // Call these methods within the movePiece method when a king or rook moves
 
@@ -324,8 +330,11 @@ public class BitBoard {
         MoveList moves = moveGenerationBuffer;
         moves.clear();
 
-        if (attackMapsDirty) {
-            recomputeAttackMaps();
+        if (whiteAttackDirty) {
+            recomputeWhiteAttackMap();
+        }
+        if (blackAttackDirty) {
+            recomputeBlackAttackMap();
         }
 
         generatePawnMoves(whitesTurn, moves);
@@ -402,10 +411,14 @@ public class BitBoard {
         allPieces = whitePieces | blackPieces;
     }
 
-    private void recomputeAttackMaps() {
+    private void recomputeWhiteAttackMap() {
         whiteAttackMap = generateAttackBitboard(true);
+        whiteAttackDirty = false;
+    }
+
+    private void recomputeBlackAttackMap() {
         blackAttackMap = generateAttackBitboard(false);
-        attackMapsDirty = false;
+        blackAttackDirty = false;
     }
 
     private void generatePawnMoves(boolean whitesTurn, MoveList moves) {
@@ -746,11 +759,17 @@ public class BitBoard {
     }
 
     private boolean isSquareUnderAttack(int index, boolean colorWhite) {
-        if (attackMapsDirty) {
-            recomputeAttackMaps();
+        if (colorWhite) {
+            if (blackAttackDirty) {
+                recomputeBlackAttackMap();
+            }
+            return (blackAttackMap & (1L << index)) != 0;
+        } else {
+            if (whiteAttackDirty) {
+                recomputeWhiteAttackMap();
+            }
+            return (whiteAttackMap & (1L << index)) != 0;
         }
-        long attacks = colorWhite ? blackAttackMap : whiteAttackMap;
-        return (attacks & (1L << index)) != 0;
     }
 
     public void performMove(int move) {
@@ -846,7 +865,18 @@ public class BitBoard {
             clearSquare(capturedPawnIndex, !isWhite);
         }
         updateAggregatedBitboards();
-        recomputeAttackMaps();
+        // mark attack maps as dirty for sides affected by the move
+        if (isWhite) {
+            whiteAttackDirty = true;
+            if (isCapture || isEnPassantMove) {
+                blackAttackDirty = true;
+            }
+        } else {
+            blackAttackDirty = true;
+            if (isCapture || isEnPassantMove) {
+                whiteAttackDirty = true;
+            }
+        }
         whitesTurn = !whitesTurn;
     }
 
@@ -869,7 +899,8 @@ public class BitBoard {
         }
         pieceBoard[index] = null;
         updateAggregatedBitboards();
-        attackMapsDirty = true;
+        whiteAttackDirty = true;
+        blackAttackDirty = true;
     }
 
 
@@ -1161,7 +1192,8 @@ public class BitBoard {
         // Update the aggregated bitboards and piece board
         updateAggregatedBitboards();
         initPieceBoardFromBitboards();
-        recomputeAttackMaps();
+        recomputeWhiteAttackMap();
+        recomputeBlackAttackMap();
         whitesTurn = !whitesTurn;
     }
 
