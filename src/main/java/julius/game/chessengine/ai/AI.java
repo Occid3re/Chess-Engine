@@ -351,7 +351,7 @@ public class AI {
         int bestMove = -1; // Use an integer to represent the best move
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
 
-        ArrayList<Integer> sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), simulatorEngine, isWhitesTurn, depth, startTime, timeLimit);
+        ArrayList<Integer> sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), isWhitesTurn, depth);
 
         for (int moveInt : sortedMoves) {
 
@@ -468,7 +468,7 @@ public class AI {
         double maxEval = Double.NEGATIVE_INFINITY;
         int bestMoveAtThisNode = -1; // Variable to track the best move at this node
 
-        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, simulatorEngine, isWhite, depth, startTime, timeLimit);
+        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, isWhite, depth);
         for (int index = 0; index < orderedMoves.size(); index++) {
             int move = orderedMoves.get(index);
             simulatorEngine.performMove(move);
@@ -551,7 +551,7 @@ public class AI {
         double minEval = Double.POSITIVE_INFINITY;
         int bestMoveAtThisNode = -1; // Track the best move at this node
 
-        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, simulatorEngine, isWhite, depth, startTime, timeLimit);
+        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, isWhite, depth);
         for (int index = 0; index < orderedMoves.size(); index++) {
             int move = orderedMoves.get(index);
             simulatorEngine.performMove(move);
@@ -623,7 +623,7 @@ public class AI {
     }
 
 
-    ArrayList<Integer> sortMovesByEfficiency(MoveList moves, Engine simulatorEngine, boolean isWhite, int currentDepth, long startTime, long timeLimit) {
+    ArrayList<Integer> sortMovesByEfficiency(MoveList moves, boolean isWhite, int currentDepth) {
         int size = moves.size();
 
         int[] moveBuffer = new int[size];
@@ -631,7 +631,7 @@ public class AI {
 
         for (int i = 0; i < size; i++) {
             int moveInt = moves.getMove(i);
-            int score;
+            int score = 0;
 
             boolean isKiller = false;
             for (int killerMove : killerMoves[currentDepth]) {
