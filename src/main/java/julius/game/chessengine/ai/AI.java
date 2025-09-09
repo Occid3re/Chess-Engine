@@ -623,36 +623,56 @@ public class AI {
     }
 
 
-    private ArrayList<Integer> sortMovesByEfficiency(MoveList moves, Engine simulatorEngine, boolean isWhite, int currentDepth, long startTime, long timeLimit) {
-        PriorityQueue<Integer> sortedMoves = new PriorityQueue<>(
-                Comparator.comparingDouble((Integer moveInt) -> {
-                    // Prioritize killer moves
-                    for (int killerMove : killerMoves[currentDepth]) {
-                        if (moveInt == killerMove) {
-                            return KILLER_MOVE_SCORE;
-                        }
-                    }
+    ArrayList<Integer> sortMovesByEfficiency(MoveList moves, Engine simulatorEngine, boolean isWhite, int currentDepth, long startTime, long timeLimit) {
+        int size = moves.size();
 
-                    // Prioritize captures using MVV-LVA
-                    int mvvLvaScore = calculateMvvLvaScore(moveInt);
-                    if (mvvLvaScore != 0) {
-                        return mvvLvaScore;
-                    }
+        int[] moveBuffer = new int[size];
+        int[] scoreBuffer = new int[size];
 
-                    // History heuristic for quiet moves
+        for (int i = 0; i < size; i++) {
+            int moveInt = moves.getMove(i);
+            int score;
+
+            boolean isKiller = false;
+            for (int killerMove : killerMoves[currentDepth]) {
+                if (moveInt == killerMove) {
+                    score = KILLER_MOVE_SCORE;
+                    isKiller = true;
+                    break;
+                }
+            }
+
+            if (!isKiller) {
+                int mvvLvaScore = calculateMvvLvaScore(moveInt);
+                if (mvvLvaScore != 0) {
+                    score = mvvLvaScore;
+                } else {
                     int from = moveInt & 0x3F;
                     int to = (moveInt >> 6) & 0x3F;
-                    return historyTable[from][to];
-                }).reversed()
-        );
+                    score = historyTable[from][to];
+                }
+            }
 
-        for (int i = 0; i < moves.size(); i++) {
-            sortedMoves.add(moves.getMove(i));
+            moveBuffer[i] = moveInt;
+            scoreBuffer[i] = score;
         }
 
-        ArrayList<Integer> sortedMoveList = new ArrayList<>();
-        while (!sortedMoves.isEmpty()) {
-            sortedMoveList.add(sortedMoves.poll());
+        for (int i = 1; i < size; i++) {
+            int keyMove = moveBuffer[i];
+            int keyScore = scoreBuffer[i];
+            int j = i - 1;
+            while (j >= 0 && scoreBuffer[j] < keyScore) {
+                moveBuffer[j + 1] = moveBuffer[j];
+                scoreBuffer[j + 1] = scoreBuffer[j];
+                j--;
+            }
+            moveBuffer[j + 1] = keyMove;
+            scoreBuffer[j + 1] = keyScore;
+        }
+
+        ArrayList<Integer> sortedMoveList = new ArrayList<>(size);
+        for (int i = 0; i < size; i++) {
+            sortedMoveList.add(moveBuffer[i]);
         }
 
         return sortedMoveList;
