@@ -65,6 +65,13 @@ public class AI {
      */
     private final int[][] historyTable; // [from][to]
 
+    // Buffers used for move ordering. Reused across calls to avoid repeated
+    // allocations when ordering moves.
+    private static final int MAX_MOVE_LIST_SIZE = 218; // maximum legal moves
+    private final int[] moveBuffer = new int[MAX_MOVE_LIST_SIZE];
+    private final int[] scoreBuffer = new int[MAX_MOVE_LIST_SIZE];
+    private final long[] sortBuffer = new long[MAX_MOVE_LIST_SIZE];
+
     // Late move reduction configuration
     private static final int LMR_MOVE_INDEX_THRESHOLD = 3; // Moves after this index may be reduced
     private static final int LMR_DEPTH_REDUCTION = 1; // How much to reduce the search depth
@@ -344,7 +351,8 @@ public class AI {
         int bestMove = -1; // Use an integer to represent the best move
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
 
-        ArrayList<Integer> sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth);
+        ArrayList<Integer> sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth,
+                simulatorEngine.getBoardStateHash());
 
         for (int moveInt : sortedMoves) {
 
@@ -463,7 +471,7 @@ public class AI {
         double maxEval = Double.NEGATIVE_INFINITY;
         int bestMoveAtThisNode = -1; // Variable to track the best move at this node
 
-        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, depth);
+        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, depth, boardHash);
         for (int index = 0; index < orderedMoves.size(); index++) {
             int move = orderedMoves.get(index);
             simulatorEngine.performMove(move);
@@ -549,7 +557,7 @@ public class AI {
         double minEval = Double.POSITIVE_INFINITY;
         int bestMoveAtThisNode = -1; // Track the best move at this node
 
-        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, depth);
+        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, depth, boardHash);
         for (int index = 0; index < orderedMoves.size(); index++) {
             int move = orderedMoves.get(index);
             simulatorEngine.performMove(move);
@@ -625,14 +633,15 @@ public class AI {
     }
 
 
-    ArrayList<Integer> sortMovesByEfficiency(MoveList moves, int currentDepth) {
+    ArrayList<Integer> sortMovesByEfficiency(MoveList moves, int currentDepth, long boardHash) {
         int size = moves.size();
-
-        int[] moveBuffer = new int[size];
-        int[] scoreBuffer = new int[size];
 
         // Ensure the depth index is within the killerMoves array bounds
         int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
+
+        TranspositionTableEntry ttEntry = transpositionTable.get(boardHash);
+        int ttMove = ttEntry != null ? ttEntry.bestMove : -1;
+        int ttIndex = -1;
 
         for (int i = 0; i < size; i++) {
             int moveInt = moves.getMove(i);
@@ -660,24 +669,33 @@ public class AI {
 
             moveBuffer[i] = moveInt;
             scoreBuffer[i] = score;
+            sortBuffer[i] = (((long) score) << 32) | (moveInt & 0xffffffffL);
+
+            if (moveInt == ttMove) {
+                ttIndex = i;
+            }
         }
 
-        for (int i = 1; i < size; i++) {
-            int keyMove = moveBuffer[i];
-            int keyScore = scoreBuffer[i];
-            int j = i - 1;
-            while (j >= 0 && scoreBuffer[j] < keyScore) {
-                moveBuffer[j + 1] = moveBuffer[j];
-                scoreBuffer[j + 1] = scoreBuffer[j];
-                j--;
-            }
-            moveBuffer[j + 1] = keyMove;
-            scoreBuffer[j + 1] = keyScore;
+        int sortStart = 0;
+        if (ttIndex > 0) {
+            long ttCombined = sortBuffer[ttIndex];
+            System.arraycopy(sortBuffer, 0, sortBuffer, 1, ttIndex);
+            sortBuffer[0] = ttCombined;
+            sortStart = 1; // keep TT move at front
         }
+
+        Arrays.sort(sortBuffer, sortStart, size);
 
         ArrayList<Integer> sortedMoveList = new ArrayList<>(size);
-        for (int i = 0; i < size; i++) {
-            sortedMoveList.add(moveBuffer[i]);
+        if (ttIndex != -1) {
+            sortedMoveList.add((int) (sortBuffer[0] & 0xffffffffL));
+            for (int i = size - 1; i >= 1; i--) {
+                sortedMoveList.add((int) (sortBuffer[i] & 0xffffffffL));
+            }
+        } else {
+            for (int i = size - 1; i >= 0; i--) {
+                sortedMoveList.add((int) (sortBuffer[i] & 0xffffffffL));
+            }
         }
 
         return sortedMoveList;
