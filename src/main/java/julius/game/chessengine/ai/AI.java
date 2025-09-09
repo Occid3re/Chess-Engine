@@ -223,7 +223,9 @@ public class AI {
         synchronized (calculationLock) {
             calculationLock.notifyAll();
         }
-        //currentBestMove = -1; // Reset currentBestMove after performing it
+        // Reset the best move so that a stale move isn't played again before
+        // the calculation thread provides a new one for the updated position.
+        currentBestMove = -1;
     }
 
     private void calculateLine() {
@@ -317,9 +319,18 @@ public class AI {
                 }
             }
         } finally {
-            if (bestMove != -1) {
-                currentBestMove = bestMove;
+            // In very rare cases the search may exit without assigning a best move
+            // (for example when the time limit is hit before any move is
+            // evaluated). Provide a fallback so the engine always responds with a
+            // legal move instead of timing out.
+            if (bestMove == -1) {
+                MoveList legalMoves = simulatorEngine.getAllLegalMoves();
+                if (legalMoves.size() > 0) {
+                    bestMove = legalMoves.getMove(0);
+                }
             }
+
+            currentBestMove = bestMove;
             fillCalculatedLine(simulatorEngine); // Ensure this is always called at the end
         }
     }
