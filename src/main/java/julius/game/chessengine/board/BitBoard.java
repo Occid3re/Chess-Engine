@@ -657,12 +657,15 @@ public class BitBoard {
         long kingAttacks = KING_ATTACKS[kingPositionIndex];
         boolean isFirstKingMove = hasKingNotMoved(whitesTurn);
 
-        for (long possibleMoves = kingAttacks; possibleMoves != 0; possibleMoves &= possibleMoves - 1) {
+        long ownPieces = whitesTurn ? whitePieces : blackPieces;
+        long opponentPieces = whitesTurn ? blackPieces : whitePieces;
+        long legalMoves = kingAttacks & ~ownPieces;
+        long captureMoves = kingAttacks & opponentPieces;
+
+        for (long possibleMoves = legalMoves; possibleMoves != 0; possibleMoves &= possibleMoves - 1) {
             int targetIndex = Long.numberOfTrailingZeros(possibleMoves);
-            if (!isOccupiedByColor(targetIndex, whitesTurn)) {
-                boolean isCapture = isOccupiedByOpponent(targetIndex, whitesTurn);
-                moves.add(createMoveInt(kingPositionIndex, targetIndex, PieceType.KING, whitesTurn, isCapture, false, false, null, isCapture ? getPieceTypeAtIndex(targetIndex) : null, isFirstKingMove, false, lastMoveDoubleStepPawnIndex));
-            }
+            boolean isCapture = (captureMoves & (1L << targetIndex)) != 0;
+            moves.add(createMoveInt(kingPositionIndex, targetIndex, PieceType.KING, whitesTurn, isCapture, false, false, null, isCapture ? getPieceTypeAtIndex(targetIndex) : null, isFirstKingMove, false, lastMoveDoubleStepPawnIndex));
         }
 
         addCastlingMoves(whitesTurn, kingPositionIndex, moves);
