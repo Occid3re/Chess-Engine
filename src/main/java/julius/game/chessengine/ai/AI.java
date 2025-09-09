@@ -41,19 +41,26 @@ public class AI {
      */
     private static final int CAPTURE_TRANSPOSITION_TABLE_MAX_ENTRIES = 500_000;
 
+    /** Number of threads used for searching. Configurable via the system property
+     * {@code chessengine.searchThreads}. Defaults to single-threaded search. */
+    private static final int SEARCH_THREADS = Integer.getInteger("chessengine.searchThreads", 1);
+
     /**
-     * Fixed-size transposition table backed by an array with open addressing.
-     * The structure relies on atomic operations for thread safety and does not
-     * grow beyond the predefined capacity.
+     * Fixed-size transposition table. Uses a non-atomic implementation when running
+     * with a single search thread to avoid the overhead of atomic operations.
      */
-    private static final FixedSizeTranspositionTable<TranspositionTableEntry> transpositionTable =
-            new FixedSizeTranspositionTable<>(TRANSPOSITION_TABLE_MAX_ENTRIES);
+    private static final TranspositionTable<TranspositionTableEntry> transpositionTable =
+            SEARCH_THREADS == 1
+                    ? new PlainFixedSizeTranspositionTable<>(TRANSPOSITION_TABLE_MAX_ENTRIES, TranspositionTableEntry.class)
+                    : new FixedSizeTranspositionTable<>(TRANSPOSITION_TABLE_MAX_ENTRIES);
 
     /**
      * Separate table for capture searches using the same fixed-size structure.
      */
-    private static final FixedSizeTranspositionTable<CaptureTranspositionTableEntry> captureTranspositionTable =
-            new FixedSizeTranspositionTable<>(CAPTURE_TRANSPOSITION_TABLE_MAX_ENTRIES);
+    private static final TranspositionTable<CaptureTranspositionTableEntry> captureTranspositionTable =
+            SEARCH_THREADS == 1
+                    ? new PlainFixedSizeTranspositionTable<>(CAPTURE_TRANSPOSITION_TABLE_MAX_ENTRIES, CaptureTranspositionTableEntry.class)
+                    : new FixedSizeTranspositionTable<>(CAPTURE_TRANSPOSITION_TABLE_MAX_ENTRIES);
 
     private final int[][] killerMoves; // 2D array for killer moves, initialized in the constructor
     private final int numKillerMoves = 2;

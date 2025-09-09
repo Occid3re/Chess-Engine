@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
-import julius.game.chessengine.ai.FixedSizeTranspositionTable;
+import julius.game.chessengine.ai.TranspositionTable;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -24,11 +24,11 @@ public class LateMoveReductionTest {
     private void clearTranspositionTables() throws Exception {
         Field mainField = AI.class.getDeclaredField("transpositionTable");
         mainField.setAccessible(true);
-        ((FixedSizeTranspositionTable<?>) mainField.get(null)).clear();
+        ((TranspositionTable<?>) mainField.get(null)).clear();
 
         Field captureField = AI.class.getDeclaredField("captureTranspositionTable");
         captureField.setAccessible(true);
-        ((FixedSizeTranspositionTable<?>) captureField.get(null)).clear();
+        ((TranspositionTable<?>) captureField.get(null)).clear();
     }
 
     @Test
