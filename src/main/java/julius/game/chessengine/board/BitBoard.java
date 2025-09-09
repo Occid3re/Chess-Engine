@@ -315,7 +315,32 @@ public class BitBoard {
         whiteAttackDirty = true;
         blackAttackDirty = true;
     }
-    // Call these methods within the movePiece method when a king or rook moves
+
+    // Fast: set a piece bitboard without recomputing aggregates/attacks.
+    // Caller must call updateAggregatedBitboards() and mark dirty after batches.
+    private void setBitboardForPieceFast(int pieceTypeBits, boolean isWhite, long bitboard) {
+        if (isWhite) {
+            switch (pieceTypeBits) {
+                case 1 -> whitePawns = bitboard;
+                case 2 -> whiteKnights = bitboard;
+                case 3 -> whiteBishops = bitboard;
+                case 4 -> whiteRooks = bitboard;
+                case 5 -> whiteQueens = bitboard;
+                case 6 -> whiteKing = bitboard;
+                default -> throw new IllegalArgumentException("Unknown piece type: " + pieceTypeBits);
+            }
+        } else {
+            switch (pieceTypeBits) {
+                case 1 -> blackPawns = bitboard;
+                case 2 -> blackKnights = bitboard;
+                case 3 -> blackBishops = bitboard;
+                case 4 -> blackRooks = bitboard;
+                case 5 -> blackQueens = bitboard;
+                case 6 -> blackKing = bitboard;
+                default -> throw new IllegalArgumentException("Unknown piece type: " + pieceTypeBits);
+            }
+        }
+    }
 
     private void markKingAsMoved(boolean isWhite) {
         if (isWhite) {
@@ -972,6 +997,7 @@ public class BitBoard {
         }
         return Long.numberOfTrailingZeros(kingBitboard);
     }
+
     private long knightAttackBitmask(int positionIndex) {
         return KnightHelper.knightMoveTable[positionIndex];
     }
@@ -1057,40 +1083,47 @@ public class BitBoard {
     }
 
     public void undoMove(int move) {
-        int fromIndex = MoveHelper.deriveFromIndex(move); // Extract the first 6 bits
-        int toIndex = MoveHelper.deriveToIndex(move); // Extract the next 6 bits
-        int pieceTypeBits = MoveHelper.derivePieceTypeBits(move); // Extract the next 3 bits
-        boolean isWhite = MoveHelper.isWhitesMove(move); // Extract the color bit
+        int fromIndex = MoveHelper.deriveFromIndex(move);
+        int toIndex = MoveHelper.deriveToIndex(move);
+        int pieceTypeBits = MoveHelper.derivePieceTypeBits(move);
+        boolean isWhite = MoveHelper.isWhitesMove(move);
         boolean isCapture = MoveHelper.isCapture(move);
         boolean isEnPassantMove = MoveHelper.isEnPassantMove(move);
         boolean isCastlingMove = MoveHelper.isCastlingMove(move);
-        int promotionPieceTypeBits = MoveHelper.derivePromotionPieceTypeBits(move); // Extract the next 3 bits
-        int capturedPieceTypeBits = MoveHelper.deriveCapturedPieceTypeBits(move); // Extract the next 3 bits
-        boolean isKingFirstMove = MoveHelper.isKingFirstMove(move); // Extract the king's first move bit
-        boolean isRookFirstMove = MoveHelper.isRookFirstMove(move); // Extract the rook's first move bit
+        int promotionPieceTypeBits = MoveHelper.derivePromotionPieceTypeBits(move);
+        int capturedPieceTypeBits = MoveHelper.deriveCapturedPieceTypeBits(move);
+        boolean isKingFirstMove = MoveHelper.isKingFirstMove(move);
+        boolean isRookFirstMove = MoveHelper.isRookFirstMove(move);
         int doubleStepPawnIndex = MoveHelper.deriveLastMoveDoubleStepPawnIndex(move);
 
-        // 1. Handle Captured Piece Restoration
+        // 1) restore captured piece (bitboards + pieceBoard)
         undoCapture(toIndex, capturedPieceTypeBits, isCapture, isWhite, isEnPassantMove);
 
-        // 2. Handle Pawn Promotion
-        undoPromotion(promotionPieceTypeBits, fromIndex, toIndex, isWhite);
+        // 2) undo promotion (bitboards + pieceBoard[fromIndex], pieceBoard[toIndex] if no capture)
+        undoPromotion(promotionPieceTypeBits, fromIndex, toIndex, isWhite, isCapture);
 
-        // Moving the piece back...
-        // Ensure that if the piece is a king, it's handled correctly
+        // 3) move mover back on bitboards
         undoPieceMove(pieceTypeBits, fromIndex, toIndex, isWhite);
 
-        // If the move was a castling move, move the rook back
+        // 4) clear landing square on simple non-capture, non-promotion, non-ep
+        if (!isCapture && promotionPieceTypeBits == 0 && !isEnPassantMove) {
+            pieceBoard[toIndex] = null;
+        }
+
+        // 5) restore mover on pieceBoard[from]
+        pieceBoard[fromIndex] = pieceTypeFromBits(pieceTypeBits);
+
+        // 6) undo rook movement in castling (bitboards + pieceBoard)
         undoCastling(fromIndex, toIndex, isCastlingMove, isWhite);
 
-        // If the move was a double pawn push, remove the last move double step pawn position
+        // 7) restore state flags + ep index
         undoGameState(fromIndex, toIndex, pieceTypeBits, isKingFirstMove, isRookFirstMove, isWhite, doubleStepPawnIndex);
 
-        // Update the aggregated bitboards and piece board
+        // 8) finalize aggregates once; mark attacks dirty (lazy recompute)
         updateAggregatedBitboards();
-        initPieceBoardFromBitboards();
-        recomputeWhiteAttackMap();
-        recomputeBlackAttackMap();
+        whiteAttackDirty = true;
+        blackAttackDirty = true;
+
         whitesTurn = !whitesTurn;
     }
 
@@ -1134,63 +1167,67 @@ public class BitBoard {
     }
 
     private void undoCastling(int fromIndex, int toIndex, boolean isCastling, boolean isWhite) {
-        if (isCastling) {
-            // Determine if this is kingside or queenside castling
-            boolean kingside = toIndex > fromIndex;
-            int rookFromIndex, rookToIndex;
-            if (isWhite) {
-                whiteKingHasCastled = false;
-            } else {
-                blackKingHasCastled = false;
-            }
-            if (kingside) {
-                rookToIndex = isWhite ? 7 : 63;
-                rookFromIndex = rookToIndex - 2;
-            } else {
-                rookToIndex = isWhite ? 0 : 56;
-                rookFromIndex = rookToIndex + 3;
-            }
-            // Move the rook back
-            long rookBitboard = intToPiecesBitboard(4, isWhite);
-            rookBitboard = moveBit(rookBitboard, rookFromIndex, rookToIndex);
-            setBitboardForPiece(4, isWhite, rookBitboard);
-        }
+        if (!isCastling) return;
+
+        boolean kingside = toIndex > fromIndex;
+        if (isWhite) whiteKingHasCastled = false;
+        else blackKingHasCastled = false;
+
+        int rookToIndex = isWhite ? (kingside ? 7 : 0) : (kingside ? 63 : 56);
+        int rookFromIndex = kingside ? rookToIndex - 2 : rookToIndex + 3;
+
+        long rooks = intToPiecesBitboard(4, isWhite);
+        rooks &= ~(1L << rookFromIndex);
+        rooks |= (1L << rookToIndex);
+        setBitboardForPieceFast(4, isWhite, rooks);
+
+        // mirror on pieceBoard
+        pieceBoard[rookFromIndex] = null;
+        pieceBoard[rookToIndex] = PieceType.ROOK;
     }
 
     private void undoPieceMove(int pieceTypeBits, int fromIndex, int toIndex, boolean isWhite) {
-        long pieceBitboard = intToPiecesBitboard(pieceTypeBits, isWhite);
-        pieceBitboard = moveBit(pieceBitboard, toIndex, fromIndex);
-        setBitboardForPiece(pieceTypeBits, isWhite, pieceBitboard);
+        long bb = intToPiecesBitboard(pieceTypeBits, isWhite);
+        // move bit back
+        bb &= ~(1L << toIndex);
+        bb |= (1L << fromIndex);
+        setBitboardForPieceFast(pieceTypeBits, isWhite, bb);
     }
 
-    private void undoPromotion(int promotionPieceTypeBits, int fromIndex, int toIndex, boolean isWhite) {
-        if (promotionPieceTypeBits != 0) {
-            long promotedPieceBitboard = intToPiecesBitboard(promotionPieceTypeBits, isWhite);
-            // Remove promoted piece
-            promotedPieceBitboard &= ~(1L << toIndex);
-            setBitboardForPiece(promotionPieceTypeBits, isWhite, promotedPieceBitboard);
 
-            // Re-add the pawn
-            long pawnBitboard = intToPiecesBitboard(1, isWhite);
-            pawnBitboard |= 1L << fromIndex;
-            setBitboardForPiece(1, isWhite, pawnBitboard);
+    private void undoPromotion(int promotionPieceTypeBits, int fromIndex, int toIndex, boolean isWhite, boolean wasCapture) {
+        if (promotionPieceTypeBits == 0) return;
+
+        long promoted = intToPiecesBitboard(promotionPieceTypeBits, isWhite);
+        promoted &= ~(1L << toIndex);
+        setBitboardForPieceFast(promotionPieceTypeBits, isWhite, promoted);
+
+        long pawns = intToPiecesBitboard(1, isWhite) | (1L << fromIndex);
+        setBitboardForPieceFast(1, isWhite, pawns);
+
+        // mirror on pieceBoard
+        pieceBoard[fromIndex] = PieceType.PAWN;
+        if (!wasCapture) {
+            pieceBoard[toIndex] = null; // if capture, undoCapture already restored captured piece there
         }
     }
 
     private void undoCapture(int toIndex, int capturedPieceTypeBits, boolean isCapture, boolean isWhite, boolean isEnPassant) {
-        if (isCapture) {
-            int enPassantModifier = 0;
-            if (isEnPassant) {
-                // En passant capture has occurred
-                enPassantModifier = isWhite ? -8 : 8;  // Modifier based on pawn color
-                lastMoveDoubleStepPawnIndex = toIndex + enPassantModifier;
-            }
+        if (!isCapture) return;
 
-            // Directly update the bitboard of the captured piece
-            setBitboardForPiece(capturedPieceTypeBits, !isWhite, intToPiecesBitboard(capturedPieceTypeBits, !isWhite) | (1L << (toIndex + enPassantModifier)));
+        int enPassantModifier = isEnPassant ? (isWhite ? -8 : 8) : 0;
+        int restoreIndex = toIndex + enPassantModifier;
+
+        long bb = intToPiecesBitboard(capturedPieceTypeBits, !isWhite) | (1L << restoreIndex);
+        setBitboardForPieceFast(capturedPieceTypeBits, !isWhite, bb);
+
+        // mirror on pieceBoard
+        pieceBoard[restoreIndex] = pieceTypeFromBits(capturedPieceTypeBits);
+
+        if (isEnPassant) {
+            lastMoveDoubleStepPawnIndex = restoreIndex;
         }
     }
-
 
     public boolean isEndgame() {
         // Check if both queens are off the board
