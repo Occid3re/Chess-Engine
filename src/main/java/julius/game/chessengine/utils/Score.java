@@ -632,10 +632,10 @@ public class Score {
 
     private int applyPositionalValues(long bitboard, int[] positionalValues) {
         int score = 0;
-        for (int i = Long.numberOfTrailingZeros(bitboard); i < 64 - Long.numberOfLeadingZeros(bitboard); i++) {
-            if (((1L << i) & bitboard) != 0) {
-                score += positionalValues[i];
-            }
+        while (bitboard != 0) {
+            long sq = bitboard & -bitboard;
+            score += positionalValues[Long.numberOfTrailingZeros(sq)];
+            bitboard ^= sq;
         }
         return score;
     }
