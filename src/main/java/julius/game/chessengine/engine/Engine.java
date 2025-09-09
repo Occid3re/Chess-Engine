@@ -19,7 +19,7 @@ public class Engine {
     private static final int MAX_SIZE = 5_000_000;
     private static final int MAX_AGE = 10_000;
 
-    private TimedLRUCache<Long, MoveList> legalMovesCache = new TimedLRUCache<>(MAX_SIZE, MAX_AGE);
+    private TimedLRUCache<MoveList> legalMovesCache = new TimedLRUCache<>(MAX_SIZE, MAX_AGE);
 
     @Getter
     private OpeningBook openingBook;
