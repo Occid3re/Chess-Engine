@@ -36,4 +36,24 @@ public class ScoreEvaluationTest {
         assertTrue(scoreExposed.getBlackKingSafetyScore() < scoreSafe.getBlackKingSafetyScore());
         assertTrue(scoreExposed.getScoreDifference() > scoreSafe.getScoreDifference());
     }
+
+    @Test
+    void centerPawnsGrantBonusToWhite() {
+        BitBoard board = FEN.translateFENtoBitBoard("4k3/8/8/8/4P3/8/8/4K3 w - - 0 1");
+        Score score = new Score();
+        score.initializeScore(board);
+
+        assertEquals(Score.CENTER_PAWN_BONUS, score.getWhiteCenterPawnBonus());
+        assertEquals(0, score.getBlackCenterPawnBonus());
+    }
+
+    @Test
+    void centerPawnsGrantBonusToBlack() {
+        BitBoard board = FEN.translateFENtoBitBoard("4k3/8/8/4p3/8/8/8/4K3 w - - 0 1");
+        Score score = new Score();
+        score.initializeScore(board);
+
+        assertEquals(0, score.getWhiteCenterPawnBonus());
+        assertEquals(Score.CENTER_PAWN_BONUS, score.getBlackCenterPawnBonus());
+    }
 }
