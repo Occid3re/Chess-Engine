@@ -173,6 +173,8 @@ public class BitBoardTest {
                 false, false, false, null, null, false, false,
                 board.getLastMoveDoubleStepPawnIndex());
         board.performMove(move);
+        // Recompute attack maps lazily by generating moves
+        board.generateAllPossibleMoves(board.whitesTurn);
         long afterWhite = board.getWhiteAttackMap();
         assertNotEquals(initialWhite, afterWhite, "Attack map should change after a move");
         int d5 = convertStringToIndex("d5");
