@@ -65,6 +65,36 @@ public class MoveList {
         isStringRepresentationStale = true;
     }
 
+    /**
+     * Replace the move at the given index.
+     * Marks the cached string representation as stale.
+     *
+     * @param index index of the element to replace (0 <= index < size())
+     * @param move  the new move (encoded int)
+     * @throws IndexOutOfBoundsException if index is out of range
+     */
+    public void setMove(int index, int move) {
+        if (index < 0 || index >= moveCount) {
+            throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + moveCount);
+        }
+        moves[index] = move;
+        isStringRepresentationStale = true;
+    }
+
+    /**
+     * Swap two moves in-place.
+     */
+    public void swap(int i, int j) {
+        if (i < 0 || i >= moveCount || j < 0 || j >= moveCount) {
+            throw new IndexOutOfBoundsException("i: " + i + ", j: " + j + ", Size: " + moveCount);
+        }
+        if (i == j) return;
+        int tmp = moves[i];
+        moves[i] = moves[j];
+        moves[j] = tmp;
+        isStringRepresentationStale = true;
+    }
+
     @Override
     public String toString() {
         if (isStringRepresentationStale) {

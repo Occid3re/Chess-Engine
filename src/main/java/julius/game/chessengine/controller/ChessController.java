@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static julius.game.chessengine.board.MoveHelper.convertIndexToString;
@@ -42,6 +43,12 @@ public class ChessController {
         return ResponseEntity.ok().build();
     }
 
+    @GetMapping(value = "/fen")
+    public ResponseEntity<String> getFen() {
+        // Render the current board state as a single-line FEN string
+        return ResponseEntity.ok(ai.getMainEngine().translateBoardToFen().toString());
+    }
+
     @PatchMapping(value = "/fen")
     public ResponseEntity<?> setBoardToFEN(@RequestParam("fen") String fen) {
         ai.getMainEngine().importBoardFromFen(fen);
@@ -54,12 +61,14 @@ public class ChessController {
         return ResponseEntity.ok().build();
     }
 
-    @PatchMapping(value = "/autoplay/timelimit/{timeLimit}")
-    public ResponseEntity<?> autoplaySetTimelimit(@PathVariable("timeLimit") long timeLimit)  {
-        ai.setTimeLimit(timeLimit);
-        log.debug("setting to: " + timeLimit);
+    @PatchMapping(value = "/autoplay/timelimit/{millis}")
+    public ResponseEntity<?> autoplaySetTimelimit(@PathVariable("millis") long millis)  {
+        ai.setTimeLimit(millis); // interpret as milliseconds
+        log.debug("setting timeLimit to (ms): {}", millis);
         return ResponseEntity.ok().build();
     }
+
+
     @PatchMapping(value = "/autoplay/{color}")
     public ResponseEntity<?> calculateMoveForColor(@PathVariable("color") String color) {
         if (color != null) {
@@ -71,12 +80,16 @@ public class ChessController {
 
     @GetMapping(value = "/autoplay/lastMove")
     public ResponseEntity<ApiMove> getLastMove() {
-        GameStateEnum state = ai.getMainEngine().getGameState().getState();
         int lastMove = ai.getMainEngine().getLine().getLast();
+        if (lastMove == -1) {
+            return ResponseEntity.noContent().build(); // 204 until a first move exists
+        }
+        GameStateEnum state = ai.getMainEngine().getGameState().getState();
         int fromIndex = MoveHelper.deriveFromIndex(lastMove);
         int toIndex = MoveHelper.deriveToIndex(lastMove);
-
-        ApiMove move = new ApiMove(state, convertIndexToString(fromIndex),convertIndexToString(toIndex));
+        ApiMove move = new ApiMove(state,
+                convertIndexToString(fromIndex),
+                convertIndexToString(toIndex));
         return ResponseEntity.ok(move);
     }
 
@@ -189,6 +202,44 @@ public class ChessController {
 
         return ResponseEntity.ok(boardState);
     }
+
+    @GetMapping(value = "/search/status")
+    public ResponseEntity<SearchStatus> getSearchStatus() {
+        boolean whitesTurn = ai.getMainEngine().whitesTurn();
+        String sideToMove = whitesTurn ? "WHITE" : "BLACK";
+
+        List<String> pv = ai.getCalculatedLine().stream()
+                .map(ms -> Move.convertIntToMove(ms.getMove()).toString())
+                .collect(Collectors.toList());
+
+        Integer bestMoveInt = ai.getCurrentBestMoveInt();
+        String bestMove = (bestMoveInt != null && bestMoveInt != -1)
+                ? Move.convertIntToMove(bestMoveInt).toString()
+                : null;
+
+        SearchStatus status = new SearchStatus();
+        status.sideToMove = sideToMove;
+        status.timeLimitMs = ai.getTimeLimit();
+        status.bestMove = bestMove;
+        status.nodesVisited = ai.getNodesVisited();
+        status.nullMoveCount = ai.getNullMoveCount();
+        status.pv = pv;
+        status.gameState = ai.getMainEngine().getGameState();
+
+        return ResponseEntity.ok(status);
+    }
+
+    // Simple DTO for JSON
+    public static class SearchStatus {
+        public String sideToMove;
+        public long timeLimitMs;
+        public String bestMove;
+        public long nodesVisited;
+        public long nullMoveCount;
+        public List<String> pv;
+        public GameState gameState;
+    }
+
 
 
 }
