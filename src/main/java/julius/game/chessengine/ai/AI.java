@@ -351,7 +351,7 @@ public class AI {
         int bestMove = -1; // Use an integer to represent the best move
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
 
-        ArrayList<Integer> sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), isWhitesTurn, depth);
+        ArrayList<Integer> sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth);
 
         for (int moveInt : sortedMoves) {
 
@@ -468,7 +468,7 @@ public class AI {
         double maxEval = Double.NEGATIVE_INFINITY;
         int bestMoveAtThisNode = -1; // Variable to track the best move at this node
 
-        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, isWhite, depth);
+        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, depth);
         for (int index = 0; index < orderedMoves.size(); index++) {
             int move = orderedMoves.get(index);
             simulatorEngine.performMove(move);
@@ -551,7 +551,7 @@ public class AI {
         double minEval = Double.POSITIVE_INFINITY;
         int bestMoveAtThisNode = -1; // Track the best move at this node
 
-        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, isWhite, depth);
+        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, depth);
         for (int index = 0; index < orderedMoves.size(); index++) {
             int move = orderedMoves.get(index);
             simulatorEngine.performMove(move);
@@ -623,18 +623,21 @@ public class AI {
     }
 
 
-    ArrayList<Integer> sortMovesByEfficiency(MoveList moves, boolean isWhite, int currentDepth) {
+    ArrayList<Integer> sortMovesByEfficiency(MoveList moves, int currentDepth) {
         int size = moves.size();
 
         int[] moveBuffer = new int[size];
         int[] scoreBuffer = new int[size];
+
+        // Ensure the depth index is within the killerMoves array bounds
+        int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
 
         for (int i = 0; i < size; i++) {
             int moveInt = moves.getMove(i);
             int score = 0;
 
             boolean isKiller = false;
-            for (int killerMove : killerMoves[currentDepth]) {
+            for (int killerMove : killerMoves[depthIndex]) {
                 if (moveInt == killerMove) {
                     score = KILLER_MOVE_SCORE;
                     isKiller = true;
@@ -799,20 +802,22 @@ public class AI {
     }
 
     private void updateKillerMoves(int depth, int move) {
-        int numKillerMoves = killerMoves[depth].length; // Get the number of killer moves for this depth
+        // Ensure depth is within bounds of the killerMoves array
+        int depthIndex = Math.max(0, Math.min(depth, killerMoves.length - 1));
+        int numKillerMoves = killerMoves[depthIndex].length; // Get the number of killer moves for this depth
 
         // Check if the move is already in the killer moves array
         for (int i = 0; i < numKillerMoves; i++) {
-            if (killerMoves[depth][i] == move) {
+            if (killerMoves[depthIndex][i] == move) {
                 return; // If move is already a killer move, no need to update
             }
         }
 
         // Shift existing killer moves down and insert the new move at the beginning
         for (int i = numKillerMoves - 1; i > 0; i--) {
-            killerMoves[depth][i] = killerMoves[depth][i - 1];
+            killerMoves[depthIndex][i] = killerMoves[depthIndex][i - 1];
         }
-        killerMoves[depth][0] = move; // Insert new killer move at the top
+        killerMoves[depthIndex][0] = move; // Insert new killer move at the top
     }
 
     private boolean isKillerMove(int depth, int move) {
