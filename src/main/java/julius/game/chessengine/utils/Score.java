@@ -63,6 +63,8 @@ public class Score {
     private int blackRooksHalfOpenFileBonus = 0;
     private int whiteRooksOpenFileBonus = 0;
     private int blackRooksOpenFileBonus = 0;
+    private int whiteBishopPairBonus = 0;
+    private int blackBishopPairBonus = 0;
 
     // Initialize positional values
     private int whitePawnsPosition = 0;
@@ -109,6 +111,7 @@ public class Score {
     private static final int MOBILITY_BONUS = 5;
     private static final int MISSING_PAWN_SHIELD_PENALTY = -15;
     private static final int KING_ATTACK_PENALTY = -10;
+    public static final int BISHOP_PAIR_BONUS = 50;
 
     private static final long NOT_A_FILE = ~FileMasks[0];
     private static final long NOT_H_FILE = ~FileMasks[7];
@@ -159,6 +162,8 @@ public class Score {
         this.blackRooksHalfOpenFileBonus = other.blackRooksHalfOpenFileBonus;
         this.whiteRooksOpenFileBonus = other.whiteRooksOpenFileBonus;
         this.blackRooksOpenFileBonus = other.blackRooksOpenFileBonus;
+        this.whiteBishopPairBonus = other.whiteBishopPairBonus;
+        this.blackBishopPairBonus = other.blackBishopPairBonus;
 
         this.whitePawnsPosition = other.whitePawnsPosition;
         this.blackPawnsPosition = other.blackPawnsPosition;
@@ -208,6 +213,8 @@ public class Score {
         initializePawnScore(whitePawns, blackPawns);
         initializeKnightScore(whiteKnights, blackKnights);
         initializeBishopScore(whiteBishops, blackBishops);
+        whiteBishopPairBonus = Long.bitCount(whiteBishops) == 2 ? BISHOP_PAIR_BONUS : 0;
+        blackBishopPairBonus = Long.bitCount(blackBishops) == 2 ? BISHOP_PAIR_BONUS : 0;
         initializeRookScore(whiteRooks, blackRooks);
         initializeQueenScore(whiteQueens, blackQueens);
 
@@ -273,6 +280,7 @@ public class Score {
         totalWhiteScore += whiteBishopsAmountScore;
         totalWhiteScore += whiteRooksAmountScore;
         totalWhiteScore += whiteQueensAmountScore;
+        totalWhiteScore += whiteBishopPairBonus;
 
         totalWhiteScore += whiteCenterPawnBonus;
         totalWhiteScore += whiteDoubledPawnPenalty;
@@ -311,6 +319,7 @@ public class Score {
         totalBlackScore += blackBishopsAmountScore;
         totalBlackScore += blackRooksAmountScore;
         totalBlackScore += blackQueensAmountScore;
+        totalBlackScore += blackBishopPairBonus;
 
         totalBlackScore += blackCenterPawnBonus;
         totalBlackScore += blackDoubledPawnPenalty;
@@ -696,12 +705,14 @@ public class Score {
         this.whiteBishopsAmountScore = Long.bitCount(whiteBishops) * BISHOP_VALUE;
         updateBishopsPositionBonusWhite(whiteBishops);
         updateStartingSquarePenaltyWhite(whiteKnights, whiteBishops, whiteRooks);
+        whiteBishopPairBonus = Long.bitCount(whiteBishops) == 2 ? BISHOP_PAIR_BONUS : 0;
     }
 
     public void updateBlackBishopValues(long blackBishops, long blackKnights, long blackRooks) {
         this.blackBishopsAmountScore = Long.bitCount(blackBishops) * BISHOP_VALUE;
         updateBishopsPositionBonusBlack(blackBishops);
         updateStartingSquarePenaltyBlack(blackKnights, blackBishops, blackRooks);
+        blackBishopPairBonus = Long.bitCount(blackBishops) == 2 ? BISHOP_PAIR_BONUS : 0;
     }
 
     public void updateWhiteRookValues(BitBoard bitBoard) {
