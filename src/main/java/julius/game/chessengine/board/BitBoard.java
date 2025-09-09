@@ -14,7 +14,6 @@ import java.util.Objects;
 
 import static julius.game.chessengine.board.MoveHelper.createMoveInt;
 import static julius.game.chessengine.helper.BitHelper.*;
-import static julius.game.chessengine.helper.BitboardHelper.lineBetweenIndices;
 import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
 import static julius.game.chessengine.helper.KnightHelper.knightMoveTable;
 
@@ -327,17 +326,14 @@ public class BitBoard {
     }
 
     public MoveList generateAllPossibleMoves(boolean whitesTurn) {
-        // Reuse the internal buffer to cut down on object creation and garbage
-        // collection pressure during heavy search operations.
+        // Reuse the internal buffer to cut down on object creation and GC pressure.
         MoveList moves = moveGenerationBuffer;
         moves.clear();
 
-        if (whiteAttackDirty) {
-            recomputeWhiteAttackMap();
-        }
-        if (blackAttackDirty) {
-            recomputeBlackAttackMap();
-        }
+        // Do NOT recompute white/black attack maps here.
+        // They are recomputed lazily inside isSquareUnderAttack() only when needed
+        // (e.g., castling checks, isInCheck). This saves a full-board attack rebuild
+        // on most plies where castling isn’t even considered.
 
         generatePawnMoves(whitesTurn, moves);
         generateKnightMoves(whitesTurn, moves);
@@ -348,6 +344,7 @@ public class BitBoard {
 
         return moves;
     }
+
 
     /**
      * Generates a bitboard of all squares attacked by the given side.
@@ -435,8 +432,7 @@ public class BitBoard {
         long promotionRank = whitesTurn ? RankMasks[7] : RankMasks[0];
 
         // Non-promotion single pushes
-        long quietPushes = singlePushes & ~promotionRank;
-        long temp = quietPushes;
+        long temp = singlePushes & ~promotionRank;
         while (temp != 0) {
             int toIndex = Long.numberOfTrailingZeros(temp);
             int fromIndex = whitesTurn ? toIndex - 8 : toIndex + 8;
@@ -446,8 +442,7 @@ public class BitBoard {
         }
 
         // Promotion pushes
-        long promotionPushes = singlePushes & promotionRank;
-        temp = promotionPushes;
+        temp = singlePushes & promotionRank;
         while (temp != 0) {
             int toIndex = Long.numberOfTrailingZeros(temp);
             int fromIndex = whitesTurn ? toIndex - 8 : toIndex + 8;
@@ -699,20 +694,22 @@ public class BitBoard {
     }
 
     private void addCastlingMoves(boolean whitesTurn, int kingPositionIndex, MoveList moves) {
-        if (canKingCastle(whitesTurn)) {
+        // Avoid an extra bit scan: we already know the king's square.
+        if (canKingCastle(whitesTurn, kingPositionIndex)) {
             if (canCastleKingside(whitesTurn, kingPositionIndex)) {
-                moves.add(createMoveInt(kingPositionIndex, kingPositionIndex + 2, PieceType.KING, whitesTurn, false, true, false, null, null, true, true, lastMoveDoubleStepPawnIndex));
+                moves.add(createMoveInt(kingPositionIndex, kingPositionIndex + 2, PieceType.KING,
+                        whitesTurn, false, true, false, null, null, true, true, lastMoveDoubleStepPawnIndex));
             }
             if (canCastleQueenside(whitesTurn, kingPositionIndex)) {
-                moves.add(createMoveInt(kingPositionIndex, kingPositionIndex - 2, PieceType.KING, whitesTurn, false, true, false, null, null, true, true, lastMoveDoubleStepPawnIndex));
+                moves.add(createMoveInt(kingPositionIndex, kingPositionIndex - 2, PieceType.KING,
+                        whitesTurn, false, true, false, null, null, true, true, lastMoveDoubleStepPawnIndex));
             }
         }
     }
 
-
-    private boolean canKingCastle(boolean whitesTurn) {
-        // The king must not have moved and must not currently be under attack
-        int kingIndex = findKingIndex(whitesTurn);
+    private boolean canKingCastle(boolean whitesTurn, int kingIndex) {
+        // King must not have moved and must not be in check now.
+        // isSquareUnderAttack() will lazily recompute opponent attack map if dirty.
         return hasKingNotMoved(whitesTurn) && !isSquareUnderAttack(kingIndex, whitesTurn);
     }
 
@@ -930,18 +927,6 @@ public class BitBoard {
         return (allPieces & positionMask) != 0;
     }
 
-    public boolean isOccupiedByOpponent(int index, boolean colorWhite) {
-        long positionMask = 1L << index;
-
-        if (colorWhite) {
-            // Check if the position is occupied by any of the black pieces
-            return (blackPieces & positionMask) != 0;
-        } else {
-            // Check if the position is occupied by any of the white pieces
-            return (whitePieces & positionMask) != 0;
-        }
-    }
-
     public boolean hasKingNotMoved(boolean whitesTurn) {
         return whitesTurn ? !whiteKingMoved : !blackKingMoved;
     }
@@ -972,102 +957,21 @@ public class BitBoard {
         };
     }
 
-    public boolean isOccupiedByPawn(int index, boolean whiteColor) {
-        // Create a bitmask for the position
-        long positionMask = 1L << index;
-
-        // Check if the position is occupied by a pawn of the given color
-        if (whiteColor) {
-            return (whitePawns & positionMask) != 0;
-        } else { // Color.BLACK
-            return (blackPawns & positionMask) != 0;
-        }
+    public boolean isInCheck(boolean white) {
+        int kingIndex = findKingIndex(white);
+        return isSquareUnderAttack(kingIndex, white);
     }
 
-    public boolean isOccupiedByColor(int index, boolean colorWhite) {
-        // Convert the position to a bit index
-        long positionMask = 1L << index;
-
-        // Check if the position is occupied by a piece of the given color
-        if (colorWhite) {
-            return (whitePieces & positionMask) != 0;
-        } else { // Color.BLACK
-            return (blackPieces & positionMask) != 0;
-        }
-    }
-
-    public boolean isInCheck(boolean whitesTurn) {
-        int kingPosition = findKingIndex(whitesTurn);
-        long opponentAttacks = generateAttackBitboard(!whitesTurn);
-        return (opponentAttacks & (1L << kingPosition)) != 0;
-    }
-
-
-    public long generatePinMask(boolean whitesTurn) {
-        long kingPosition = whitesTurn ? whiteKing : blackKing;
-        long slidingPieces = whitesTurn ? (blackBishops | blackRooks | blackQueens) : (whiteBishops | whiteRooks | whiteQueens);
-
-        long pinMasks = 0L;
-
-        while (slidingPieces != 0) {
-            long slidingPiecePosition = Long.lowestOneBit(slidingPieces);
-            slidingPieces ^= slidingPiecePosition; // Remove the current sliding piece
-
-            long lineOfAttack = calculateLineOfAttack(slidingPiecePosition, kingPosition);
-            long piecesInBetween = lineOfAttack & (whitesTurn ? whitePieces : blackPieces);
-
-            if (Long.bitCount(piecesInBetween) == 1) {
-                long pinnedPiece = piecesInBetween & lineOfAttack;
-                long squaresBetweenPinnedAndKing = lineBetweenIndices(Long.numberOfTrailingZeros(pinnedPiece), Long.numberOfTrailingZeros(kingPosition));
-                long obstructingPieces = squaresBetweenPinnedAndKing & allPieces;
-
-                if (obstructingPieces == 0) {
-                    // There are no obstructing pieces (piece is pinned)
-                    pinMasks |= lineOfAttack;
-                    pinMasks &= whitesTurn ? whitePieces : blackPieces;
-                }
-            }
-        }
-
-        return pinMasks;
-    }
-
-
-    private long calculateLineOfAttack(long slidingPiecePosition, long kingPosition) {
-        long lineOfAttack = 0L;
-        int slidingPieceIndex = Long.numberOfTrailingZeros(slidingPiecePosition);
-        int kingIndex = Long.numberOfTrailingZeros(kingPosition);
-
-        // Determine the type of the sliding piece
-        if ((slidingPiecePosition & (whiteBishops | blackBishops)) != 0) {
-            // Bishop's line of attack
-            long occupancy = allPieces & bishopHelper.bishopMasks[slidingPieceIndex];
-            long attack = bishopHelper.calculateMovesUsingBishopMagic(slidingPieceIndex, occupancy);
-            lineOfAttack = attack & lineBetweenIndices(slidingPieceIndex, kingIndex);
-        } else if ((slidingPiecePosition & (whiteRooks | blackRooks)) != 0) {
-            // Rook's line of attack
-            long occupancy = allPieces & rookHelper.rookMasks[slidingPieceIndex];
-            long attack = rookHelper.calculateMovesUsingRookMagic(slidingPieceIndex, occupancy);
-            lineOfAttack = attack & lineBetweenIndices(slidingPieceIndex, kingIndex);
-        } else if ((slidingPiecePosition & (whiteQueens | blackQueens)) != 0) {
-            // Queen's line of attack (combination of rook and bishop)
-            long occupancyBishop = allPieces & bishopHelper.bishopMasks[slidingPieceIndex];
-            long occupancyRook = allPieces & rookHelper.rookMasks[slidingPieceIndex];
-            long attackDiagonal = bishopHelper.calculateMovesUsingBishopMagic(slidingPieceIndex, occupancyBishop);
-            long attackStraight = rookHelper.calculateMovesUsingRookMagic(slidingPieceIndex, occupancyRook);
-            lineOfAttack = (attackDiagonal | attackStraight) & lineBetweenIndices(slidingPieceIndex, kingIndex);
-        }
-
-        return lineOfAttack;
-    }
 
     private int findKingIndex(boolean whitesTurn) {
-        // Use bit operations to find the king's position on the board
-        // Assuming there's only one king per color on the board.
         long kingBitboard = whitesTurn ? whiteKing : blackKing;
+        if (kingBitboard == 0L) {
+            // Defensive: avoid returning 64 from Long.numberOfTrailingZeros(0)
+            // which can cause array/bitshift issues elsewhere.
+            throw new IllegalStateException((whitesTurn ? "White" : "Black") + " king missing from board state");
+        }
         return Long.numberOfTrailingZeros(kingBitboard);
     }
-
     private long knightAttackBitmask(int positionIndex) {
         return KnightHelper.knightMoveTable[positionIndex];
     }
@@ -1150,14 +1054,6 @@ public class BitBoard {
         // Set the bit at the toIndex
         pieceBitboard |= 1L << toIndex;
         return pieceBitboard;
-    }
-
-    private boolean doesMoveWrapAround(int fromIndex, int toIndex) {
-        int fromFile = fromIndex % 8;
-        int toRank = toIndex / 8;
-        int toFile = toIndex % 8;
-        // Check if the move wraps around the board horizontally or is outside the board vertically
-        return Math.abs(fromFile - toFile) > 1 || toRank < 0 || toRank > 7;
     }
 
     public void undoMove(int move) {
