@@ -104,7 +104,7 @@ public class Score {
     private static final int CASTLING_BONUS = 75;
 
     private static final int ROOK_HALF_OPEN_FILE_BONUS = 25;
-    private static final int ROOK_OPEN_FILE_BONUS = 12;
+    private static final int ROOK_OPEN_FILE_BONUS = 35;
 
     private static final int MOBILITY_BONUS = 5;
     private static final int MISSING_PAWN_SHIELD_PENALTY = -15;
