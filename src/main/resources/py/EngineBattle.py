@@ -119,6 +119,55 @@ def check_game_state(state: Optional[str]) -> Optional[str]:
     return None
 
 
+def format_http_error(e: requests.HTTPError) -> str:
+    """
+    Extract a concise, useful message from an HTTPError, including status code and any
+    JSON 'message'/'detail'/'error' or first 500 chars of text/HTML (title if present).
+    """
+    resp = getattr(e, 'response', None)
+    if not resp:
+        return str(e)
+    status = resp.status_code
+    try:
+        data = resp.json()
+        detail = (
+                data.get('message')
+                or data.get('detail')
+                or data.get('error')
+        )
+        if detail:
+            return f"HTTP {status} — {detail}"
+        # fallback: compact JSON
+        import json
+        return f"HTTP {status} — {json.dumps(data)[:500]}"
+    except ValueError:
+        text = (resp.text or "").strip()
+        if not text:
+            return f"HTTP {status} — <empty body>"
+        # Try to extract <title> from HTML
+        m = re.search(r'<title>(.*?)</title>', text, re.IGNORECASE | re.DOTALL)
+        if m:
+            title = re.sub(r'\s+', ' ', m.group(1)).strip()
+            return f"HTTP {status} — {title}"
+        return f"HTTP {status} — {text[:500]}"
+
+
+def manual_award_on_timeout(engine1_name: str, engine2_name: str) -> int:
+    """
+    Block for manual decision after a timeout.
+    Returns 1 to award Engine 1, or 2 to award Engine 2.
+    """
+    print("\nTIMEOUT: Paused for manual decision.")
+    print(f"Type '1' to award the win to {engine1_name}, or '2' to award the win to {engine2_name}.")
+    while True:
+        choice = input("Award to [1/2]: ").strip()
+        if choice == '1':
+            return 1
+        if choice == '2':
+            return 2
+        print("Please enter '1' or '2'.")
+
+
 # ----------------------------
 # Match runner
 # ----------------------------
@@ -142,6 +191,8 @@ def run_matches(jar1_path: str,
     """
     engine1_url = f"http://localhost:{port1}"  # WHITE
     engine2_url = f"http://localhost:{port2}"  # BLACK
+    engine1_name = get_file_name_without_extension(jar1_path)
+    engine2_name = get_file_name_without_extension(jar2_path)
 
     print(f"Launching engines:\n  {jar1_path} -> {engine1_url}\n  {jar2_path} -> {engine2_url}")
 
@@ -201,11 +252,13 @@ def run_matches(jar1_path: str,
                             if 'from' in lm1 and 'to' in lm1:
                                 try:
                                     make_move(engine2_url, lm1['from'], lm1['to'])
-                                    # CRITICAL: mark the receiver's lastSeen as the move we just applied
+                                    # Mark receiver's lastSeen as the move we just applied
                                     last2 = {'from': lm1['from'], 'to': lm1['to'], 'currentState': lm1.get('currentState')}
                                 except requests.HTTPError as e:
-                                    print(f"Engine2 rejected move {lm1['from']}-{lm1['to']} with {e}. "
-                                          f"Receiver fault -> Engine2 loses this game.")
+                                    print(
+                                        f"{engine2_name} rejected move {lm1['from']}-{lm1['to']}. "
+                                        f"{format_http_error(e)}. Receiver fault -> {engine2_name} loses this game."
+                                    )
                                     engine1_wins += 1
                                     moved = True
                                     break
@@ -213,9 +266,15 @@ def run_matches(jar1_path: str,
                             break
                         time.sleep(poll_sleep_s)
                     if not moved:
-                        engine2_wins += 1
-                        print(f"{get_file_name_without_extension(jar1_path)} failed to move in time.")
-                        break
+                        print(f"{engine1_name} failed to produce a move in time.")
+                        winner = manual_award_on_timeout(engine1_name, engine2_name)
+                        if winner == 1:
+                            engine1_wins += 1
+                            print(f"Awarded win to {engine1_name} by manual decision.")
+                        else:
+                            engine2_wins += 1
+                            print(f"Awarded win to {engine2_name} by manual decision.")
+                        break  # end the current game after manual award
 
                     # Check terminal after white move
                     game_state = None
@@ -240,11 +299,13 @@ def run_matches(jar1_path: str,
                             if 'from' in lm2 and 'to' in lm2:
                                 try:
                                     make_move(engine1_url, lm2['from'], lm2['to'])
-                                    # CRITICAL: mark the receiver's lastSeen as the move we just applied
+                                    # Mark receiver's lastSeen as the move we just applied
                                     last1 = {'from': lm2['from'], 'to': lm2['to'], 'currentState': lm2.get('currentState')}
                                 except requests.HTTPError as e:
-                                    print(f"Engine1 rejected move {lm2['from']}-{lm2['to']} with {e}. "
-                                          f"Receiver fault -> Engine1 loses this game.")
+                                    print(
+                                        f"{engine1_name} rejected move {lm2['from']}-{lm2['to']}. "
+                                        f"{format_http_error(e)}. Receiver fault -> {engine1_name} loses this game."
+                                    )
                                     engine2_wins += 1
                                     moved = True
                                     break
@@ -252,9 +313,15 @@ def run_matches(jar1_path: str,
                             break
                         time.sleep(poll_sleep_s)
                     if not moved:
-                        engine1_wins += 1
-                        print(f"{get_file_name_without_extension(jar2_path)} failed to move in time.")
-                        break
+                        print(f"{engine2_name} failed to produce a move in time.")
+                        winner = manual_award_on_timeout(engine1_name, engine2_name)
+                        if winner == 1:
+                            engine1_wins += 1
+                            print(f"Awarded win to {engine1_name} by manual decision.")
+                        else:
+                            engine2_wins += 1
+                            print(f"Awarded win to {engine2_name} by manual decision.")
+                        break  # end the current game after manual award
 
                     # Terminal after black move (either side may report)
                     game_state = None
@@ -271,8 +338,8 @@ def run_matches(jar1_path: str,
                             draws += 1
                         break
 
-                print(f"{get_file_name_without_extension(jar1_path)} wins: {engine1_wins}, "
-                      f"{get_file_name_without_extension(jar2_path)} wins: {engine2_wins}, "
+                print(f"{engine1_name} wins: {engine1_wins}, "
+                      f"{engine2_name} wins: {engine2_wins}, "
                       f"Draws: {draws}")
 
             except KeyboardInterrupt:
@@ -294,9 +361,6 @@ def run_matches(jar1_path: str,
 
 
 
-
-
-
 # ----------------------------
 # CLI
 # ----------------------------
@@ -314,7 +378,7 @@ def main():
     parser.add_argument("--engine-time-limit", type=int, default=50,
                         help="Time limit configured on the engine (seconds per move/search window).")
     parser.add_argument("--move-timeout", type=float, default=3.0,
-                        help="Wall-clock tolerance before declaring the other engine wins.")
+                        help="Wall-clock tolerance before declaring the other engine wins or pausing for manual decision.")
     parser.add_argument("--startup-deadline", type=float, default=60.0,
                         help="Seconds to wait for each server to become reachable.")
     args = parser.parse_args()
