@@ -88,11 +88,11 @@ public class Score {
     private int blackStateBonus = 0;
 
     // Constants for piece values
-    public static final int PAWN_VALUE = 1000;   // Pawns are worth 1 point, scaled by 100
-    public static final int KNIGHT_VALUE = 3000; // Knights are worth 3 points
-    public static final int BISHOP_VALUE = 3130; // Bishops are worth 3 points
-    public static final int ROOK_VALUE = 5000;   // Rooks are worth 5 points
-    public static final int QUEEN_VALUE = 9000;  // Queens are worth 9 points
+    public static final int PAWN_VALUE = 100;   // Pawns are worth 1 point, scaled by 100
+    public static final int KNIGHT_VALUE = 300; // Knights are worth 3 points
+    public static final int BISHOP_VALUE = 330; // Bishops are slightly more valuable than knights
+    public static final int ROOK_VALUE = 500;   // Rooks are worth 5 points
+    public static final int QUEEN_VALUE = 900;  // Queens are worth 9 points
 
     // Pawn bonuses and penalties
     private static final int DOUBLED_PAWN_PENALTY = -20; // Example penalty value for doubled pawns
@@ -265,7 +265,7 @@ public class Score {
 
     public double getScoreDifference() {
         if (cachedScoreDifference == null) {
-            cachedScoreDifference = (calculateTotalWhiteScore() - calculateTotalBlackScore()) / 1000.0;
+            cachedScoreDifference = (calculateTotalWhiteScore() - calculateTotalBlackScore()) / 100.0;
         }
 
         return cachedScoreDifference;
@@ -811,11 +811,11 @@ public class Score {
 
     public static int getPieceValue(int pieceTypeBits) {
         return switch (pieceTypeBits) {
-            case 1 -> PAWN_VALUE / 1000;
-            case 2 -> KNIGHT_VALUE / 1000;
-            case 3 -> BISHOP_VALUE / 1000;
-            case 4 -> ROOK_VALUE / 1000;
-            case 5 -> QUEEN_VALUE / 1000;
+            case 1 -> PAWN_VALUE / 100;
+            case 2 -> KNIGHT_VALUE / 100;
+            case 3 -> BISHOP_VALUE / 100;
+            case 4 -> ROOK_VALUE / 100;
+            case 5 -> QUEEN_VALUE / 100;
             case 6 -> 1000;
             default -> throw new IllegalStateException("Unexpected value: " + pieceTypeBits);
         };
