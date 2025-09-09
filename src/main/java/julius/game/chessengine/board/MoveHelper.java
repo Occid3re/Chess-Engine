@@ -28,20 +28,24 @@ public class MoveHelper {
         return (move >> 18) & 0x07;
     }
 
+    /**
+     * Returns the two-bit special property field.
+     * Use this method only when both bits are required.
+     */
     public static int deriveSpecialProperty(int move) {
         return (move >> 16) & 0x03;
     }
 
     public static boolean isCapture(int move) {
-        return (deriveSpecialProperty(move) & 0x01) != 0;
+        return ((move >>> 16) & 0x1) != 0;
     }
 
     public static boolean isEnPassantMove(int move) {
-        return deriveSpecialProperty(move) == 3;
+        return ((move >>> 16) & 0x3) == 0x3;
     }
 
     public static boolean isCastlingMove(int move) {
-        return deriveSpecialProperty(move) == 2;
+        return ((move >>> 16) & 0x3) == 0x2;
     }
 
     public static boolean isKingFirstMove(int move) {
