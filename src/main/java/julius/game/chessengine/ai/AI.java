@@ -311,7 +311,9 @@ public class AI {
                 break;
             }
 
-            log.debug("[{}] hash exists and move: {}", currentBoardHash, entry);
+            if (log.isDebugEnabled()) {
+                log.debug("[{}] hash exists and move: {}", currentBoardHash, entry);
+            }
             newCalculatedLine.add(new MoveAndScore(entry.bestMove, entry.score));
 
             // Perform the move and increment the counter
@@ -327,10 +329,12 @@ public class AI {
 
         this.calculatedLine = new ArrayList<>(newCalculatedLine);
 
-        log.debug("Move Line: {}", newCalculatedLine.stream()
-                .map(m -> Move.convertIntToMove(m.move).toString())
-                .collect(Collectors.joining(", ")));
-        log.debug("");
+        if (log.isDebugEnabled()) {
+            log.debug("Move Line: {}", newCalculatedLine.stream()
+                    .map(m -> Move.convertIntToMove(m.move).toString())
+                    .collect(Collectors.joining(", ")));
+            log.debug("");
+        }
     }
 
 
@@ -384,7 +388,9 @@ public class AI {
      * *
      */
     private double alphaBeta(Engine simulatorEngine, int depth, double alpha, double beta, boolean isWhite, long startTime, long timeLimit) {
-        log.debug(" ------------------------- {} ------------------------- ", depth);
+        if (log.isDebugEnabled()) {
+            log.debug(" ------------------------- {} ------------------------- ", depth);
+        }
         nodesVisited++;
         // Check for time limit exceeded
         if (System.currentTimeMillis() - startTime > timeLimit) {
@@ -453,7 +459,7 @@ public class AI {
     }
 
     private double maximizer(Engine simulatorEngine, int depth, double alpha, double beta, boolean isWhite, long boardHash, double alphaOriginal, MoveList moves, long startTime, long timeLimit) {
-        long start = System.nanoTime(); // Start timing
+        long start = log.isDebugEnabled() ? System.nanoTime() : 0L; // Start timing only for debugging
         double maxEval = Double.NEGATIVE_INFINITY;
         int bestMoveAtThisNode = -1; // Variable to track the best move at this node
 
@@ -495,10 +501,12 @@ public class AI {
                 }
             }
 
-            log.debug("DEPTH: " + depth + " --- " + Move.convertIntToMove(move));
-            long endTime = System.nanoTime();
-            log.debug("DEPTH: " + depth);
-            log.debug("--> [+] Time taken for maximizer: {} ms", (endTime - start) / 1e6);
+            if (log.isDebugEnabled()) {
+                long endTime = System.nanoTime();
+                log.debug("DEPTH: {} --- {}", depth, Move.convertIntToMove(move));
+                log.debug("DEPTH: {}", depth);
+                log.debug("--> [+] Time taken for maximizer: {} ms", (endTime - start) / 1e6);
+            }
 
             simulatorEngine.undoLastMove();
 
@@ -511,7 +519,9 @@ public class AI {
             if (beta <= alpha) {
                 updateKillerMoves(depth, move);
                 incrementHistory(move, depth);
-                log.debug(" Maxi New Killer Move is {}", Move.convertIntToMove(move));
+                if (log.isDebugEnabled()) {
+                    log.debug(" Maxi New Killer Move is {}", Move.convertIntToMove(move));
+                }
                 break; // Alpha-beta pruning
             }
         }
@@ -536,7 +546,7 @@ public class AI {
                              boolean isWhite, long boardHash,
                              double betaOriginal, MoveList moves, long startTime,
                              long timeLimit) {
-        long start = System.nanoTime(); // Start timing
+        long start = log.isDebugEnabled() ? System.nanoTime() : 0L; // Start timing only for debugging
         double minEval = Double.POSITIVE_INFINITY;
         int bestMoveAtThisNode = -1; // Track the best move at this node
 
@@ -577,9 +587,11 @@ public class AI {
                 }
             }
 
-            long endTime = System.nanoTime();
-            log.debug("DEPTH: " + depth + " --- " + Move.convertIntToMove(move));
-            log.debug("<-- [-] Time taken for minimizer: {} ms", (endTime - start) / 1e6);
+            if (log.isDebugEnabled()) {
+                long endTime = System.nanoTime();
+                log.debug("DEPTH: {} --- {}", depth, Move.convertIntToMove(move));
+                log.debug("<-- [-] Time taken for minimizer: {} ms", (endTime - start) / 1e6);
+            }
 
             simulatorEngine.undoLastMove();
 
@@ -592,7 +604,9 @@ public class AI {
             if (alpha >= beta) {
                 updateKillerMoves(depth, move);
                 incrementHistory(move, depth);
-                log.debug("Mini New Killer Move is {}", Move.convertIntToMove(move));
+                if (log.isDebugEnabled()) {
+                    log.debug("Mini New Killer Move is {}", Move.convertIntToMove(move));
+                }
                 break;
             }
         }
@@ -698,7 +712,9 @@ public class AI {
 
     private double quiescenceSearch(Engine simulatorEngine, boolean isWhitesTurn, double alpha, double beta, long startTime, long timeLimit, int depth) {
         if (System.currentTimeMillis() - startTime > timeLimit) {
-            log.debug("timeout");
+            if (log.isDebugEnabled()) {
+                log.debug("timeout");
+            }
             return AI.EXIT_FLAG; // Timeout
         }
 
@@ -729,16 +745,24 @@ public class AI {
     private double evaluateStaticPosition(GameState gameState, boolean isWhitesTurn, int depth) {
 
         if (gameState.isInStateCheckMate()) {
-            log.debug("Checkmate found");
+            if (log.isDebugEnabled()) {
+                log.debug("Checkmate found");
+            }
             return CHECKMATE - depth; // -depth to allow faster checkmates
         }
         if (gameState.isInStateDraw()) {
-            log.debug("DRAW");
+            if (log.isDebugEnabled()) {
+                log.debug("DRAW");
+            }
             return DRAW;
         }
         double scoreDifference = gameState.getScore().getScoreDifference();
 
-        log.debug("Evaluate static position score {}, {} ", isWhitesTurn ? scoreDifference : -scoreDifference, isWhitesTurn ? "WHITE" : "BLACK");
+        if (log.isDebugEnabled()) {
+            log.debug("Evaluate static position score {}, {} ",
+                    isWhitesTurn ? scoreDifference : -scoreDifference,
+                    isWhitesTurn ? "WHITE" : "BLACK");
+        }
         return isWhitesTurn ? scoreDifference : -scoreDifference;
     }
 
