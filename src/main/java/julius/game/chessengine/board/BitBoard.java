@@ -520,8 +520,10 @@ public class BitBoard {
             int toIndex = Long.numberOfTrailingZeros(temp);
             int fromIndex = whitesTurn ? toIndex - 7 : toIndex + 7;
             PieceType capturedType = getPieceTypeAtIndex(toIndex);
-            moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, true, false, false,
-                    null, capturedType, false, false, lastMoveDoubleStepPawnIndex));
+            if (capturedType != PieceType.KING) {
+                moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, true, false, false,
+                        null, capturedType, false, false, lastMoveDoubleStepPawnIndex));
+            }
             temp &= temp - 1;
         }
 
@@ -531,8 +533,10 @@ public class BitBoard {
             int toIndex = Long.numberOfTrailingZeros(temp);
             int fromIndex = whitesTurn ? toIndex - 9 : toIndex + 9;
             PieceType capturedType = getPieceTypeAtIndex(toIndex);
-            moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, true, false, false,
-                    null, capturedType, false, false, lastMoveDoubleStepPawnIndex));
+            if (capturedType != PieceType.KING) {
+                moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, true, false, false,
+                        null, capturedType, false, false, lastMoveDoubleStepPawnIndex));
+            }
             temp &= temp - 1;
         }
 
@@ -542,7 +546,9 @@ public class BitBoard {
             int toIndex = Long.numberOfTrailingZeros(temp);
             int fromIndex = whitesTurn ? toIndex - 7 : toIndex + 7;
             PieceType capturedType = getPieceTypeAtIndex(toIndex);
-            addPromotionMoves(moves, fromIndex, toIndex, whitesTurn, true, capturedType);
+            if (capturedType != PieceType.KING) {
+                addPromotionMoves(moves, fromIndex, toIndex, whitesTurn, true, capturedType);
+            }
             temp &= temp - 1;
         }
 
@@ -551,7 +557,9 @@ public class BitBoard {
             int toIndex = Long.numberOfTrailingZeros(temp);
             int fromIndex = whitesTurn ? toIndex - 9 : toIndex + 9;
             PieceType capturedType = getPieceTypeAtIndex(toIndex);
-            addPromotionMoves(moves, fromIndex, toIndex, whitesTurn, true, capturedType);
+            if (capturedType != PieceType.KING) {
+                addPromotionMoves(moves, fromIndex, toIndex, whitesTurn, true, capturedType);
+            }
             temp &= temp - 1;
         }
 
@@ -615,7 +623,9 @@ public class BitBoard {
                 boolean isCapture = (opponentPieces & (1L << targetIndex)) != 0;
 
                 PieceType capturedPieceType = isCapture ? getPieceTypeAtIndex(targetIndex) : null;
-                moves.add(createMoveInt(knightIndex, targetIndex, PieceType.KNIGHT, whitesTurn, isCapture, false, false, null, capturedPieceType, false, false, lastMoveDoubleStepPawnIndex));
+                if (capturedPieceType != PieceType.KING) {
+                    moves.add(createMoveInt(knightIndex, targetIndex, PieceType.KNIGHT, whitesTurn, isCapture, false, false, null, capturedPieceType, false, false, lastMoveDoubleStepPawnIndex));
+                }
 
                 potentialMoves &= potentialMoves - 1; // Clear the lowest set bit
             }
@@ -643,7 +653,10 @@ public class BitBoard {
 
 
                 boolean isCapture = (opponentPieces & (1L << targetSquare)) != 0;
-                moves.add(createMoveInt(bishopSquare, targetSquare, PieceType.BISHOP, isWhite, isCapture, false, false, null, isCapture ? getPieceTypeAtIndex(targetSquare) : null, false, false, lastMoveDoubleStepPawnIndex));
+                PieceType capturedType = isCapture ? getPieceTypeAtIndex(targetSquare) : null;
+                if (capturedType != PieceType.KING) {
+                    moves.add(createMoveInt(bishopSquare, targetSquare, PieceType.BISHOP, isWhite, isCapture, false, false, null, capturedType, false, false, lastMoveDoubleStepPawnIndex));
+                }
             }
         }
     }
@@ -666,7 +679,10 @@ public class BitBoard {
                 attacks &= attacks - 1; // Remove the least significant bit representing an attack
                 boolean isFirstRookMove = !hasRookMoved(rookSquare);
                 boolean isCapture = (opponentPieces & (1L << targetSquare)) != 0;
-                moves.add(createMoveInt(rookSquare, targetSquare, PieceType.ROOK, whitesTurn, isCapture, false, false, null, isCapture ? getPieceTypeAtIndex(targetSquare) : null, false, isFirstRookMove, lastMoveDoubleStepPawnIndex));
+                PieceType capturedType = isCapture ? getPieceTypeAtIndex(targetSquare) : null;
+                if (capturedType != PieceType.KING) {
+                    moves.add(createMoveInt(rookSquare, targetSquare, PieceType.ROOK, whitesTurn, isCapture, false, false, null, capturedType, false, isFirstRookMove, lastMoveDoubleStepPawnIndex));
+                }
             }
         }
     }
@@ -690,7 +706,10 @@ public class BitBoard {
                 int targetSquare = Long.numberOfTrailingZeros(attacks);
                 attacks &= attacks - 1; // Remove the least significant bit representing an attack
                 boolean isCapture = (opponentPieces & (1L << targetSquare)) != 0;
-                moves.add(createMoveInt(queenSquare, targetSquare, PieceType.QUEEN, whitesTurn, isCapture, false, false, null, isCapture ? getPieceTypeAtIndex(targetSquare) : null, false, false, lastMoveDoubleStepPawnIndex));
+                PieceType capturedType = isCapture ? getPieceTypeAtIndex(targetSquare) : null;
+                if (capturedType != PieceType.KING) {
+                    moves.add(createMoveInt(queenSquare, targetSquare, PieceType.QUEEN, whitesTurn, isCapture, false, false, null, capturedType, false, false, lastMoveDoubleStepPawnIndex));
+                }
             }
         }
     }
@@ -712,7 +731,10 @@ public class BitBoard {
         for (long possibleMoves = legalMoves; possibleMoves != 0; possibleMoves &= possibleMoves - 1) {
             int targetIndex = Long.numberOfTrailingZeros(possibleMoves);
             boolean isCapture = (captureMoves & (1L << targetIndex)) != 0;
-            moves.add(createMoveInt(kingPositionIndex, targetIndex, PieceType.KING, whitesTurn, isCapture, false, false, null, isCapture ? getPieceTypeAtIndex(targetIndex) : null, isFirstKingMove, false, lastMoveDoubleStepPawnIndex));
+            PieceType capturedType = isCapture ? getPieceTypeAtIndex(targetIndex) : null;
+            if (capturedType != PieceType.KING) {
+                moves.add(createMoveInt(kingPositionIndex, targetIndex, PieceType.KING, whitesTurn, isCapture, false, false, null, capturedType, isFirstKingMove, false, lastMoveDoubleStepPawnIndex));
+            }
         }
 
         addCastlingMoves(whitesTurn, kingPositionIndex, moves);
@@ -809,6 +831,10 @@ public class BitBoard {
         PieceType movingPiece = pieceTypeFromBits(pieceTypeBits);
 
         if (isCapture) {
+            PieceType captured = getPieceTypeAtIndex(toIndex);
+            if (captured == PieceType.KING) {
+                throw new IllegalStateException("Cannot capture the king");
+            }
             clearSquare(toIndex, !isWhite);
         }
 
