@@ -237,14 +237,16 @@ $(document).ready(function () {
 
     // Prevent the page from scrolling when interacting with the board on touch devices
     const boardElement = document.getElementById('board');
-    ['touchstart', 'touchmove'].forEach(evt => {
-        boardElement.addEventListener(
-            evt,
-            e => {
-                if (e.cancelable) e.preventDefault();
-            },
-            { passive: false }
-        );
+    const preventScroll = e => { if (e.cancelable) e.preventDefault(); };
+
+    boardElement.addEventListener('touchmove', preventScroll, { passive: false });
+    boardElement.addEventListener('touchstart', () => {
+        document.body.addEventListener('touchmove', preventScroll, { passive: false });
+    });
+    ['touchend', 'touchcancel'].forEach(evt => {
+        boardElement.addEventListener(evt, () => {
+            document.body.removeEventListener('touchmove', preventScroll);
+        });
     });
 
     initEventListeners();
