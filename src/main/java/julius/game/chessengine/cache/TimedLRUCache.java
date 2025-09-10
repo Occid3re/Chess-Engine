@@ -69,7 +69,9 @@ public class TimedLRUCache<V> {
     }
 
     private void evict(long now) {
-        while (!keyQueue.isEmpty()) {
+        // Ensure both queues contain data before accessing their heads to avoid
+        // NoSuchElementException when they become unsynchronized.
+        while (!keyQueue.isEmpty() && !timeQueue.isEmpty()) {
             long k = keyQueue.firstLong();
             long t = timeQueue.firstLong();
             Entry<V> entry = map.get(k);
@@ -85,6 +87,12 @@ public class TimedLRUCache<V> {
             } else {
                 break;
             }
+        }
+
+        // If the queues ever get out of sync, clear them to reset state.
+        if (keyQueue.size() != timeQueue.size()) {
+            keyQueue.clear();
+            timeQueue.clear();
         }
     }
 

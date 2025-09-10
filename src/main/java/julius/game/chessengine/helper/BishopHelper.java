@@ -70,7 +70,7 @@ public class BishopHelper {
             squareIndexCounts.put(square, indexCount);
             total += indexCount;
         }
-        log.info(" --- Bishop attacks take up a size of {} --- ", total);
+        log.debug(" --- Bishop attacks take up a size of {} --- ", total);
 
         // Create a list of square indices sorted by index counts in descending order
         List<Integer> squares = squareIndexCounts.entrySet().stream()
@@ -94,7 +94,7 @@ public class BishopHelper {
                 // Submit the task only if duplicates are found, indicating a need for optimization
                 executor.submit(() -> findMagicNumberForSquare(square, magicNumbers));
             } else {
-                log.info("Bishop square {} is fully optimized size {}", square, squareIndexCounts.get(square));
+                log.debug("Bishop square {} is fully optimized size {}", square, squareIndexCounts.get(square));
             }
         }
 
@@ -116,7 +116,7 @@ public class BishopHelper {
         long mask = bishopMasks[square];
         Set<Long> occupancies = generateAllOccupancies(mask);
         int minIndices = calculateIndexCount(bishopMagics[square], square, mask);
-        log.info("Bishop Square: {}, has a size of {}", square, minIndices);
+        log.debug("Bishop Square: {}, has a size of {}", square, minIndices);
 
 
         while (true) {
@@ -140,7 +140,7 @@ public class BishopHelper {
                 minIndices = indexToOccupancy.size(); // Update to the new lower value
                 bishopMagics[square] = magicCandidate; // Update the magic number
                 squareMagicFound[square] = true;
-                log.info("Bishop Optimized magic number found for square " + square + ": " + magicCandidate);
+                log.debug("Bishop Optimized magic number found for square " + square + ": " + magicCandidate);
                 magicNumbers.put(square, magicCandidate);
                 break;
             }
