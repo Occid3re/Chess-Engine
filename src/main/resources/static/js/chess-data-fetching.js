@@ -35,6 +35,11 @@ const updateCalculatedLine = () => {
         updateKingGlow(gameState); // Update the king glow based on game state
         updateGameDetails(data);
     });
+
+    makeRequest('GET', 'http://localhost:8080/chess/search/status', (status) => {
+        const side = status.sideToMove.charAt(0) + status.sideToMove.slice(1).toLowerCase();
+        document.getElementById('turnIndicator').textContent = `Turn: ${side}`;
+    });
 };
 
 // Add an event listener to the "View Details" button
