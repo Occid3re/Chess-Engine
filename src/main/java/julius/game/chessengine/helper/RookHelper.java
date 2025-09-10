@@ -31,27 +31,36 @@ public class RookHelper {
     private static RookHelper instance = null;
 
     public final static int[] WHITE_ROOK_POSITIONAL_VALUES = {
-            // Ranks 1 to 8 (for a White Rook)
-            0, 0, 0, 0, 0, 0, 0, 0,     // Rank 1 (Back rank, initial position)
-            5, 10, 10, 10, 10, 10, 10, 5, // Rank 2
-            5, 10, 10, 10, 10, 10, 10, 5, // Rank 3
-            5, 10, 15, 15, 15, 15, 10, 5, // Rank 4
-            5, 10, 15, 20, 20, 15, 10, 5, // Rank 5
-            5, 10, 15, 20, 20, 15, 10, 5, // Rank 6
-            10, 20, 25, 30, 30, 25, 20, 10, // Rank 7
-            15, 25, 30, 35, 35, 30, 25, 15  // Rank 8 (Advanced position)
+            // R1
+            0,  0,  0,  0,  0,  0,  0,  0,
+            // R2
+            5, 10, 10, 10, 10, 10, 10,  5,
+            // R3
+            -5,  0,  0,  0,  0,  0,  0, -5,
+            // R4
+            -5,  0,  0,  0,  0,  0,  0, -5,
+            // R5
+            -5,  0,  0,  0,  0,  0,  0, -5,
+            // R6
+            -5,  0,  0,  0,  0,  0,  0, -5,
+            // R7
+            -5,  0,  0,  5,  5,  0,  0, -5,
+            // R8
+            0,  0,  0,  5,  5,  0,  0,  0
     };
 
     public final static int[] BLACK_ROOK_POSITIONAL_VALUES = {
-            15, 25, 30, 35, 35, 30, 25, 15, // Rank 1 (Advanced position)
-            10, 20, 25, 30, 30, 25, 20, 10, // Rank 2
-            5, 10, 15, 20, 20, 15, 10, 5, // Rank 3
-            5, 10, 15, 20, 20, 15, 10, 5,   // Rank 4
-            5, 10, 15, 15, 15, 15, 10, 5,   // Rank 5
-            5, 10, 10, 10, 10, 10, 10, 5,   // Rank 6
-            5, 10, 10, 10, 10, 10, 10, 5,   // Rank 7
-            0, 0, 0, 0, 0, 0, 0, 0          // Rank 8 (Back rank, initial position)
+            // mirror of white
+            0,  0,  0,  5,  5,  0,  0,  0, // R1
+            -5,  0,  0,  5,  5,  0,  0, -5, // R2
+            -5,  0,  0,  0,  0,  0,  0, -5, // R3
+            -5,  0,  0,  0,  0,  0,  0, -5, // R4
+            -5,  0,  0,  0,  0,  0,  0, -5, // R5
+            -5,  0,  0,  0,  0,  0,  0, -5, // R6
+            5, 10, 10, 10, 10, 10, 10,  5, // R7
+            0,  0,  0,  0,  0,  0,  0,  0  // R8
     };
+
 
     public RookHelper() {
         loadMagicNumbers();
