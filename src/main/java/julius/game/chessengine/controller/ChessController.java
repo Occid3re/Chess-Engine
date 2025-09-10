@@ -63,7 +63,7 @@ public class ChessController {
 
     @PostMapping(value = "/train")
     public ResponseEntity<?> train() {
-        ai.trainSelfPlay(1);
+        ai.trainSelfPlay(1000);
         return ResponseEntity.ok().build();
     }
 
