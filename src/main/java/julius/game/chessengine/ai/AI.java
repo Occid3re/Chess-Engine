@@ -393,8 +393,8 @@ public class AI {
 
         for (int moveInt : sortedMoves) {
 
-            // Time check at the beginning of each loop iteration
-            if (System.nanoTime() > deadline) {
+            // Exit early if the search was cancelled or the position changed
+            if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
                 break;
             }
 
@@ -443,8 +443,8 @@ public class AI {
      */
     private double alphaBeta(Engine simulatorEngine, int depth, double alpha, double beta, boolean isWhite, long deadline) {
         nodesVisited++;
-        // Check for time limit exceeded
-        if (System.nanoTime() > deadline) {
+        // Stop if the search was cancelled, the position changed, or time ran out
+        if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
             return EXIT_FLAG;
         }
 
@@ -516,6 +516,9 @@ public class AI {
 
         ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, depth, boardHash);
         for (int index = 0; index < orderedMoves.size(); index++) {
+            if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
+                return EXIT_FLAG;
+            }
             int move = orderedMoves.get(index);
             simulatorEngine.performMove(move);
             long newBoardHash = simulatorEngine.getBoardStateHash();
@@ -615,6 +618,9 @@ public class AI {
 
         ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, depth, boardHash);
         for (int index = 0; index < orderedMoves.size(); index++) {
+            if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
+                return EXIT_FLAG;
+            }
             int move = orderedMoves.get(index);
             simulatorEngine.performMove(move);
             long newBoardHash = simulatorEngine.getBoardStateHash();
