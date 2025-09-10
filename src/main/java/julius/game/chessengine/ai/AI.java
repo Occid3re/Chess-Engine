@@ -1,5 +1,6 @@
 package julius.game.chessengine.ai;
 
+import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.Move;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.MoveList;
@@ -110,6 +111,10 @@ public class AI {
 
     private boolean useNullMovePruning = true;
     private boolean useLateMoveReductions = true;
+    private final NeuralEvaluator neuralEvaluator = new NeuralEvaluator();
+    @Getter
+    @Setter
+    private boolean useNeuralEvaluation = false;
     @Getter
     private long nodesVisited = 0;
     @Getter
@@ -859,7 +864,7 @@ public class AI {
         // If side to move is in check, search all legal evasions (not only captures)
         boolean inCheck = isSideInCheck(simulatorEngine, isWhitesTurn);
 
-        double standPat = evaluateStaticPosition(simulatorEngine.getGameState(), isWhitesTurn, depth);
+        double standPat = evaluateStaticPosition(simulatorEngine.getGameState(), simulatorEngine.getBitBoard(), isWhitesTurn, depth);
         if (!inCheck) {
             if (standPat >= beta) {
                 return beta; // fail-hard beta
@@ -899,7 +904,7 @@ public class AI {
         return alpha;
     }
 
-    private double evaluateStaticPosition(GameState gameState, boolean isWhitesTurn, int depth) {
+    private double evaluateStaticPosition(GameState gameState, BitBoard board, boolean isWhitesTurn, int depth) {
 
         if (gameState.isInStateCheckMate()) {
             if (log.isDebugEnabled()) {
@@ -919,6 +924,15 @@ public class AI {
             }
             return DRAW;
         }
+        if (useNeuralEvaluation) {
+            try {
+                double neural = neuralEvaluator.evaluate(board);
+                return isWhitesTurn ? neural : -neural;
+            } catch (Exception e) {
+                // Fallback to heuristic score below
+            }
+        }
+
         double scoreDifference = gameState.getScore().getScoreDifference();
 
         if (log.isDebugEnabled()) {
