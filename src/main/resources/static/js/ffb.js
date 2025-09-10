@@ -1,9 +1,10 @@
 $(document).ready(function () {
     let computerColor = 'black'; // Default computer color
 
+    const apiBaseUrl = window.location.origin;
     const makeRequest = async (method, url, callback) => {
         try {
-            const response = await fetch(url, { method });
+            const response = await fetch(`${apiBaseUrl}${url}`, { method });
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             const data = await response.json();
             if (callback) callback(data);
@@ -15,7 +16,7 @@ $(document).ready(function () {
     let latestGameData = null; 
 
     const updateCalculatedLine = () => {
-        makeRequest('GET', 'http://localhost:8080/chess/state', (data) => {
+        makeRequest('GET', '/chess/state', (data) => {
             latestGameData = data;    
             const lineText = data.move || "No moves yet";
             const gameState = data.gameState.state;
@@ -80,7 +81,7 @@ $(document).ready(function () {
 
     function importFEN(fenString) {
         var encodedFenString = encodeURIComponent(fenString);
-        makeRequest('PATCH', `http://localhost:8080/chess/fen?fen=${encodedFenString}`, () => {
+        makeRequest('PATCH', `/chess/fen?fen=${encodedFenString}`, () => {
             reloadBoard();
         });
     }
@@ -142,18 +143,18 @@ $(document).ready(function () {
     };
 
     const makeMove = (type, color) => {
-        makeRequest('PATCH', `http://localhost:8080/chess/figure/move/${type}/${color}`, (data) => {
+        makeRequest('PATCH', `/chess/figure/move/${type}/${color}`, (data) => {
             checkState(data.state);
             reloadBoard();
         });
     };
 
     const onDrop = (source, target) => {
-        makeRequest('PATCH', `http://localhost:8080/chess/figure/move/${source}/${target}`, reloadBoard);
+        makeRequest('PATCH', `/chess/figure/move/${source}/${target}`, reloadBoard);
     };
 
     const reloadBoard = () => {
-        makeRequest('GET', 'http://localhost:8080/chess/figure/frontend', (data) => {
+        makeRequest('GET', '/chess/figure/frontend', (data) => {
             board.position(data.renderBoard);
             updateCalculatedLine(); // Update the calculated line
         });
@@ -166,7 +167,7 @@ $(document).ready(function () {
     };
 
     const onMouseoverSquare = (square) => {
-        makeRequest('GET', `http://localhost:8080/chess/figure/move/possible/${square}`, (moves) => {
+        makeRequest('GET', `/chess/figure/move/possible/${square}`, (moves) => {
             if (moves.length === 0) return;
             highlightSquare(square, true);
             moves.forEach(move => highlightSquare(move.x + move.y, true));
@@ -182,17 +183,17 @@ $(document).ready(function () {
             makeMove('intelligent', computerColor);
         });
         $('#resetBoard').on('click', () => {
-            makeRequest('PUT', 'http://localhost:8080/chess/reset', () => {
+            makeRequest('PUT', '/chess/reset', () => {
                 reloadBoard();
             });
         });
         $('#undoMove').on('click', () => {
-            makeRequest('GET', 'http://localhost:8080/chess/undo', () => {
+            makeRequest('GET', '/chess/undo', () => {
                 reloadBoard();
             });
         });
         $('#autoPlay').on('click', () => {
-            makeRequest('GET', 'http://localhost:8080/chess/autoplay', () => {
+            makeRequest('GET', '/chess/autoplay', () => {
                 reloadBoard();
             });
         });

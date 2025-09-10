@@ -17,16 +17,16 @@ $(document).ready(function () {
         $('#playWhite').on('click', () => chooseColorAndAutoPlay('white'));
         $('#playBlack').on('click', () => chooseColorAndAutoPlay('black'));
         $('#resetBoard').on('click', () => {
-            makeRequest('PUT', 'http://localhost:8080/chess/reset', reloadBoard); // Assuming makeRequest and reloadBoard are defined in chess-data-fetching.js
+            makeRequest('PUT', '/chess/reset', reloadBoard); // Assuming makeRequest and reloadBoard are defined in chess-data-fetching.js
         });
         $('#undoMove').on('click', () => {
-            makeRequest('GET', 'http://localhost:8080/chess/undo', reloadBoard); // Assuming makeRequest and reloadBoard are defined in chess-data-fetching.js
+            makeRequest('GET', '/chess/undo', reloadBoard); // Assuming makeRequest and reloadBoard are defined in chess-data-fetching.js
         });
         $('#redoMove').on('click', () => {
-            makeRequest('GET', 'http://localhost:8080/chess/redo', reloadBoard); 
+            makeRequest('GET', '/chess/redo', reloadBoard);
         });
         $('#autoPlay').on('click', () => {
-            makeRequest('GET', 'http://localhost:8080/chess/autoplay', reloadBoard); // Assuming makeRequest and reloadBoard are defined in chess-data-fetching.js
+            makeRequest('GET', '/chess/autoplay', reloadBoard); // Assuming makeRequest and reloadBoard are defined in chess-data-fetching.js
         });
         $('#importFEN').on('click', function () {
             var fenString = prompt("Please enter FEN:");

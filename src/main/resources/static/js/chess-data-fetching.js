@@ -9,9 +9,10 @@ let lastPossibleMoves = [];
 let previousPiecesData = null;
 
 // Function to make API requests
+const apiBaseUrl = window.location.origin;
 const makeRequest = async (method, url, callback) => {
     try {
-        const response = await fetch(url, { method });
+        const response = await fetch(`${apiBaseUrl}${url}`, { method });
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const data = await response.json();
         if (callback) callback(data);
@@ -22,7 +23,7 @@ const makeRequest = async (method, url, callback) => {
 
 // Update the calculated line and game details
 const updateCalculatedLine = () => {
-    makeRequest('GET', 'http://localhost:8080/chess/state', (data) => {
+    makeRequest('GET', '/chess/state', (data) => {
         latestStateData = data;
         const lineText = data.move || "No moves yet";
         const gameState = data.gameState.state;
@@ -36,7 +37,7 @@ const updateCalculatedLine = () => {
         updateGameDetails(data);
     });
 
-    makeRequest('GET', 'http://localhost:8080/chess/search/status', (status) => {
+    makeRequest('GET', '/chess/search/status', (status) => {
         const side = status.sideToMove.charAt(0) + status.sideToMove.slice(1).toLowerCase();
         document.getElementById('turnIndicator').textContent = `Turn: ${side}`;
     });
@@ -46,7 +47,7 @@ const updateCalculatedLine = () => {
 document.getElementById('PGN').addEventListener('click', async function(event) {
     event.preventDefault();
     try {
-        const response = await fetch('http://localhost:8080/chess/pgn', { method: 'GET' });
+        const response = await fetch(`${apiBaseUrl}/chess/pgn`, { method: 'GET' });
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const pgnData = await response.json();
 
@@ -65,7 +66,7 @@ const updateSliderValue = (value) => {
 const handleSliderChange = () => {
     const sliderValue = $('#autoplaySlider').val();
     updateSliderValue(sliderValue);
-    makeRequest('PATCH', `http://localhost:8080/chess/autoplay/timelimit/${sliderValue}`, reloadBoard);
+    makeRequest('PATCH', `/chess/autoplay/timelimit/${sliderValue}`, reloadBoard);
 };
 
 // Initialize slider event listener
@@ -209,14 +210,14 @@ const checkState = (state) => {
 // Function to import FEN
 function importFEN(fenString) {
     var encodedFenString = encodeURIComponent(fenString);
-    makeRequest('PATCH', `http://localhost:8080/chess/fen?fen=${encodedFenString}`, () => {
+    makeRequest('PATCH', `/chess/fen?fen=${encodedFenString}`, () => {
         reloadBoard();
     });
 }
 
 // Function to make a move
 const autoPlayColor = (color) => {
-    makeRequest('PATCH', `http://localhost:8080/chess/autoplay/${color}`, (data) => {
+    makeRequest('PATCH', `/chess/autoplay/${color}`, (data) => {
         checkState(data.state);
         reloadBoard();
     });
@@ -224,12 +225,12 @@ const autoPlayColor = (color) => {
 // Function for onDrop event
 const onDrop = (source, target) => {
     const saveToOpeningBook = document.getElementById('recordOpeningMove').checked;
-    const url = `http://localhost:8080/chess/figure/move/${source}/${target}?saveToOpeningBook=${saveToOpeningBook}`;
+    const url = `/chess/figure/move/${source}/${target}?saveToOpeningBook=${saveToOpeningBook}`;
     makeRequest('PATCH', url, reloadBoard);
 };
 
 const onMouseoverSquare = (square) => {
-    makeRequest('GET', `http://localhost:8080/chess/figure/move/possible/${square}`, (moves) => {
+    makeRequest('GET', `/chess/figure/move/possible/${square}`, (moves) => {
         if (moves.length === 0) return;
         highlightSquare(square, true);
         moves.forEach(move => highlightSquare(move.x + move.y, true));
@@ -281,7 +282,7 @@ const initBoard = () => {
 };
 
 const reloadBoard = () => {
-    makeRequest('GET', 'http://localhost:8080/chess/figure/frontend', (newData) => {
+    makeRequest('GET', '/chess/figure/frontend', (newData) => {
         if (board) {
             // Compare new data with previous data
 
