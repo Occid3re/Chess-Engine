@@ -69,6 +69,8 @@ public class GameState {
     public void updateScore(BitBoard bitBoard, int move) {
         //reset cached score
         score.resetCachedScoreDifference();
+        // keep board snapshot for neural evaluation
+        score.setCurrentBoard(new BitBoard(bitBoard));
 
         boolean isWhite = MoveHelper.isWhitesMove(move);
         int pieceTypeBits = MoveHelper.derivePieceTypeBits(move);

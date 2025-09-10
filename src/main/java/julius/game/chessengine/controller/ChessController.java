@@ -61,6 +61,12 @@ public class ChessController {
         return ResponseEntity.ok().build();
     }
 
+    @PostMapping(value = "/train")
+    public ResponseEntity<?> train() {
+        ai.trainSelfPlay(1);
+        return ResponseEntity.ok().build();
+    }
+
     @PatchMapping(value = "/autoplay/timelimit/{millis}")
     public ResponseEntity<?> autoplaySetTimelimit(@PathVariable("millis") long millis)  {
         ai.setTimeLimit(millis); // interpret as milliseconds

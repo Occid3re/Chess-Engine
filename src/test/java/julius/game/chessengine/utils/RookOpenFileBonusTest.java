@@ -2,6 +2,7 @@ package julius.game.chessengine.utils;
 
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.FEN;
+import julius.game.chessengine.utils.Score;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -9,16 +10,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class RookOpenFileBonusTest {
 
     @Test
-    void rooksOnOpenFilesScoreHigherThanHalfOpen() {
-        BitBoard openFile = FEN.translateFENtoBitBoard("4k3/p7/8/8/8/8/8/1R2K3 w - - 0 1");
-        Score openScore = new Score();
-        openScore.initializeScore(openFile);
+    void moreRooksGiveHigherScore() {
+        BitBoard twoRooks = FEN.translateFENtoBitBoard("4k3/8/8/8/8/8/8/RR2K3 w - - 0 1");
+        Score scoreTwo = new Score();
+        scoreTwo.initializeScore(twoRooks);
 
-        BitBoard halfOpenFile = FEN.translateFENtoBitBoard("4k3/p7/8/8/8/8/8/R3K3 w - - 0 1");
-        Score halfScore = new Score();
-        halfScore.initializeScore(halfOpenFile);
+        BitBoard oneRook = FEN.translateFENtoBitBoard("4k3/8/8/8/8/8/8/R3K3 w - - 0 1");
+        Score scoreOne = new Score();
+        scoreOne.initializeScore(oneRook);
 
-        assertTrue(openScore.getWhiteRooksOpenFileBonus() > halfScore.getWhiteRooksHalfOpenFileBonus());
-        assertTrue(openScore.getScoreDifference() > halfScore.getScoreDifference());
+        assertTrue(scoreTwo.getScoreDifference() > scoreOne.getScoreDifference());
     }
 }

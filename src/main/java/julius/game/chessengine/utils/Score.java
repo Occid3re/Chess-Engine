@@ -3,6 +3,8 @@ package julius.game.chessengine.utils;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.GameStateEnum;
+import julius.game.chessengine.figures.PieceType;
+import julius.game.chessengine.nn.NeuralNetwork;
 import lombok.Data;
 import lombok.extern.log4j.Log4j2;
 
@@ -58,6 +60,9 @@ public class Score {
     public static final int BISHOP_PAIR_BONUS = 40;
 
     private Double cachedScoreDifference = null;
+
+    /** Latest board position used to derive neural network features. */
+    private BitBoard currentBoard;
 
     private int whiteScore;
     private int blackScore;
@@ -202,6 +207,7 @@ public class Score {
         this.blackStateBonus = other.blackStateBonus;
 
         this.cachedScoreDifference = other.cachedScoreDifference;
+        this.currentBoard = other.currentBoard != null ? new BitBoard(other.currentBoard) : null;
     }
 
 
@@ -210,6 +216,8 @@ public class Score {
      */
     public void initializeScore(BitBoard bitBoard) {
         cachedScoreDifference = null;
+        // keep a copy of the current board for feature extraction
+        this.currentBoard = new BitBoard(bitBoard);
 
         long whitePawns = bitBoard.getWhitePawns();
         long blackPawns = bitBoard.getBlackPawns();
@@ -293,10 +301,41 @@ public class Score {
 
     public double getScoreDifference() {
         if (cachedScoreDifference == null) {
-            cachedScoreDifference = (calculateTotalWhiteScore() - calculateTotalBlackScore()) / 100.0;
+            cachedScoreDifference = NeuralNetwork.getInstance().evaluate(toFeatureVector());
         }
-
         return cachedScoreDifference;
+    }
+
+    public double[] toFeatureVector() {
+        double[] features = new double[65];
+        if (currentBoard == null) {
+            return features;
+        }
+        PieceType[] pieces = currentBoard.getPieceBoard();
+        long whiteMask = currentBoard.getWhitePieces();
+        long blackMask = currentBoard.getBlackPieces();
+        for (int i = 0; i < 64; i++) {
+            PieceType type = pieces[i];
+            if (type == null) {
+                features[i] = 0;
+                continue;
+            }
+            int code;
+            switch (type) {
+                case PAWN: code = 1; break;
+                case KNIGHT: code = 2; break;
+                case BISHOP: code = 3; break;
+                case ROOK: code = 4; break;
+                case QUEEN: code = 5; break;
+                case KING: code = 6; break;
+                default: code = 0;
+            }
+            boolean white = ((whiteMask >>> i) & 1L) != 0;
+            boolean black = ((blackMask >>> i) & 1L) != 0;
+            features[i] = white ? code : (black ? -code : 0);
+        }
+        features[64] = currentBoard.isWhitesTurn() ? 1 : -1;
+        return features;
     }
 
     public int calculateTotalWhiteScore() {

@@ -6,6 +6,7 @@ import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
+import julius.game.chessengine.nn.NeuralNetwork;
 import julius.game.chessengine.utils.Score;
 import lombok.Getter;
 import lombok.Setter;
@@ -194,6 +195,39 @@ public class AI {
                 }
             }
         }, 0, 50, TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * Trains the evaluation network by letting the engine play against itself
+     * for a couple of games.  The training is intentionally lightweight to keep
+     * the example simple and fast.
+     */
+    public void trainSelfPlay(int games) {
+        NeuralNetwork nn = NeuralNetwork.getInstance();
+        for (int g = 0; g < games; g++) {
+            mainEngine.startNewGame();
+            List<double[]> history = new ArrayList<>();
+            while (!mainEngine.getGameState().isGameOver()) {
+                history.add(mainEngine.getGameState().getScore().toFeatureVector());
+                Engine sim = mainEngine.createSimulation();
+                MoveAndScore mas = getBestMove(sim, sim.whitesTurn(), 2,
+                        System.nanoTime() + timeLimit * 1_000_000,
+                        Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY);
+                if (mas == null) {
+                    break;
+                }
+                mainEngine.performMove(mas.move);
+            }
+            double result = 0d;
+            GameStateEnum state = mainEngine.getGameState().getState();
+            if (state == GameStateEnum.WHITE_WON) {
+                result = 1d;
+            } else if (state == GameStateEnum.BLACK_WON) {
+                result = -1d;
+            }
+            nn.train(history, result);
+        }
+        nn.save();
     }
 
     public void performMove() {

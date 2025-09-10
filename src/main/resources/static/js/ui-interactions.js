@@ -34,6 +34,9 @@ $(document).ready(function () {
                 importFEN(fenString); // Assuming importFEN is defined in chess-data-fetching.js
             }
         });
+        $('#trainAI').on('click', () => {
+            makeRequest('POST', 'http://localhost:8080/chess/train', reloadBoard);
+        });
     };
 
     // Initialize event listeners
