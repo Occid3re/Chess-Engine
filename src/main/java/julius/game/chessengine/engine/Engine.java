@@ -1,6 +1,8 @@
 package julius.game.chessengine.engine;
 
 import julius.game.chessengine.ai.OpeningBook;
+import julius.game.chessengine.ai.nnue.NnueConfig;
+import julius.game.chessengine.ai.nnue.NnueEvaluator;
 import julius.game.chessengine.board.*;
 import julius.game.chessengine.cache.TimedLRUCache;
 import julius.game.chessengine.figures.PieceType;
@@ -15,6 +17,14 @@ import java.util.stream.Collectors;
 @Service
 @Log4j2
 public class Engine {
+
+    static {
+        try {
+            NnueEvaluator.INSTANCE.loadFromResource(NnueConfig.RESOURCE);
+        } catch (Exception e) {
+            NnueConfig.ENABLE_NNUE = false;
+        }
+    }
 
     private static final int MAX_SIZE = 5_000_000;
     private static final int MAX_AGE = 10_000;

@@ -7,6 +7,8 @@ import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.utils.Score;
+import julius.game.chessengine.ai.nnue.NnueConfig;
+import julius.game.chessengine.ai.nnue.NnueIntegration;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.log4j.Log4j2;
@@ -926,7 +928,9 @@ public class AI {
                     isWhitesTurn ? scoreDifference : -scoreDifference,
                     isWhitesTurn ? "WHITE" : "BLACK");
         }
-        return isWhitesTurn ? scoreDifference : -scoreDifference;
+        return NnueConfig.ENABLE_NNUE
+                ? NnueIntegration.blendedEval(gameState, isWhitesTurn)
+                : (isWhitesTurn ? scoreDifference : -scoreDifference);
     }
 
     private MoveList getPossibleCapturesOrPromotions(Engine simulatorEngine) {
