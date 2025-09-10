@@ -217,7 +217,6 @@ public class AI {
             log.debug("Current best move {} is not valid for the current turn.", Move.convertIntToMove(currentBestMove));
             return; // Return the current state without making a move
         }
-        log.info("Perform Move");
         mainEngine.performMove(currentBestMove);
         currentBoardState = mainEngine.getBoardStateHash();
         synchronized (calculationLock) {
@@ -419,7 +418,6 @@ public class AI {
                 score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline);
                 // Check for time limit exceeded after alphaBeta call
                 if (score == EXIT_FLAG || positionChanged()) {
-                    log.info("best Position changed");
                     simulatorEngine.undoLastMove(); // Undo move using its integer representation
                     break;
                 }
@@ -454,7 +452,7 @@ public class AI {
      */
     private double alphaBeta(Engine simulatorEngine, int depth, double alpha, double beta, boolean isWhite, long deadline) {
         if (log.isDebugEnabled()) {
-            log.debug(" ------------------------- {} ------------------------- ", depth);
+            log.debug("Entering search depth {}", depth);
         }
         nodesVisited++;
         // Check for time limit exceeded
@@ -559,7 +557,6 @@ public class AI {
 
                 if (eval == EXIT_FLAG || positionChanged()) {
                     simulatorEngine.undoLastMove();
-                    log.info("maxi Position changed");
                     return EXIT_FLAG;
                 }
 
@@ -567,7 +564,6 @@ public class AI {
                     eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline);
                     if (eval == EXIT_FLAG || positionChanged()) {
                         simulatorEngine.undoLastMove();
-                        log.info("maxi Position changed");
                         return EXIT_FLAG;
                     }
                 }
@@ -576,7 +572,6 @@ public class AI {
                     eval = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhite, deadline);
                     if (eval == EXIT_FLAG || positionChanged()) {
                         simulatorEngine.undoLastMove();
-                        log.info("maxi Position changed");
                         return EXIT_FLAG;
                     }
                 }
@@ -659,7 +654,6 @@ public class AI {
                 eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline);
 
                 if (eval == EXIT_FLAG || positionChanged()) {
-                    log.info("mini Position changed");
                     simulatorEngine.undoLastMove();
                     return EXIT_FLAG;
                 }
@@ -667,7 +661,6 @@ public class AI {
                 if (usePvs && eval > alpha && eval < beta) {
                     eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline);
                     if (eval == EXIT_FLAG || positionChanged()) {
-                        log.info("mini Position changed");
                         simulatorEngine.undoLastMove();
                         return EXIT_FLAG;
                     }
@@ -676,7 +669,6 @@ public class AI {
                 if (reduced && eval < beta) {
                     eval = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhite, deadline);
                     if (eval == EXIT_FLAG || positionChanged()) {
-                        log.info("mini Position changed");
                         simulatorEngine.undoLastMove();
                         return EXIT_FLAG;
                     }

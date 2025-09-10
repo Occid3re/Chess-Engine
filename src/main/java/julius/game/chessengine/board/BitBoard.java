@@ -1079,7 +1079,7 @@ public class BitBoard {
             logBoard.append("  ").append(rank).append('\n'); // Append the rank number at the end of each line
         }
         logBoard.append("a b c d e f g h"); // Append file letters at the bottom
-        log.info(logBoard.toString()); // Log the current board state
+        log.debug(logBoard.toString()); // Log the current board state
     }
 
     private char getPieceChar(long positionMask) {
