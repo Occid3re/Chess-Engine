@@ -177,7 +177,10 @@ body {
 
 
 #board {
-    width: 512px;
+    width: 100%;
+    max-width: 512px;
+    touch-action: none;
+    -ms-touch-action: none;
 }
 
 /* Top Bar Styles */

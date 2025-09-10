@@ -232,6 +232,21 @@ $(document).ready(function () {
 
     const board = Chessboard('board', boardConfig);
 
+    // Keep board responsive to screen size
+    $(window).resize(board.resize);
+
+    // Prevent the page from scrolling when interacting with the board on touch devices
+    const boardElement = document.getElementById('board');
+    ['touchstart', 'touchmove'].forEach(evt => {
+        boardElement.addEventListener(
+            evt,
+            e => {
+                if (e.cancelable) e.preventDefault();
+            },
+            { passive: false }
+        );
+    });
+
     initEventListeners();
     initColorChoiceEventListeners();
     reloadBoard();
