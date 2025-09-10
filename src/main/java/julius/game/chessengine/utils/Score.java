@@ -37,12 +37,15 @@ public class Score {
     // --- Pawn structure (cp). Slightly gentler, less swingy. ---
     private static final int DOUBLED_PAWN_PENALTY  = -12; // was -20
     private static final int ISOLATED_PAWN_PENALTY = -10; // ok
-    public  static final int PASSED_PAWN_BONUS     = 60;  // was 60 (kept)
+    public  static final int PASSED_PAWN_BONUS     = 60;  // kept
     public  static final int CENTER_PAWN_BONUS     = 15;  // was 20
     private static final int ADVANCED_PAWN_BONUS   = 8;   // was 10
     private static final int BLOCKED_PAWN_PENALTY  = -10; // was -8
     private static final int BACKWARD_PAWN_PENALTY = -12; // ok
 
+    // FIX: steer king away from blocking own passers / reward clear paths
+    private static final int OWN_KING_BLOCKS_PASSED_PAWN_PENALTY = -150; // big to outweigh PST pull
+    private static final int PASSED_PAWN_FREE_PATH_BONUS_PER_RANK = 12;  // small but helps pushing
 
     // Other bonuses and penalties
     private static final int NOT_CASTLED_AND_ROOK_MOVE_PENALTY = -20; // was -50 (too harsh early)
@@ -244,8 +247,11 @@ public class Score {
         updateDoubledPawnPenaltyBlack(blackPawns);
         updateIsolatedPawnPenaltyWhite(whitePawns);
         updateIsolatedPawnPenaltyBlack(blackPawns);
-        updatePassedPawnBonusWhite(whitePawns, blackPawns);
-        updatePassedPawnBonusBlack(blackPawns, whitePawns);
+
+        // FIX: passed-pawn bonus considers self-blockers / clear paths
+        updatePassedPawnBonusWhite(whitePawns, blackPawns, allPieces, whiteKing);
+        updatePassedPawnBonusBlack(blackPawns, whitePawns, allPieces, blackKing);
+
         whitePawnAdvanceBonus = calculatePawnAdvanceBonus(whitePawns, allPieces, blackAttacks, true, phase);
         blackPawnAdvanceBonus = calculatePawnAdvanceBonus(blackPawns, allPieces, whiteAttacks, false, phase);
         whiteBlockedPawnPenalty = calculateBlockedPawnPenalty(whitePawns, allPieces, true, phase);
@@ -430,12 +436,13 @@ public class Score {
         blackIsolatedPawnPenalty = countIsolatedPawns(blackPawns) * ISOLATED_PAWN_PENALTY;
     }
 
-    public void updatePassedPawnBonusWhite(long whitePawns, long blackPawns) {
-        whitePassedPawnBonus = calculatePassedPawnBonus(whitePawns, blackPawns, true);
+    // FIX: new signatures accept allPieces and own king to avoid rewarding self-blocked passers
+    public void updatePassedPawnBonusWhite(long whitePawns, long blackPawns, long allPieces, long whiteKing) {
+        whitePassedPawnBonus = calculatePassedPawnBonus(whitePawns, blackPawns, allPieces, whiteKing, true);
     }
 
-    public void updatePassedPawnBonusBlack(long blackPawns, long whitePawns) {
-        blackPassedPawnBonus = calculatePassedPawnBonus(blackPawns, whitePawns, false);
+    public void updatePassedPawnBonusBlack(long blackPawns, long whitePawns, long allPieces, long blackKing) {
+        blackPassedPawnBonus = calculatePassedPawnBonus(blackPawns, whitePawns, allPieces, blackKing, false);
     }
 
     public void updateCenterPawnBonusWhite(long whitePawns) {
@@ -497,39 +504,60 @@ public class Score {
         return penalty * (256 + phase) / 256;
     }
 
-    private int calculatePassedPawnBonus(long pawns, long opponentPawns, boolean isWhite) {
+    // FIX: new version considers own king blocking the file, and rewards a clear file to promotion
+    private int calculatePassedPawnBonus(long pawns, long opponentPawns, long allPieces, long ownKing, boolean isWhite) {
         int bonus = 0;
         long remaining = pawns;
+
         while (remaining != 0) {
             long pawn = remaining & -remaining;
             remaining ^= pawn;
+
             int square = Long.numberOfTrailingZeros(pawn);
             int file = square % 8;
             int rank = square / 8 + 1;
+
             long fileMask = FileMasks[file];
-            if (file > 0) {
-                fileMask |= FileMasks[file - 1];
-            }
-            if (file < 7) {
-                fileMask |= FileMasks[file + 1];
-            }
-            long forwardMask = 0L;
+            long adjFilesMask = fileMask;
+            if (file > 0)  adjFilesMask |= FileMasks[file - 1];
+            if (file < 7)  adjFilesMask |= FileMasks[file + 1];
+
+            // Ranks forward (all squares ahead)
+            long forwardRanksMask = 0L;
             if (isWhite) {
-                for (int r = rank + 1; r <= 8; r++) {
-                    forwardMask |= RankMasks[r - 1];
-                }
-                if ((opponentPawns & (fileMask & forwardMask)) == 0) {
-                    bonus += PASSED_PAWN_BONUS * (rank - 1);
-                }
+                for (int r = rank + 1; r <= 8; r++) forwardRanksMask |= RankMasks[r - 1];
             } else {
-                for (int r = rank - 1; r >= 1; r--) {
-                    forwardMask |= RankMasks[r - 1];
-                }
-                if ((opponentPawns & (fileMask & forwardMask)) == 0) {
-                    bonus += PASSED_PAWN_BONUS * (8 - rank);
-                }
+                for (int r = rank - 1; r >= 1; r--) forwardRanksMask |= RankMasks[r - 1];
             }
+
+            // Passed definition: no enemy pawn ahead on same or adjacent files
+            boolean isPassed = (opponentPawns & (adjFilesMask & forwardRanksMask)) == 0;
+            if (!isPassed) continue;
+
+            // Base bonus grows with advancement (kept from your logic)
+            int base = PASSED_PAWN_BONUS * (isWhite ? (rank - 1) : (8 - rank));
+
+            // Path squares on the same file ahead
+            long filePathAhead = fileMask & forwardRanksMask;
+
+            // One-step forward square (for immediate self-block check)
+            long oneStep = isWhite ? (pawn << 8) : (pawn >>> 8);
+
+            // If own king sits directly in front, penalize hard (this is the common issue you observed)
+            if ((oneStep & ownKing) != 0L) {
+                base += OWN_KING_BLOCKS_PASSED_PAWN_PENALTY; // strong nudge to move the king off the file
+            }
+
+            // If the entire file to promotion is clear (no pieces at all), add a small "free runway" bonus
+            // This slightly prefers stepping aside or clearing the path to start pushing.
+            if ((filePathAhead & allPieces) == 0L) {
+                int distToPromo = isWhite ? (8 - rank) : (rank - 1);
+                base += PASSED_PAWN_FREE_PATH_BONUS_PER_RANK * distToPromo;
+            }
+
+            bonus += base;
         }
+
         return bonus;
     }
 
@@ -750,6 +778,7 @@ public class Score {
         long whitePawns = bitBoard.getWhitePawns();
         long allPieces = bitBoard.getAllPieces();
         long blackAttacks = bitBoard.generateAttackBitboard(false);
+        long whiteKing = bitBoard.getWhiteKing();
         int phase = bitBoard.getPhase();
 
         this.whitePawnsAmountScore = Long.bitCount(whitePawns) * PAWN_VALUE;
@@ -757,6 +786,10 @@ public class Score {
         updateDoubledPawnPenaltyWhite(whitePawns);
         updatePawnsPositionBonusWhite(whitePawns);
         updateCenterPawnBonusWhite(whitePawns);
+
+        // FIX: pass allPieces + own king
+        updatePassedPawnBonusWhite(whitePawns, bitBoard.getBlackPawns(), allPieces, whiteKing);
+
         whitePawnAdvanceBonus = calculatePawnAdvanceBonus(whitePawns, allPieces, blackAttacks, true, phase);
         whiteBlockedPawnPenalty = calculateBlockedPawnPenalty(whitePawns, allPieces, true, phase);
         whiteBackwardPawnPenalty = calculateBackwardPawnPenalty(whitePawns, bitBoard.getBlackPawns(), allPieces, true, phase);
@@ -770,6 +803,7 @@ public class Score {
         long blackPawns = bitBoard.getBlackPawns();
         long allPieces = bitBoard.getAllPieces();
         long whiteAttacks = bitBoard.generateAttackBitboard(true);
+        long blackKing = bitBoard.getBlackKing();
         int phase = bitBoard.getPhase();
 
         this.blackPawnsAmountScore = Long.bitCount(blackPawns) * PAWN_VALUE;
@@ -777,6 +811,10 @@ public class Score {
         updateDoubledPawnPenaltyBlack(blackPawns);
         updatePawnsPositionBonusBlack(blackPawns);
         updateCenterPawnBonusBlack(blackPawns);
+
+        // FIX: pass allPieces + own king
+        updatePassedPawnBonusBlack(blackPawns, bitBoard.getWhitePawns(), allPieces, blackKing);
+
         blackPawnAdvanceBonus = calculatePawnAdvanceBonus(blackPawns, allPieces, whiteAttacks, false, phase);
         blackBlockedPawnPenalty = calculateBlockedPawnPenalty(blackPawns, allPieces, false, phase);
         blackBackwardPawnPenalty = calculateBackwardPawnPenalty(blackPawns, bitBoard.getWhitePawns(), allPieces, false, phase);
