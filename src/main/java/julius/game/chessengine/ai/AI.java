@@ -255,14 +255,26 @@ public class AI {
     private void performCalculation() {
         log.debug(" --- TranspositionTable[{}] --- ", transpositionTable.size());
         decayHistoryTable();
-        Engine simulatorEngine = mainEngine.createSimulation();
-        long boardStateHash = simulatorEngine.getBoardStateHash();
-        log.debug("boardStateBeforeCalculation {}, currentBoardState {}", beforeCalculationBoardState, currentBoardState);
+        try {
+            Engine simulatorEngine = mainEngine.createSimulation();
+            long boardStateHash = simulatorEngine.getBoardStateHash();
+            log.debug("boardStateBeforeCalculation {}, currentBoardState {}", beforeCalculationBoardState, currentBoardState);
 
-        // Perform calculation only if the board state has actually changed
-        boolean isWhite = simulatorEngine.whitesTurn();
-        long deadline = System.nanoTime() + timeLimit * 1_000_000;
-        calculateBestMove(simulatorEngine, boardStateHash, isWhite, deadline);
+            // Perform calculation only if the board state has actually changed
+            boolean isWhite = simulatorEngine.whitesTurn();
+            long deadline = System.nanoTime() + timeLimit * 1_000_000;
+            calculateBestMove(simulatorEngine, boardStateHash, isWhite, deadline);
+        } catch (IllegalStateException e) {
+            log.warn("Illegal board state during search: {}", e.getMessage());
+            MoveList legalMoves = mainEngine.getAllLegalMoves();
+            if (legalMoves.size() > 0) {
+                currentBestMove = legalMoves.getMove(0);
+            } else {
+                currentBestMove = -1;
+            }
+        } catch (Exception e) {
+            log.error("Unexpected error during calculation", e);
+        }
 
     }
 
