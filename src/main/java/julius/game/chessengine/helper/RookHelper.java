@@ -117,7 +117,7 @@ public class RookHelper {
             squareIndexCounts.put(square, indexCount);
             total += indexCount;
         }
-        log.info(" --- Rook attacks take up a size of {} --- ", total);
+        log.debug(" --- Rook attacks take up a size of {} --- ", total);
 
         // Create a list of square indices sorted by index counts in descending order
         List<Integer> squares = squareIndexCounts.entrySet().stream()
@@ -141,7 +141,7 @@ public class RookHelper {
                 executor.submit(() -> findMagicNumberForSquare(square, magicNumbers));
             }
             else {
-                log.info("Rook square {} is fully optimized size {}", square, squareIndexCounts.get(square));
+                log.debug("Rook square {} is fully optimized size {}", square, squareIndexCounts.get(square));
             }
         }
 
@@ -163,7 +163,7 @@ public class RookHelper {
         long mask = rookMasks[square];
         Set<Long> occupancies = generateAllOccupancies(mask);
         int minIndices = calculateIndexCount(rookMagics[square], square, mask);
-        log.info("Rook Square: {}, has a size of {}", square, minIndices);
+        log.debug("Rook Square: {}, has a size of {}", square, minIndices);
 
         while (true) {
             long magicCandidate = randomMagicNumber();
@@ -186,7 +186,7 @@ public class RookHelper {
                 minIndices = indexToOccupancy.size(); // Update to the new lower value
                 rookMagics[square] = magicCandidate; // Update the magic number
                 squareMagicFound[square] = true;
-                log.info("Rook Optimized magic number found for square " + square + ": " + magicCandidate);
+                log.debug("Rook Optimized magic number found for square " + square + ": " + magicCandidate);
                 magicNumbers.put(square, magicCandidate);
                 break;
             }
