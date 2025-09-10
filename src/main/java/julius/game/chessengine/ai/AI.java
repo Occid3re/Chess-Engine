@@ -110,7 +110,9 @@ public class AI {
 
     private boolean useNullMovePruning = true;
     private boolean useLateMoveReductions = true;
+    @Getter
     private long nodesVisited = 0;
+    @Getter
     private long nullMoveCount = 0;
 
 
@@ -130,21 +132,6 @@ public class AI {
         this.historyTable = new int[64][64];
     }
 
-    public void setUseNullMovePruning(boolean useNullMovePruning) {
-        this.useNullMovePruning = useNullMovePruning;
-    }
-
-    public void setUseLateMoveReductions(boolean useLateMoveReductions) {
-        this.useLateMoveReductions = useLateMoveReductions;
-    }
-
-    public long getNodesVisited() {
-        return nodesVisited;
-    }
-
-    public long getNullMoveCount() {
-        return nullMoveCount;
-    }
     public Integer getCurrentBestMoveInt() {
         return currentBestMove;
     }
@@ -716,72 +703,119 @@ public class AI {
 
 
     ArrayList<Integer> sortMovesByEfficiency(MoveList moves, int currentDepth, long boardHash) {
-        int size = moves.size();
+        final int size = moves.size();
+        final int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
 
-        // Ensure the depth index is within the killerMoves array bounds
-        int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
+        // Category encoding (higher is earlier):
+        // 7: TT move, 6: promotions, 5: good captures, 4: equal captures,
+        // 3: killer[0], 2: killer[1], 1: quiets (history), 0: bad captures
+        final int CAT_TT = 7, CAT_PROMO = 6, CAT_CAP_GOOD = 5, CAT_CAP_EQUAL = 4,
+                CAT_KILLER0 = 3, CAT_KILLER1 = 2, CAT_QUIET = 1, CAT_CAP_BAD = 0;
 
+        // Lightweight bonuses (local so no class changes):
+        final int PROMOTION_ORDER_BONUS = 900;   // strong push for promotions
+        final int KILLER0_BONUS = 50;            // distinguish first vs second killer
+        final int KILLER1_BONUS = 30;
+
+        // Hash move (TT) handling — keep your "pin to front" approach
         TranspositionTableEntry ttEntry = transpositionTable.get(boardHash);
-        int ttMove = ttEntry != null ? ttEntry.bestMove : -1;
+        final int ttMove = ttEntry != null ? ttEntry.bestMove : -1;
         int ttIndex = -1;
 
+        // Pre-fetch killers for this depth
+        final int k0 = killerMoves[depthIndex][0];
+        final int k1 = killerMoves[depthIndex][1];
+
         for (int i = 0; i < size; i++) {
-            int moveInt = moves.getMove(i);
-            int score = 0;
+            final int moveInt = moves.getMove(i);
 
-            boolean isKiller = false;
-            for (int killerMove : killerMoves[depthIndex]) {
-                if (moveInt == killerMove) {
-                    score = KILLER_MOVE_SCORE;
-                    isKiller = true;
-                    break;
-                }
-            }
-
-            if (!isKiller) {
-                int mvvLvaScore = calculateMvvLvaScore(moveInt);
-                if (mvvLvaScore != 0) {
-                    score = mvvLvaScore;
-                } else {
-                    int from = moveInt & 0x3F;
-                    int to = (moveInt >> 6) & 0x3F;
-                    score = historyTable[from][to];
-                }
-            }
-
-            moveBuffer[i] = moveInt;
-            scoreBuffer[i] = score;
-            sortBuffer[i] = (((long) score) << 32) | (moveInt & 0xffffffffL);
-
+            // Track TT move position for the "pin to front" trick
             if (moveInt == ttMove) {
                 ttIndex = i;
             }
+
+            // Compute base features
+            final boolean isCapture = MoveHelper.isCapture(moveInt);
+            final boolean isPromotion = MoveHelper.isPawnPromotionMove(moveInt);
+
+            int category;
+            int score;
+
+            if (moveInt == ttMove) {
+                // TT move gets the top category; score acts as tie-breaker only
+                category = CAT_TT;
+                score = Integer.MAX_VALUE; // ensure it stays first within its bucket
+            } else if (isPromotion) {
+                // Promotions are extremely forcing — sort before captures
+                category = CAT_PROMO;
+                int base = calculateMvvLvaScore(moveInt); // promotion-captures benefit, quiet promos keep 0
+                score = base + PROMOTION_ORDER_BONUS;
+            } else if (isCapture) {
+                // MVV-LVA for captures; classify as good/equal/bad without SEE
+                final int mvvLva = calculateMvvLvaScore(moveInt); // victim - attacker (can be negative)
+                if (mvvLva > 0) {
+                    category = CAT_CAP_GOOD;
+                } else if (mvvLva == 0) {
+                    category = CAT_CAP_EQUAL;
+                } else {
+                    category = CAT_CAP_BAD;
+                }
+                // Scale captures so bigger victims / smaller attackers bubble up
+                score = (mvvLva * 16); // small scale keeps room for tie-breaks
+            } else if (moveInt == k0) {
+                category = CAT_KILLER0;
+                score = KILLER_MOVE_SCORE + KILLER0_BONUS;
+            } else if (moveInt == k1) {
+                category = CAT_KILLER1;
+                score = KILLER_MOVE_SCORE + KILLER1_BONUS;
+            } else {
+                // Quiet with history
+                final int from = moveInt & 0x3F;
+                final int to   = (moveInt >>> 6) & 0x3F;
+                category = CAT_QUIET;
+                score = historyTable[from][to]; // butterfly history
+            }
+
+            // Persist (kept for compatibility with your buffers)
+            moveBuffer[i] = moveInt;
+            scoreBuffer[i] = score;
+
+            // Compose a sortable 64-bit key:
+            // [8 bits category][24 bits score clamped to unsigned][32 bits move id]
+            int s = score;
+            if (s < 0) s = 0; else if (s > 0x00FFFFFF) s = 0x00FFFFFF; // clamp to 24 bits
+            long key = (((long) category) << 56) | (((long) s) << 32) | (moveInt & 0xFFFFFFFFL);
+            sortBuffer[i] = key;
         }
 
+        // Keep TT move hard-pinned at the front (index 0), sort the remainder by key
         int sortStart = 0;
         if (ttIndex > 0) {
             long ttCombined = sortBuffer[ttIndex];
             System.arraycopy(sortBuffer, 0, sortBuffer, 1, ttIndex);
             sortBuffer[0] = ttCombined;
-            sortStart = 1; // keep TT move at front
+            sortStart = 1;
         }
 
-        Arrays.sort(sortBuffer, sortStart, size);
+        Arrays.sort(sortBuffer, sortStart, size); // ascending by key
 
+        // Build result in descending order (bigger category/score first)
         ArrayList<Integer> sortedMoveList = new ArrayList<>(size);
         if (ttIndex != -1) {
-            sortedMoveList.add((int) (sortBuffer[0] & 0xffffffffL));
+            // TT already at index 0
+            sortedMoveList.add((int) (sortBuffer[0] & 0xFFFFFFFFL));
             for (int i = size - 1; i >= 1; i--) {
-                sortedMoveList.add((int) (sortBuffer[i] & 0xffffffffL));
+                sortedMoveList.add((int) (sortBuffer[i] & 0xFFFFFFFFL));
             }
         } else {
             for (int i = size - 1; i >= 0; i--) {
-                sortedMoveList.add((int) (sortBuffer[i] & 0xffffffffL));
+                sortedMoveList.add((int) (sortBuffer[i] & 0xFFFFFFFFL));
             }
         }
 
         return sortedMoveList;
     }
+
 
     public double evaluateBoard(Engine simulatorEngine, boolean isWhitesTurn, long deadline) {
         if (simulatorEngine.getGameState().isInStateCheckMate()) {
@@ -815,36 +849,54 @@ public class AI {
         return score;
     }
 
-    private double quiescenceSearch(Engine simulatorEngine, boolean isWhitesTurn, double alpha, double beta, long deadline, int depth) {
+    private double quiescenceSearch(Engine simulatorEngine, boolean isWhitesTurn,
+                                    double alpha, double beta, long deadline, int depth) {
         if (System.nanoTime() > deadline) {
-            if (log.isDebugEnabled()) {
-                log.debug("timeout");
-            }
+            if (log.isDebugEnabled()) log.debug("timeout");
             return AI.EXIT_FLAG; // Timeout
         }
 
+        // If side to move is in check, search all legal evasions (not only captures)
+        boolean inCheck = isSideInCheck(simulatorEngine, isWhitesTurn);
+
         double standPat = evaluateStaticPosition(simulatorEngine.getGameState(), isWhitesTurn, depth);
-        if (standPat >= beta) {
-            return beta; // Fail-hard beta cutoff
-        }
-        if (alpha < standPat) {
-            alpha = standPat; // Delta pruning
+        if (!inCheck) {
+            if (standPat >= beta) {
+                return beta; // fail-hard beta
+            }
+            if (alpha < standPat) {
+                alpha = standPat; // raise alpha via stand-pat
+            }
+
+            // Simple delta/futility-like guard: if even a big swing cannot beat alpha, cut
+            // Keeps it conservative to avoid tactical blindness
+            final int BIG_DELTA = 1000; // ~queen
+            if (standPat + BIG_DELTA < alpha) {
+                return alpha;
+            }
         }
 
-        MoveList moves = getPossibleCapturesOrPromotions(simulatorEngine);
-        for (int i = 0; i < moves.size(); i++) {
-            simulatorEngine.performMove(moves.getMove(i));
-            double score = -quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, ++depth);
+        // Generate moves: evasions if in check, else captures/promotions
+        MoveList moves = inCheck ? simulatorEngine.getAllLegalMoves() : getPossibleCapturesOrPromotions(simulatorEngine);
+
+        // Order them (captures first via MVV-LVA/promotion bonus, killers/history still help)
+        ArrayList<Integer> ordered = sortMovesByEfficiency(moves, 0, simulatorEngine.getBoardStateHash());
+
+        for (int m : ordered) {
+            simulatorEngine.performMove(m);
+            double score = -quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
             simulatorEngine.undoLastMove();
 
+            if (score == EXIT_FLAG) return EXIT_FLAG;
+
             if (score >= beta) {
-                return beta; // Beta cutoff
+                return beta;
             }
             if (score > alpha) {
-                alpha = score; // Found a better move
+                alpha = score;
             }
         }
-        return alpha; // Best score in the subtree
+        return alpha;
     }
 
     private double evaluateStaticPosition(GameState gameState, boolean isWhitesTurn, int depth) {

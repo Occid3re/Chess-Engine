@@ -9,27 +9,36 @@ import static julius.game.chessengine.helper.BitHelper.fileBitboard;
 public class PawnHelper {
 
     public final static int[] WHITE_PAWN_POSITIONAL_VALUES = {
-            0, 0, 0, 0, 0, 0, 0, 0, //Rank 1
-            0, 2, 4, -12, -12, 4, 2, 0, //Rank 2
-            0, 2, 4, 4, 4, 4, 2, 0, //Rank 3
-            0, 2, 4, 8, 8, 4, 2, 0, //Rank 4
-            0, 2, 4, 8, 8, 4, 2, 0, //Rank 5
-            4, 8, 10, 16, 16, 10, 8, 4, //Rank 6
-            100, 100, 100, 100, 100, 100, 100, 100, //Rank 7
-            0, 0, 0, 0, 0, 0, 0, 0 //Rank 8
+            // R1
+            0,  0,  0,  0,  0,  0,  0,  0,
+            // R2
+            5, 10, 10,-20,-20,10, 10,  5,
+            // R3
+            5, -5,-10,  0,  0,-10, -5,  5,
+            // R4
+            0,  0,  0, 20, 20,  0,  0,  0,
+            // R5
+            5,  5, 10, 25, 25, 10,  5,  5,
+            // R6
+            10, 10, 20, 30, 30, 20, 10, 10,
+            // R7
+            50, 50, 50, 50, 50, 50, 50, 50,
+            // R8
+            0,  0,  0,  0,  0,  0,  0,  0
     };
 
     public final static int[] BLACK_PAWN_POSITIONAL_VALUES = {
-            0, 0, 0, 0, 0, 0, 0, 0, // Rank 1
-            100, 100, 100, 100, 100, 100, 100, 100,// Rank 2 -- close to promotion
-            4, 8, 10, 16, 16, 10, 8, 4,// Rank 3
-            0, 2, 4, 8, 8, 4, 2, 0, // Rank 4
-            0, 2, 4, 8, 8, 4, 2, 0,  // Rank 5
-            0, 2, 4, 4, 4, 4, 2, 0,// Rank 6
-            0, 2, 4, -12, -12, 4, 2, 0, // Rank 7
-            0, 0, 0, 0, 0, 0, 0, 0 // Rank 8
+            // mirror of white (rank-flipped)
+            0,  0,  0,  0,  0,  0,  0,  0, // R1
+            50, 50, 50, 50, 50, 50, 50, 50, // R2
+            10, 10, 20, 30, 30, 20, 10, 10, // R3
+            5,  5, 10, 25, 25, 10,  5,  5, // R4
+            0,  0,  0, 20, 20,  0,  0,  0, // R5
+            5, -5,-10,  0,  0,-10, -5,  5, // R6
+            5, 10, 10,-20,-20,10, 10,  5, // R7
+            0,  0,  0,  0,  0,  0,  0,  0  // R8
     };
-
+    
     // Method to count pawns in the center (e4, d4, e5, d5 squares)
     public static int countCenterPawns(long pawnsBitboard) {
         // Bit positions for e4, d4, e5, d5

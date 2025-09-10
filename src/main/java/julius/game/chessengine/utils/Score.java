@@ -22,10 +22,40 @@ import static julius.game.chessengine.helper.BitHelper.RankMasks;
 public class Score {
 
     public static final int CHECKMATE = 100000;
-    public static final int CHECK = 100;
+    public static final int CHECK = 50;     // was 100; lighter is more stable
     public static final int DRAW = 0;
 
     public static final int KILLER_MOVE_SCORE = 10000;
+
+    // --- Material (centipawns) ---
+    public static final int PAWN_VALUE   = 100;
+    public static final int KNIGHT_VALUE = 320;  // was 300
+    public static final int BISHOP_VALUE = 330;  // ok
+    public static final int ROOK_VALUE   = 500;  // ok
+    public static final int QUEEN_VALUE  = 900;  // ok
+
+    // --- Pawn structure (cp). Slightly gentler, less swingy. ---
+    private static final int DOUBLED_PAWN_PENALTY  = -12; // was -20
+    private static final int ISOLATED_PAWN_PENALTY = -10; // ok
+    public  static final int PASSED_PAWN_BONUS     = 60;  // was 60 (kept)
+    public  static final int CENTER_PAWN_BONUS     = 15;  // was 20
+    private static final int ADVANCED_PAWN_BONUS   = 8;   // was 10
+    private static final int BLOCKED_PAWN_PENALTY  = -10; // was -8
+    private static final int BACKWARD_PAWN_PENALTY = -12; // ok
+
+
+    // Other bonuses and penalties
+    private static final int NOT_CASTLED_AND_ROOK_MOVE_PENALTY = -20; // was -50 (too harsh early)
+    private static final int START_POSITION_PENALTY            = -40; // was -50
+    private static final int CASTLING_BONUS                    = 40;  // was 75 (more balanced)
+
+    private static final int ROOK_HALF_OPEN_FILE_BONUS = 15; // was 25
+    private static final int ROOK_OPEN_FILE_BONUS      = 25; // was 35
+
+    private static final int MOBILITY_BONUS = 5;
+    private static final int MISSING_PAWN_SHIELD_PENALTY = -15;
+    private static final int KING_ATTACK_PENALTY = -10;
+    public static final int BISHOP_PAIR_BONUS = 40;
 
     private Double cachedScoreDifference = null;
 
@@ -94,35 +124,6 @@ public class Score {
     // State bonuses
     private int whiteStateBonus = 0;
     private int blackStateBonus = 0;
-
-    // Constants for piece values
-    public static final int PAWN_VALUE = 100;   // Pawns are worth 1 point, scaled by 100
-    public static final int KNIGHT_VALUE = 300; // Knights are worth 3 points
-    public static final int BISHOP_VALUE = 330; // Bishops are slightly more valuable than knights
-    public static final int ROOK_VALUE = 500;   // Rooks are worth 5 points
-    public static final int QUEEN_VALUE = 900;  // Queens are worth 9 points
-
-    // Pawn bonuses and penalties
-    private static final int DOUBLED_PAWN_PENALTY = -20; // Example penalty value for doubled pawns
-    private static final int ISOLATED_PAWN_PENALTY = -10; // Penalty for isolated pawns
-    public static final int PASSED_PAWN_BONUS = 60;     // Bonus for passed pawns
-    public static final int CENTER_PAWN_BONUS = 20;     // Bonus for pawns in the center
-    private static final int ADVANCED_PAWN_BONUS = 10;  // Reward for safely advanced pawns
-    private static final int BLOCKED_PAWN_PENALTY = -8; // Penalty for blocked pawns
-    private static final int BACKWARD_PAWN_PENALTY = -12; // Penalty for backward pawns
-
-    // Other bonuses and penalties
-    private static final int NOT_CASTLED_AND_ROOK_MOVE_PENALTY = -50;
-    private static final int START_POSITION_PENALTY = -50; // Define the penalty value for starting position
-    private static final int CASTLING_BONUS = 75;
-
-    private static final int ROOK_HALF_OPEN_FILE_BONUS = 25;
-    private static final int ROOK_OPEN_FILE_BONUS = 35;
-
-    private static final int MOBILITY_BONUS = 5;
-    private static final int MISSING_PAWN_SHIELD_PENALTY = -15;
-    private static final int KING_ATTACK_PENALTY = -10;
-    public static final int BISHOP_PAIR_BONUS = 50;
 
     private static final long NOT_A_FILE = ~FileMasks[0];
     private static final long NOT_H_FILE = ~FileMasks[7];
