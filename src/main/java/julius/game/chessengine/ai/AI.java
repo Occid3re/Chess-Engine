@@ -451,9 +451,6 @@ public class AI {
      * *
      */
     private double alphaBeta(Engine simulatorEngine, int depth, double alpha, double beta, boolean isWhite, long deadline) {
-        if (log.isDebugEnabled()) {
-            log.debug("Entering search depth {}", depth);
-        }
         nodesVisited++;
         // Check for time limit exceeded
         if (System.nanoTime() > deadline) {
