@@ -218,7 +218,7 @@ body {
     background-color: #32CD32; /* Unified button color */
 }
 
-#score, #calculatedLine {
+#score, #calculatedLine, #turnIndicator {
     text-align: center;
     font-size: large;
     color: lime;
