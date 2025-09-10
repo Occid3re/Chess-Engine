@@ -104,7 +104,6 @@ public class AI {
 
     private final int maxDepth = 18; // Adjust the level of depth according to your requirements
 
-    // you already have @Getter, but safe to expose explicitly
     @Getter
     @Setter
     private long timeLimit; // milliseconds
@@ -117,20 +116,19 @@ public class AI {
 
     public AI(Engine mainEngine) {
         this.mainEngine = mainEngine;
-        this.timeLimit = 50; // milliseconds (default 50 ms)
+        this.timeLimit = 50;
 
         // Initialize the array for killer moves
         this.killerMoves = new int[maxDepth][numKillerMoves];
         for (int i = 0; i < maxDepth; i++) {
             for (int j = 0; j < numKillerMoves; j++) {
-                killerMoves[i][j] = -1;
+                killerMoves[i][j] = -1; // Initialize with an invalid move
             }
         }
 
         // Initialize history table with zeros
         this.historyTable = new int[64][64];
     }
-
 
     public void setUseNullMovePruning(boolean useNullMovePruning) {
         this.useNullMovePruning = useNullMovePruning;
@@ -185,9 +183,9 @@ public class AI {
     }
 
     public void startAutoPlay(boolean aiIsWhite, boolean aiIsBlack) {
-        log.debug("timelimit (ms): {}", timeLimit);
+        log.debug("timelimit is: " + timeLimit);
         if (scheduler != null && !scheduler.isShutdown()) {
-            scheduler.shutdownNow();
+            scheduler.shutdownNow(); // Ensure previous scheduler is stopped
         }
         scheduler = Executors.newSingleThreadScheduledExecutor();
 
@@ -199,52 +197,35 @@ public class AI {
                 scheduler.shutdown();
                 return;
             }
-            final boolean myTurn = (aiIsWhite && mainEngine.whitesTurn())
-                    || (aiIsBlack && !mainEngine.whitesTurn());
-
-            if (myTurn && currentBestMove != -1) {
-                performMove();
+            if ((aiIsWhite && mainEngine.whitesTurn()) || (aiIsBlack && !mainEngine.whitesTurn())) {
+                if (currentBestMove != -1) {
+                    performMove();
+                }
             }
-            // else: wait for calculation thread to supply a new best move
         }, 0, 50, TimeUnit.MILLISECONDS);
-    }
-
-    public Integer getCurrentBestMoveInt() {
-        return currentBestMove;
     }
 
     public void performMove() {
         if (currentBestMove == -1) {
-            log.error("No current best move available. Unable to perform a move.");
-            log.error("boardStateBeforeCalculation {}, currentBoardHash {}", beforeCalculationBoardState, currentBoardState);
-            log.error("WhitesTurn = {}, isEndgame = {}", mainEngine.whitesTurn(), mainEngine.isEndgame());
-            log.error("Gamestate = " + mainEngine.getGameState());
+            // The calculation thread has not yet produced a move; skip until one is available.
+            log.debug("No current best move available. Waiting for calculation to finish.");
             return;
         }
 
-        // If best move belongs to the wrong side (stale), clear it and force a recalculation
-        if (MoveHelper.isWhitesMove(currentBestMove) != mainEngine.whitesTurn()) {
-            log.debug("Stale best move {} for wrong side; forcing recalculation.",
-                    Move.convertIntToMove(currentBestMove));
-            currentBestMove = -1;
-            synchronized (calculationLock) {
-                // Trick the waiting loop to see a "change" and recompute immediately
-                beforeCalculationBoardState = ~currentBoardState;
-                calculationLock.notifyAll();
-            }
-            return;
+        if (!MoveHelper.isWhitesMove(currentBestMove) == mainEngine.whitesTurn()) {
+            // If the current best move is not valid for the current turn, log an error and return.
+            log.debug("Current best move {} is not valid for the current turn.", Move.convertIntToMove(currentBestMove));
+            return; // Return the current state without making a move
         }
-
-        log.info("Perform Move");
         mainEngine.performMove(currentBestMove);
         currentBoardState = mainEngine.getBoardStateHash();
         synchronized (calculationLock) {
             calculationLock.notifyAll();
         }
-        // Consume the move so we don't replay it on the same position
+        // Reset the best move so that a stale move isn't played again before
+        // the calculation thread provides a new one for the updated position.
         currentBestMove = -1;
     }
-
 
     private void calculateLine() {
         log.debug("keepCalculating: {}, interrupted: {}", keepCalculating, Thread.currentThread().isInterrupted());
@@ -262,23 +243,37 @@ public class AI {
             if (!keepCalculating || Thread.currentThread().isInterrupted()) {
                 break;
             }
-            currentBoardState = mainEngine.getBoardStateHash();
-            beforeCalculationBoardState = currentBoardState;
-            performCalculation();
+            do {
+                currentBoardState = mainEngine.getBoardStateHash();
+                beforeCalculationBoardState = currentBoardState;
+                performCalculation();
+            } while (!positionChanged() && keepCalculating && !Thread.currentThread().isInterrupted());
         }
     }
 
     private void performCalculation() {
         log.debug(" --- TranspositionTable[{}] --- ", transpositionTable.size());
         decayHistoryTable();
-        Engine simulatorEngine = mainEngine.createSimulation();
-        long boardStateHash = simulatorEngine.getBoardStateHash();
-        log.debug("boardStateBeforeCalculation {}, currentBoardState {}", beforeCalculationBoardState, currentBoardState);
+        try {
+            Engine simulatorEngine = mainEngine.createSimulation();
+            long boardStateHash = simulatorEngine.getBoardStateHash();
+            log.debug("boardStateBeforeCalculation {}, currentBoardState {}", beforeCalculationBoardState, currentBoardState);
 
-        // Perform calculation only if the board state has actually changed
-        boolean isWhite = simulatorEngine.whitesTurn();
-        long deadline = System.nanoTime() + timeLimit * 1_000_000;
-        calculateBestMove(simulatorEngine, boardStateHash, isWhite, deadline);
+            // Perform calculation only if the board state has actually changed
+            boolean isWhite = simulatorEngine.whitesTurn();
+            long deadline = System.nanoTime() + timeLimit * 1_000_000;
+            calculateBestMove(simulatorEngine, boardStateHash, isWhite, deadline);
+        } catch (IllegalStateException e) {
+            log.warn("Illegal board state during search: {}", e.getMessage());
+            MoveList legalMoves = mainEngine.getAllLegalMoves();
+            if (legalMoves.size() > 0) {
+                currentBestMove = legalMoves.getMove(0);
+            } else {
+                currentBestMove = -1;
+            }
+        } catch (Exception e) {
+            log.error("Unexpected error during calculation", e);
+        }
 
     }
 
@@ -423,7 +418,6 @@ public class AI {
                 score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline);
                 // Check for time limit exceeded after alphaBeta call
                 if (score == EXIT_FLAG || positionChanged()) {
-                    log.info("best Position changed");
                     simulatorEngine.undoLastMove(); // Undo move using its integer representation
                     break;
                 }
@@ -458,7 +452,7 @@ public class AI {
      */
     private double alphaBeta(Engine simulatorEngine, int depth, double alpha, double beta, boolean isWhite, long deadline) {
         if (log.isDebugEnabled()) {
-            log.debug(" ------------------------- {} ------------------------- ", depth);
+            log.debug("Entering search depth {}", depth);
         }
         nodesVisited++;
         // Check for time limit exceeded
@@ -563,7 +557,6 @@ public class AI {
 
                 if (eval == EXIT_FLAG || positionChanged()) {
                     simulatorEngine.undoLastMove();
-                    log.info("maxi Position changed");
                     return EXIT_FLAG;
                 }
 
@@ -571,7 +564,6 @@ public class AI {
                     eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline);
                     if (eval == EXIT_FLAG || positionChanged()) {
                         simulatorEngine.undoLastMove();
-                        log.info("maxi Position changed");
                         return EXIT_FLAG;
                     }
                 }
@@ -580,7 +572,6 @@ public class AI {
                     eval = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhite, deadline);
                     if (eval == EXIT_FLAG || positionChanged()) {
                         simulatorEngine.undoLastMove();
-                        log.info("maxi Position changed");
                         return EXIT_FLAG;
                     }
                 }
@@ -663,7 +654,6 @@ public class AI {
                 eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline);
 
                 if (eval == EXIT_FLAG || positionChanged()) {
-                    log.info("mini Position changed");
                     simulatorEngine.undoLastMove();
                     return EXIT_FLAG;
                 }
@@ -671,7 +661,6 @@ public class AI {
                 if (usePvs && eval > alpha && eval < beta) {
                     eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline);
                     if (eval == EXIT_FLAG || positionChanged()) {
-                        log.info("mini Position changed");
                         simulatorEngine.undoLastMove();
                         return EXIT_FLAG;
                     }
@@ -680,7 +669,6 @@ public class AI {
                 if (reduced && eval < beta) {
                     eval = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhite, deadline);
                     if (eval == EXIT_FLAG || positionChanged()) {
-                        log.info("mini Position changed");
                         simulatorEngine.undoLastMove();
                         return EXIT_FLAG;
                     }
@@ -826,93 +814,37 @@ public class AI {
         return score;
     }
 
-    private double quiescenceSearch(Engine simulatorEngine,
-                                    boolean isWhitesTurn,
-                                    double alpha,
-                                    double beta,
-                                    long deadline,
-                                    int depth) {
-        // Hard timeout check
+    private double quiescenceSearch(Engine simulatorEngine, boolean isWhitesTurn, double alpha, double beta, long deadline, int depth) {
         if (System.nanoTime() > deadline) {
             if (log.isDebugEnabled()) {
                 log.debug("timeout");
             }
-            return AI.EXIT_FLAG;
+            return AI.EXIT_FLAG; // Timeout
         }
 
-        // If the side to move is in check, this position is NOT quiescent.
-        // Search all legal evasions (not just captures/promotions) and don't allow stand-pat.
-        if (isSideInCheck(simulatorEngine, isWhitesTurn)) {
-            MoveList evasions = simulatorEngine.getAllLegalMoves();
-
-            for (int i = 0; i < evasions.size(); i++) {
-                int move = evasions.getMove(i);
-
-                simulatorEngine.performMove(move);
-                double score = -quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
-                simulatorEngine.undoLastMove();
-
-                if (score == EXIT_FLAG) {
-                    return EXIT_FLAG;
-                }
-                if (score >= beta) {
-                    return beta; // fail-hard beta cutoff
-                }
-                if (score > alpha) {
-                    alpha = score;
-                }
-            }
-
-            // No evasions improved alpha; return current alpha (checkmate/stalemate
-            // detection is handled by evaluateStaticPosition deeper in the tree).
-            return alpha;
-        }
-
-        // Normal quiescence node (not in check): allow stand-pat and then search noisy moves.
         double standPat = evaluateStaticPosition(simulatorEngine.getGameState(), isWhitesTurn, depth);
         if (standPat >= beta) {
-            return beta; // fail-hard beta cutoff
+            return beta; // Fail-hard beta cutoff
         }
         if (alpha < standPat) {
-            alpha = standPat; // raise alpha via stand-pat
+            alpha = standPat; // Delta pruning
         }
 
-        // Only search captures/promotions from non-check positions to stabilize evaluation.
         MoveList moves = getPossibleCapturesOrPromotions(simulatorEngine);
-
-        // (Optional tiny ordering: prefer higher MVV-LVA first; cheap and often helps.)
-        // Simple insertion sort on small lists to avoid allocs:
-        for (int i = 1; i < moves.size(); i++) {
-            int key = moves.getMove(i);
-            int j = i - 1;
-            while (j >= 0 && calculateMvvLvaScore(moves.getMove(j)) < calculateMvvLvaScore(key)) {
-                moves.setMove(j + 1, moves.getMove(j));
-                j--;
-            }
-            moves.setMove(j + 1, key);
-        }
-
         for (int i = 0; i < moves.size(); i++) {
-            int move = moves.getMove(i);
-
-            simulatorEngine.performMove(move);
-            double score = -quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
+            simulatorEngine.performMove(moves.getMove(i));
+            double score = -quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, ++depth);
             simulatorEngine.undoLastMove();
 
-            if (score == EXIT_FLAG) {
-                return EXIT_FLAG;
-            }
             if (score >= beta) {
-                return beta; // beta cutoff
+                return beta; // Beta cutoff
             }
             if (score > alpha) {
-                alpha = score;
+                alpha = score; // Found a better move
             }
         }
-
-        return alpha;
+        return alpha; // Best score in the subtree
     }
-
 
     private double evaluateStaticPosition(GameState gameState, boolean isWhitesTurn, int depth) {
 
