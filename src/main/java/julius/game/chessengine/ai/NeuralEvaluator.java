@@ -1,6 +1,13 @@
 package julius.game.chessengine.ai;
 
 import julius.game.chessengine.board.BitBoard;
+import julius.game.chessengine.ai.SelfPlayBuffer.Sample;
+
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 /**
  * Lightweight feed-forward neural network used to evaluate board positions.
@@ -32,6 +39,76 @@ public class NeuralEvaluator {
         b2 = 0.0;
     }
 
+    /** Performs a simple stochastic gradient descent step on the given batch. */
+    public synchronized void trainBatch(java.util.List<Sample> batch, double learningRate) {
+        for (Sample sample : batch) {
+            double[] input = sample.state;
+            double target = sample.outcome; // expected output in [-1,1]
+
+            double[] hidden = new double[HIDDEN_SIZE];
+            for (int j = 0; j < HIDDEN_SIZE; j++) {
+                double sum = b1[j];
+                for (int i = 0; i < INPUT_SIZE; i++) {
+                    sum += w1[j][i] * input[i];
+                }
+                hidden[j] = Math.max(0.0, sum);
+            }
+
+            double out = b2;
+            for (int j = 0; j < HIDDEN_SIZE; j++) {
+                out += w2[j] * hidden[j];
+            }
+
+            double error = out - target;
+
+            for (int j = 0; j < HIDDEN_SIZE; j++) {
+                w2[j] -= learningRate * error * hidden[j];
+            }
+            b2 -= learningRate * error;
+
+            for (int j = 0; j < HIDDEN_SIZE; j++) {
+                if (hidden[j] > 0) {
+                    double grad = error * w2[j];
+                    for (int i = 0; i < INPUT_SIZE; i++) {
+                        w1[j][i] -= learningRate * grad * input[i];
+                    }
+                    b1[j] -= learningRate * grad;
+                }
+            }
+        }
+    }
+
+    /** Saves network weights to disk for later reuse. */
+    public synchronized void saveWeights(Path path) throws IOException {
+        try (DataOutputStream out = new DataOutputStream(Files.newOutputStream(path))) {
+            for (int j = 0; j < HIDDEN_SIZE; j++) {
+                for (int i = 0; i < INPUT_SIZE; i++) {
+                    out.writeDouble(w1[j][i]);
+                }
+                out.writeDouble(b1[j]);
+                out.writeDouble(w2[j]);
+            }
+            out.writeDouble(b2);
+        }
+    }
+
+    /** Loads network weights from disk if available. */
+    public synchronized void loadWeights(Path path) throws IOException {
+        if (!Files.exists(path)) {
+            return;
+        }
+        try (DataInputStream in = new DataInputStream(Files.newInputStream(path))) {
+            for (int j = 0; j < HIDDEN_SIZE; j++) {
+                for (int i = 0; i < INPUT_SIZE; i++) {
+                    w1[j][i] = in.readDouble();
+                }
+                b1[j] = in.readDouble();
+                w2[j] = in.readDouble();
+            }
+            b2 = in.readDouble();
+        }
+    }
+
     /**
      * Encodes the given board and evaluates it using the neural network.
      * The returned value represents a centipawn-like score from White's
@@ -61,7 +138,7 @@ public class NeuralEvaluator {
      * input. Piece order: white Pawns, Knights, Bishops, Rooks, Queens, King,
      * then the same order for black pieces.
      */
-    private double[] encode(BitBoard board) {
+    public double[] encode(BitBoard board) {
         double[] input = new double[INPUT_SIZE];
         int plane = 0;
         plane = fillPlane(board.getWhitePawns(), plane, input);

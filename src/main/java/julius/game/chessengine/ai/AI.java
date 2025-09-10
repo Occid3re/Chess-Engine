@@ -13,6 +13,8 @@ import lombok.Setter;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -115,6 +117,13 @@ public class AI {
     @Getter
     @Setter
     private boolean useNeuralEvaluation = false;
+    private final SelfPlayBuffer selfPlayBuffer = new SelfPlayBuffer(10_000);
+    private final List<double[]> currentGameStates = new ArrayList<>();
+    private final List<Integer> currentGameMoves = new ArrayList<>();
+    @Getter
+    @Setter
+    private int selfPlayGamesPerCycle = Integer.getInteger("chessengine.selfPlayGamesPerCycle", 10);
+    private int gamesSinceLastTraining = 0;
     @Getter
     private long nodesVisited = 0;
     @Getter
@@ -135,6 +144,14 @@ public class AI {
 
         // Initialize history table with zeros
         this.historyTable = new int[64][64];
+
+        try {
+            neuralEvaluator.loadWeights(Paths.get("neural.weights"));
+        } catch (IOException e) {
+            log.info("No previous neural weights found, starting fresh.");
+        }
+
+        startTrainerThread();
     }
 
     public Integer getCurrentBestMoveInt() {
@@ -152,6 +169,29 @@ public class AI {
         calculationThread = new Thread(this::calculateLine);
         calculationThread.setName("Simulator");
         calculationThread.start();
+    }
+
+    private void startTrainerThread() {
+        Thread trainer = new Thread(() -> {
+            while (true) {
+                try {
+                    if (gamesSinceLastTraining >= selfPlayGamesPerCycle && selfPlayBuffer.size() > 0) {
+                        List<SelfPlayBuffer.Sample> batch = selfPlayBuffer.sample(32);
+                        neuralEvaluator.trainBatch(batch, 0.01);
+                        neuralEvaluator.saveWeights(Paths.get("neural.weights"));
+                        gamesSinceLastTraining = 0;
+                    }
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (IOException e) {
+                    log.error("Failed to persist neural weights", e);
+                }
+            }
+        });
+        trainer.setDaemon(true);
+        trainer.start();
     }
 
     public void reset() {
@@ -213,6 +253,9 @@ public class AI {
             log.debug("Current best move {} is not valid for the current turn.", Move.convertIntToMove(currentBestMove));
             return; // Return the current state without making a move
         }
+        double[] encoded = neuralEvaluator.encode(mainEngine.getBitBoard());
+        currentGameStates.add(encoded);
+        currentGameMoves.add(currentBestMove);
         mainEngine.performMove(currentBestMove);
         currentBoardState = mainEngine.getBoardStateHash();
         synchronized (calculationLock) {
@@ -221,6 +264,14 @@ public class AI {
         // Reset the best move so that a stale move isn't played again before
         // the calculation thread provides a new one for the updated position.
         currentBestMove = -1;
+
+        if (mainEngine.getGameState().isGameOver()) {
+            double outcome = outcomeFromState(mainEngine.getGameState().getState());
+            selfPlayBuffer.addGame(new ArrayList<>(currentGameStates), new ArrayList<>(currentGameMoves), outcome);
+            currentGameStates.clear();
+            currentGameMoves.clear();
+            gamesSinceLastTraining++;
+        }
     }
 
     private void calculateLine() {
@@ -385,6 +436,16 @@ public class AI {
                     .collect(Collectors.joining(", ")));
             log.debug("");
         }
+    }
+
+    private double outcomeFromState(GameStateEnum state) {
+        if (state == GameStateEnum.WHITE_WON) {
+            return 1.0;
+        }
+        if (state == GameStateEnum.BLACK_WON) {
+            return -1.0;
+        }
+        return 0.0;
     }
 
 
