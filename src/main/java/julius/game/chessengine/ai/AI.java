@@ -861,7 +861,7 @@ public class AI {
         // If side to move is in check, search all legal evasions (not only captures)
         boolean inCheck = isSideInCheck(simulatorEngine, isWhitesTurn);
 
-        double standPat = evaluateStaticPosition(simulatorEngine.getGameState(), isWhitesTurn, depth);
+        double standPat = evaluateStaticPosition(simulatorEngine, isWhitesTurn, depth);
         if (!inCheck) {
             if (standPat >= beta) {
                 return beta; // fail-hard beta
@@ -901,7 +901,8 @@ public class AI {
         return alpha;
     }
 
-    private double evaluateStaticPosition(GameState gameState, boolean isWhitesTurn, int depth) {
+    private double evaluateStaticPosition(Engine engine, boolean isWhitesTurn, int depth) {
+        GameState gameState = engine.getGameState();
 
         if (gameState.isInStateCheckMate()) {
             if (log.isDebugEnabled()) {
@@ -929,7 +930,7 @@ public class AI {
                     isWhitesTurn ? "WHITE" : "BLACK");
         }
         return NnueConfig.ENABLE_NNUE
-                ? NnueIntegration.blendedEval(gameState, isWhitesTurn)
+                ? NnueIntegration.blendedEval(gameState, engine.getBitBoard(), isWhitesTurn)
                 : (isWhitesTurn ? scoreDifference : -scoreDifference);
     }
 

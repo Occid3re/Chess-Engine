@@ -30,7 +30,7 @@ public final class SelfPlaySearch {
 
     public static int evaluateCp(Engine engine, int timeMs) {
         double eval = NnueConfig.ENABLE_NNUE
-                ? NnueIntegration.blendedEval(engine.getGameState(), engine.getGameState().isWhitesTurn())
+                ? NnueIntegration.blendedEval(engine.getGameState(), engine.getBitBoard(), engine.whitesTurn())
                 : (engine.getGameState().getScore().getScoreDifference());
         return (int) Math.max(-2000, Math.min(2000, Math.round(eval * 100.0))); // cp
     }

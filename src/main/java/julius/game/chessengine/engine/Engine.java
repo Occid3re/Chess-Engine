@@ -40,6 +40,7 @@ public class Engine {
     @Getter
     private ArrayList<Integer> line = new ArrayList<>();
     private ArrayList<Integer> redoLine = new ArrayList<>();
+    @Getter
     private BitBoard bitBoard = new BitBoard();
     @Getter
     private GameState gameState = new GameState(bitBoard);
