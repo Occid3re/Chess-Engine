@@ -244,9 +244,11 @@ public class AI {
             if (!keepCalculating || Thread.currentThread().isInterrupted()) {
                 break;
             }
-            currentBoardState = mainEngine.getBoardStateHash();
-            beforeCalculationBoardState = currentBoardState;
-            performCalculation();
+            do {
+                currentBoardState = mainEngine.getBoardStateHash();
+                beforeCalculationBoardState = currentBoardState;
+                performCalculation();
+            } while (!positionChanged() && keepCalculating && !Thread.currentThread().isInterrupted());
         }
     }
 
