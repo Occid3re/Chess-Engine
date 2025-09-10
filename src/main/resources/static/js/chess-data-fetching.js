@@ -13,9 +13,17 @@ const makeRequest = async (method, url, callback) => {
     try {
         const response = await fetch(url, { method });
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        const data = await response.json();
+
+        // Some endpoints (e.g. PATCH actions) return no content. Attempt to
+        // parse JSON only when a body is present to avoid "Unexpected end of
+        // JSON input" errors.
+        const text = await response.text();
+        const data = text ? JSON.parse(text) : null;
+
         if (callback) callback(data);
     } catch (error) {
+        // Log the error so callers understand whether the failure was network
+        // related or due to malformed JSON.
         console.error('Request failed:', error);
     }
 };
