@@ -198,18 +198,18 @@ public class AI {
                 return;
             }
             if ((aiIsWhite && mainEngine.whitesTurn()) || (aiIsBlack && !mainEngine.whitesTurn())) {
-                performMove();
+                if (currentBestMove != -1) {
+                    performMove();
+                }
             }
         }, 0, 50, TimeUnit.MILLISECONDS);
     }
 
     public void performMove() {
         if (currentBestMove == -1) {
-            log.error("No current best move available. Unable to perform a move.");
-            log.error("boardStateBeforeCalculation {}, currentBoardHash {}", beforeCalculationBoardState, currentBoardState);
-            log.error("WhitesTurn = {}, isEndgame = {}", mainEngine.whitesTurn(), mainEngine.isEndgame());
-            log.error("Gamestate = " + mainEngine.getGameState());
-            return; // Return the current state without making a move
+            // The calculation thread has not yet produced a move; skip until one is available.
+            log.debug("No current best move available. Waiting for calculation to finish.");
+            return;
         }
 
         if (!MoveHelper.isWhitesMove(currentBestMove) == mainEngine.whitesTurn()) {
