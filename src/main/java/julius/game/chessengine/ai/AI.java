@@ -340,7 +340,7 @@ public class AI {
     }
 
     private boolean shouldStopCalculating(long deadline) {
-        return positionChanged() || timeLimitExceeded(deadline) || Thread.interrupted();
+        return positionChanged() || timeLimitExceeded(deadline) || Thread.currentThread().isInterrupted();
     }
 
     private void fillCalculatedLine(Engine simulation) {
