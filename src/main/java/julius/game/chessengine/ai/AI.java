@@ -214,9 +214,16 @@ public class AI {
                         System.nanoTime() + timeLimit * 1_000_000,
                         Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY);
                 if (mas == null) {
-                    break;
+                    // Fallback to a random legal move so training can continue
+                    MoveList legal = mainEngine.getAllLegalMoves();
+                    if (legal.size() == 0) {
+                        break;
+                    }
+                    int randomMove = legal.getMove(new Random().nextInt(legal.size()));
+                    mainEngine.performMove(randomMove);
+                } else {
+                    mainEngine.performMove(mas.move);
                 }
-                mainEngine.performMove(mas.move);
             }
             double result = 0d;
             GameStateEnum state = mainEngine.getGameState().getState();
