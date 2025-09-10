@@ -1,5 +1,6 @@
 package julius.game.chessengine.board;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.helper.BishopHelper;
 import julius.game.chessengine.helper.KnightHelper;
@@ -53,6 +54,7 @@ public class BitBoard {
     private PieceType[] pieceBoard = new PieceType[64];
 
     // Reusable buffer for move generation to avoid frequent allocations.
+    @JsonIgnore
     private final MoveList moveGenerationBuffer = new MoveList();
 
     // This variable needs to be set whenever a move is made

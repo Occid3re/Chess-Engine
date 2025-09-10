@@ -1,5 +1,6 @@
 package julius.game.chessengine.utils;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.GameStateEnum;
@@ -62,6 +63,7 @@ public class Score {
     private Double cachedScoreDifference = null;
 
     /** Latest board position used to derive neural network features. */
+    @JsonIgnore
     private BitBoard currentBoard;
 
     private int whiteScore;
