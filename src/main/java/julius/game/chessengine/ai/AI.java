@@ -203,7 +203,8 @@ public class AI {
             return;
         }
 
-        if (!MoveHelper.isWhitesMove(currentBestMove) == mainEngine.whitesTurn()) {
+        // FIX: readability (logical != instead of !A == B)
+        if (MoveHelper.isWhitesMove(currentBestMove) != mainEngine.whitesTurn()) {
             // If the current best move is not valid for the current turn, log an error and return.
             log.debug("Current best move {} is not valid for the current turn.", Move.convertIntToMove(currentBestMove));
             return; // Return the current state without making a move
@@ -404,7 +405,8 @@ public class AI {
             if (simulatorEngine.getGameState().isInStateCheckMate()) {
                 score = isWhitesTurn ? (CHECKMATE - depth) : -(CHECKMATE - depth);
             } else if (simulatorEngine.getGameState().isInStateDraw()) {
-                score = 0;
+                // FIX: keep draw policy consistent (use same static evaluation as elsewhere)
+                score = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, depth);
             } else {
                 score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline);
                 // Check for time limit exceeded after alphaBeta call
@@ -450,12 +452,16 @@ public class AI {
 
         long boardHash = simulatorEngine.getBoardStateHash();
 
+        // FIX: consistent draw handling (use same policy everywhere)
         if (simulatorEngine.getGameState().isInStateDraw()) {
-            return 0;
+            return evaluateStaticPosition(simulatorEngine.getGameState(), isWhite, depth);
         }
 
         if (depth == 0 || simulatorEngine.getGameState().isGameOver()) {
             double eval = evaluateBoard(simulatorEngine, isWhite, deadline);
+            if (eval == EXIT_FLAG) { // FIX: propagate qsearch timeout
+                return EXIT_FLAG;
+            }
             log.trace("eval {}, alpha {}, beta {}, depth: {}, isWhite {}", eval, alpha, beta, depth, isWhite);
             if (!isWhite) {
                 eval = -eval;
@@ -465,7 +471,8 @@ public class AI {
 
         TranspositionTableEntry entry = transpositionTable.get(boardHash);
 
-        if (entry != null && entry.depth > depth) {
+        // FIX: accept entries with depth >= current depth
+        if (entry != null && entry.depth >= depth) {
             if (entry.nodeType == NodeType.EXACT) {
                 return entry.score;
             }
@@ -484,6 +491,10 @@ public class AI {
             nullMoveCount++;
             double nullScore = alphaBeta(simulatorEngine, depth - 1 - 2, alpha, beta, !isWhite, deadline);
             simulatorEngine.undoNullMove(ep);
+
+            if (nullScore == EXIT_FLAG) { // propagate timeout
+                return EXIT_FLAG;
+            }
 
             if (isWhite && nullScore >= beta) {
                 return beta;
@@ -850,16 +861,21 @@ public class AI {
         }
 
         double score = quiescenceSearch(simulatorEngine, isWhitesTurn, alpha, beta, deadline, 0);
-        captureTranspositionTable.put(boardStateHash, new CaptureTranspositionTableEntry(score, isWhitesTurn));
+
+        // FIX: don't cache timeouts in the capture TT (qsearch TT)
+        if (score != EXIT_FLAG) {
+            captureTranspositionTable.put(boardStateHash, new CaptureTranspositionTableEntry(score, isWhitesTurn));
+        }
 
         return score;
     }
 
     private double quiescenceSearch(Engine simulatorEngine, boolean isWhitesTurn,
                                     double alpha, double beta, long deadline, int depth) {
-        if (System.nanoTime() > deadline) {
-            if (log.isDebugEnabled()) log.debug("timeout");
-            return AI.EXIT_FLAG; // Timeout
+        // FIX: early stop conditions (mirror main search)
+        if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
+            if (log.isDebugEnabled()) log.debug("qsearch stop (timeout/interrupt/positionChanged)");
+            return AI.EXIT_FLAG; // Timeout / cancelled
         }
 
         // If side to move is in check, search all legal evasions (not only captures)
@@ -890,10 +906,13 @@ public class AI {
 
         for (int m : ordered) {
             simulatorEngine.performMove(m);
-            double score = -quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
+            // FIX: propagate timeout BEFORE negation
+            double child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
             simulatorEngine.undoLastMove();
 
-            if (score == EXIT_FLAG) return EXIT_FLAG;
+            if (child == EXIT_FLAG) return EXIT_FLAG;
+
+            double score = -child;
 
             if (score >= beta) {
                 return beta;
@@ -1003,10 +1022,9 @@ public class AI {
     }
 
     private boolean isKillerMove(int depth, int move) {
-        if (depth >= killerMoves.length) {
-            return false;
-        }
-        for (int killerMove : killerMoves[depth]) {
+        // FIX: clamp depth index so killers still work near boundaries
+        int depthIndex = Math.max(0, Math.min(depth, killerMoves.length - 1));
+        for (int killerMove : killerMoves[depthIndex]) {
             if (killerMove == move) {
                 return true;
             }
