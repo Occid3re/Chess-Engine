@@ -76,7 +76,6 @@ public class OpeningBook {
         }
         Random random = new Random();
         int randomMove = moves.get(random.nextInt(moves.size()));
-        log.info("Performing Opening Move: {}, BoardStateHash: {}", Move.convertIntToMove(randomMove), boardStateHash);
         return randomMove;
     }
 

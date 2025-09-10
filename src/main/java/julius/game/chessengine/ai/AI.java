@@ -198,18 +198,18 @@ public class AI {
                 return;
             }
             if ((aiIsWhite && mainEngine.whitesTurn()) || (aiIsBlack && !mainEngine.whitesTurn())) {
-                performMove();
+                if (currentBestMove != -1) {
+                    performMove();
+                }
             }
         }, 0, 50, TimeUnit.MILLISECONDS);
     }
 
     public void performMove() {
         if (currentBestMove == -1) {
-            log.error("No current best move available. Unable to perform a move.");
-            log.error("boardStateBeforeCalculation {}, currentBoardHash {}", beforeCalculationBoardState, currentBoardState);
-            log.error("WhitesTurn = {}, isEndgame = {}", mainEngine.whitesTurn(), mainEngine.isEndgame());
-            log.error("Gamestate = " + mainEngine.getGameState());
-            return; // Return the current state without making a move
+            // The calculation thread has not yet produced a move; skip until one is available.
+            log.debug("No current best move available. Waiting for calculation to finish.");
+            return;
         }
 
         if (!MoveHelper.isWhitesMove(currentBestMove) == mainEngine.whitesTurn()) {
@@ -217,7 +217,6 @@ public class AI {
             log.debug("Current best move {} is not valid for the current turn.", Move.convertIntToMove(currentBestMove));
             return; // Return the current state without making a move
         }
-        log.info("Perform Move");
         mainEngine.performMove(currentBestMove);
         currentBoardState = mainEngine.getBoardStateHash();
         synchronized (calculationLock) {
@@ -244,23 +243,37 @@ public class AI {
             if (!keepCalculating || Thread.currentThread().isInterrupted()) {
                 break;
             }
-            currentBoardState = mainEngine.getBoardStateHash();
-            beforeCalculationBoardState = currentBoardState;
-            performCalculation();
+            do {
+                currentBoardState = mainEngine.getBoardStateHash();
+                beforeCalculationBoardState = currentBoardState;
+                performCalculation();
+            } while (!positionChanged() && keepCalculating && !Thread.currentThread().isInterrupted());
         }
     }
 
     private void performCalculation() {
         log.debug(" --- TranspositionTable[{}] --- ", transpositionTable.size());
         decayHistoryTable();
-        Engine simulatorEngine = mainEngine.createSimulation();
-        long boardStateHash = simulatorEngine.getBoardStateHash();
-        log.debug("boardStateBeforeCalculation {}, currentBoardState {}", beforeCalculationBoardState, currentBoardState);
+        try {
+            Engine simulatorEngine = mainEngine.createSimulation();
+            long boardStateHash = simulatorEngine.getBoardStateHash();
+            log.debug("boardStateBeforeCalculation {}, currentBoardState {}", beforeCalculationBoardState, currentBoardState);
 
-        // Perform calculation only if the board state has actually changed
-        boolean isWhite = simulatorEngine.whitesTurn();
-        long deadline = System.nanoTime() + timeLimit * 1_000_000;
-        calculateBestMove(simulatorEngine, boardStateHash, isWhite, deadline);
+            // Perform calculation only if the board state has actually changed
+            boolean isWhite = simulatorEngine.whitesTurn();
+            long deadline = System.nanoTime() + timeLimit * 1_000_000;
+            calculateBestMove(simulatorEngine, boardStateHash, isWhite, deadline);
+        } catch (IllegalStateException e) {
+            log.warn("Illegal board state during search: {}", e.getMessage());
+            MoveList legalMoves = mainEngine.getAllLegalMoves();
+            if (legalMoves.size() > 0) {
+                currentBestMove = legalMoves.getMove(0);
+            } else {
+                currentBestMove = -1;
+            }
+        } catch (Exception e) {
+            log.error("Unexpected error during calculation", e);
+        }
 
     }
 
@@ -405,7 +418,6 @@ public class AI {
                 score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline);
                 // Check for time limit exceeded after alphaBeta call
                 if (score == EXIT_FLAG || positionChanged()) {
-                    log.info("best Position changed");
                     simulatorEngine.undoLastMove(); // Undo move using its integer representation
                     break;
                 }
@@ -440,7 +452,7 @@ public class AI {
      */
     private double alphaBeta(Engine simulatorEngine, int depth, double alpha, double beta, boolean isWhite, long deadline) {
         if (log.isDebugEnabled()) {
-            log.debug(" ------------------------- {} ------------------------- ", depth);
+            log.debug("Entering search depth {}", depth);
         }
         nodesVisited++;
         // Check for time limit exceeded
@@ -545,7 +557,6 @@ public class AI {
 
                 if (eval == EXIT_FLAG || positionChanged()) {
                     simulatorEngine.undoLastMove();
-                    log.info("maxi Position changed");
                     return EXIT_FLAG;
                 }
 
@@ -553,7 +564,6 @@ public class AI {
                     eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline);
                     if (eval == EXIT_FLAG || positionChanged()) {
                         simulatorEngine.undoLastMove();
-                        log.info("maxi Position changed");
                         return EXIT_FLAG;
                     }
                 }
@@ -562,7 +572,6 @@ public class AI {
                     eval = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhite, deadline);
                     if (eval == EXIT_FLAG || positionChanged()) {
                         simulatorEngine.undoLastMove();
-                        log.info("maxi Position changed");
                         return EXIT_FLAG;
                     }
                 }
@@ -645,7 +654,6 @@ public class AI {
                 eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline);
 
                 if (eval == EXIT_FLAG || positionChanged()) {
-                    log.info("mini Position changed");
                     simulatorEngine.undoLastMove();
                     return EXIT_FLAG;
                 }
@@ -653,7 +661,6 @@ public class AI {
                 if (usePvs && eval > alpha && eval < beta) {
                     eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline);
                     if (eval == EXIT_FLAG || positionChanged()) {
-                        log.info("mini Position changed");
                         simulatorEngine.undoLastMove();
                         return EXIT_FLAG;
                     }
@@ -662,7 +669,6 @@ public class AI {
                 if (reduced && eval < beta) {
                     eval = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhite, deadline);
                     if (eval == EXIT_FLAG || positionChanged()) {
-                        log.info("mini Position changed");
                         simulatorEngine.undoLastMove();
                         return EXIT_FLAG;
                     }
