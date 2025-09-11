@@ -5,10 +5,8 @@ import lombok.extern.log4j.Log4j2;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static julius.game.chessengine.helper.BitHelper.FileMasks;
 
@@ -18,15 +16,15 @@ public class RookHelper {
     private static final String ROOK_MAGIC_NUMBERS_PATH = "/magic/rook_magic_numbers.txt";
     private static final String ROOK_MAGIC_NUMBERS_PATH_write = "src/main/resources" + ROOK_MAGIC_NUMBERS_PATH;
 
-    int[][] directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}}; // Rook directions
+    // Rook directions
+    private static final int[][] directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
 
-    public long[] rookMasks = new long[64];
-    public long[][] rookAttacks = new long[64][];
+    public final long[] rookMasks = new long[64];
+    public final long[][] rookAttacks = new long[64][];
+    public final int[] rookBits = new int[64];
+    public final long[] rookMagics = new long[64]; // To store the found magic numbers
 
-    public int[] rookBits = new int[64];
-    public long[] rookMagics = new long[64]; // To store the found magic numbers
-
-    boolean[] squareMagicFound = new boolean[64];
+    private final boolean[] squareMagicFound = new boolean[64];
 
     private static RookHelper instance = null;
 
@@ -61,15 +59,13 @@ public class RookHelper {
             0,  0,  0,  0,  0,  0,  0,  0  // R8
     };
 
-
     public RookHelper() {
         loadMagicNumbers();
-        // First, generate and store occupancy masks
         for (int square = 0; square < 64; square++) {
             rookMasks[square] = generateOccupancyMask(square);
+            rookBits[square] = Long.bitCount(rookMasks[square]);
+            rookAttacks[square] = buildAttackTableForSquare(square, rookMagics[square], rookMasks[square]);
         }
-        initializeRookAttacks();
-        initializeRookBits();
     }
 
     public static RookHelper getInstance() {
@@ -79,12 +75,12 @@ public class RookHelper {
         return instance;
     }
 
+    // ----------------------- Convenience stats -----------------------
+
     public static int countRooksOnOpenFiles(long rooksBitboard, long allPawns) {
         int count = 0;
         for (char file = 'a'; file <= 'h'; file++) {
-            if (isRookOnOpenFile(rooksBitboard, allPawns, file)) {
-                count++;
-            }
+            if (isRookOnOpenFile(rooksBitboard, allPawns, file)) count++;
         }
         return count;
     }
@@ -92,72 +88,68 @@ public class RookHelper {
     public static int countRooksOnHalfOpenFiles(long rooksBitboard, long ownPawnsBitboard, long opponentPawnsBitboard) {
         int count = 0;
         for (char file = 'a'; file <= 'h'; file++) {
-            if (isRookOnHalfOpenFile(rooksBitboard, ownPawnsBitboard, opponentPawnsBitboard, file)) {
-                count++;
-            }
+            if (isRookOnHalfOpenFile(rooksBitboard, ownPawnsBitboard, opponentPawnsBitboard, file)) count++;
         }
         return count;
     }
 
     private static boolean isRookOnOpenFile(long rooksBitboard, long allPawns, char file) {
         long fileBitboard = FileMasks[file - 'a'];
-        // Check if the file has no pawns and if the rook is on this file
         return (allPawns & fileBitboard) == 0 && (rooksBitboard & fileBitboard) != 0;
     }
 
     private static boolean isRookOnHalfOpenFile(long rooksBitboard, long ownPawnsBitboard, long opponentPawnsBitboard, char file) {
         long fileBitboard = FileMasks[file - 'a'];
-        // Check if the file has opponent's pawns but not own pawns, and if the rook is on this file
         return (ownPawnsBitboard & fileBitboard) == 0 && (opponentPawnsBitboard & fileBitboard) != 0 && (rooksBitboard & fileBitboard) != 0;
     }
 
-    public void findMagicNumbersParallel(int time) {
+    // ----------------------- Mining API (used by your test) -----------------------
+
+    public void findMagicNumbersParallel(int timeMinutes) {
+        // Order squares by decreasing difficulty.
+        List<Integer> squares = new ArrayList<>(64);
+        for (int sq = 0; sq < 64; sq++) squares.add(sq);
+        squares.sort((a, b) -> Integer.compare(rookBits[b], rookBits[a]));
+
         ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
-        ConcurrentHashMap<Integer, Long> magicNumbers = new ConcurrentHashMap<>();
+        ConcurrentHashMap<Integer, Long> newlyFound = new ConcurrentHashMap<>();
 
-        // Map to store square indices and their corresponding index counts
-        Map<Integer, Integer> squareIndexCounts = new HashMap<>();
-
-        int total = 0;
-        // Calculate index counts for each square
-        for (int square = 0; square < 64; square++) {
-            long mask = rookMasks[square];
-            int indexCount = calculateIndexCount(rookMagics[square], square, mask);
-            squareIndexCounts.put(square, indexCount);
-            total += indexCount;
-        }
-        log.info(" --- Rook attacks take up a size of {} --- ", total);
-
-        // Create a list of square indices sorted by index counts in descending order
-        List<Integer> squares = squareIndexCounts.entrySet().stream()
-                .sorted(Map.Entry.<Integer, Integer>comparingByValue().reversed())
-                .map(Map.Entry::getKey)
-                .toList();
+        AtomicInteger tasks = new AtomicInteger(0);
+        long totalEntries = 0;
+        for (int sq = 0; sq < 64; sq++) totalEntries += (1L << rookBits[sq]);
+        log.info(" --- Rook perfect tables require {} entries total --- ", totalEntries);
 
         for (int square : squares) {
-            Set<Long> uniqueAttacks = new HashSet<>();
-            boolean duplicatesFound = false;
+            long mask = rookMasks[square];
+            int bits = rookBits[square];
+            long magic = rookMagics[square];
 
-            for (long attacks : rookAttacks[square]) {
-                if (!uniqueAttacks.add(attacks)) { // add() returns false if the item was already in the set
-                    duplicatesFound = true;
-                    break;
-                }
+            if (magic != 0 && isPerfectMagic(square, mask, bits, magic)) {
+                // Already perfect; no work for this square.
+                continue;
             }
 
-            if (duplicatesFound) {
-                // Submit the task only if duplicates are found, indicating a need for optimization
-                executor.submit(() -> findMagicNumberForSquare(square, magicNumbers));
-            }
-            else {
-                log.info("Rook square {} is fully optimized size {}", square, squareIndexCounts.get(square));
-            }
+            tasks.incrementAndGet();
+            executor.submit(() -> {
+                long[] occs = enumerateOccupanciesArray(mask);
+                long[] attacks = rookAttacksFor(square, occs);
+                long[] table = new long[1 << bits];
+
+                long found = findPerfectMagicForSquare(bits, mask, occs, attacks, table);
+                rookMagics[square] = found;
+                squareMagicFound[square] = true;
+
+                // Replace in-memory table so subsequent tests use this.
+                rookAttacks[square] = table;
+
+                newlyFound.put(square, found);
+                log.info("Rook perfect magic @{} found: {}", square, found);
+            });
         }
 
-        // Shutdown executor and wait for termination
         executor.shutdown();
         try {
-            if (!executor.awaitTermination(time, TimeUnit.MINUTES)) {
+            if (!executor.awaitTermination(timeMinutes, TimeUnit.MINUTES)) {
                 executor.shutdownNow();
             }
         } catch (InterruptedException e) {
@@ -165,138 +157,113 @@ public class RookHelper {
             executor.shutdownNow();
         }
 
-        writeMagicNumbersToFile(magicNumbers);
-    }
-
-    private void findMagicNumberForSquare(int square, ConcurrentHashMap<Integer, Long> magicNumbers) {
-        long mask = rookMasks[square];
-        Set<Long> occupancies = generateAllOccupancies(mask);
-        int minIndices = calculateIndexCount(rookMagics[square], square, mask);
-        log.info("Rook Square: {}, has a size of {}", square, minIndices);
-
-        while (true) {
-            long magicCandidate = randomMagicNumber();
-            Map<Integer, Long> indexToOccupancy = new HashMap<>();
-            boolean collision = false;
-
-            for (long occupancy : occupancies) {
-                int index = transform(occupancy, magicCandidate, mask);
-                Long existingOccupancy = indexToOccupancy.get(index);
-
-                if (existingOccupancy != null && calculateRookMoves(square, occupancy) != calculateRookMoves(square, existingOccupancy)) {
-                    collision = true;
-                    break;
-                }
-
-                indexToOccupancy.put(index, occupancy);
-            }
-
-            if (!collision && indexToOccupancy.size() < minIndices) {
-                minIndices = indexToOccupancy.size(); // Update to the new lower value
-                rookMagics[square] = magicCandidate; // Update the magic number
-                squareMagicFound[square] = true;
-                log.info("Rook Optimized magic number found for square " + square + ": " + magicCandidate);
-                magicNumbers.put(square, magicCandidate);
-                break;
-            }
+        if (!newlyFound.isEmpty()) {
+            writeMagicNumbersToFile(newlyFound);
+        } else {
+            log.info("All rook magics are already perfect. Nothing to mine.");
         }
     }
 
-    private int calculateIndexCount(long magicNumber, int square, long mask) {
-        Set<Long> occupancies = generateAllOccupancies(mask);
-        Set<Integer> indices = new HashSet<>();
-
-        for (long occupancy : occupancies) {
-            int index = transform(occupancy, magicNumber, mask);
-            indices.add(index);
-        }
-        return indices.size();
-    }
-
-    public void initializeRookAttacks() {
-        for (int square = 0; square < 64; square++) {
-            long mask = rookMasks[square];
-            Set<Long> occupancies = generateAllOccupancies(mask);
-            rookAttacks[square] = new long[occupancies.size()];
-
-            for (long occupancy : occupancies) {
-                int index = transform(occupancy, rookMagics[square], mask);
-                rookAttacks[square][index] = calculateRookMoves(square, occupancy);
-            }
-        }
-    }
-
-    public void initializeRookBits() {
-        for (int square = 0; square < 64; square++) {
-            rookBits[square] = Long.bitCount(rookMasks[square]);
-        }
-    }
+    // ----------------------- Move gen & masks -----------------------
 
     public Set<Long> generateAllOccupancies(long mask) {
-        Set<Long> occupancies = new HashSet<>();
-        int numberOfBits = Long.bitCount(mask);
-
-        // Generate all possible combinations of bits within the mask
-        for (int i = 0; i < (1 << numberOfBits); i++) {
-            long occupancy = 0L;
-            int bitIndex = 0;
-            for (int j = 0; j < 64; j++) {
-                if ((mask & (1L << j)) != 0) {
-                    if ((i & (1 << bitIndex)) != 0) {
-                        occupancy |= (1L << j);
-                    }
-                    bitIndex++;
-                }
+        LinkedHashSet<Long> set = new LinkedHashSet<>();
+        int[] bits = maskToBitPositions(mask);
+        int n = bits.length;
+        int size = 1 << n;
+        for (int i = 0; i < size; i++) {
+            long occ = 0L;
+            for (int k = 0; k < n; k++) {
+                if ((i & (1 << k)) != 0) occ |= (1L << bits[k]);
             }
-            occupancies.add(occupancy);
+            set.add(occ);
         }
-        return occupancies;
+        return set;
     }
 
     public long calculateRookMoves(int square, long occupancy) {
         long moves = 0L;
         int row = square / 8, col = square % 8;
 
-        for (int[] dir : directions) {
-            int r = row + dir[0], c = col + dir[1]; // Move one step in the direction initially
-
-            while (r >= 0 && r < 8 && c >= 0 && c < 8) {
-                long positionBit = 1L << (r * 8 + c); // Calculate the bit for the current position
-
-                moves |= positionBit; // Add this square to the moves
-                if ((occupancy & positionBit) != 0) {
-                    break; // Stop if there's a piece in the way
-                }
-
-
-                r += dir[0]; // Move in the row direction
-                c += dir[1]; // Move in the column direction
-            }
+        // Down (increasing row)
+        for (int r = row + 1; r < 8; r++) {
+            long bb = 1L << (r * 8 + col);
+            moves |= bb;
+            if ((occupancy & bb) != 0) break;
+        }
+        // Up (decreasing row)
+        for (int r = row - 1; r >= 0; r--) {
+            long bb = 1L << (r * 8 + col);
+            moves |= bb;
+            if ((occupancy & bb) != 0) break;
+        }
+        // Right (increasing col)
+        for (int c = col + 1; c < 8; c++) {
+            long bb = 1L << (row * 8 + c);
+            moves |= bb;
+            if ((occupancy & bb) != 0) break;
+        }
+        // Left (decreasing col)
+        for (int c = col - 1; c >= 0; c--) {
+            long bb = 1L << (row * 8 + c);
+            moves |= bb;
+            if ((occupancy & bb) != 0) break;
         }
 
         return moves;
     }
 
-
     public long generateOccupancyMask(int square) {
         long mask = 0L;
         int row = square / 8, col = square % 8;
 
-        // Include squares the rook can move to, excluding the edges and the rook's current square
-        for (int i = 1; i < 7; i++) {
-            if (col - i > 0) mask |= (1L << (square - i));      // Left
-            if (col + i < 7) mask |= (1L << (square + i));     // Right
-            if (row - i > 0) mask |= (1L << (square - 8 * i)); // Up
-            if (row + i < 7) mask |= (1L << (square + 8 * i)); // Down
-        }
+        // Exclude board edges (only interior 1..6 columns/rows are included in mask).
+        for (int r = row + 1; r <= 6; r++) mask |= 1L << (r * 8 + col);
+        for (int r = row - 1; r >= 1; r--) mask |= 1L << (r * 8 + col);
+        for (int c = col + 1; c <= 6; c++) mask |= 1L << (row * 8 + c);
+        for (int c = col - 1; c >= 1; c--) mask |= 1L << (row * 8 + c);
+
         return mask;
     }
 
-    private long randomMagicNumber() {
-        return new Random().nextLong();
+    private static int[] maskToBitPositions(long mask) {
+        int n = Long.bitCount(mask);
+        int[] pos = new int[n];
+        int idx = 0;
+        while (mask != 0) {
+            int lsb = Long.numberOfTrailingZeros(mask);
+            pos[idx++] = lsb;
+            mask &= (mask - 1);
+        }
+        return pos;
     }
 
+    private static long[] enumerateOccupanciesArray(long mask) {
+        int[] bits = maskToBitPositions(mask);
+        int n = bits.length;
+        long[] occs = new long[1 << n];
+        for (int i = 0; i < occs.length; i++) {
+            long occ = 0L;
+            for (int k = 0; k < n; k++) {
+                if ((i & (1 << k)) != 0) occ |= (1L << bits[k]);
+            }
+            occs[i] = occ;
+        }
+        return occs;
+    }
+
+    private long[] rookAttacksFor(int square, long[] occs) {
+        long[] attacks = new long[occs.length];
+        for (int i = 0; i < occs.length; i++) {
+            attacks[i] = calculateRookMoves(square, occs[i]);
+        }
+        return attacks;
+    }
+
+    // ----------------------- Transform & IO -----------------------
+
     public int transform(long occupancy, long magicNumber, long mask) {
+        // Keep compatibility with your tests.
         return (int) ((occupancy * magicNumber) >>> (64 - Long.bitCount(mask)));
     }
 
@@ -325,7 +292,6 @@ public class RookHelper {
         File file = new File(ROOK_MAGIC_NUMBERS_PATH_write);
         Map<Integer, Long> existingNumbers = new HashMap<>();
 
-        // Load existing magic numbers from the file
         if (file.exists()) {
             try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
                 String line;
@@ -342,11 +308,9 @@ public class RookHelper {
             }
         }
 
-        // Update with new magic numbers
         existingNumbers.putAll(magicNumbers);
 
-        // Write updated magic numbers back to the file
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(file, false))) { // false to overwrite the file
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(file, false))) {
             for (Map.Entry<Integer, Long> entry : existingNumbers.entrySet()) {
                 writer.write(entry.getKey() + ":" + entry.getValue() + "\n");
             }
@@ -356,10 +320,86 @@ public class RookHelper {
     }
 
     public long calculateMovesUsingRookMagic(int square, long occupancy) {
-        // Calculate the index using the magic number
         int index = this.transform(occupancy, this.rookMagics[square], this.rookMasks[square]);
-        // Retrieve the moves from the rookAttacks table
         return this.rookAttacks[square][index];
     }
 
+    // ----------------------- Perfect magic machinery -----------------------
+
+    private static long rand64Sparse() {
+        ThreadLocalRandom r = ThreadLocalRandom.current();
+        return r.nextLong() & r.nextLong() & r.nextLong();
+    }
+
+    private static int transformBits(long occupancy, long magic, int bits) {
+        return (int) ((occupancy * magic) >>> (64 - bits));
+    }
+
+    private boolean isPerfectMagic(int square, long mask, int bits, long magic) {
+        if (magic == 0) return false;
+        int size = 1 << bits;
+        final long EMPTY = Long.MIN_VALUE;
+        long[] trial = new long[size];
+        Arrays.fill(trial, EMPTY);
+
+        long[] occs = enumerateOccupanciesArray(mask);
+        for (long occ : occs) {
+            int idx = transformBits(occ, magic, bits);
+            long atk = calculateRookMoves(square, occ);
+            long cur = trial[idx];
+            if (cur == EMPTY) trial[idx] = atk;
+            else if (cur != atk) return false;
+        }
+
+        // Ensure in-memory table reflects this perfect mapping.
+        if (rookAttacks[square] == null || rookAttacks[square].length != size) {
+            rookAttacks[square] = trial;
+        } else {
+            rookAttacks[square] = trial;
+        }
+        return true;
+    }
+
+    private long findPerfectMagicForSquare(int bits, long mask, long[] occs, long[] attacks, long[] tableOut) {
+        final long EMPTY = Long.MIN_VALUE;
+        long[] trial = new long[1 << bits];
+
+        while (true) {
+            long magic = rand64Sparse();
+            // Reject weak candidates with poor dispersion in the high bits.
+            if (Long.bitCount((mask * magic) >>> 56) < 6) continue;
+
+            Arrays.fill(trial, EMPTY);
+            boolean ok = true;
+            for (int i = 0; i < occs.length; i++) {
+                int idx = transformBits(occs[i], magic, bits);
+                long atk = attacks[i];
+                long cur = trial[idx];
+                if (cur == EMPTY) trial[idx] = atk;
+                else if (cur != atk) { ok = false; break; }
+            }
+            if (ok) {
+                System.arraycopy(trial, 0, tableOut, 0, trial.length);
+                return magic;
+            }
+        }
+    }
+
+    private long[] buildAttackTableForSquare(int square, long magic, long mask) {
+        int bits = Long.bitCount(mask);
+        long[] occs = enumerateOccupanciesArray(mask);
+        long[] table = new long[1 << bits];
+        if (magic == 0) {
+            for (long occ : occs) {
+                int idx = transformBits(occ, 0L, bits);
+                table[idx] = calculateRookMoves(square, occ);
+            }
+            return table;
+        }
+        for (long occ : occs) {
+            int idx = transformBits(occ, magic, bits);
+            table[idx] = calculateRookMoves(square, occ);
+        }
+        return table;
+    }
 }
