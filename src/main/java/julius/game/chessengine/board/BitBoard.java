@@ -286,36 +286,6 @@ public class BitBoard {
         };
     }
 
-    private void setBitboardForPiece(int pieceTypeBits, boolean isWhite, long bitboard) {
-        if (isWhite) {
-            switch (pieceTypeBits) {
-                case 1 -> whitePawns = bitboard;
-                case 2 -> whiteKnights = bitboard;
-                case 3 -> whiteBishops = bitboard;
-                case 4 -> whiteRooks = bitboard;
-                case 5 -> whiteQueens = bitboard;
-                case 6 -> whiteKing = bitboard;
-                default -> throw new IllegalArgumentException("Unknown piece type: " + pieceTypeBits);
-            }
-
-        } else {
-            switch (pieceTypeBits) {
-                case 1 -> blackPawns = bitboard;
-                case 2 -> blackKnights = bitboard;
-                case 3 -> blackBishops = bitboard;
-                case 4 -> blackRooks = bitboard;
-                case 5 -> blackQueens = bitboard;
-                case 6 -> blackKing = bitboard;
-                default -> throw new IllegalArgumentException("Unknown piece type: " + pieceTypeBits);
-            }
-        }
-
-        // After setting the bitboard, update the aggregated bitboards
-        updateAggregatedBitboards();
-        whiteAttackDirty = true;
-        blackAttackDirty = true;
-    }
-
     // Fast: set a piece bitboard without recomputing aggregates/attacks.
     // Caller must call updateAggregatedBitboards() and mark dirty after batches.
     private void setBitboardForPieceFast(int pieceTypeBits, boolean isWhite, long bitboard) {
@@ -803,153 +773,163 @@ public class BitBoard {
         return pieceAtPosition == PieceType.ROOK;
     }
 
+    // Replace your current isSquareUnderAttack with this version
     private boolean isSquareUnderAttack(int index, boolean colorWhite) {
+        long target = 1L << index;
+
         if (colorWhite) {
-            if (blackAttackDirty) {
-                recomputeBlackAttackMap();
-            }
-            return (blackAttackMap & (1L << index)) != 0;
+            // White asks: "am I attacked by Black?"
+            // Pawns (black attacks down the board)
+            long blackPawnAttacks = ((blackPawns & ~FileMasks[7]) >>> 7) | ((blackPawns & ~FileMasks[0]) >>> 9);
+            if ((blackPawnAttacks & target) != 0) return true;
+
+            // Knights
+            if ((KnightHelper.knightMoveTable[index] & blackKnights) != 0) return true;
+
+            // King
+            if ((KING_ATTACKS[index] & blackKing) != 0) return true;
+
+            // Sliders (use rays from the target square)
+            if ((bishopAttackBitmask(index) & (blackBishops | blackQueens)) != 0) return true;
+            return (rookAttackBitmask(index) & (blackRooks | blackQueens)) != 0;
         } else {
-            if (whiteAttackDirty) {
-                recomputeWhiteAttackMap();
-            }
-            return (whiteAttackMap & (1L << index)) != 0;
+            // Black asks: "am I attacked by White?"
+            long whitePawnAttacks = ((whitePawns & ~FileMasks[0]) << 7) | ((whitePawns & ~FileMasks[7]) << 9);
+            if ((whitePawnAttacks & target) != 0) return true;
+
+            if ((KnightHelper.knightMoveTable[index] & whiteKnights) != 0) return true;
+
+            if ((KING_ATTACKS[index] & whiteKing) != 0) return true;
+
+            if ((bishopAttackBitmask(index) & (whiteBishops | whiteQueens)) != 0) return true;
+            return (rookAttackBitmask(index) & (whiteRooks | whiteQueens)) != 0;
         }
     }
 
+
+    // Replace your current performMove with this version
     public void performMove(int move) {
-        int fromIndex = MoveHelper.deriveFromIndex(move); // Extract the first 6 bits
-        int toIndex = MoveHelper.deriveToIndex(move); // Extract the next 6 bits
-        int pieceTypeBits = MoveHelper.derivePieceTypeBits(move); // Extract the next 3 bits
-        boolean isWhite = MoveHelper.isWhitesMove(move); // Extract the color bit
+        int fromIndex = MoveHelper.deriveFromIndex(move);
+        int toIndex   = MoveHelper.deriveToIndex(move);
+        int pieceBits = MoveHelper.derivePieceTypeBits(move);
+        boolean isWhite = MoveHelper.isWhitesMove(move);
         boolean isCapture = MoveHelper.isCapture(move);
-        boolean isEnPassantMove = MoveHelper.isEnPassantMove(move);
-        boolean isCastlingMove = MoveHelper.isCastlingMove(move);
-        int promotionPieceTypeBits = MoveHelper.derivePromotionPieceTypeBits(move); // Extract the next 3 bits
+        boolean isEnPassant = MoveHelper.isEnPassantMove(move);
+        boolean isCastling  = MoveHelper.isCastlingMove(move);
+        int promoBits = MoveHelper.derivePromotionPieceTypeBits(move);
 
-        long pieceBitboard = intToPiecesBitboard(pieceTypeBits, isWhite);
-        PieceType movingPiece = pieceTypeFromBits(pieceTypeBits);
+        long fromMask = 1L << fromIndex;
+        long toMask   = 1L << toIndex;
 
+        // ---- 1) Captures (fast, no aggregates yet)
         if (isCapture) {
-            PieceType captured = getPieceTypeAtIndex(toIndex);
-            if (captured == PieceType.KING) {
-                throw new IllegalStateException("Cannot capture the king");
-            }
-            clearSquare(toIndex, !isWhite);
-        }
+            int capIndex = isEnPassant ? (isWhite ? toIndex - 8 : toIndex + 8) : toIndex;
+            long capMask = 1L << capIndex;
 
-        // If the move is a castling move, move both the king and the rook
-        if (isCastlingMove) {
             if (isWhite) {
-                whiteKingHasCastled = true;
+                if ((blackPawns   & capMask) != 0) { blackPawns   &= ~capMask; pieceBoard[capIndex] = null; }
+                else if ((blackKnights & capMask) != 0) { blackKnights &= ~capMask; pieceBoard[capIndex] = null; }
+                else if ((blackBishops & capMask) != 0) { blackBishops &= ~capMask; pieceBoard[capIndex] = null; }
+                else if ((blackRooks   & capMask) != 0) { blackRooks   &= ~capMask; pieceBoard[capIndex] = null; }
+                else if ((blackQueens  & capMask) != 0) { blackQueens  &= ~capMask; pieceBoard[capIndex] = null; }
+                else if ((blackKing    & capMask) != 0) throw new IllegalStateException("Cannot capture the king");
             } else {
-                blackKingHasCastled = true;
+                if ((whitePawns   & capMask) != 0) { whitePawns   &= ~capMask; pieceBoard[capIndex] = null; }
+                else if ((whiteKnights & capMask) != 0) { whiteKnights &= ~capMask; pieceBoard[capIndex] = null; }
+                else if ((whiteBishops & capMask) != 0) { whiteBishops &= ~capMask; pieceBoard[capIndex] = null; }
+                else if ((whiteRooks   & capMask) != 0) { whiteRooks   &= ~capMask; pieceBoard[capIndex] = null; }
+                else if ((whiteQueens  & capMask) != 0) { whiteQueens  &= ~capMask; pieceBoard[capIndex] = null; }
+                else if ((whiteKing    & capMask) != 0) throw new IllegalStateException("Cannot capture the king");
             }
-            // Determine if this is kingside or queenside castling
-            boolean kingside = toIndex > fromIndex;
-            int rookFromIndex, rookToIndex;
-            if (kingside) {
-                rookFromIndex = isWhite ? 7 : 63;
-                rookToIndex = rookFromIndex - 2;
-            } else {
-                rookFromIndex = isWhite ? 0 : 56;
-                rookToIndex = rookFromIndex + 3;
-            }
-            long rookBitboard = intToPiecesBitboard(4, isWhite);
-            rookBitboard = moveBit(rookBitboard, rookFromIndex, rookToIndex);
-            setBitboardForPiece(4, isWhite, rookBitboard);
-
-            pieceBoard[rookFromIndex] = null;
-            pieceBoard[rookToIndex] = PieceType.ROOK;
-
-            // Mark the rook as moved
-            markRookAsMoved(rookFromIndex);
         }
 
-        // Move the piece
-        pieceBitboard = moveBit(pieceBitboard, fromIndex, toIndex);
-        setBitboardForPiece(pieceTypeBits, isWhite, pieceBitboard);
+        // ---- 2) Castling (move rook fast)
+        if (isCastling) {
+            if (isWhite) whiteKingHasCastled = true; else blackKingHasCastled = true;
+            boolean kingside = toIndex > fromIndex;
+            int rookFrom = isWhite ? (kingside ? 7 : 0) : (kingside ? 63 : 56);
+            int rookTo   = kingside ? (rookFrom - 2) : (rookFrom + 3);
+            long rfMask  = 1L << rookFrom;
+            long rtMask  = 1L << rookTo;
 
+            if (isWhite) {
+                whiteRooks &= ~rfMask;
+                whiteRooks |=  rtMask;
+            } else {
+                blackRooks &= ~rfMask;
+                blackRooks |=  rtMask;
+            }
+            pieceBoard[rookFrom] = null;
+            pieceBoard[rookTo]   = PieceType.ROOK;
+            markRookAsMoved(rookFrom);
+        }
+
+        // ---- 3) Move the piece (fast)
+        PieceType movingPiece = pieceTypeFromBits(pieceBits);
+
+        // remove from 'from'
+        switch (pieceBits) {
+            case 1 -> { if (isWhite) whitePawns   &= ~fromMask; else blackPawns   &= ~fromMask; }
+            case 2 -> { if (isWhite) whiteKnights &= ~fromMask; else blackKnights &= ~fromMask; }
+            case 3 -> { if (isWhite) whiteBishops &= ~fromMask; else blackBishops &= ~fromMask; }
+            case 4 -> { if (isWhite) whiteRooks   &= ~fromMask; else blackRooks   &= ~fromMask; }
+            case 5 -> { if (isWhite) whiteQueens  &= ~fromMask; else blackQueens  &= ~fromMask; }
+            case 6 -> { if (isWhite) whiteKing    &= ~fromMask; else blackKing    &= ~fromMask; }
+            default -> throw new IllegalArgumentException("Unknown piece type: " + pieceBits);
+        }
+
+        // place on 'to' (promotion handled just below)
+        if (promoBits == 0) {
+            switch (pieceBits) {
+                case 1 -> { if (isWhite) whitePawns   |= toMask; else blackPawns   |= toMask; }
+                case 2 -> { if (isWhite) whiteKnights |= toMask; else blackKnights |= toMask; }
+                case 3 -> { if (isWhite) whiteBishops |= toMask; else blackBishops |= toMask; }
+                case 4 -> { if (isWhite) whiteRooks   |= toMask; else blackRooks   |= toMask; }
+                case 5 -> { if (isWhite) whiteQueens  |= toMask; else blackQueens  |= toMask; }
+                case 6 -> { if (isWhite) whiteKing    |= toMask; else blackKing    |= toMask; }
+            }
+            pieceBoard[toIndex] = movingPiece;
+        } else {
+            // Promotion: place promoted piece instead of pawn
+            switch (promoBits) {
+                case 2 -> { if (isWhite) whiteKnights |= toMask; else blackKnights |= toMask; pieceBoard[toIndex] = PieceType.KNIGHT; }
+                case 3 -> { if (isWhite) whiteBishops |= toMask; else blackBishops |= toMask; pieceBoard[toIndex] = PieceType.BISHOP; }
+                case 4 -> { if (isWhite) whiteRooks   |= toMask; else blackRooks   |= toMask; pieceBoard[toIndex] = PieceType.ROOK; }
+                case 5 -> { if (isWhite) whiteQueens  |= toMask; else blackQueens  |= toMask; pieceBoard[toIndex] = PieceType.QUEEN; }
+                default -> throw new IllegalArgumentException("Invalid promotion piece bits: " + promoBits);
+            }
+        }
+
+        // board mirror for 'from'
         pieceBoard[fromIndex] = null;
 
-        if (promotionPieceTypeBits != 0) {
-            // Clear the pawn from the promotion square
-            clearSquare(toIndex, isWhite);
-
-            // Set the bitboard for the promotion piece
-            long promotionPieceBitboard = intToPiecesBitboard(promotionPieceTypeBits, isWhite);
-            promotionPieceBitboard |= (1L << toIndex); // Place the promotion piece on the promotion square
-            setBitboardForPiece(promotionPieceTypeBits, isWhite, promotionPieceBitboard);
-            pieceBoard[toIndex] = pieceTypeFromBits(promotionPieceTypeBits);
-        } else {
-            pieceBoard[toIndex] = movingPiece;
-        }
-
-        // Mark the king as moved if it was a king move
-        if (pieceTypeBits == 6) {
+        // ---- 4) State flags
+        if (pieceBits == 6) {
             markKingAsMoved(isWhite);
         }
-
-        //Mark rook as moved
-        if (pieceTypeBits == 4) {
+        if (pieceBits == 4) {
             markRookAsMoved(fromIndex);
         }
 
-        if (pieceTypeBits == 1 && Math.abs(fromIndex / 8 - toIndex / 8) == 2) {
-            // A pawn moved two squares forward. Only expose the en passant
-            // target square if an opposing pawn could actually capture it.
+        // En passant target (only if an enemy pawn could actually capture)
+        if (pieceBits == 1 && Math.abs(fromIndex / 8 - toIndex / 8) == 2) {
             long enemyPawns = isWhite ? blackPawns : whitePawns;
-            int file = toIndex % 8;
-            boolean leftEnemy = file > 0 && ((enemyPawns & (1L << (toIndex - 1))) != 0);
+            int file = toIndex & 7;
+            boolean leftEnemy  = file > 0 && ((enemyPawns & (1L << (toIndex - 1))) != 0);
             boolean rightEnemy = file < 7 && ((enemyPawns & (1L << (toIndex + 1))) != 0);
             lastMoveDoubleStepPawnIndex = (leftEnemy || rightEnemy) ? toIndex : 0;
         } else {
             lastMoveDoubleStepPawnIndex = 0;
         }
 
-        // Handle en passant capture
-        if (isEnPassantMove) {
-            // Clear the captured pawn for en passant
-            int capturedPawnIndex = isWhite ? toIndex - 8 : toIndex + 8;
-            clearSquare(capturedPawnIndex, !isWhite);
-        }
+        // ---- 5) Finalize once
         updateAggregatedBitboards();
-        // mark attack maps as dirty for sides affected by the move
-        if (isWhite) {
-            whiteAttackDirty = true;
-            if (isCapture || isEnPassantMove) {
-                blackAttackDirty = true;
-            }
-        } else {
-            blackAttackDirty = true;
-            if (isCapture || isEnPassantMove) {
-                whiteAttackDirty = true;
-            }
-        }
-        whitesTurn = !whitesTurn;
-    }
 
-    public void clearSquare(int index, boolean isWhite) {
-        long mask = ~(1L << index);
-        if (isWhite) {
-            if ((whitePawns & (1L << index)) != 0L) whitePawns &= mask;
-            if ((whiteKnights & (1L << index)) != 0L) whiteKnights &= mask;
-            if ((whiteBishops & (1L << index)) != 0L) whiteBishops &= mask;
-            if ((whiteRooks & (1L << index)) != 0L) whiteRooks &= mask;
-            if ((whiteQueens & (1L << index)) != 0L) whiteQueens &= mask;  // Corrected line for queen
-            whiteKing &= mask; // Only clear if the king is actually on the square
-        } else {
-            if ((blackPawns & (1L << index)) != 0L) blackPawns &= mask;
-            if ((blackKnights & (1L << index)) != 0L) blackKnights &= mask;
-            if ((blackBishops & (1L << index)) != 0L) blackBishops &= mask;
-            if ((blackRooks & (1L << index)) != 0L) blackRooks &= mask;
-            if ((blackQueens & (1L << index)) != 0L) blackQueens &= mask;  // Corrected line for queen
-            blackKing &= mask; // Only clear if the king is actually on the square
-        }
-        pieceBoard[index] = null;
-        updateAggregatedBitboards();
+        // Any move changes slider lines, so both sides’ maps become stale.
         whiteAttackDirty = true;
         blackAttackDirty = true;
+
+        whitesTurn = !whitesTurn;
     }
 
 
@@ -1097,15 +1077,6 @@ public class BitBoard {
         else if ((whiteKing & positionMask) != 0) pieceChar = 'K';
         else if ((blackKing & positionMask) != 0) pieceChar = 'k';
         return pieceChar;
-    }
-
-    // Helper method to move a piece on a bitboard
-    private long moveBit(long pieceBitboard, int fromIndex, int toIndex) {
-        // Clear the bit at the fromIndex
-        pieceBitboard &= ~(1L << fromIndex);
-        // Set the bit at the toIndex
-        pieceBitboard |= 1L << toIndex;
-        return pieceBitboard;
     }
 
     public void undoMove(int move) {
