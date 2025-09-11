@@ -72,14 +72,18 @@ public final class SearchPosition {
      */
     public int doNullMove() {
         int prev = board.getLastMoveDoubleStepPawnIndex();
+        if (prev != 0) board.xorEnPassantForSearch(prev);
         board.setLastMoveDoubleStepPawnIndex(0);
         board.whitesTurn = !board.whitesTurn;
+        board.xorSideToMoveForSearch();
         return prev;
     }
 
     public void undoNullMove(int prevEp) {
         board.whitesTurn = !board.whitesTurn;
+        board.xorSideToMoveForSearch();
         board.setLastMoveDoubleStepPawnIndex(prevEp);
+        if (prevEp != 0) board.xorEnPassantForSearch(prevEp);
     }
 
     /**

@@ -138,7 +138,9 @@ public class FEN {
         }
 
         // Pass these inferred values to the BitBoard constructor
-        return new BitBoard(whitesTurn, whitePawns, blackPawns, whiteKnights, blackKnights, whiteBishops, blackBishops, whiteRooks, blackRooks, whiteQueens, blackQueens, whiteKing, blackKing, whitePieces, blackPieces, allPieces, lastMoveDoubleStepPawnIndex, whiteKingMoved, blackKingMoved, whiteRookA1Moved, whiteRookH1Moved, blackRookA8Moved, blackRookH8Moved, whiteKingHasCastled, blackKingHasCastled);
+        BitBoard board = new BitBoard(whitesTurn, whitePawns, blackPawns, whiteKnights, blackKnights, whiteBishops, blackBishops, whiteRooks, blackRooks, whiteQueens, blackQueens, whiteKing, blackKing, whitePieces, blackPieces, allPieces, lastMoveDoubleStepPawnIndex, whiteKingMoved, blackKingMoved, whiteRookA1Moved, whiteRookH1Moved, blackRookA8Moved, blackRookH8Moved, whiteKingHasCastled, blackKingHasCastled);
+        board.rebuildZobrist();
+        return board;
     }
 
 }

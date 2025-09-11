@@ -3,6 +3,8 @@ package julius.game.chessengine.board;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.utils.Color;
 import julius.game.chessengine.figures.PieceType;
+import julius.game.chessengine.ai.SearchPosition;
+import julius.game.chessengine.board.MoveList;
 import lombok.extern.log4j.Log4j2;
 import org.junit.jupiter.api.Test;
 
@@ -47,6 +49,28 @@ public class BitBoardTest {
         b.logBoard();
 
         assertEquals(a.getBoardStateHash(), b.getBoardStateHash());
+    }
+
+    @Test
+    public void testMakeUndoHashIdentity() {
+        BitBoard b = new BitBoard();
+        long h0 = b.getBoardStateHash();
+        MoveList ml = b.generateAllPossibleMoves(true);
+        for (int i = 0; i < ml.size(); i++) {
+            int m = ml.getMove(i);
+            b.performMove(m);
+            b.undoMove(m);
+            assertEquals(h0, b.getBoardStateHash(), "hash mismatch after make/undo");
+        }
+    }
+
+    @Test
+    public void testNullMoveHashIdentity() {
+        SearchPosition sp = new SearchPosition(new BitBoard());
+        long h0 = sp.hash();
+        int ep = sp.doNullMove();
+        sp.undoNullMove(ep);
+        assertEquals(h0, sp.hash(), "hash mismatch after null/undo");
     }
 
     @Test
