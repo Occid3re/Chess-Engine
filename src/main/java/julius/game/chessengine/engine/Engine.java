@@ -100,12 +100,13 @@ public class Engine {
     }
 
     private void generateLegalMoves() {
+        final long boardStateHash = getBoardStateHash();
 
-        long boardStateHash = getBoardStateHash();
-
-        if (legalMovesCache.containsKey(boardStateHash)) {
-            // Use the cached moves
-            this.legalMoves = legalMovesCache.get(boardStateHash);
+        // Use cached result if available
+        MoveList cached = legalMovesCache.get(boardStateHash);
+        if (cached != null) {
+            this.legalMoves = cached;
+            legalMovesNeedUpdate = false;
             return;
         }
 
@@ -115,26 +116,32 @@ public class Engine {
             return;
         }
 
-        BitBoard simulation = new BitBoard(bitBoard); // Only one instance
+        // Generate pseudo-legal moves on the current board
         MoveList moves = bitBoard.getAllCurrentPossibleMoves();
 
-        this.legalMoves = new MoveList();
+        // Filter in-place by making/unmaking on the SAME bitBoard (no BitBoard copy)
+        MoveList legal = new MoveList();
         for (int i = 0; i < moves.size(); i++) {
             int move = moves.getMove(i);
-            simulation.performMove(move);
-            if (!simulation.isInCheck(MoveHelper.isWhitesMove(move))) {
-                this.legalMoves.add(move);
+
+            bitBoard.performMove(move);
+            // If the mover's king is not left in check, the move is legal
+            if (!bitBoard.isInCheck(MoveHelper.isWhitesMove(move))) {
+                legal.add(move);
             }
-            simulation.undoMove(move); // Revert to original state after checking
+            bitBoard.undoMove(move);
         }
+
+        this.legalMoves = legal;
         legalMovesNeedUpdate = false;
-        legalMovesCache.put(boardStateHash, this.legalMoves);
+        legalMovesCache.put(boardStateHash, legal);
 
         int size = legalMovesCache.size();
         if (size > MAX_SIZE) {
             throw new RuntimeException(String.format("LegalMovesCache size %s is larger than MAX_SIZE %s", size, MAX_SIZE));
         }
     }
+
 
     // Each of these methods would need to be implemented to handle the specific move generation for each piece type.
     public List<Move> getMovesFromIndex(int fromIndex) {
@@ -245,21 +252,30 @@ public class Engine {
         return bitBoard.whitesTurn;
     }
 
-    public int doNullMove() {
-        int prev = bitBoard.getLastMoveDoubleStepPawnIndex();
+    // Engine.java
+    public int doNullMoveForSearch() {
+        // Save current en-passant target (0 means none in your codebase)
+        int previousDoubleStep = bitBoard.getLastMoveDoubleStepPawnIndex();
+
+        // EP is not valid across a null move: clear it (no move-gen)
         bitBoard.setLastMoveDoubleStepPawnIndex(0);
+
+        // Flip side to move (no legalMoves recompute, no GameState updates)
         bitBoard.whitesTurn = !bitBoard.whitesTurn;
-        generateLegalMoves();
-        gameState.updateState(bitBoard, legalMoves, false);
-        return prev;
+
+        return previousDoubleStep;
     }
 
-    public void undoNullMove(int previousDoubleStep) {
+
+    // Engine.java
+    public void undoNullMoveForSearch(int previousDoubleStep) {
+        // Flip side back (still no move-gen / GameState work)
         bitBoard.whitesTurn = !bitBoard.whitesTurn;
+
+        // Restore EP target
         bitBoard.setLastMoveDoubleStepPawnIndex(previousDoubleStep);
-        generateLegalMoves();
-        gameState.updateState(bitBoard, legalMoves, false);
     }
+
 
     public void undoLastMove() {
         if (!line.isEmpty()) {
