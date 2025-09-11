@@ -1,5 +1,6 @@
 package julius.game.chessengine.ai;
 
+import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.Move;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.MoveList;
@@ -390,7 +391,7 @@ public class AI {
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
 
         ArrayList<Integer> sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth,
-                simulatorEngine.getBoardStateHash());
+                simulatorEngine.getBoardStateHash(), simulatorEngine.getBitBoard());
 
         for (int moveInt : sortedMoves) {
 
@@ -525,7 +526,7 @@ public class AI {
         double maxEval = Double.NEGATIVE_INFINITY;
         int bestMoveAtThisNode = -1; // Variable to track the best move at this node
 
-        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, depth, boardHash);
+        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, simulatorEngine.getBitBoard());
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
                 return EXIT_FLAG;
@@ -627,7 +628,7 @@ public class AI {
         double minEval = Double.POSITIVE_INFINITY;
         int bestMoveAtThisNode = -1; // Track the best move at this node
 
-        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, depth, boardHash);
+        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, simulatorEngine.getBitBoard());
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
                 return EXIT_FLAG;
@@ -719,7 +720,7 @@ public class AI {
     }
 
 
-    ArrayList<Integer> sortMovesByEfficiency(MoveList moves, int currentDepth, long boardHash) {
+    ArrayList<Integer> sortMovesByEfficiency(MoveList moves, int currentDepth, long boardHash, BitBoard board) {
         final int size = moves.size();
         final int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
 
@@ -768,17 +769,21 @@ public class AI {
                 int base = calculateMvvLvaScore(moveInt); // promotion-captures benefit, quiet promos keep 0
                 score = base + PROMOTION_ORDER_BONUS;
             } else if (isCapture) {
-                // MVV-LVA for captures; classify as good/equal/bad without SEE
-                final int mvvLva = calculateMvvLvaScore(moveInt); // victim - attacker (can be negative)
-                if (mvvLva > 0) {
-                    category = CAT_CAP_GOOD;
-                } else if (mvvLva == 0) {
-                    category = CAT_CAP_EQUAL;
-                } else {
+                final int see = Score.staticExchangeEval(board, moveInt);
+                if (see < 0) {
                     category = CAT_CAP_BAD;
+                    score = see; // negative SEE pushes to bottom
+                } else {
+                    final int mvvLva = calculateMvvLvaScore(moveInt);
+                    if (mvvLva > 0) {
+                        category = CAT_CAP_GOOD;
+                    } else if (mvvLva == 0) {
+                        category = CAT_CAP_EQUAL;
+                    } else {
+                        category = CAT_CAP_BAD;
+                    }
+                    score = (mvvLva * 16) + see;
                 }
-                // Scale captures so bigger victims / smaller attackers bubble up
-                score = (mvvLva * 16); // small scale keeps room for tie-breaks
             } else if (moveInt == k0) {
                 category = CAT_KILLER0;
                 score = KILLER_MOVE_SCORE + KILLER0_BONUS;
@@ -902,9 +907,12 @@ public class AI {
         MoveList moves = inCheck ? simulatorEngine.getAllLegalMoves() : getPossibleCapturesOrPromotions(simulatorEngine);
 
         // Order them (captures first via MVV-LVA/promotion bonus, killers/history still help)
-        ArrayList<Integer> ordered = sortMovesByEfficiency(moves, 0, simulatorEngine.getBoardStateHash());
+        ArrayList<Integer> ordered = sortMovesByEfficiency(moves, 0, simulatorEngine.getBoardStateHash(), simulatorEngine.getBitBoard());
 
         for (int m : ordered) {
+            if (!inCheck && Score.staticExchangeEval(simulatorEngine.getBitBoard(), m) < 0) {
+                continue;
+            }
             simulatorEngine.performMove(m);
             // FIX: propagate timeout BEFORE negation
             double child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);

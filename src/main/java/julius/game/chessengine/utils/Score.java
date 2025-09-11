@@ -2,13 +2,17 @@ package julius.game.chessengine.utils;
 
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveList;
+import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.GameStateEnum;
+import julius.game.chessengine.helper.BishopHelper;
+import julius.game.chessengine.helper.RookHelper;
 import lombok.Data;
 import lombok.extern.log4j.Log4j2;
 
 import static julius.game.chessengine.helper.BishopHelper.BISHOP_POSITIONAL_VALUES;
 import static julius.game.chessengine.helper.KingHelper.*;
 import static julius.game.chessengine.helper.KnightHelper.KNIGHT_POSITIONAL_VALUES;
+import static julius.game.chessengine.helper.KnightHelper.knightMoveTable;
 import static julius.game.chessengine.helper.PawnHelper.*;
 import static julius.game.chessengine.helper.PawnMoveTables.PAWN_ATTACKS;
 import static julius.game.chessengine.helper.PawnMoveTables.PAWN_PUSHES;
@@ -59,6 +63,10 @@ public class Score {
     private static final int MISSING_PAWN_SHIELD_PENALTY = -15;
     private static final int KING_ATTACK_PENALTY = -10;
     public static final int BISHOP_PAIR_BONUS = 40;
+
+    private static final int[] PIECE_VALUES = {0, PAWN_VALUE, KNIGHT_VALUE, BISHOP_VALUE, ROOK_VALUE, QUEEN_VALUE, CHECKMATE};
+    private static final BishopHelper bishopHelper = BishopHelper.getInstance();
+    private static final RookHelper rookHelper = RookHelper.getInstance();
 
     private Double cachedScoreDifference = null;
 
@@ -139,6 +147,200 @@ public class Score {
     private static final long INITIAL_WHITE_ROOK_POSITION = 0x0000000000000081L; // Rooks on a1 and h1
     private static final long INITIAL_BLACK_ROOK_POSITION = 0x8100000000000000L; // Rooks on a8 and h8
 
+
+    /**
+     * Static exchange evaluation (SEE) for a potential move.
+     * Returns the net material gain (in centipawns) assuming optimal captures
+     * on the target square by both sides. Negative values indicate that the
+     * capture loses material.
+     */
+    public static int staticExchangeEval(BitBoard board, int move) {
+        int from = MoveHelper.deriveFromIndex(move);
+        int to = MoveHelper.deriveToIndex(move);
+        boolean isWhite = MoveHelper.isWhitesMove(move);
+        int movingPiece = MoveHelper.derivePieceTypeBits(move);
+        int promotionPiece = MoveHelper.derivePromotionPieceTypeBits(move);
+        int capturedPiece = MoveHelper.deriveCapturedPieceTypeBits(move);
+
+        long[] pawns = {board.getWhitePawns(), board.getBlackPawns()};
+        long[] knights = {board.getWhiteKnights(), board.getBlackKnights()};
+        long[] bishops = {board.getWhiteBishops(), board.getBlackBishops()};
+        long[] rooks = {board.getWhiteRooks(), board.getBlackRooks()};
+        long[] queens = {board.getWhiteQueens(), board.getBlackQueens()};
+        long[] kings = {board.getWhiteKing(), board.getBlackKing()};
+
+        long occupied = board.getAllPieces();
+        int side = isWhite ? 0 : 1;
+        int currentPieceType = promotionPiece != 0 ? promotionPiece : movingPiece;
+
+        long fromMask = 1L << from;
+        long toMask = 1L << to;
+
+        int[] gains = new int[32];
+        int depth = 0;
+
+        // Remove captured piece
+        if (MoveHelper.isEnPassantMove(move)) {
+            long epPawn = isWhite ? (1L << (to - 8)) : (1L << (to + 8));
+            occupied ^= epPawn;
+            pawns[1 - side] ^= epPawn;
+            gains[depth] = PAWN_VALUE;
+        } else {
+            long capMask = toMask;
+            switch (capturedPiece) {
+                case 1 -> pawns[1 - side] ^= capMask;
+                case 2 -> knights[1 - side] ^= capMask;
+                case 3 -> bishops[1 - side] ^= capMask;
+                case 4 -> rooks[1 - side] ^= capMask;
+                case 5 -> queens[1 - side] ^= capMask;
+                case 6 -> kings[1 - side] ^= capMask;
+            }
+            if (capturedPiece != 0) {
+                occupied ^= capMask;
+                gains[depth] = PIECE_VALUES[capturedPiece];
+            } else {
+                gains[depth] = 0;
+            }
+        }
+
+        // Move attacking piece to target square
+        switch (movingPiece) {
+            case 1 -> pawns[side] ^= fromMask;
+            case 2 -> knights[side] ^= fromMask;
+            case 3 -> bishops[side] ^= fromMask;
+            case 4 -> rooks[side] ^= fromMask;
+            case 5 -> queens[side] ^= fromMask;
+            case 6 -> kings[side] ^= fromMask;
+        }
+        occupied ^= fromMask;
+
+        switch (currentPieceType) {
+            case 1 -> pawns[side] |= toMask;
+            case 2 -> knights[side] |= toMask;
+            case 3 -> bishops[side] |= toMask;
+            case 4 -> rooks[side] |= toMask;
+            case 5 -> queens[side] |= toMask;
+            case 6 -> kings[side] |= toMask;
+        }
+        occupied |= toMask;
+
+        long whiteAttackers = attackersToSquare(to, occupied, pawns, knights, bishops, rooks, queens, kings, true);
+        long blackAttackers = attackersToSquare(to, occupied, pawns, knights, bishops, rooks, queens, kings, false);
+        if (side == 0) {
+            whiteAttackers &= ~toMask;
+        } else {
+            blackAttackers &= ~toMask;
+        }
+
+        side ^= 1;
+        long attackersSide = side == 0 ? whiteAttackers : blackAttackers;
+
+        while (attackersSide != 0) {
+            long fromSq;
+            int pieceType;
+            if ((attackersSide & pawns[side]) != 0) {
+                fromSq = attackersSide & pawns[side];
+                pieceType = 1;
+            } else if ((attackersSide & knights[side]) != 0) {
+                fromSq = attackersSide & knights[side];
+                pieceType = 2;
+            } else if ((attackersSide & bishops[side]) != 0) {
+                fromSq = attackersSide & bishops[side];
+                pieceType = 3;
+            } else if ((attackersSide & rooks[side]) != 0) {
+                fromSq = attackersSide & rooks[side];
+                pieceType = 4;
+            } else if ((attackersSide & queens[side]) != 0) {
+                fromSq = attackersSide & queens[side];
+                pieceType = 5;
+            } else {
+                fromSq = attackersSide & kings[side];
+                pieceType = 6;
+            }
+            fromSq &= -fromSq; // isolate least significant bit
+
+            depth++;
+            gains[depth] = PIECE_VALUES[pieceType] - gains[depth - 1];
+
+            // Remove attacker from its square
+            switch (pieceType) {
+                case 1 -> pawns[side] ^= fromSq;
+                case 2 -> knights[side] ^= fromSq;
+                case 3 -> bishops[side] ^= fromSq;
+                case 4 -> rooks[side] ^= fromSq;
+                case 5 -> queens[side] ^= fromSq;
+                case 6 -> kings[side] ^= fromSq;
+            }
+            occupied ^= fromSq;
+
+            // Remove the piece currently on the target square from the opponent
+            int other = side ^ 1;
+            switch (currentPieceType) {
+                case 1 -> pawns[other] ^= toMask;
+                case 2 -> knights[other] ^= toMask;
+                case 3 -> bishops[other] ^= toMask;
+                case 4 -> rooks[other] ^= toMask;
+                case 5 -> queens[other] ^= toMask;
+                case 6 -> kings[other] ^= toMask;
+            }
+
+            // Place capturing piece on target square
+            currentPieceType = pieceType;
+            switch (pieceType) {
+                case 1 -> pawns[side] |= toMask;
+                case 2 -> knights[side] |= toMask;
+                case 3 -> bishops[side] |= toMask;
+                case 4 -> rooks[side] |= toMask;
+                case 5 -> queens[side] |= toMask;
+                case 6 -> kings[side] |= toMask;
+            }
+            occupied |= toMask;
+
+            whiteAttackers = attackersToSquare(to, occupied, pawns, knights, bishops, rooks, queens, kings, true);
+            blackAttackers = attackersToSquare(to, occupied, pawns, knights, bishops, rooks, queens, kings, false);
+            if (side == 0) {
+                whiteAttackers &= ~toMask;
+            } else {
+                blackAttackers &= ~toMask;
+            }
+
+            side ^= 1;
+            attackersSide = side == 0 ? whiteAttackers : blackAttackers;
+        }
+
+        while (--depth > 0) {
+            gains[depth - 1] = -Math.max(-gains[depth - 1], gains[depth]);
+        }
+        return gains[0];
+    }
+
+    private static long attackersToSquare(int square, long occupied,
+                                          long[] pawns, long[] knights, long[] bishops,
+                                          long[] rooks, long[] queens, long[] kings,
+                                          boolean white) {
+        long target = 1L << square;
+        long attackers = 0L;
+        if (white) {
+            attackers |= ((target >>> 7) & NOT_H_FILE) & pawns[0];
+            attackers |= ((target >>> 9) & NOT_A_FILE) & pawns[0];
+            attackers |= knightMoveTable[square] & knights[0];
+            long diag = bishopHelper.calculateMovesUsingBishopMagic(square, occupied);
+            attackers |= diag & (bishops[0] | queens[0]);
+            long straight = rookHelper.calculateMovesUsingRookMagic(square, occupied);
+            attackers |= straight & (rooks[0] | queens[0]);
+            attackers |= KING_ATTACKS[square] & kings[0];
+        } else {
+            attackers |= ((target << 7) & NOT_A_FILE) & pawns[1];
+            attackers |= ((target << 9) & NOT_H_FILE) & pawns[1];
+            attackers |= knightMoveTable[square] & knights[1];
+            long diag = bishopHelper.calculateMovesUsingBishopMagic(square, occupied);
+            attackers |= diag & (bishops[1] | queens[1]);
+            long straight = rookHelper.calculateMovesUsingRookMagic(square, occupied);
+            attackers |= straight & (rooks[1] | queens[1]);
+            attackers |= KING_ATTACKS[square] & kings[1];
+        }
+        return attackers;
+    }
 
     public Score() {
         this.whiteScore = 0;
