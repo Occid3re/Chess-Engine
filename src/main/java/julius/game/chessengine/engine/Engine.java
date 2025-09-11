@@ -89,6 +89,15 @@ public class Engine {
         return new Engine(this);
     }
 
+    /**
+     * Creates a deep copy of the underlying {@link BitBoard}. This is used by
+     * the search to obtain a lightweight snapshot of the current position
+     * without any of the GUI or game state overhead.
+     */
+    public BitBoard cloneBitBoard() {
+        return new BitBoard(this.bitBoard);
+    }
+
     public void startNewGame() {
         bitBoard = new BitBoard();
         gameState = new GameState(bitBoard);
