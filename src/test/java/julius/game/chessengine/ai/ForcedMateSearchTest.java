@@ -9,6 +9,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;
 
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static julius.game.chessengine.utils.Score.CHECKMATE;
 
@@ -44,7 +45,8 @@ public class ForcedMateSearchTest {
         AI ai = new AI(engine);
         long deadline = System.nanoTime() + timeLimitMs * 1_000_000L;
         double evaluation = ai.evaluateBoard(engine, engine.whitesTurn(), deadline);
-        assertTrue(Math.abs(evaluation) >= CHECKMATE - mateDepth,
+        assertNotEquals(AI.EXIT_FLAG, evaluation, "Search terminated prematurely");
+        assertTrue(evaluation >= CHECKMATE - mateDepth,
                 () -> "Expected mate in " + mateDepth + " within " + timeLimitMs + "ms but got " + evaluation);
     }
 }
