@@ -1090,7 +1090,8 @@ public class AI {
 
     public double evaluateBoard(Engine simulatorEngine, boolean isWhitesTurn, long deadline) {
         if (simulatorEngine.getGameState().isInStateCheckMate()) {
-            return CHECKMATE;
+            // Side to move has no legal moves and is in check → losing for side to move
+            return -CHECKMATE; // (or -(CHECKMATE - depth) if you thread depth in)
         }
 
         if (simulatorEngine.getGameState().isInStateDraw()) {
@@ -1181,10 +1182,7 @@ public class AI {
     private double evaluateStaticPosition(GameState gameState, boolean isWhitesTurn, int depth) {
 
         if (gameState.isInStateCheckMate()) {
-            if (log.isDebugEnabled()) {
-                log.debug("Checkmate found");
-            }
-            return CHECKMATE - depth; // -depth to allow faster checkmates
+            return -(CHECKMATE - depth);
         }
         if (gameState.isInStateDraw()) {
             if (log.isDebugEnabled()) {
