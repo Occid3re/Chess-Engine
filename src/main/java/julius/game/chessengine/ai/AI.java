@@ -846,11 +846,23 @@ public class AI {
             }
         }
 
-        // Generate moves: evasions if in check, else captures/promotions
-        MoveList moves = inCheck ? simulatorEngine.getAllLegalMoves() : getPossibleCapturesOrPromotions(simulatorEngine);
+        ArrayList<Integer> ordered;
+        if (inCheck) {
+            // When in check, search all legal evasions
+            MoveList moves = simulatorEngine.getAllLegalMoves();
+            ordered = sortMovesByEfficiency(moves, 0, simulatorEngine.getBoardStateHash());
+        } else {
+            // Otherwise consider captures/promotions and quiet checking moves
+            MoveList captures = getPossibleCapturesOrPromotions(simulatorEngine);
+            MoveList checks = getCheckingMoves(simulatorEngine, isWhitesTurn);
 
-        // Order them (captures first via MVV-LVA/promotion bonus, killers/history still help)
-        ArrayList<Integer> ordered = sortMovesByEfficiency(moves, 0, simulatorEngine.getBoardStateHash());
+            ArrayList<Integer> orderedCaptures = sortMovesByEfficiency(captures, 0, simulatorEngine.getBoardStateHash());
+            ArrayList<Integer> orderedChecks = sortMovesByEfficiency(checks, 0, simulatorEngine.getBoardStateHash());
+
+            ordered = new ArrayList<>(orderedCaptures.size() + orderedChecks.size());
+            ordered.addAll(orderedCaptures); // captures/promotions first
+            ordered.addAll(orderedChecks);   // quiet checks afterwards
+        }
 
         for (int m : ordered) {
             simulatorEngine.performMove(m);
@@ -913,6 +925,28 @@ public class AI {
         }
 
         return capturesAndPromotions;
+    }
+
+    /**
+     * Generate quiet moves that deliver check to the opponent.
+     * These are appended after captures/promotions in quiescence search
+     * to catch simple mating threats without incurring large overhead.
+     */
+    private MoveList getCheckingMoves(Engine simulatorEngine, boolean isWhitesTurn) {
+        MoveList allLegalMoves = simulatorEngine.getAllLegalMoves();
+        MoveList checkingMoves = new MoveList();
+        for (int i = 0; i < allLegalMoves.size(); i++) {
+            int m = allLegalMoves.getMove(i);
+            if (MoveHelper.isCapture(m) || MoveHelper.isPawnPromotionMove(m)) {
+                continue; // only quiet moves
+            }
+            simulatorEngine.performMove(m);
+            if (isSideInCheck(simulatorEngine, !isWhitesTurn)) {
+                checkingMoves.add(m);
+            }
+            simulatorEngine.undoLastMove();
+        }
+        return checkingMoves;
     }
 
 
