@@ -263,6 +263,24 @@ def print_timeout_diagnostics(engine_url: str, engine_name: str) -> None:
 # Match runner
 # ----------------------------
 
+def handle_timeout(engine_timed_out: str,
+                   engine1_name: str,
+                   engine2_name: str,
+                   engine1_wins: int,
+                   engine2_wins: int) -> (int, int):
+    """
+    Automatically decide winner when one engine times out.
+    Returns updated (engine1_wins, engine2_wins).
+    """
+    if engine_timed_out == "engine1":
+        engine2_wins += 1
+        print(f"{engine1_name} timed out. Awarded win to {engine2_name}.")
+    elif engine_timed_out == "engine2":
+        engine1_wins += 1
+        print(f"{engine2_name} timed out. Awarded win to {engine1_name}.")
+    return engine1_wins, engine2_wins
+
+
 def run_matches(jar1_path: str,
                 jar2_path: str,
                 port1: int = 8080,
@@ -348,18 +366,10 @@ def run_matches(jar1_path: str,
                         time.sleep(poll_sleep_s)
                     if not moved:
                         print(f"{engine1_name} failed to produce a move in time.")
-                        # NEW: dump board + PV so you can judge
                         print_timeout_diagnostics(engine2_url, engine2_name)
-                        print_timeout_diagnostics(engine1_url, engine1_name)  # optional: see the other side too
-                        winner = manual_award_on_timeout(engine1_name, engine2_name)
-                        if winner == 1:
-                            engine1_wins += 1
-                            print(f"Awarded win to {engine1_name} by manual decision.")
-                        else:
-                            engine2_wins += 1
-                            print(f"Awarded win to {engine2_name} by manual decision.")
+                        print_timeout_diagnostics(engine1_url, engine1_name)
+                        engine1_wins, engine2_wins = handle_timeout("engine1", engine1_name, engine2_name, engine1_wins, engine2_wins)
                         break
-
                     game_state = None
                     if last1 and 'currentState' in last1:
                         game_state = check_game_state(last1['currentState'])
@@ -398,18 +408,10 @@ def run_matches(jar1_path: str,
                         time.sleep(poll_sleep_s)
                     if not moved:
                         print(f"{engine2_name} failed to produce a move in time.")
-                        # NEW: dump board + PV so you can judge
                         print_timeout_diagnostics(engine2_url, engine2_name)
-                        print_timeout_diagnostics(engine1_url, engine1_name)  # optional: see the other side too
-                        winner = manual_award_on_timeout(engine1_name, engine2_name)
-                        if winner == 1:
-                            engine1_wins += 1
-                            print(f"Awarded win to {engine1_name} by manual decision.")
-                        else:
-                            engine2_wins += 1
-                            print(f"Awarded win to {engine2_name} by manual decision.")
+                        print_timeout_diagnostics(engine1_url, engine1_name)
+                        engine1_wins, engine2_wins = handle_timeout("engine2", engine1_name, engine2_name, engine1_wins, engine2_wins)
                         break
-
                     game_state = None
                     if last2 and 'currentState' in last2:
                         game_state = check_game_state(last2['currentState'])

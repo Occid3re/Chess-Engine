@@ -687,25 +687,25 @@ public class Score {
 
         // Detect stalemate by verifying if any legal moves exist. We only
         // search until the first legal move is found, keeping the check cheap.
-        if (!hasAnyLegalMove(bitBoard, false) && !bitBoard.isInCheck(false)) {
+        if (hasNoLegalMove(bitBoard, false) && !bitBoard.isInCheck(false)) {
             whiteStateBonus += CHECK;
         }
-        if (!hasAnyLegalMove(bitBoard, true) && !bitBoard.isInCheck(true)) {
+        if (hasNoLegalMove(bitBoard, true) && !bitBoard.isInCheck(true)) {
             blackStateBonus += CHECK;
         }
     }
 
-    private boolean hasAnyLegalMove(BitBoard board, boolean white) {
+    private boolean hasNoLegalMove(BitBoard board, boolean white) {
         MoveList moves = board.generateAllPossibleMoves(white);
         for (int i = 0; i < moves.size(); i++) {
             int move = moves.getMove(i);
             BitBoard copy = new BitBoard(board);
             copy.performMove(move);
             if (!copy.isInCheck(white)) {
-                return true;
+                return false;
             }
         }
-        return false;
+        return true;
     }
 
     public void updateKingSafety(BitBoard bitBoard) {
