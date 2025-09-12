@@ -5,16 +5,21 @@ import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.utils.Score;
 import org.junit.jupiter.api.Test;
+import java.lang.reflect.Method;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 public class QuiescenceSearchCheckTest {
 
     @Test
-    void engineAvoidsAllowingImmediateMate() {
+    void engineAvoidsAllowingImmediateMate() throws Exception {
         Engine engine = new Engine();
         AI ai = new AI(engine);
         engine.importBoardFromFen("7k/7p/4N3/5Q1/8/4q3/4R3/6K1 b - - 0 1");
+
+        Method alphaBeta = AI.class.getDeclaredMethod("alphaBeta", Engine.class, int.class,
+                double.class, double.class, boolean.class, long.class);
+        alphaBeta.setAccessible(true);
 
         MoveList legal = engine.getAllLegalMoves();
         int losingMove = -1;
@@ -25,7 +30,9 @@ public class QuiescenceSearchCheckTest {
             Move decoded = Move.convertIntToMove(m);
 
             engine.performMove(m);
-            double score = ai.evaluateBoard(engine, engine.whitesTurn(), System.nanoTime() + 1_000_000_000L);
+            long deadline = System.nanoTime() + 1_000_000_000L;
+            double score = (double) alphaBeta.invoke(ai, engine, 0, Double.NEGATIVE_INFINITY,
+                    Double.POSITIVE_INFINITY, engine.whitesTurn(), deadline);
             engine.undoLastMove();
             double blackScore = -score;
 
