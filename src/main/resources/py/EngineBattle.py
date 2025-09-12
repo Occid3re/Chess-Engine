@@ -3,7 +3,7 @@ import os
 import re
 import subprocess
 import time
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 
 import requests
 
@@ -79,10 +79,45 @@ def wait_until_up(base_url: str, deadline_s: float) -> bool:
 # Engine API helpers
 # ----------------------------
 
+def _http_error_status(e: requests.HTTPError) -> Optional[int]:
+    resp = getattr(e, "response", None)
+    return getattr(resp, "status_code", None)
+
+
 def make_move(engine_url: str, frm: str, to: str, timeout_s: float = 3.0) -> Dict[str, Any]:
     r = requests.patch(f"{engine_url}/chess/figure/move/{frm}/{to}", timeout=timeout_s)
     r.raise_for_status()
     return r.json()
+
+
+def make_move_with_retry(engine_url: str, frm: str, to: str,
+                         timeout_s: float = 3.0,
+                         retries: int = 2,
+                         backoff_s: float = 0.15) -> Tuple[bool, Optional[str]]:
+    """
+    Try to mirror a move. Retries on transient server errors (5xx/429).
+    Returns (ok, err_msg_if_any).
+    """
+    for attempt in range(retries + 1):
+        try:
+            make_move(engine_url, frm, to, timeout_s=timeout_s)
+            return True, None
+        except requests.HTTPError as e:
+            code = _http_error_status(e)
+            # Transient: 5xx or 429 -> retry
+            if code in (429, 500, 502, 503, 504):
+                if attempt < retries:
+                    time.sleep(backoff_s * (attempt + 1))
+                    continue
+            # Non-transient or retry exhausted -> fail with formatted message
+            return False, format_http_error(e)
+        except requests.RequestException as e:
+            # Network hiccup: retry a bit
+            if attempt < retries:
+                time.sleep(backoff_s * (attempt + 1))
+                continue
+            return False, str(e)
+    return False, "unknown error"
 
 
 def set_time_limit(engine_url: str, time_limit: int, timeout_s: float = 3.0) -> bool:
@@ -96,13 +131,27 @@ def start_autoplay(engine_url: str, ai_color: str, timeout_s: float = 3.0) -> bo
 
 
 def get_last_move(engine_url: str, timeout_s: float = 3.0) -> Optional[Dict[str, Any]]:
-    r = requests.get(f"{engine_url}/chess/autoplay/lastMove", timeout=timeout_s)
-    if r.ok:
-        try:
-            return r.json()
-        except ValueError:
-            return None
-    return None
+    """
+    Robust lastMove:
+    - 204/404/409/423 -> None
+    - 5xx -> None (treat as transient hiccup)
+    - 200 -> JSON if possible, else None
+    """
+    try:
+        r = requests.get(f"{engine_url}/chess/autoplay/lastMove", timeout=timeout_s)
+    except requests.RequestException:
+        return None
+
+    if r.status_code in (204, 404, 409, 423):
+        return None
+    if 500 <= r.status_code < 600:
+        return None
+    if not r.ok:
+        return None
+    try:
+        return r.json()
+    except ValueError:
+        return None
 
 
 def reset_board(engine_url: str, timeout_s: float = 5.0) -> bool:
@@ -318,8 +367,18 @@ def run_matches(jar1_path: str,
 
             time.sleep(0.2)
 
-            last1 = get_last_move(engine1_url)
-            last2 = get_last_move(engine2_url)
+            # Prime last moves (handle transient 5xx/204 gracefully)
+            def prime_last(engine_url: str, tries: int = 5, pause: float = 0.1):
+                lm = None
+                for _ in range(tries):
+                    lm = get_last_move(engine_url)
+                    if lm is not None:
+                        return lm
+                    time.sleep(pause)
+                return lm
+
+            last1 = prime_last(engine1_url)
+            last2 = prime_last(engine2_url)
 
             # NOTE: Python passes SECONDS; controller converts to ms now.
             if not (set_time_limit(engine1_url, engine_time_limit) and set_time_limit(engine2_url, engine_time_limit)):
@@ -328,6 +387,9 @@ def run_matches(jar1_path: str,
 
             start_autoplay(engine1_url, "WHITE")
             start_autoplay(engine2_url, "BLACK")
+
+            # Small warm-up to let search threads spin up and avoid races
+            time.sleep(0.25)
 
             max_ply = 500
             ply = 0
@@ -344,23 +406,23 @@ def run_matches(jar1_path: str,
                     deadline = time.time() + move_timeout_s
                     moved = False
                     while time.time() < deadline:
-                        lm1 = get_last_move(engine1_url)  # might be None (204) or a dict
+                        lm1 = get_last_move(engine1_url)  # might be None (204/5xx) or a dict
                         if lm1 and lm1 != last1:
                             last1 = lm1
                             if ('from' in lm1 and 'to' in lm1
                                     and lm1['from'] and lm1['to']):
-                                try:
-                                    make_move(engine2_url, lm1['from'], lm1['to'])
-                                    last2 = {'from': lm1['from'], 'to': lm1['to'],
-                                             'currentState': lm1.get('currentState')}
-                                except requests.HTTPError as e:
+                                ok, err = make_move_with_retry(engine2_url, lm1['from'], lm1['to'])
+                                if not ok:
                                     print(
                                         f"{engine2_name} rejected move {lm1['from']}-{lm1['to']}. "
-                                        f"{format_http_error(e)}. Receiver fault -> {engine2_name} loses this game."
+                                        f"{err}. Receiver fault -> {engine2_name} loses this game."
                                     )
                                     engine1_wins += 1
                                     moved = True
                                     break
+                                # keep local mirror cache consistent
+                                last2 = {'from': lm1['from'], 'to': lm1['to'],
+                                         'currentState': lm1.get('currentState')}
                             moved = True
                             break
                         time.sleep(poll_sleep_s)
@@ -391,18 +453,17 @@ def run_matches(jar1_path: str,
                             last2 = lm2
                             if ('from' in lm2 and 'to' in lm2
                                     and lm2['from'] and lm2['to']):
-                                try:
-                                    make_move(engine1_url, lm2['from'], lm2['to'])
-                                    last1 = {'from': lm2['from'], 'to': lm2['to'],
-                                             'currentState': lm2.get('currentState')}
-                                except requests.HTTPError as e:
+                                ok, err = make_move_with_retry(engine1_url, lm2['from'], lm2['to'])
+                                if not ok:
                                     print(
                                         f"{engine1_name} rejected move {lm2['from']}-{lm2['to']}. "
-                                        f"{format_http_error(e)}. Receiver fault -> {engine1_name} loses this game."
+                                        f"{err}. Receiver fault -> {engine1_name} loses this game."
                                     )
                                     engine2_wins += 1
                                     moved = True
                                     break
+                                last1 = {'from': lm2['from'], 'to': lm2['to'],
+                                         'currentState': lm2.get('currentState')}
                             moved = True
                             break
                         time.sleep(poll_sleep_s)
