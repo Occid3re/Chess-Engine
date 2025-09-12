@@ -13,13 +13,9 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
+import java.util.concurrent.*;
 
 import static julius.game.chessengine.utils.Score.*;
-import static julius.game.chessengine.utils.Score.DRAW;
 
 @Log4j2
 @Component
@@ -27,6 +23,14 @@ public class AI {
 
     @Getter
     private final Engine mainEngine;
+
+    // ADD these fields (near other fields):
+    /** Thread pool for root-split parallel search (created only if SEARCH_THREADS > 1). */
+    private final ExecutorService searchPool;
+
+    /** Limit how many root moves we fan out in parallel to avoid oversubscription. */
+    private static final int ROOT_PARALLEL_LIMIT =
+            Integer.getInteger("chessengine.rootParallelLimit", 24);
 
     public static final double EXIT_FLAG = Double.MAX_VALUE;
 
@@ -103,7 +107,7 @@ public class AI {
     private long timeLimit; // milliseconds
 
     private boolean useNullMovePruning = false;
-    private boolean useLateMoveReductions = true;
+
     @Getter
     private long nodesVisited = 0;
     @Getter
@@ -114,17 +118,25 @@ public class AI {
         this.mainEngine = mainEngine;
         this.timeLimit = 50;
 
-        // Initialize the array for killer moves
+        // Initialize killer moves etc...
         this.killerMoves = new int[maxDepth][numKillerMoves];
         for (int i = 0; i < maxDepth; i++) {
             for (int j = 0; j < numKillerMoves; j++) {
-                killerMoves[i][j] = -1; // Initialize with an invalid move
+                killerMoves[i][j] = -1;
             }
         }
-
-        // Initialize history table with zeros
         this.historyTable = new int[64][64];
+
+        // NEW: create a fixed-size pool only when useful
+        this.searchPool = SEARCH_THREADS > 1
+                ? Executors.newFixedThreadPool(SEARCH_THREADS, r -> {
+            Thread t = new Thread(r, "AI-Search-" + System.identityHashCode(r));
+            t.setDaemon(true);
+            return t;
+        })
+                : null;
     }
+
 
     public Integer getCurrentBestMoveInt() {
         return currentBestMove;
@@ -278,15 +290,29 @@ public class AI {
                     break;
                 }
 
-                // No aspiration window: always search with full window
-                MoveAndScore moveAndScore = getBestMove(
-                        simulatorEngine,
-                        isWhite,
-                        currentDepth,
-                        deadline,
-                        Double.NEGATIVE_INFINITY,
-                        Double.POSITIVE_INFINITY
-                );
+                MoveAndScore moveAndScore;
+
+                // NEW: root-split parallel search when threads available and >1 legal move likely
+                if (SEARCH_THREADS > 1) {
+                    moveAndScore = getBestMoveParallel(
+                            simulatorEngine,
+                            isWhite,
+                            currentDepth,
+                            deadline,
+                            Double.NEGATIVE_INFINITY,
+                            Double.POSITIVE_INFINITY
+                    );
+                } else {
+                    // fallback single-threaded
+                    moveAndScore = getBestMove(
+                            simulatorEngine,
+                            isWhite,
+                            currentDepth,
+                            deadline,
+                            Double.NEGATIVE_INFINITY,
+                            Double.POSITIVE_INFINITY
+                    );
+                }
 
                 if (moveAndScore == null) {
                     break;
@@ -309,6 +335,143 @@ public class AI {
             fillCalculatedLine(simulatorEngine);
         }
     }
+
+    private MoveAndScore getBestMoveParallel(Engine simulatorEngine,
+                                             boolean isWhitesTurn,
+                                             int depth,
+                                             long deadline,
+                                             double alpha,
+                                             double beta) {
+        // Safety: if pool is absent or we’re close to timeout, just do sequential
+        if (searchPool == null || Thread.currentThread().isInterrupted() || timeLimitExceeded(deadline)) {
+            return getBestMove(simulatorEngine, isWhitesTurn, depth, deadline, alpha, beta);
+        }
+
+        // Order root moves once from the root position
+        MoveList legal = simulatorEngine.getAllLegalMoves();
+        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash());
+        if (orderedMoves.isEmpty()) return null;
+
+        // Evaluate the first move synchronously to seed alpha (YBWC style)
+        int firstMove = orderedMoves.get(0);
+        double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
+        int bestMove = -1;
+
+        {
+            if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
+                return null;
+            }
+
+            simulatorEngine.performMove(firstMove);
+            double score;
+            if (simulatorEngine.getGameState().isInStateCheckMate()) {
+                score = isWhitesTurn ? (CHECKMATE - depth) : -(CHECKMATE - depth);
+            } else if (simulatorEngine.getGameState().isInStateDraw()) {
+                score = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, depth);
+            } else {
+                score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline);
+                if (score == EXIT_FLAG || positionChanged()) {
+                    simulatorEngine.undoLastMove();
+                    return null;
+                }
+            }
+            simulatorEngine.undoLastMove();
+
+            bestScore = score;
+            bestMove = firstMove;
+            if (isWhitesTurn) {
+                alpha = Math.max(alpha, score);
+            } else {
+                beta = Math.min(beta, score);
+            }
+            if (alpha >= beta) {
+                return new MoveAndScore(bestMove, bestScore);
+            }
+        }
+
+        // Fan out the remaining best N root moves in parallel
+        int fanout = Math.min(ROOT_PARALLEL_LIMIT, orderedMoves.size() - 1);
+        if (fanout <= 0) {
+            return new MoveAndScore(bestMove, bestScore);
+        }
+
+        CompletionService<MoveAndScore> ecs = new ExecutorCompletionService<>(searchPool);
+        List<Future<MoveAndScore>> futures = new ArrayList<>(fanout);
+
+        for (int i = 1; i <= fanout; i++) {
+            final int moveInt = orderedMoves.get(i);
+            double finalAlpha = alpha;
+            double finalBeta = beta;
+            futures.add(ecs.submit(() -> {
+                // Fast bail-outs
+                if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
+                    return null;
+                }
+
+                // Each task searches on its own cloned engine; no shared mutable board state
+                Engine e = mainEngine.createSimulation();
+                // Recreate the same root position in this clone
+
+                e.performMove(moveInt);
+                double score;
+                if (e.getGameState().isInStateCheckMate()) {
+                    score = isWhitesTurn ? (CHECKMATE - depth) : -(CHECKMATE - depth);
+                } else if (e.getGameState().isInStateDraw()) {
+                    score = evaluateStaticPosition(e.getGameState(), !isWhitesTurn, depth);
+                } else {
+                    // We use the *current* alpha/beta snapshot for some pruning benefit;
+                    // it won’t dynamically shrink inside this task (acceptable).
+                    score = alphaBeta(e, depth - 1, finalAlpha, finalBeta, !isWhitesTurn, deadline);
+                    if (score == EXIT_FLAG) {
+                        return null;
+                    }
+                }
+                return new MoveAndScore(moveInt, score);
+            }));
+        }
+
+        int completed = 0;
+        try {
+            while (completed < fanout) {
+                if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
+                    break;
+                }
+                Future<MoveAndScore> f = ecs.take(); // waits for next completed
+                completed++;
+                MoveAndScore res = f.get();
+                if (res == null) continue;
+
+                // Update best move/score and alpha/beta
+                if (isBetterScore(isWhitesTurn, res.score, bestScore)) {
+                    bestScore = res.score;
+                    bestMove = res.move;
+                }
+                if (isWhitesTurn) {
+                    alpha = Math.max(alpha, res.score);
+                } else {
+                    beta = Math.min(beta, res.score);
+                }
+
+                // Optional early-out: if window collapses, we can ignore remaining results
+                if (alpha >= beta) {
+                    break;
+                }
+            }
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+        } catch (Exception ex) {
+            log.warn("Parallel root search error", ex);
+        } finally {
+            // We don't cancel running tasks forcefully; they will see the position/time checks.
+            // But we can try to cancel ones not yet started:
+            for (Future<MoveAndScore> f : futures) {
+                if (!f.isDone()) f.cancel(true);
+            }
+        }
+
+        return bestMove != -1 ? new MoveAndScore(bestMove, bestScore) : null;
+    }
+
 
     private boolean shouldStopCalculating(long deadline) {
         return positionChanged() || timeLimitExceeded(deadline) || Thread.currentThread().isInterrupted();
@@ -1016,17 +1179,6 @@ public class AI {
             killerMoves[depthIndex][i] = killerMoves[depthIndex][i - 1];
         }
         killerMoves[depthIndex][0] = move; // Insert new killer move at the top
-    }
-
-    private boolean isKillerMove(int depth, int move) {
-        // FIX: clamp depth index so killers still work near boundaries
-        int depthIndex = Math.max(0, Math.min(depth, killerMoves.length - 1));
-        for (int killerMove : killerMoves[depthIndex]) {
-            if (killerMove == move) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private void incrementHistory(int move, int depth) {
