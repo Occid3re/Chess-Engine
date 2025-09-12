@@ -16,10 +16,100 @@ import java.util.stream.Collectors;
 @Log4j2
 public class Engine {
 
-    private static final int MAX_SIZE = 5_000_000;
-    private static final int MAX_AGE = 10_000;
+    /*
+     * Adaptive cache configuration
+     * ---------------------------
+     * By default we:
+     *  - Allocate ~8% of max heap (min 64MB) for the legal-moves cache.
+     *  - Assume ~256 bytes per entry (heuristic), clamped between 50k and 500k entries.
+     *  - Use a long TTL (24h). Legal move lists for a board state don't "age" by wall-clock,
+     *    so eviction should primarily be LRU. You can disable time expiry by setting TTL <= 0.
+     *
+     * Overrides (priority: System Property > Env Var > Heuristic):
+     *  - chess.cache.maxSize (int)
+     *  - chess.cache.maxAgeMs (long)
+     *  - CHESS_CACHE_MAX_SIZE (int)
+     *  - CHESS_CACHE_MAX_AGE_MS (long)
+     *
+     * This makes it easy to run multiple app versions with different cache sizing.
+     */
+    private static final class CacheConfig {
+        final int maxSize;
+        final int maxAgeMs;
+        CacheConfig(int maxSize, int maxAgeMs) { this.maxSize = maxSize; this.maxAgeMs = maxAgeMs; }
+    }
 
-    private TimedLRUCache<MoveList> legalMovesCache = new TimedLRUCache<>(MAX_SIZE, MAX_AGE);
+    private static CacheConfig computeCacheConfig() {
+        // Heuristic baseline
+        long maxHeap = Runtime.getRuntime().maxMemory();          // bytes
+        long budget  = Math.max(64L << 20, (maxHeap * 8) / 100);  // >=64MB or 8% of heap
+        long estimatedBytesPerEntry = 256;                        // adjust if profiling suggests otherwise
+
+        long computedSize = Math.max(1, budget / estimatedBytesPerEntry);
+        int heuristicMaxSize = (int) Math.min(500_000, computedSize);
+        int heuristicMaxAgeMs = 86_400_000; // 24h; set <=0 to disable time expiry
+
+        // Overrides via System Properties
+        Integer sysMaxSize = getIntSysProp("chess.cache.maxSize");
+        Long sysMaxAgeMs   = getLongSysProp("chess.cache.maxAgeMs");
+
+        // Fallback to environment variables if system properties absent
+        Integer envMaxSize = (sysMaxSize == null) ? getIntEnv("CHESS_CACHE_MAX_SIZE") : null;
+        Long envMaxAgeMs   = (sysMaxAgeMs == null) ? getLongEnv("CHESS_CACHE_MAX_AGE_MS") : null;
+
+        int maxSize = firstNonNull(sysMaxSize, envMaxSize, heuristicMaxSize);
+        long maxAge = firstNonNull(sysMaxAgeMs, envMaxAgeMs, (long) heuristicMaxAgeMs);
+
+        // Defensive clamps
+        if (maxSize <= 0) maxSize = heuristicMaxSize;
+        // maxAge can be <=0 to mean "no time-based expiry"
+
+        if (log.isInfoEnabled()) {
+            log.info("LegalMovesCache config -> maxSize={}, maxAgeMs={} (heap={}, budget~{}MB, heuristicSize={})",
+                    maxSize, maxAge, maxHeap, budget >> 20, heuristicMaxSize);
+        }
+        return new CacheConfig(maxSize, (int) Math.min(Integer.MAX_VALUE, Math.max(Integer.MIN_VALUE, maxAge)));
+    }
+
+    private static Integer getIntSysProp(String key) {
+        String v = System.getProperty(key);
+        return parseInt(v);
+    }
+
+    private static Long getLongSysProp(String key) {
+        String v = System.getProperty(key);
+        return parseLong(v);
+    }
+
+    private static Integer getIntEnv(String key) {
+        String v = System.getenv(key);
+        return parseInt(v);
+    }
+
+    private static Long getLongEnv(String key) {
+        String v = System.getenv(key);
+        return parseLong(v);
+    }
+
+    private static Integer parseInt(String v) {
+        if (v == null || v.isEmpty()) return null;
+        try { return Integer.parseInt(v.trim()); } catch (NumberFormatException ignored) { return null; }
+    }
+
+    private static Long parseLong(String v) {
+        if (v == null || v.isEmpty()) return null;
+        try { return Long.parseLong(v.trim()); } catch (NumberFormatException ignored) { return null; }
+    }
+
+    @SafeVarargs
+    private static <T> T firstNonNull(T... values) {
+        for (T v : values) if (v != null) return v;
+        return null;
+    }
+
+    // --- Cache instance based on computed configuration ---
+    private static final CacheConfig CACHE_CFG = computeCacheConfig();
+    private TimedLRUCache<MoveList> legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
 
     @Getter
     private OpeningBook openingBook;
@@ -46,7 +136,9 @@ public class Engine {
         this.legalMoves = other.legalMoves == null ? null : new MoveList(other.legalMoves);
         this.legalMovesNeedUpdate = other.legalMovesNeedUpdate;
         this.openingBook = other.openingBook;
-        this.legalMovesCache = new TimedLRUCache<>(MAX_SIZE, MAX_AGE);
+
+        // Fresh cache with same sizing; copy entries
+        this.legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
         other.legalMovesCache.forEach((k, v) -> this.legalMovesCache.put(k, new MoveList(v)));
     }
 
@@ -96,7 +188,9 @@ public class Engine {
         line = new ArrayList<>();
         redoLine = new ArrayList<>();
         this.openingBook = OpeningBook.getInstance();
-        legalMovesCache = new TimedLRUCache<>(MAX_SIZE, MAX_AGE);
+        legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
+        // Optional: one cleanup to ensure fresh state
+        legalMovesCache.cleanup();
     }
 
     private void generateLegalMoves() {
@@ -137,19 +231,17 @@ public class Engine {
         legalMovesCache.put(boardStateHash, legal);
 
         int size = legalMovesCache.size();
-        if (size > MAX_SIZE) {
-            throw new RuntimeException(String.format("LegalMovesCache size %s is larger than MAX_SIZE %s", size, MAX_SIZE));
+        if (size > CACHE_CFG.maxSize) {
+            // This should be rare due to eviction, but keep the guard to surface misconfigurations.
+            throw new RuntimeException(String.format(
+                    "LegalMovesCache size %s is larger than configured MAX_SIZE %s", size, CACHE_CFG.maxSize));
         }
     }
 
-
     // Each of these methods would need to be implemented to handle the specific move generation for each piece type.
     public List<Move> getMovesFromIndex(int fromIndex) {
-
         MoveList legalMoves = getAllLegalMoves();
-
         List<Move> movesFromIndex = new ArrayList<>();
-
         for (int i = 0; i < legalMoves.size(); i++) {
             int m = legalMoves.getMove(i);
             int from = MoveHelper.deriveFromIndex(m); // Extract the first 6 bits
@@ -157,31 +249,24 @@ public class Engine {
                 movesFromIndex.add(Move.convertIntToMove(m));
             }
         }
-
         return movesFromIndex;
     }
 
     public void moveRandomFigure(boolean isWhite) {
-        // Now, the color parameter is used to determine which moves to generate
         MoveList moves = getAllLegalMoves();
-
         if (moves.size() == 0) {
             throw new RuntimeException("No moves possible for " + (isWhite ? "White" : "Black"));
         }
-
         Random rand = new Random();
         int randomMove = moves.getMove(rand.nextInt(moves.size()));
-
-        // Execute the move on the bitboard
         performMove(randomMove);
-
     }
 
     public synchronized GameState moveFigure(int fromIndex, int toIndex, int promotionPiece) {
         return moveFigure(bitBoard, fromIndex, toIndex, promotionPiece);
     }
 
-    //always queen
+    // always queen
     public synchronized void moveFigure(int fromIndex, int toIndex) {
         moveFigure(bitBoard, fromIndex, toIndex, 5);
     }
@@ -207,7 +292,6 @@ public class Engine {
         if (move == -1) {
             log.warn("Move not legal!");
         } else {
-            // Perform the move on the bitboard
             performMove(move);
         }
 
@@ -222,7 +306,7 @@ public class Engine {
         for (int i = 0; i < legalMoves.size(); i++) {
             int m = legalMoves.getMove(i);
             int from = MoveHelper.deriveFromIndex(m); // Extract the first 6 bits
-            int to = MoveHelper.deriveToIndex(m); // Extract the next 6 bits
+            int to = MoveHelper.deriveToIndex(m);     // Extract the next 6 bits
             int promotionPieceTypeBits = MoveHelper.derivePromotionPieceTypeBits(m);
 
             if (from == fromIndex && to == toIndex && (promotionPieceTypeBits == 0 | promotionPieceTypeBits == promotionPiece)) {
@@ -238,11 +322,9 @@ public class Engine {
                 .collect(Collectors.toList());
     }
 
-
     public synchronized long getBoardStateHash() {
         return bitBoard.getBoardStateHash();
     }
-
 
     public void logBoard() {
         bitBoard.logBoard();
@@ -266,7 +348,6 @@ public class Engine {
         return previousDoubleStep;
     }
 
-
     // Engine.java
     public void undoNullMoveForSearch(int previousDoubleStep) {
         // Flip side back (still no move-gen / GameState work)
@@ -275,7 +356,6 @@ public class Engine {
         // Restore EP target
         bitBoard.setLastMoveDoubleStepPawnIndex(previousDoubleStep);
     }
-
 
     public void undoLastMove() {
         if (!line.isEmpty()) {
@@ -315,5 +395,4 @@ public class Engine {
     public boolean isEndgame() {
         return bitBoard.isEndgame();
     }
-
 }
