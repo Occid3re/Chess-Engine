@@ -36,13 +36,17 @@ public class Engine {
     private static final class CacheConfig {
         final int maxSize;
         final int maxAgeMs;
-        CacheConfig(int maxSize, int maxAgeMs) { this.maxSize = maxSize; this.maxAgeMs = maxAgeMs; }
+
+        CacheConfig(int maxSize, int maxAgeMs) {
+            this.maxSize = maxSize;
+            this.maxAgeMs = maxAgeMs;
+        }
     }
 
     private static CacheConfig computeCacheConfig() {
         // Heuristic baseline
         long maxHeap = Runtime.getRuntime().maxMemory();          // bytes
-        long budget  = Math.max(64L << 20, (maxHeap * 8) / 100);  // >=64MB or 8% of heap
+        long budget = Math.max(64L << 20, (maxHeap * 8) / 100);  // >=64MB or 8% of heap
         long estimatedBytesPerEntry = 256;                        // adjust if profiling suggests otherwise
 
         long computedSize = Math.max(1, budget / estimatedBytesPerEntry);
@@ -50,12 +54,12 @@ public class Engine {
         int heuristicMaxAgeMs = 86_400_000; // 24h; set <=0 to disable time expiry
 
         // Overrides via System Properties
-        Integer sysMaxSize = getIntSysProp("chess.cache.maxSize");
-        Long sysMaxAgeMs   = getLongSysProp("chess.cache.maxAgeMs");
+        Integer sysMaxSize = getIntSysProp();
+        Long sysMaxAgeMs = getLongSysProp();
 
         // Fallback to environment variables if system properties absent
-        Integer envMaxSize = (sysMaxSize == null) ? getIntEnv("CHESS_CACHE_MAX_SIZE") : null;
-        Long envMaxAgeMs   = (sysMaxAgeMs == null) ? getLongEnv("CHESS_CACHE_MAX_AGE_MS") : null;
+        Integer envMaxSize = (sysMaxSize == null) ? getIntEnv() : null;
+        Long envMaxAgeMs = (sysMaxAgeMs == null) ? getLongEnv() : null;
 
         int maxSize = firstNonNull(sysMaxSize, envMaxSize, heuristicMaxSize);
         long maxAge = firstNonNull(sysMaxAgeMs, envMaxAgeMs, (long) heuristicMaxAgeMs);
@@ -71,34 +75,42 @@ public class Engine {
         return new CacheConfig(maxSize, (int) Math.min(Integer.MAX_VALUE, Math.max(Integer.MIN_VALUE, maxAge)));
     }
 
-    private static Integer getIntSysProp(String key) {
-        String v = System.getProperty(key);
+    private static Integer getIntSysProp() {
+        String v = System.getProperty("chess.cache.maxSize");
         return parseInt(v);
     }
 
-    private static Long getLongSysProp(String key) {
-        String v = System.getProperty(key);
+    private static Long getLongSysProp() {
+        String v = System.getProperty("chess.cache.maxAgeMs");
         return parseLong(v);
     }
 
-    private static Integer getIntEnv(String key) {
-        String v = System.getenv(key);
+    private static Integer getIntEnv() {
+        String v = System.getenv("CHESS_CACHE_MAX_SIZE");
         return parseInt(v);
     }
 
-    private static Long getLongEnv(String key) {
-        String v = System.getenv(key);
+    private static Long getLongEnv() {
+        String v = System.getenv("CHESS_CACHE_MAX_AGE_MS");
         return parseLong(v);
     }
 
     private static Integer parseInt(String v) {
         if (v == null || v.isEmpty()) return null;
-        try { return Integer.parseInt(v.trim()); } catch (NumberFormatException ignored) { return null; }
+        try {
+            return Integer.parseInt(v.trim());
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     private static Long parseLong(String v) {
         if (v == null || v.isEmpty()) return null;
-        try { return Long.parseLong(v.trim()); } catch (NumberFormatException ignored) { return null; }
+        try {
+            return Long.parseLong(v.trim());
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     @SafeVarargs
@@ -109,6 +121,7 @@ public class Engine {
 
     // --- Cache instance based on computed configuration ---
     private static final CacheConfig CACHE_CFG = computeCacheConfig();
+    private final MoveList legalFilterBuffer = new MoveList();
     private TimedLRUCache<MoveList> legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
 
     @Getter
@@ -204,6 +217,8 @@ public class Engine {
             return;
         }
 
+        // Note: gameState.isGameOver() might be stale right after a move but before gameState.update().
+        // We still compute; if terminal, pseudo-gen will be cheap and filter to empty anyway.
         if (gameState.isGameOver()) {
             this.legalMoves = new MoveList();
             legalMovesNeedUpdate = false;
@@ -213,30 +228,44 @@ public class Engine {
         // Generate pseudo-legal moves on the current board
         MoveList moves = bitBoard.getAllCurrentPossibleMoves();
 
-        // Filter in-place by making/unmaking on the SAME bitBoard (no BitBoard copy)
-        MoveList legal = new MoveList();
-        for (int i = 0; i < moves.size(); i++) {
+        // Cache mover color once (performMove flips it)
+        final boolean moverIsWhite = bitBoard.whitesTurn;
+
+        // Precompute the king index once; adjust only for king moves
+        final int kingIndexBase = bitBoard.getKingIndex(moverIsWhite);
+
+        // Reuse a buffer to cut allocations; copy once when storing in cache.
+        MoveList buf = legalFilterBuffer;
+        buf.clear();
+
+        for (int i = 0, n = moves.size(); i < n; i++) {
             int move = moves.getMove(i);
 
+            // If the mover is the king, its checked square after the move is the destination.
+            final boolean kingMove = MoveHelper.derivePieceTypeBits(move) == 6; // 6 == KING in your encoding
+            final int kingIndexToCheck = kingMove ? MoveHelper.deriveToIndex(move) : kingIndexBase;
+
             bitBoard.performMove(move);
-            // If the mover's king is not left in check, the move is legal
-            if (!bitBoard.isInCheck(MoveHelper.isWhitesMove(move))) {
-                legal.add(move);
+            // Check attacks on the mover's king square (using current board after move)
+            if (!bitBoard.isSquareUnderAttack(kingIndexToCheck, moverIsWhite)) {
+                buf.add(move);
             }
             bitBoard.undoMove(move);
         }
 
-        this.legalMoves = legal;
+        // Copy once for cache + external exposure
+        MoveList result = new MoveList(buf);
+        this.legalMoves = result;
         legalMovesNeedUpdate = false;
-        legalMovesCache.put(boardStateHash, legal);
+        legalMovesCache.put(boardStateHash, result);
 
         int size = legalMovesCache.size();
         if (size > CACHE_CFG.maxSize) {
-            // This should be rare due to eviction, but keep the guard to surface misconfigurations.
             throw new RuntimeException(String.format(
                     "LegalMovesCache size %s is larger than configured MAX_SIZE %s", size, CACHE_CFG.maxSize));
         }
     }
+
 
     // Each of these methods would need to be implemented to handle the specific move generation for each piece type.
     public List<Move> getMovesFromIndex(int fromIndex) {
@@ -309,7 +338,7 @@ public class Engine {
             int to = MoveHelper.deriveToIndex(m);     // Extract the next 6 bits
             int promotionPieceTypeBits = MoveHelper.derivePromotionPieceTypeBits(m);
 
-            if (from == fromIndex && to == toIndex && (promotionPieceTypeBits == 0 | promotionPieceTypeBits == promotionPiece)) {
+            if (from == fromIndex && to == toIndex && (promotionPieceTypeBits == 0 || promotionPieceTypeBits == promotionPiece)) {
                 move = m;
             }
         }

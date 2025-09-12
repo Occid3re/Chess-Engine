@@ -684,6 +684,16 @@ public class BitBoard {
         }
     }
 
+    // Add this near other public helpers
+    public int getKingIndex(boolean white) {
+        long k = white ? whiteKing : blackKing;
+        if (k == 0L) {
+            throw new IllegalStateException((white ? "White" : "Black") + " king missing from board state");
+        }
+        return Long.numberOfTrailingZeros(k);
+    }
+
+
     private void generateKingMoves(boolean whitesTurn, MoveList moves) {
         long kingBitboard = whitesTurn ? whiteKing : blackKing;
         if (kingBitboard == 0L) {
@@ -773,23 +783,18 @@ public class BitBoard {
         return pieceAtPosition == PieceType.ROOK;
     }
 
-    // Replace your current isSquareUnderAttack with this version
-    private boolean isSquareUnderAttack(int index, boolean colorWhite) {
+    public boolean isSquareUnderAttack(int index, boolean colorWhite) {
         long target = 1L << index;
 
         if (colorWhite) {
             // White asks: "am I attacked by Black?"
-            // Pawns (black attacks down the board)
             long blackPawnAttacks = ((blackPawns & ~FileMasks[7]) >>> 7) | ((blackPawns & ~FileMasks[0]) >>> 9);
             if ((blackPawnAttacks & target) != 0) return true;
 
-            // Knights
             if ((KnightHelper.knightMoveTable[index] & blackKnights) != 0) return true;
 
-            // King
             if ((KING_ATTACKS[index] & blackKing) != 0) return true;
 
-            // Sliders (use rays from the target square)
             if ((bishopAttackBitmask(index) & (blackBishops | blackQueens)) != 0) return true;
             return (rookAttackBitmask(index) & (blackRooks | blackQueens)) != 0;
         } else {
@@ -806,8 +811,6 @@ public class BitBoard {
         }
     }
 
-
-    // Replace your current performMove with this version
     public void performMove(int move) {
         int fromIndex = MoveHelper.deriveFromIndex(move);
         int toIndex   = MoveHelper.deriveToIndex(move);
