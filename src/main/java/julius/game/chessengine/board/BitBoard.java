@@ -549,19 +549,25 @@ public class BitBoard {
 
         if (fileIndexOfDoubleSteppedPawn > 0) {
             long leftAttackers = potentialEnPassantAttackers & FileMasks[fileIndexOfDoubleSteppedPawn - 1];
-            if (whitesTurn ?
-                    ((leftAttackers << 9 & enPassantTargetSquare) != 0) :
-                    ((leftAttackers >> 7 & enPassantTargetSquare) != 0)) {
-                addEnPassantMove(moves, Long.numberOfTrailingZeros(leftAttackers), enPassantTargetIndex, whitesTurn);
+            while (leftAttackers != 0) {
+                int from = Long.numberOfTrailingZeros(leftAttackers);
+                boolean hits = whitesTurn
+                        ? (((1L << from) << 9) & enPassantTargetSquare) != 0
+                        : (((1L << from) >> 7) & enPassantTargetSquare) != 0;
+                if (hits) addEnPassantMove(moves, from, enPassantTargetIndex, whitesTurn);
+                leftAttackers &= leftAttackers - 1;
             }
         }
 
         if (fileIndexOfDoubleSteppedPawn < 7) {
             long rightAttackers = potentialEnPassantAttackers & FileMasks[fileIndexOfDoubleSteppedPawn + 1];
-            if (whitesTurn ?
-                    ((rightAttackers << 7 & enPassantTargetSquare) != 0) :
-                    ((rightAttackers >> 9 & enPassantTargetSquare) != 0)) {
-                addEnPassantMove(moves, Long.numberOfTrailingZeros(rightAttackers), enPassantTargetIndex, whitesTurn);
+            while (rightAttackers != 0) {
+                int from = Long.numberOfTrailingZeros(rightAttackers);
+                boolean hits = whitesTurn
+                        ? (((1L << from) << 7) & enPassantTargetSquare) != 0
+                        : (((1L << from) >> 9) & enPassantTargetSquare) != 0;
+                if (hits) addEnPassantMove(moves, from, enPassantTargetIndex, whitesTurn);
+                rightAttackers &= rightAttackers - 1;
             }
         }
     }
@@ -810,16 +816,16 @@ public class BitBoard {
     // Replace your current performMove with this version
     public void performMove(int move) {
         int fromIndex = MoveHelper.deriveFromIndex(move);
-        int toIndex   = MoveHelper.deriveToIndex(move);
+        int toIndex = MoveHelper.deriveToIndex(move);
         int pieceBits = MoveHelper.derivePieceTypeBits(move);
         boolean isWhite = MoveHelper.isWhitesMove(move);
         boolean isCapture = MoveHelper.isCapture(move);
         boolean isEnPassant = MoveHelper.isEnPassantMove(move);
-        boolean isCastling  = MoveHelper.isCastlingMove(move);
+        boolean isCastling = MoveHelper.isCastlingMove(move);
         int promoBits = MoveHelper.derivePromotionPieceTypeBits(move);
 
         long fromMask = 1L << fromIndex;
-        long toMask   = 1L << toIndex;
+        long toMask = 1L << toIndex;
 
         // ---- 1) Captures (fast, no aggregates yet)
         if (isCapture) {
@@ -827,40 +833,61 @@ public class BitBoard {
             long capMask = 1L << capIndex;
 
             if (isWhite) {
-                if ((blackPawns   & capMask) != 0) { blackPawns   &= ~capMask; pieceBoard[capIndex] = null; }
-                else if ((blackKnights & capMask) != 0) { blackKnights &= ~capMask; pieceBoard[capIndex] = null; }
-                else if ((blackBishops & capMask) != 0) { blackBishops &= ~capMask; pieceBoard[capIndex] = null; }
-                else if ((blackRooks   & capMask) != 0) { blackRooks   &= ~capMask; pieceBoard[capIndex] = null; }
-                else if ((blackQueens  & capMask) != 0) { blackQueens  &= ~capMask; pieceBoard[capIndex] = null; }
-                else if ((blackKing    & capMask) != 0) throw new IllegalStateException("Cannot capture the king");
+                if ((blackPawns & capMask) != 0) {
+                    blackPawns &= ~capMask;
+                    pieceBoard[capIndex] = null;
+                } else if ((blackKnights & capMask) != 0) {
+                    blackKnights &= ~capMask;
+                    pieceBoard[capIndex] = null;
+                } else if ((blackBishops & capMask) != 0) {
+                    blackBishops &= ~capMask;
+                    pieceBoard[capIndex] = null;
+                } else if ((blackRooks & capMask) != 0) {
+                    blackRooks &= ~capMask;
+                    pieceBoard[capIndex] = null;
+                } else if ((blackQueens & capMask) != 0) {
+                    blackQueens &= ~capMask;
+                    pieceBoard[capIndex] = null;
+                } else if ((blackKing & capMask) != 0) throw new IllegalStateException("Cannot capture the king");
             } else {
-                if ((whitePawns   & capMask) != 0) { whitePawns   &= ~capMask; pieceBoard[capIndex] = null; }
-                else if ((whiteKnights & capMask) != 0) { whiteKnights &= ~capMask; pieceBoard[capIndex] = null; }
-                else if ((whiteBishops & capMask) != 0) { whiteBishops &= ~capMask; pieceBoard[capIndex] = null; }
-                else if ((whiteRooks   & capMask) != 0) { whiteRooks   &= ~capMask; pieceBoard[capIndex] = null; }
-                else if ((whiteQueens  & capMask) != 0) { whiteQueens  &= ~capMask; pieceBoard[capIndex] = null; }
-                else if ((whiteKing    & capMask) != 0) throw new IllegalStateException("Cannot capture the king");
+                if ((whitePawns & capMask) != 0) {
+                    whitePawns &= ~capMask;
+                    pieceBoard[capIndex] = null;
+                } else if ((whiteKnights & capMask) != 0) {
+                    whiteKnights &= ~capMask;
+                    pieceBoard[capIndex] = null;
+                } else if ((whiteBishops & capMask) != 0) {
+                    whiteBishops &= ~capMask;
+                    pieceBoard[capIndex] = null;
+                } else if ((whiteRooks & capMask) != 0) {
+                    whiteRooks &= ~capMask;
+                    pieceBoard[capIndex] = null;
+                } else if ((whiteQueens & capMask) != 0) {
+                    whiteQueens &= ~capMask;
+                    pieceBoard[capIndex] = null;
+                } else if ((whiteKing & capMask) != 0) throw new IllegalStateException("Cannot capture the king");
             }
         }
 
         // ---- 2) Castling (move rook fast)
         if (isCastling) {
-            if (isWhite) whiteKingHasCastled = true; else blackKingHasCastled = true;
+            if (isWhite) whiteKingHasCastled = true;
+            else blackKingHasCastled = true;
             boolean kingside = toIndex > fromIndex;
             int rookFrom = isWhite ? (kingside ? 7 : 0) : (kingside ? 63 : 56);
-            int rookTo   = kingside ? (rookFrom - 2) : (rookFrom + 3);
-            long rfMask  = 1L << rookFrom;
-            long rtMask  = 1L << rookTo;
+            int rookTo = kingside ? (rookFrom - 2) : (rookFrom + 3);
+            long rfMask = 1L << rookFrom;
+            long rtMask = 1L << rookTo;
 
             if (isWhite) {
                 whiteRooks &= ~rfMask;
-                whiteRooks |=  rtMask;
+                whiteRooks |= rtMask;
             } else {
                 blackRooks &= ~rfMask;
-                blackRooks |=  rtMask;
+                blackRooks |= rtMask;
             }
             pieceBoard[rookFrom] = null;
-            pieceBoard[rookTo]   = PieceType.ROOK;
+            pieceBoard[rookTo] = PieceType.ROOK;
             markRookAsMoved(rookFrom);
         }
 
@@ -869,33 +896,85 @@ public class BitBoard {
 
         // remove from 'from'
         switch (pieceBits) {
-            case 1 -> { if (isWhite) whitePawns   &= ~fromMask; else blackPawns   &= ~fromMask; }
-            case 2 -> { if (isWhite) whiteKnights &= ~fromMask; else blackKnights &= ~fromMask; }
-            case 3 -> { if (isWhite) whiteBishops &= ~fromMask; else blackBishops &= ~fromMask; }
-            case 4 -> { if (isWhite) whiteRooks   &= ~fromMask; else blackRooks   &= ~fromMask; }
-            case 5 -> { if (isWhite) whiteQueens  &= ~fromMask; else blackQueens  &= ~fromMask; }
-            case 6 -> { if (isWhite) whiteKing    &= ~fromMask; else blackKing    &= ~fromMask; }
+            case 1 -> {
+                if (isWhite) whitePawns &= ~fromMask;
+                else blackPawns &= ~fromMask;
+            }
+            case 2 -> {
+                if (isWhite) whiteKnights &= ~fromMask;
+                else blackKnights &= ~fromMask;
+            }
+            case 3 -> {
+                if (isWhite) whiteBishops &= ~fromMask;
+                else blackBishops &= ~fromMask;
+            }
+            case 4 -> {
+                if (isWhite) whiteRooks &= ~fromMask;
+                else blackRooks &= ~fromMask;
+            }
+            case 5 -> {
+                if (isWhite) whiteQueens &= ~fromMask;
+                else blackQueens &= ~fromMask;
+            }
+            case 6 -> {
+                if (isWhite) whiteKing &= ~fromMask;
+                else blackKing &= ~fromMask;
+            }
             default -> throw new IllegalArgumentException("Unknown piece type: " + pieceBits);
         }
 
         // place on 'to' (promotion handled just below)
         if (promoBits == 0) {
             switch (pieceBits) {
-                case 1 -> { if (isWhite) whitePawns   |= toMask; else blackPawns   |= toMask; }
-                case 2 -> { if (isWhite) whiteKnights |= toMask; else blackKnights |= toMask; }
-                case 3 -> { if (isWhite) whiteBishops |= toMask; else blackBishops |= toMask; }
-                case 4 -> { if (isWhite) whiteRooks   |= toMask; else blackRooks   |= toMask; }
-                case 5 -> { if (isWhite) whiteQueens  |= toMask; else blackQueens  |= toMask; }
-                case 6 -> { if (isWhite) whiteKing    |= toMask; else blackKing    |= toMask; }
+                case 1 -> {
+                    if (isWhite) whitePawns |= toMask;
+                    else blackPawns |= toMask;
+                }
+                case 2 -> {
+                    if (isWhite) whiteKnights |= toMask;
+                    else blackKnights |= toMask;
+                }
+                case 3 -> {
+                    if (isWhite) whiteBishops |= toMask;
+                    else blackBishops |= toMask;
+                }
+                case 4 -> {
+                    if (isWhite) whiteRooks |= toMask;
+                    else blackRooks |= toMask;
+                }
+                case 5 -> {
+                    if (isWhite) whiteQueens |= toMask;
+                    else blackQueens |= toMask;
+                }
+                case 6 -> {
+                    if (isWhite) whiteKing |= toMask;
+                    else blackKing |= toMask;
+                }
             }
             pieceBoard[toIndex] = movingPiece;
         } else {
             // Promotion: place promoted piece instead of pawn
             switch (promoBits) {
-                case 2 -> { if (isWhite) whiteKnights |= toMask; else blackKnights |= toMask; pieceBoard[toIndex] = PieceType.KNIGHT; }
-                case 3 -> { if (isWhite) whiteBishops |= toMask; else blackBishops |= toMask; pieceBoard[toIndex] = PieceType.BISHOP; }
-                case 4 -> { if (isWhite) whiteRooks   |= toMask; else blackRooks   |= toMask; pieceBoard[toIndex] = PieceType.ROOK; }
-                case 5 -> { if (isWhite) whiteQueens  |= toMask; else blackQueens  |= toMask; pieceBoard[toIndex] = PieceType.QUEEN; }
+                case 2 -> {
+                    if (isWhite) whiteKnights |= toMask;
+                    else blackKnights |= toMask;
+                    pieceBoard[toIndex] = PieceType.KNIGHT;
+                }
+                case 3 -> {
+                    if (isWhite) whiteBishops |= toMask;
+                    else blackBishops |= toMask;
+                    pieceBoard[toIndex] = PieceType.BISHOP;
+                }
+                case 4 -> {
+                    if (isWhite) whiteRooks |= toMask;
+                    else blackRooks |= toMask;
+                    pieceBoard[toIndex] = PieceType.ROOK;
+                }
+                case 5 -> {
+                    if (isWhite) whiteQueens |= toMask;
+                    else blackQueens |= toMask;
+                    pieceBoard[toIndex] = PieceType.QUEEN;
+                }
                 default -> throw new IllegalArgumentException("Invalid promotion piece bits: " + promoBits);
             }
         }
@@ -915,7 +994,7 @@ public class BitBoard {
         if (pieceBits == 1 && Math.abs(fromIndex / 8 - toIndex / 8) == 2) {
             long enemyPawns = isWhite ? blackPawns : whitePawns;
             int file = toIndex & 7;
-            boolean leftEnemy  = file > 0 && ((enemyPawns & (1L << (toIndex - 1))) != 0);
+            boolean leftEnemy = file > 0 && ((enemyPawns & (1L << (toIndex - 1))) != 0);
             boolean rightEnemy = file < 7 && ((enemyPawns & (1L << (toIndex + 1))) != 0);
             lastMoveDoubleStepPawnIndex = (leftEnemy || rightEnemy) ? toIndex : 0;
         } else {
