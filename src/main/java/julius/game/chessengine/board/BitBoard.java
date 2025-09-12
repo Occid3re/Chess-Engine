@@ -1227,21 +1227,39 @@ public class BitBoard {
     }
 
     public boolean isEndgame() {
-        // Check if both queens are off the board
-        if (blackQueens == 0 && whiteQueens == 0 && blackRooks == 0 && whiteRooks == 0) {
+        // Your getPhase() returns 0 (opening) .. 256 (pure endgame).
+        // Be conservative: only call it endgame in the last ~20% of phase.
+        final int PHASE_ENDGAME_THRESHOLD = 208; // ~80% toward endgame
+
+        int phase = getPhase();
+        if (phase >= PHASE_ENDGAME_THRESHOLD) {
             return true;
         }
 
-        // Count the total number of major and minor pieces on the board using bit counts
-        int totalPieces = Long.bitCount(whiteKnights) + Long.bitCount(blackKnights) +
-                Long.bitCount(whiteBishops) + Long.bitCount(blackBishops) +
-                Long.bitCount(whiteRooks) + Long.bitCount(blackRooks) +
-                Long.bitCount(whiteQueens) + Long.bitCount(blackQueens);
+        // --- Additional conservative fallbacks for queenless positions ---
+        // Idea: only treat queenless middlegames as "endgame" when material is very reduced.
+        boolean noQueens = (whiteQueens | blackQueens) == 0;
 
-        // Consider it endgame if there are fewer than a certain number of pieces
-        final int ENDGAME_PIECE_THRESHOLD = 6;
-        return totalPieces <= ENDGAME_PIECE_THRESHOLD;
+        if (noQueens) {
+            int rookCount = Long.bitCount(whiteRooks | blackRooks);
+            int whiteMinors = Long.bitCount(whiteKnights | whiteBishops);
+            int blackMinors = Long.bitCount(blackKnights | blackBishops);
+            int totalMinors = whiteMinors + blackMinors;
+            int pawnCount = Long.bitCount(whitePawns | blackPawns);
+
+            // Case 1: No rooks, at most one minor per side, and pawns not too crowded
+            if (rookCount == 0 && whiteMinors <= 1 && blackMinors <= 1 && pawnCount <= 10) {
+                return true;
+            }
+
+            // Case 2: At most one rook *total*, at most one minor total (very simplified), reasonable pawn count
+            return rookCount <= 1 && totalMinors <= 1 && pawnCount <= 12;
+        }
+
+        // Otherwise, keep treating as non-endgame to avoid early king activity.
+        return false;
     }
+
 
     public int getPhase() {
         int phase = 0;
