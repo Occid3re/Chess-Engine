@@ -199,7 +199,7 @@ public class Engine {
         // Use cached result if available
         MoveList cached = legalMovesCache.get(boardStateHash);
         if (cached != null) {
-            this.legalMoves = cached;
+            this.legalMoves = new MoveList(cached);
             legalMovesNeedUpdate = false;
             return;
         }
@@ -228,7 +228,8 @@ public class Engine {
 
         this.legalMoves = legal;
         legalMovesNeedUpdate = false;
-        legalMovesCache.put(boardStateHash, legal);
+        // Store a clone to keep the cache immutable from callers' perspective.
+        legalMovesCache.put(boardStateHash, new MoveList(legal));
 
         int size = legalMovesCache.size();
         if (size > CACHE_CFG.maxSize) {
@@ -309,7 +310,7 @@ public class Engine {
             int to = MoveHelper.deriveToIndex(m);     // Extract the next 6 bits
             int promotionPieceTypeBits = MoveHelper.derivePromotionPieceTypeBits(m);
 
-            if (from == fromIndex && to == toIndex && (promotionPieceTypeBits == 0 | promotionPieceTypeBits == promotionPiece)) {
+            if (from == fromIndex && to == toIndex && (promotionPieceTypeBits == 0 || promotionPieceTypeBits == promotionPiece)) {
                 move = m;
             }
         }
@@ -345,6 +346,9 @@ public class Engine {
         // Flip side to move (no legalMoves recompute, no GameState updates)
         bitBoard.whitesTurn = !bitBoard.whitesTurn;
 
+        // Mark move list stale so the next search ply regenerates for the new side.
+        legalMovesNeedUpdate = true;
+
         return previousDoubleStep;
     }
 
@@ -355,6 +359,9 @@ public class Engine {
 
         // Restore EP target
         bitBoard.setLastMoveDoubleStepPawnIndex(previousDoubleStep);
+
+        // Mark stale again so we rebuild for the restored side.
+        legalMovesNeedUpdate = true;
     }
 
     public void undoLastMove() {
