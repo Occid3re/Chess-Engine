@@ -102,7 +102,7 @@ public class AI {
     @Setter
     private long timeLimit; // milliseconds
 
-    private boolean useNullMovePruning = true;
+    private boolean useNullMovePruning = false;
     private boolean useLateMoveReductions = true;
     @Getter
     private long nodesVisited = 0;
@@ -315,43 +315,92 @@ public class AI {
     }
 
     private void fillCalculatedLine(Engine simulation) {
-        long currentBoardHash = simulation.getBoardStateHash();
-        List<MoveAndScore> newCalculatedLine = new LinkedList<>();
-        Set<Long> seenBoardHashes = new HashSet<>();
-        int movesPerformed = 0; // Counter for the number of moves performed
+        long rootHash = simulation.getBoardStateHash();
+        List<MoveAndScore> pv = new ArrayList<>();
+        Set<Long> seen = new HashSet<>();
+        int movesPerformed = 0;
 
-        TranspositionTableEntry entry;
-        while ((entry = transpositionTable.get(currentBoardHash)) != null) {
-            if (entry.bestMove == -1 || !seenBoardHashes.add(currentBoardHash)) {
-                // Exit if no best move is found or repetition is detected
-                break;
+        // Helper to check legality
+        java.util.function.IntPredicate isLegalNow = (mv) -> {
+            MoveList legal = simulation.getAllLegalMoves();
+            for (int i = 0; i < legal.size(); i++) {
+                if (legal.getMove(i) == mv) return true;
             }
+            return false;
+        };
 
-            if (log.isDebugEnabled()) {
-                log.debug("[{}] hash exists and move: {}", currentBoardHash, entry);
+        // 1) Try to get a ROOT move (prefer EXACT, else accept LOWER/UPPER), else use currentBestMove, else first legal.
+        TranspositionTableEntry rootEntry = transpositionTable.get(rootHash);
+        int seedMove = -1;
+        Double seedScore = null; // nullable to indicate "unknown"
+
+        if (rootEntry != null && rootEntry.bestMove != -1 && MoveHelper.isWhitesMove(rootEntry.bestMove) == simulation.whitesTurn() && isLegalNow.test(rootEntry.bestMove)) {
+            // Prefer EXACT; otherwise still accept to seed PV so it's not empty
+            seedMove = rootEntry.bestMove;
+            if (rootEntry.nodeType == NodeType.EXACT) {
+                seedScore = rootEntry.score;
             }
-            newCalculatedLine.add(new MoveAndScore(entry.bestMove, entry.score));
+        }
 
-            // Perform the move and increment the counter
-            simulation.performMove(entry.bestMove);
+        if (seedMove == -1 && currentBestMove != -1 && MoveHelper.isWhitesMove(currentBestMove) == simulation.whitesTurn() && isLegalNow.test(currentBestMove)) {
+            seedMove = currentBestMove;
+            // score unknown; will remain null
+        }
+
+        if (seedMove == -1) {
+            // Fallback: first legal move, if any
+            MoveList legal = simulation.getAllLegalMoves();
+            if (legal.size() > 0) {
+                int mv = legal.getMove(0);
+                if (MoveHelper.isWhitesMove(mv) == simulation.whitesTurn()) {
+                    seedMove = mv;
+                }
+            }
+        }
+
+        // If still nothing, no PV can be constructed
+        if (seedMove == -1) {
+            this.calculatedLine = new ArrayList<>();
+            if (log.isDebugEnabled()) log.debug("PV empty: no root move available/legal.");
+            return;
+        }
+
+        // Play the seed move
+        pv.add(new MoveAndScore(seedMove, seedScore != null ? seedScore : 0.0));
+        simulation.performMove(seedMove);
+        movesPerformed++;
+        long curHash = simulation.getBoardStateHash();
+
+        // 2) Follow ONLY EXACT entries beyond root, with full validation
+        while (true) {
+            if (!seen.add(curHash)) break;
+
+            TranspositionTableEntry e = transpositionTable.get(curHash);
+            if (e == null || e.bestMove == -1 || e.nodeType != NodeType.EXACT) break;
+
+            int mv = e.bestMove;
+
+            // side-to-move must match and move must be legal now
+            if (MoveHelper.isWhitesMove(mv) != simulation.whitesTurn()) break;
+            if (!isLegalNow.test(mv)) break;
+
+            pv.add(new MoveAndScore(mv, e.score));
+            simulation.performMove(mv);
             movesPerformed++;
-            currentBoardHash = simulation.getBoardStateHash();
+            curHash = simulation.getBoardStateHash();
         }
 
-        // Undo the moves in reverse order
-        for (int i = 0; i < movesPerformed; i++) {
-            simulation.undoLastMove();
-        }
+        // Undo simulation
+        for (int i = 0; i < movesPerformed; i++) simulation.undoLastMove();
 
-        this.calculatedLine = new ArrayList<>(newCalculatedLine);
+        this.calculatedLine = new ArrayList<>(pv);
 
-        if (log.isDebugEnabled()) {
-            log.debug("Move Line: {}", newCalculatedLine.stream()
-                    .map(m -> Move.convertIntToMove(m.move).toString())
-                    .collect(Collectors.joining(", ")));
-            log.debug("");
-        }
+        /*if (log.isInfoEnabled()) {
+            String line = pv.stream().map(ms -> Move.convertIntToMove(ms.move).toString()).collect(Collectors.joining(", "));
+            log.info("Move Line: {}", line);
+        }*/
     }
+
 
 
     private MoveAndScore getBestMove(Engine simulatorEngine, boolean isWhitesTurn, int depth, long deadline,
