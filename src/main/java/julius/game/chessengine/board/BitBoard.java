@@ -7,7 +7,6 @@ import julius.game.chessengine.helper.RookHelper;
 import julius.game.chessengine.helper.ZobristTable;
 import julius.game.chessengine.utils.Color;
 import julius.game.chessengine.board.MoveHelper;
-import julius.game.chessengine.utils.Score;
 
 import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
@@ -46,6 +45,7 @@ public class BitBoard {
     private long whitePieces = 0L;
     private long blackPieces = 0L;
     private long allPieces = 0L;
+    private long zKey = 0L;
     /**
      * Bitboards caching the squares attacked by each side.
      */
@@ -74,6 +74,46 @@ public class BitBoard {
     //I just need those values to give the Engine a better score if it castles
     private boolean whiteKingHasCastled = false;
     private boolean blackKingHasCastled = false;
+
+    private void xorPiece(Color color, PieceType type, int square) {
+        zKey ^= ZobristTable.getPieceSquareHash(getPieceIndex(type, color), square);
+    }
+
+    private void xorCastlingRight(int index) {
+        zKey ^= ZobristTable.getCastlingRightsHash(index);
+    }
+
+    private void xorEp(int squareIndex) {
+        zKey ^= ZobristTable.getEnPassantSquareHash(squareIndex);
+    }
+
+    private void xorSide() {
+        zKey ^= ZobristTable.getBlackTurnHash();
+    }
+
+    private void recomputeZobristKey() {
+        zKey = 0;
+        if (whitesTurn) {
+            xorSide();
+        }
+        for (int sq = 0; sq < 64; sq++) {
+            PieceType pt = pieceBoard[sq];
+            if (pt != null) {
+                Color c = getPieceColorAtIndex(sq);
+                xorPiece(c, pt, sq);
+            }
+        }
+        if (!whiteKingMoved) {
+            if (!whiteRookH1Moved) xorCastlingRight(0);
+            if (!whiteRookA1Moved) xorCastlingRight(1);
+        }
+        if (!blackKingMoved) {
+            if (!blackRookH8Moved) xorCastlingRight(2);
+            if (!blackRookA8Moved) xorCastlingRight(3);
+        }
+        int ep = getEnPassantTargetIndex();
+        if (ep != -1) xorEp(ep);
+    }
 
     public BitBoard(boolean whitesTurn, long whitePawns, long blackPawns, long whiteKnights, long blackKnights, long whiteBishops, long blackBishops, long whiteRooks, long blackRooks, long whiteQueens, long blackQueens, long whiteKing, long blackKing, long whitePieces, long blackPieces, long allPieces, int lastMoveDoubleStepPawnIndex, boolean whiteKingMoved, boolean blackKingMoved, boolean whiteRookA1Moved, boolean whiteRookH1Moved, boolean blackRookA8Moved, boolean blackRookH8Moved, boolean whiteKingHasCastled, boolean blackKingHasCastled) {
         this.whitesTurn = whitesTurn;
@@ -104,6 +144,7 @@ public class BitBoard {
         initPieceBoardFromBitboards();
         recomputeWhiteAttackMap();
         recomputeBlackAttackMap();
+        recomputeZobristKey();
     }
 
     public BitBoard() {
@@ -151,12 +192,20 @@ public class BitBoard {
         this.blackAttackMap = other.blackAttackMap;
         this.whiteAttackDirty = other.whiteAttackDirty;
         this.blackAttackDirty = other.blackAttackDirty;
-
+        this.zKey = other.zKey;
         this.pieceBoard = Arrays.copyOf(other.pieceBoard, other.pieceBoard.length);
     }
-
     public void setLastMoveDoubleStepPawnIndex(int index) {
+        int oldEp = getEnPassantTargetIndex();
         this.lastMoveDoubleStepPawnIndex = index;
+        int newEp = getEnPassantTargetIndex();
+        if (oldEp != -1) xorEp(oldEp);
+        if (newEp != -1) xorEp(newEp);
+    }
+
+    public void flipSideToMove() {
+        whitesTurn = !whitesTurn;
+        xorSide();
     }
 
 
@@ -222,6 +271,7 @@ public class BitBoard {
         initPieceBoardFromBitboards();
         recomputeWhiteAttackMap();
         recomputeBlackAttackMap();
+        recomputeZobristKey();
     }
 
     private void initPieceBoardFromBitboards() {
@@ -1018,9 +1068,24 @@ public class BitBoard {
         long fromMask = 1L << fromIndex;
         long toMask = 1L << toIndex;
 
+        int oldEp = getEnPassantTargetIndex();
+        boolean oldWK = !whiteKingMoved && !whiteRookH1Moved;
+        boolean oldWQ = !whiteKingMoved && !whiteRookA1Moved;
+        boolean oldBK = !blackKingMoved && !blackRookH8Moved;
+        boolean oldBQ = !blackKingMoved && !blackRookA8Moved;
+
+        PieceType movingPiece = pieceTypeFromBits(pieceBits);
+        Color moverColor = isWhite ? Color.WHITE : Color.BLACK;
+        xorPiece(moverColor, movingPiece, fromIndex);
+        PieceType placedPiece = promoBits == 0 ? movingPiece : pieceTypeFromBits(promoBits);
+        xorPiece(moverColor, placedPiece, toIndex);
+
         // ---- 1) Captures (fast, no aggregates yet)
         if (isCapture) {
             int capIndex = isEnPassant ? (isWhite ? toIndex - 8 : toIndex + 8) : toIndex;
+            PieceType capType = pieceBoard[capIndex];
+            Color capColor = isWhite ? Color.BLACK : Color.WHITE;
+            xorPiece(capColor, capType, capIndex);
             long capMask = 1L << capIndex;
 
             if (isWhite) {
@@ -1067,6 +1132,8 @@ public class BitBoard {
             boolean kingside = toIndex > fromIndex;
             int rookFrom = isWhite ? (kingside ? 7 : 0) : (kingside ? 63 : 56);
             int rookTo = kingside ? (rookFrom - 2) : (rookFrom + 3);
+            xorPiece(moverColor, PieceType.ROOK, rookFrom);
+            xorPiece(moverColor, PieceType.ROOK, rookTo);
             long rfMask = 1L << rookFrom;
             long rtMask = 1L << rookTo;
 
@@ -1083,8 +1150,7 @@ public class BitBoard {
         }
 
         // ---- 3) Move the piece (fast)
-        PieceType movingPiece = pieceTypeFromBits(pieceBits);
-
+        
         // remove from 'from'
         switch (pieceBits) {
             case 1 -> {
@@ -1192,6 +1258,19 @@ public class BitBoard {
             lastMoveDoubleStepPawnIndex = 0;
         }
 
+        int newEp = (lastMoveDoubleStepPawnIndex != 0) ? ((isWhite ? 2 : 5) * 8 + (lastMoveDoubleStepPawnIndex & 7)) : -1;
+        if (oldEp != -1) xorEp(oldEp);
+        if (newEp != -1) xorEp(newEp);
+
+        boolean newWK = !whiteKingMoved && !whiteRookH1Moved;
+        boolean newWQ = !whiteKingMoved && !whiteRookA1Moved;
+        boolean newBK = !blackKingMoved && !blackRookH8Moved;
+        boolean newBQ = !blackKingMoved && !blackRookA8Moved;
+        if (oldWK != newWK) xorCastlingRight(0);
+        if (oldWQ != newWQ) xorCastlingRight(1);
+        if (oldBK != newBK) xorCastlingRight(2);
+        if (oldBQ != newBQ) xorCastlingRight(3);
+
         // ---- 5) Finalize once
         updateAggregatedBitboards();
 
@@ -1199,7 +1278,7 @@ public class BitBoard {
         whiteAttackDirty = true;
         blackAttackDirty = true;
 
-        whitesTurn = !whitesTurn;
+        flipSideToMove();
     }
 
 
@@ -1363,6 +1442,33 @@ public class BitBoard {
         boolean isRookFirstMove = MoveHelper.isRookFirstMove(move);
         int doubleStepPawnIndex = MoveHelper.deriveLastMoveDoubleStepPawnIndex(move);
 
+        int oldEp = getEnPassantTargetIndex();
+        boolean oldWK = !whiteKingMoved && !whiteRookH1Moved;
+        boolean oldWQ = !whiteKingMoved && !whiteRookA1Moved;
+        boolean oldBK = !blackKingMoved && !blackRookH8Moved;
+        boolean oldBQ = !blackKingMoved && !blackRookA8Moved;
+
+        PieceType movingPiece = pieceTypeFromBits(pieceTypeBits);
+        Color moverColor = isWhite ? Color.WHITE : Color.BLACK;
+        PieceType toPiece = promotionPieceTypeBits == 0 ? movingPiece : pieceTypeFromBits(promotionPieceTypeBits);
+        xorPiece(moverColor, toPiece, toIndex);
+        xorPiece(moverColor, movingPiece, fromIndex);
+
+        if (isCapture) {
+            int capIndex = isEnPassantMove ? (isWhite ? toIndex - 8 : toIndex + 8) : toIndex;
+            PieceType capType = pieceTypeFromBits(capturedPieceTypeBits);
+            Color capColor = isWhite ? Color.BLACK : Color.WHITE;
+            xorPiece(capColor, capType, capIndex);
+        }
+
+        if (isCastlingMove) {
+            boolean kingside = toIndex > fromIndex;
+            int rookFrom = isWhite ? (kingside ? 7 : 0) : (kingside ? 63 : 56);
+            int rookTo = kingside ? (rookFrom - 2) : (rookFrom + 3);
+            xorPiece(moverColor, PieceType.ROOK, rookFrom);
+            xorPiece(moverColor, PieceType.ROOK, rookTo);
+        }
+
         // 1) restore captured piece (bitboards + pieceBoard)
         undoCapture(toIndex, capturedPieceTypeBits, isCapture, isWhite, isEnPassantMove);
 
@@ -1386,12 +1492,25 @@ public class BitBoard {
         // 7) restore state flags + ep index
         undoGameState(fromIndex, toIndex, pieceTypeBits, isKingFirstMove, isRookFirstMove, isWhite, doubleStepPawnIndex);
 
+        int newEp = (lastMoveDoubleStepPawnIndex != 0) ? ((isWhite ? 5 : 2) * 8 + (lastMoveDoubleStepPawnIndex & 7)) : -1;
+        if (oldEp != -1) xorEp(oldEp);
+        if (newEp != -1) xorEp(newEp);
+
+        boolean newWK = !whiteKingMoved && !whiteRookH1Moved;
+        boolean newWQ = !whiteKingMoved && !whiteRookA1Moved;
+        boolean newBK = !blackKingMoved && !blackRookH8Moved;
+        boolean newBQ = !blackKingMoved && !blackRookA8Moved;
+        if (oldWK != newWK) xorCastlingRight(0);
+        if (oldWQ != newWQ) xorCastlingRight(1);
+        if (oldBK != newBK) xorCastlingRight(2);
+        if (oldBQ != newBQ) xorCastlingRight(3);
+
         // 8) finalize aggregates once; mark attacks dirty (lazy recompute)
         updateAggregatedBitboards();
         whiteAttackDirty = true;
         blackAttackDirty = true;
 
-        whitesTurn = !whitesTurn;
+        flipSideToMove();
     }
 
     private void undoGameState(int fromIndex, int toIndex, int pieceTypeBits, boolean isKingFirstMove, boolean isRookFirstMove, boolean isWhite, int doubleStepPawnIndex) {
@@ -1610,47 +1729,7 @@ public class BitBoard {
     }
 
     public long getBoardStateHash() {
-        long hash = 0;
-
-        // Iterate over all squares and XOR the hash with the piece hash values
-        for (int square = 0; square < 64; square++) {
-            PieceType pieceType = getPieceTypeAtSquare(square);
-            Color pieceColor = getPieceColorAtSquare(square);
-            if (pieceType != null && pieceColor != null) {
-                int pieceIndex = getPieceIndex(pieceType, pieceColor); // You need to implement this method
-                hash ^= ZobristTable.getPieceSquareHash(pieceIndex, square);
-            }
-        }
-
-        // Include castling rights in the hash
-        if (!whiteKingMoved) {
-            if (!whiteRookH1Moved) {
-                hash ^= ZobristTable.getCastlingRightsHash(0); // White Kingside
-            }
-            if (!whiteRookA1Moved) {
-                hash ^= ZobristTable.getCastlingRightsHash(1); // White Queenside
-            }
-        }
-        if (!blackKingMoved) {
-            if (!blackRookH8Moved) {
-                hash ^= ZobristTable.getCastlingRightsHash(2); // Black Kingside
-            }
-            if (!blackRookA8Moved) {
-                hash ^= ZobristTable.getCastlingRightsHash(3); // Black Queenside
-            }
-        }
-
-        int ep = getEnPassantTargetIndex();
-        if (ep != -1) {
-            hash ^= ZobristTable.getEnPassantSquareHash(ep);
-        }
-
-        // Include the player's turn in the hash
-        if (whitesTurn) {
-            hash ^= ZobristTable.getBlackTurnHash(); // XOR with blackTurnHash means it's white's turn
-        }
-
-        return hash;
+        return zKey;
     }
 
 }
