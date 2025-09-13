@@ -56,7 +56,6 @@ public class BitBoard {
     private final MoveList moveGenerationBuffer = new MoveList();
 
     // This variable needs to be set whenever a move is made
-    //TODO only write to it if en passant is possible then you can also hash it
     @Getter
     private int lastMoveDoubleStepPawnIndex;
 
@@ -1387,6 +1386,20 @@ public class BitBoard {
                 lastMoveDoubleStepPawnIndex);
     }
 
+    /**
+     * Returns the en-passant *target* square index [0..63], or -1 if none.
+     */
+    public int getEnPassantTargetIndex() {
+        if (lastMoveDoubleStepPawnIndex == 0) return -1;
+        // lastMoveDoubleStepPawnIndex is the double-stepped pawn's landing square
+        // The target square is on rank 5 if it's White to move now (Black just moved),
+        // or rank 2 if it's Black to move now (White just moved).
+        int file = lastMoveDoubleStepPawnIndex & 7;
+        int rank = whitesTurn ? 5 : 2;
+        return rank * 8 + file;
+    }
+
+
     private PieceType getPieceTypeAtSquare(int square) {
 
         return getPieceTypeAtIndex(square);
@@ -1435,8 +1448,9 @@ public class BitBoard {
             }
         }
 
-        if (lastMoveDoubleStepPawnIndex != 0) {
-            hash ^= ZobristTable.getEnPassantSquareHash(lastMoveDoubleStepPawnIndex);
+        int ep = getEnPassantTargetIndex();
+        if (ep != -1) {
+            hash ^= ZobristTable.getEnPassantSquareHash(ep);
         }
 
         // Include the player's turn in the hash

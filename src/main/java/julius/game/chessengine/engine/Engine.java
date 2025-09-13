@@ -13,6 +13,8 @@ import java.util.*;
 import java.util.function.LongConsumer;
 import java.util.stream.Collectors;
 
+import static julius.game.chessengine.board.MoveHelper.convertIndexToString;
+
 @Service
 @Log4j2
 public class Engine {
@@ -164,6 +166,10 @@ public class Engine {
             generateLegalMoves();
         }
         return legalMoves;
+    }
+
+    public int getEnPassantTargetIndex() {
+        return bitBoard.getEnPassantTargetIndex();
     }
 
     public synchronized void performMove(int move) {
@@ -422,6 +428,36 @@ public class Engine {
     public FEN translateBoardToFen() {
         return FEN.translateBoardToFEN(bitBoard);
     }
+
+    // Engine.java
+    public Map<String, String> buildRenderBoard() {
+        Map<String, String> map = new HashMap<>(64);
+        for (int i = 0; i < 64; i++) {
+            PieceType t = bitBoard.getPieceTypeAtIndex(i);
+            if (t == null) continue;
+            Color c = bitBoard.getPieceColorAtIndex(i);
+            String sq = convertIndexToString(i);
+            String code =
+                    (c == Color.WHITE ? "w" : "b") +
+                            switch (t) {
+                                case PAWN -> "P";
+                                case KNIGHT -> "N";
+                                case BISHOP -> "B";
+                                case ROOK -> "R";
+                                case QUEEN -> "Q";
+                                case KING -> "K";
+                            };
+            map.put(sq, code);
+        }
+
+        int epIdx = bitBoard.getEnPassantTargetIndex();
+        if (epIdx >= 0) {
+            map.remove(convertIndexToString(epIdx));
+        }
+
+        return map;
+    }
+
 
     public boolean isEndgame() {
         return bitBoard.isEndgame();
