@@ -8,6 +8,7 @@ import julius.game.chessengine.helper.ZobristTable;
 import julius.game.chessengine.utils.Color;
 import julius.game.chessengine.board.MoveHelper;
 
+import julius.game.chessengine.utils.Score;
 import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
 
