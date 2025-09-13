@@ -891,7 +891,6 @@ public class AI {
                 double pBeta  = usePvs ? (alpha + 1) : beta;
 
                 // ---- LMR: reduce late quiets when we’re not in check at this node ----
-                boolean isTactical = MoveHelper.isCapture(move) || MoveHelper.isPawnPromotionMove(move);
                 boolean canReduce = !inCheckAtNode && !isTactical && nextDepth >= 2 && index >= 3;
 
                 if (canReduce) {

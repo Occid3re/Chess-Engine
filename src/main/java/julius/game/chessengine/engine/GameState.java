@@ -1,18 +1,18 @@
 package julius.game.chessengine.engine;
 
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.utils.Score;
 import lombok.Data;
+import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashMap;
 
-import it.unimi.dsi.fastutil.ints.IntArrayDeque;
-import it.unimi.dsi.fastutil.ints.IntDeque;
 
 @Data
 @Log4j2
@@ -20,12 +20,13 @@ public class GameState {
 
     private final Deque<Long> hashHistory = new ArrayDeque<>(256);
     private final HashMap<Long, Integer> repetition = new HashMap<>();
-    private final IntDeque halfmoveStack = new IntArrayDeque();
+    private final IntArrayList halfmoveStack = new IntArrayList();
 
     private GameStateEnum state;
 
     private Score score;
 
+    @Getter
     private int halfmoveClock = 0;          // resets on pawn move or capture
     private long lastZobrist = 0L;          // last committed root hash
 
@@ -260,7 +261,6 @@ public class GameState {
         return repetition.getOrDefault(lastZobrist, 0) >= 3;
     }
 
-    public int getHalfmoveClock() { return halfmoveClock; }
     public void resetHalfmoveClock() { halfmoveClock = 0; }
     public void incHalfmoveClock() { halfmoveClock++; }
     public boolean isFiftyMoveRule() { return halfmoveClock >= 100; }
@@ -270,13 +270,12 @@ public class GameState {
 
     @Override
     public String toString() {
-        String sb = "GameState {" +
+        return "GameState {" +
                 "\n  State: " + state +
                 "\n  White Score: " + score.calculateTotalWhiteScore() +
                 "\n  Black Score: " + score.calculateTotalBlackScore() +
                 "\n  Score Difference: " + score.getScoreDifference() +
                 "\n  Repetition Count: " + repetition +
                 "\n}";
-        return sb;
     }
 }
