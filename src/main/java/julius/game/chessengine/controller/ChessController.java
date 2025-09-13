@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -134,8 +135,22 @@ public class ChessController {
     }
 
     @GetMapping(value = "/figure/frontend")
-    public ResponseEntity<FEN> getFiguresFrontend() {
-        return ResponseEntity.ok( ai.getMainEngine().translateBoardToFen());
+    public ResponseEntity<FrontendBoard> getFiguresFrontend() {
+        // build board map directly from engine to avoid any ghost EP piece
+        Map<String, String> render = ai.getMainEngine().buildRenderBoard();
+
+        // optional: include a FEN string too (your UI doesn’t need it, but handy)
+        String fen = ai.getMainEngine().translateBoardToFen().toString();
+
+        int epIdx = ai.getMainEngine().getEnPassantTargetIndex();
+        String epTarget = (epIdx >= 0) ? convertIndexToString(epIdx) : null;
+
+        FrontendBoard fb = new FrontendBoard();
+        fb.setRenderBoard(render);
+        fb.setFen(fen);
+        fb.setEnPassantTarget(epTarget);
+
+        return ResponseEntity.ok(fb);
     }
 
     @PatchMapping(value = "/figure/move/{from}/{to}")
