@@ -114,7 +114,9 @@ public class AI {
     @Setter
     private long timeLimit; // milliseconds
 
-    private boolean useNullMovePruning = false;
+    private boolean useNullMovePruning = Boolean.parseBoolean(
+            System.getProperty("chessengine.nullMove", "true")
+    );
 
     @Getter
     private long nodesVisited = 0;
@@ -1243,12 +1245,15 @@ public class AI {
         return System.nanoTime() > deadline;
     }
 
-    private void updateTranspositionTable(long boardStateHash, MoveAndScore moveAndScore, int currentDepth) {
-        TranspositionTableEntry existingEntry = transpositionTable.get(boardStateHash);
-        if (existingEntry == null || existingEntry.depth < currentDepth) {
-            transpositionTable.put(boardStateHash, new TranspositionTableEntry(moveAndScore.score, currentDepth, NodeType.EXACT, moveAndScore.move));
+    private void updateTranspositionTable(long hash, MoveAndScore ms, int depth) {
+        if (depth < 4) return; // throttle shallow writes; keep reads
+        TranspositionTableEntry e = transpositionTable.get(hash);
+        if (e == null || e.depth < depth) {
+            transpositionTable.put(hash,
+                    new TranspositionTableEntry(ms.score, depth, NodeType.EXACT, ms.move));
         }
     }
+
 
     private synchronized boolean positionChanged() {
         return currentBoardState != beforeCalculationBoardState;

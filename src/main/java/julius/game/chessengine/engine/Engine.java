@@ -135,17 +135,23 @@ public class Engine {
     }
 
     public Engine(Engine other) {
-        this.bitBoard = new BitBoard(other.bitBoard); // Assuming BitBoard's constructor is a deep copy constructor
-        this.gameState = new GameState(other.gameState); // Assuming GameState's constructor is a deep copy constructor
+        this.bitBoard = new BitBoard(other.bitBoard);
+        this.gameState = new GameState(other.gameState);
         this.line = new ArrayList<>(other.line);
         this.redoLine = new ArrayList<>(other.redoLine);
-        this.legalMoves = other.legalMoves == null ? null : new MoveList(other.legalMoves);
-        this.legalMovesNeedUpdate = other.legalMovesNeedUpdate;
-        this.openingBook = other.openingBook;
 
-        // Fresh cache with same sizing; copy entries
+        // ❌ heavy: cloning the current legal list and cache
+        // this.legalMoves = other.legalMoves == null ? null : new MoveList(other.legalMoves);
+        // this.legalMovesNeedUpdate = other.legalMovesNeedUpdate;
+        // this.legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
+        // other.legalMovesCache.forEach((k, v) -> this.legalMovesCache.put(k, new MoveList(v)));
+
+        // ✅ light: fresh empty state for the clone; compute lazily when needed
+        this.legalMoves = null;
+        this.legalMovesNeedUpdate = true;
         this.legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
-        other.legalMovesCache.forEach((k, v) -> this.legalMovesCache.put(k, new MoveList(v)));
+
+        this.openingBook = other.openingBook;
     }
 
     public void setOnPositionChanged(LongConsumer cb) {
