@@ -8,6 +8,9 @@ import shlex
 
 import requests
 
+#py -3 EngineBattle.py --jar1 "E:\ChessEngines\chess-engine-3.0.4.jar" --jar2 "E:\ChessEngines\chess-engine-3.0.6.jar" --jvm1 "-Xms4g -Xmx8g -XX:+UseG1GC"  --jvm2 "-Xms4g -Xmx8g -XX:+UseG1GC -Dchessengine.searchThreads=8 -Dchessengine.rootParallelLimit=128" --games 100 --engine-time-limit 1000
+
+
 
 # ----------------------------
 # Utilities
