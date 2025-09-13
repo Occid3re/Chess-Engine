@@ -9,6 +9,7 @@ import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.pgn.PGN;
 import julius.game.chessengine.pgn.PgnParser;
 import julius.game.chessengine.utils.Score;
+import julius.game.chessengine.utils.VersionInfo;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.http.ResponseEntity;
@@ -32,6 +33,15 @@ public class ChessController {
 
     private final AI ai;
     private final OpeningBook openingBook;
+
+    @GetMapping(value = "/info")
+    public ResponseEntity<Map<String, Object>> info() {
+        Map<String, Object> info = Map.of(
+                "version", VersionInfo.getVersion(),
+                "threads", ai.getSearchThreads()
+        );
+        return ResponseEntity.ok(info);
+    }
 
     @GetMapping(value = "/score")
     public ResponseEntity<Score> getScore() {

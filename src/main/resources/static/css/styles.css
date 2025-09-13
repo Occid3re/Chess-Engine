@@ -189,6 +189,11 @@ body {
 }
 
 /* Top Bar Styles */
+.top-bar {
+    background: linear-gradient(90deg, #003366, #006400);
+    padding: 10px 0;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
 .top-bar ul {
     list-style: none; /* Removes default list styling */
     padding: 0;
@@ -201,6 +206,16 @@ body {
 
 .top-bar li {
     margin: 0 5px; /* Adjust spacing between menu items */
+}
+
+#infoBar {
+    text-align: center;
+    color: #32CD32;
+    background-color: rgba(0, 0, 0, 0.6);
+    font-family: 'Orbitron', sans-serif;
+    padding: 5px 0;
+    box-shadow: 0 0 10px #00eeff;
+    margin-bottom: 15px;
 }
 
 /* Button Styles */

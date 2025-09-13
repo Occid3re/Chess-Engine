@@ -21,6 +21,19 @@ const makeRequest = async (method, url, callback) => {
     }
 };
 
+// Load version and thread information for the info bar
+const loadInfoBar = () => {
+    fetch(`${apiBaseUrl}/chess/info`)
+        .then(r => r.json())
+        .then(data => {
+            const infoBar = document.getElementById('infoBar');
+            if (infoBar) {
+                infoBar.textContent = `Version: v${data.version} | Threads: ${data.threads}`;
+            }
+        })
+        .catch(err => console.error('Failed to load app info', err));
+};
+
 // Update the calculated line and game details
 const updateCalculatedLine = () => {
     makeRequest('GET', '/chess/state', (data) => {
@@ -340,4 +353,5 @@ const startAutoRefresh = (intervalMs) => {
 $(document).ready(function () {
     initBoard(); // Initialize the board when the document is ready
     startAutoRefresh(300); // Start auto-refresh
+    loadInfoBar();
 });
