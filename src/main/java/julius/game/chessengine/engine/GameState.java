@@ -7,27 +7,28 @@ import julius.game.chessengine.utils.Score;
 import lombok.Data;
 import lombok.extern.log4j.Log4j2;
 
-import java.util.concurrent.ConcurrentHashMap;
+import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 
 @Data
 @Log4j2
 public class GameState {
 
-    private ConcurrentHashMap<Long, Integer> repetitionCounter;
+    private Long2IntOpenHashMap repetitionCounter;
 
     private GameStateEnum state;
 
     private Score score;
 
     public GameState(BitBoard bitBoard) {
-        repetitionCounter = new ConcurrentHashMap<>();
+        repetitionCounter = new Long2IntOpenHashMap();
         state = GameStateEnum.PLAY;
         score = new Score();
         initializeScore(bitBoard);
+        recordHash(bitBoard.getBoardStateHash());
     }
 
     public GameState(GameState other) {
-        this.repetitionCounter = new ConcurrentHashMap<>(other.repetitionCounter); // Deep copy of the map
+        this.repetitionCounter = new Long2IntOpenHashMap(other.repetitionCounter); // Deep copy of the map
         this.state = other.state; // Enum, so a direct copy is fine
         this.score = new Score(other.score);
     }
@@ -62,7 +63,6 @@ public class GameState {
             else {
                 state = GameStateEnum.PLAY;
             }
-            incrementHashCount(bitBoard.getBoardStateHash());
         }
     }
 
@@ -214,36 +214,22 @@ public class GameState {
     /**
      * Threefold Repetition Logic
      */
-    private void incrementHashCount(long hash) {
-        repetitionCounter.put(hash, repetitionCounter.getOrDefault(hash, 0) + 1);
+    public void recordHash(long hash) {
+        repetitionCounter.addTo(hash, 1);
     }
 
-    private void decrementHashCount(long hash) {
-        // Check if the hash exists in the map
-        if (repetitionCounter.containsKey(hash)) {
-            int count = repetitionCounter.get(hash);
-
-            // Decrement the count
-            if (count > 1) {
-                repetitionCounter.put(hash, count - 1);
-            } else {
-                // If the count reaches zero, remove the hash from the map
-                repetitionCounter.remove(hash);
-            }
+    public void removeHash(long hash) {
+        int count = repetitionCounter.get(hash);
+        if (count <= 1) {
+            repetitionCounter.remove(hash);
+        } else {
+            repetitionCounter.put(hash, count - 1);
         }
+        state = GameStateEnum.PLAY;
     }
 
     private boolean isThreeFoldRepetition(long hash) {
-        int repCount = repetitionCounter.getOrDefault(hash, 0);
-        if (repCount > 3) {
-            throw new IllegalStateException(String.format("Repetition count can't be higher then 3, was %s", repCount));
-        }
-        return repCount == 3;
-    }
-
-    public void undo(long hash) {
-        decrementHashCount(hash);
-        state = GameStateEnum.PLAY;
+        return repetitionCounter.getOrDefault(hash, 0) >= 3;
     }
 
     @Override

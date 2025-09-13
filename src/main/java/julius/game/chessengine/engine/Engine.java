@@ -188,6 +188,8 @@ public class Engine {
         if (!gameState.isGameOver()) {
             long boardStateHashBeforeMove = getBoardStateHash();
             bitBoard.performMove(move);
+            long newHash = getBoardStateHash();
+            gameState.recordHash(newHash);
             if (openingBook.containsMoveAndBoardStateHash(boardStateHashBeforeMove, move)) {
                 isOpeningMove = true;
             }
@@ -371,11 +373,11 @@ public class Engine {
         // Save current en-passant target (0 means none in your codebase)
         int previousDoubleStep = bitBoard.getLastMoveDoubleStepPawnIndex();
 
-        // EP is not valid across a null move: clear it (no move-gen)
+        // EP is not valid across a null move: clear it
         bitBoard.setLastMoveDoubleStepPawnIndex(0);
 
-        // Flip side to move (no legalMoves recompute, no GameState updates)
-        bitBoard.whitesTurn = !bitBoard.whitesTurn;
+        // Flip side to move
+        bitBoard.flipSideToMove();
 
         // Mark move list stale so the next search ply regenerates for the new side.
         legalMovesNeedUpdate = true;
@@ -385,8 +387,8 @@ public class Engine {
 
     // Engine.java
     public void undoNullMoveForSearch(int previousDoubleStep) {
-        // Flip side back (still no move-gen / GameState work)
-        bitBoard.whitesTurn = !bitBoard.whitesTurn;
+        // Flip side back
+        bitBoard.flipSideToMove();
 
         // Restore EP target
         bitBoard.setLastMoveDoubleStepPawnIndex(previousDoubleStep);
@@ -400,18 +402,18 @@ public class Engine {
 
         Integer undoMove = line.getLast();
 
-        // 1) Undo on the board first
+        long currentHash = getBoardStateHash();
+        gameState.removeHash(currentHash);
+
+        // 1) Undo on the board
         this.bitBoard.undoMove(undoMove);
 
-        // 2) Recompute legal moves and the *new* hash
+        // 2) Recompute legal moves
         generateLegalMoves();
-        long newHash = bitBoard.getBoardStateHash();
-
-        // 3) Let GameState see the correct, post-undo position
-        gameState.undo(newHash);
+        gameState.updateState(bitBoard, legalMoves, false);
         gameState.updateScore(bitBoard, undoMove);
 
-        // 4) Bookkeeping
+        // 3) Bookkeeping
         redoLine.add(undoMove);
         line.removeLast();
         notifyPositionChanged();
