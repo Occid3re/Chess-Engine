@@ -10,6 +10,7 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.function.LongConsumer;
 import java.util.stream.Collectors;
 
 @Service
@@ -124,6 +125,9 @@ public class Engine {
     @Getter
     private GameState gameState = new GameState(bitBoard);
 
+    private LongConsumer onPositionChanged = h -> {};
+
+
     public Engine() {
         startNewGame();
     }
@@ -140,6 +144,13 @@ public class Engine {
         // Fresh cache with same sizing; copy entries
         this.legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
         other.legalMovesCache.forEach((k, v) -> this.legalMovesCache.put(k, new MoveList(v)));
+    }
+
+    public void setOnPositionChanged(LongConsumer cb) {
+        this.onPositionChanged = (cb != null ? cb : h -> {});
+    }
+    private void notifyPositionChanged() {
+        onPositionChanged.accept(getBoardStateHash());
     }
 
     public MoveList getAllLegalMoves() {
@@ -166,6 +177,7 @@ public class Engine {
             generateLegalMoves();
             gameState.update(bitBoard, legalMoves, move, isOpeningMove);
             line.add(move);
+            notifyPositionChanged();
         }
     }
 
@@ -174,6 +186,7 @@ public class Engine {
         this.gameState = new GameState(bitBoard);
         generateLegalMoves();
         gameState.updateState(bitBoard, legalMoves, false);
+        notifyPositionChanged();
     }
 
     public synchronized Engine createSimulation() {
@@ -191,6 +204,7 @@ public class Engine {
         legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
         // Optional: one cleanup to ensure fresh state
         legalMovesCache.cleanup();
+        notifyPositionChanged();
     }
 
     private void generateLegalMoves() {
@@ -365,23 +379,33 @@ public class Engine {
     }
 
     public void undoLastMove() {
-        if (!line.isEmpty()) {
-            gameState.undo(bitBoard.getBoardStateHash());
-            Integer undoMove = line.getLast();
-            this.bitBoard.undoMove(undoMove);
-            gameState.updateScore(bitBoard, undoMove);
-            generateLegalMoves();
-            redoLine.add(undoMove);
-            line.removeLast();
-        } else {
-            throw new IllegalStateException("undoLastMoveWasNotPossible, line is empty");
-        }
+        if (line.isEmpty()) throw new IllegalStateException("undoLastMoveWasNotPossible, line is empty");
+
+        Integer undoMove = line.getLast();
+
+        // 1) Undo on the board first
+        this.bitBoard.undoMove(undoMove);
+
+        // 2) Recompute legal moves and the *new* hash
+        generateLegalMoves();
+        long newHash = bitBoard.getBoardStateHash();
+
+        // 3) Let GameState see the correct, post-undo position
+        gameState.undo(newHash);
+        gameState.updateScore(bitBoard, undoMove);
+
+        // 4) Bookkeeping
+        redoLine.add(undoMove);
+        line.removeLast();
+        notifyPositionChanged();
     }
+
 
     public void redoMove() {
         if (!redoLine.isEmpty()) {
             performMove(redoLine.getLast());
             redoLine.removeLast();
+            notifyPositionChanged();
         } else {
             throw new IllegalStateException("redoLastMoveWasNotPossible, redoLine is empty");
         }

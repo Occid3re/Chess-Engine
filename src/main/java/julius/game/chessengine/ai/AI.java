@@ -101,6 +101,8 @@ public class AI {
 
     private volatile int currentBestMove = -1;
 
+    private volatile long bestMoveForHash = -1;
+
     @Getter
     private List<MoveAndScore> calculatedLine = Collections.synchronizedList(new ArrayList<>());
 
@@ -141,17 +143,13 @@ public class AI {
             return t;
         })
                 : null;
+
+        this.mainEngine.setOnPositionChanged(h -> updateBoardStateHash());
     }
 
 
     public Integer getCurrentBestMoveInt() {
         return currentBestMove;
-    }
-
-
-    public void resetCounters() {
-        nodesVisited = 0;
-        nullMoveCount = 0;
     }
 
     private void startCalculationThread() {
@@ -201,7 +199,7 @@ public class AI {
                 return;
             }
             if ((aiIsWhite && mainEngine.whitesTurn()) || (aiIsBlack && !mainEngine.whitesTurn())) {
-                if (currentBestMove != -1) {
+                if (currentBestMove != -1 && bestMoveForHash == mainEngine.getBoardStateHash()) {
                     performMove();
                 }
             }
@@ -209,27 +207,32 @@ public class AI {
     }
 
     public void performMove() {
-        if (currentBestMove == -1) {
-            // The calculation thread has not yet produced a move; skip until one is available.
-            log.debug("No current best move available. Waiting for calculation to finish.");
+        if (currentBestMove == -1) return;
+
+        long now = mainEngine.getBoardStateHash();
+        if (now != bestMoveForHash) {
+            log.info("Stale best move for hash {}, current {}", bestMoveForHash, now);
+            currentBestMove = -1;                           // <-- stop re-trying the stale move
+            synchronized (calculationLock) {
+                calculationLock.notifyAll();
+            } // <-- wake recalculation
             return;
         }
 
-        // FIX: readability (logical != instead of !A == B)
         if (MoveHelper.isWhitesMove(currentBestMove) != mainEngine.whitesTurn()) {
-            // If the current best move is not valid for the current turn, log an error and return.
-            log.debug("Current best move {} is not valid for the current turn.", Move.convertIntToMove(currentBestMove));
-            return; // Return the current state without making a move
+            log.info("Best move {} not for side to move", Move.convertIntToMove(currentBestMove));
+            currentBestMove = -1;                           // (optional) also drop here
+            return;
         }
+
         mainEngine.performMove(currentBestMove);
         currentBoardState = mainEngine.getBoardStateHash();
         synchronized (calculationLock) {
             calculationLock.notifyAll();
         }
-        // Reset the best move so that a stale move isn't played again before
-        // the calculation thread provides a new one for the updated position.
-        currentBestMove = -1;
+        currentBestMove = -1; // don’t re-play it
     }
+
 
     private void calculateLine() {
         log.debug("keepCalculating: {}, interrupted: {}", keepCalculating, Thread.currentThread().isInterrupted());
@@ -331,14 +334,18 @@ public class AI {
                 }
             }
         } finally {
-            if (bestMove == -1) {
-                MoveList legalMoves = simulatorEngine.getAllLegalMoves();
-                if (legalMoves.size() > 0) {
-                    bestMove = legalMoves.getMove(0);
+            if (!positionChanged() && keepCalculating && !Thread.currentThread().isInterrupted()) {
+                if (bestMove == -1) {
+                    MoveList legalMoves = simulatorEngine.getAllLegalMoves();
+                    if (legalMoves.size() > 0) bestMove = legalMoves.getMove(0);
                 }
+                bestMoveForHash = boardStateHash;
+                currentBestMove = bestMove;
+                fillCalculatedLine(simulatorEngine);
+            } else {
+                // The board changed while/just after we searched: don't publish a stale result.
+                currentBestMove = -1;
             }
-            currentBestMove = bestMove;
-            fillCalculatedLine(simulatorEngine);
         }
     }
 
