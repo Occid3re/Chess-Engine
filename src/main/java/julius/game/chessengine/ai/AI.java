@@ -152,6 +152,13 @@ public class AI {
         return currentBestMove;
     }
 
+    /**
+     * Expose the number of search threads configured for the engine.
+     */
+    public int getSearchThreads() {
+        return SEARCH_THREADS;
+    }
+
     private void startCalculationThread() {
         keepCalculating = true;
         calculationThread = new Thread(this::calculateLine);
