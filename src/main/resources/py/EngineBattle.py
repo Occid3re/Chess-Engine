@@ -4,6 +4,7 @@ import re
 import subprocess
 import time
 from typing import Optional, Dict, Any, Tuple
+import shlex
 
 import requests
 
@@ -32,18 +33,15 @@ def get_file_name_without_extension(file_path: str) -> str:
     return os.path.splitext(base_name)[0]
 
 
-def start_java_process(jar_path: str, port: int) -> subprocess.Popen:
+def start_java_process(jar_path: str, port: int, jvm_args=None) -> subprocess.Popen:
     """
-    Start the Spring Boot JAR on a given port with stdout/stderr suppressed.
-    Uses the 'java' on PATH.
+    Start the Spring Boot JAR on a given port with optional extra JVM args.
     """
     if not os.path.isfile(jar_path):
         raise FileNotFoundError(f"JAR not found: {jar_path}")
+    cmd = ['java'] + (jvm_args or []) + ['-jar', jar_path, f'--server.port={port}']
     with open(os.devnull, 'w') as devnull:
-        return subprocess.Popen(
-            ['java', '-jar', jar_path, f'--server.port={port}'],
-            stdout=devnull, stderr=devnull
-        )
+        return subprocess.Popen(cmd, stdout=devnull, stderr=devnull)
 
 
 def is_server_running(base_url: str, timeout_s: float = 1.5) -> bool:
@@ -338,7 +336,9 @@ def run_matches(jar1_path: str,
                 engine_time_limit: int = 50,
                 move_timeout_s: float = 6.0,
                 startup_deadline_s: float = 60.0,
-                poll_sleep_s: float = 0.05) -> None:
+                poll_sleep_s: float = 0.05,
+                jvm1: str = "",
+                jvm2: str = "") -> None:
     engine1_url = f"http://localhost:{port1}"  # WHITE
     engine2_url = f"http://localhost:{port2}"  # BLACK
     engine1_name = get_file_name_without_extension(jar1_path)
@@ -346,8 +346,12 @@ def run_matches(jar1_path: str,
 
     print(f"Launching engines:\n  {jar1_path} -> {engine1_url}\n  {jar2_path} -> {engine2_url}")
 
-    e1 = start_java_process(jar1_path, port1)
-    e2 = start_java_process(jar2_path, port2)
+    # On Windows, posix=False tends to respect quotes the way you'd expect.
+    jvm1_list = shlex.split(jvm1, posix=False) if jvm1 else None
+    jvm2_list = shlex.split(jvm2, posix=False) if jvm2 else None
+
+    e1 = start_java_process(jar1_path, port1, jvm_args=jvm1_list)
+    e2 = start_java_process(jar2_path, port2, jvm_args=jvm2_list)
 
     try:
         if not wait_until_up(engine1_url, startup_deadline_s):
@@ -519,6 +523,8 @@ def main():
                         help="Path to reference engine JAR (v2).")
     parser.add_argument("--jar2", default=None,
                         help="Path to new engine JAR (defaults to latest chess-engine-*.jar in ./target)")
+    parser.add_argument("--jvm1", default="", help="Extra JVM args for engine 1 (WHITE)")
+    parser.add_argument("--jvm2", default="", help="Extra JVM args for engine 2 (BLACK)")
     parser.add_argument("--target-dir", default="target", help="Directory to search for newest engine JAR.")
     parser.add_argument("--port1", type=int, default=8080)
     parser.add_argument("--port2", type=int, default=8082)
@@ -546,8 +552,8 @@ def main():
         port1=args.port1,
         port2=args.port2,
         games=args.games,
-        engine_time_limit=args.engine_time_limit,   # <-- milliseconds, passed through unchanged
-        move_timeout_s=args.move_timeout,          # <-- seconds
+        engine_time_limit=args.engine_time_limit,
+        move_timeout_s=args.move_timeout,
         startup_deadline_s=args.startup_deadline
     )
 
