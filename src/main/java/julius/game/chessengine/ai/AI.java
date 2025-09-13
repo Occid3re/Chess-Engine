@@ -296,44 +296,68 @@ public class AI {
 
     private void calculateBestMove(Engine simulatorEngine, long boardStateHash, boolean isWhite, long deadline) {
         double bestScore = isWhite ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
-        int bestMove = mainEngine.getOpeningBook().getRandomMoveForBoardStateHash(boardStateHash); // if none found returns -1
+        int bestMove = mainEngine.getOpeningBook().getRandomMoveForBoardStateHash(boardStateHash); // if none: -1
         if (bestMove != -1) {
             currentBestMove = bestMove;
             return;
         }
 
+        // For aspiration windows we center around the previous iteration’s score.
+        // Start neutral; quickly stabilizes after depth 2.
+        Double lastIterScore = null;
+
         try {
             for (int currentDepth = 1; currentDepth <= maxDepth; currentDepth++) {
-                if (shouldStopCalculating(deadline)) {
-                    break;
-                }
+                if (shouldStopCalculating(deadline)) break;
 
-                MoveAndScore moveAndScore;
+                MoveAndScore moveAndScore = null;
 
-                // NEW: root-split parallel search when threads available and >1 legal move likely
-                if (SEARCH_THREADS > 1) {
-                    moveAndScore = getBestMoveParallel(
-                            simulatorEngine,
-                            isWhite,
-                            currentDepth,
-                            deadline,
-                            Double.NEGATIVE_INFINITY,
-                            Double.POSITIVE_INFINITY
-                    );
-                } else {
-                    // fallback single-threaded
-                    moveAndScore = getBestMove(
-                            simulatorEngine,
-                            isWhite,
-                            currentDepth,
-                            deadline,
-                            Double.NEGATIVE_INFINITY,
-                            Double.POSITIVE_INFINITY
-                    );
+                // --- Aspiration window around lastIterScore (if known) ---
+                double alpha = Double.NEGATIVE_INFINITY, beta = Double.POSITIVE_INFINITY;
+                if (lastIterScore != null && currentDepth >= 3) {
+                    double window = 50.0;            // ≈ 0.50 pawn; tune 25–100
+                    alpha = lastIterScore - window;
+                    beta  = lastIterScore + window;
+
+                    int retries = 0;
+                    while (true) {
+                        if (SEARCH_THREADS > 1) {
+                            moveAndScore = getBestMoveParallel(simulatorEngine, isWhite, currentDepth, deadline, alpha, beta);
+                        } else {
+                            moveAndScore = getBestMove(simulatorEngine, isWhite, currentDepth, deadline, alpha, beta);
+                        }
+                        if (moveAndScore == null) break; // timeout/stop
+
+                        // Fail-low/high? Widen and re-search this same depth.
+                        if (moveAndScore.score <= alpha) {
+                            // fail-low → widen downwards
+                            window *= 2.0;
+                            alpha = moveAndScore.score - window;
+                            retries++;
+                            if (retries > 3) { alpha = Double.NEGATIVE_INFINITY; beta = Double.POSITIVE_INFINITY; }
+                            else continue;
+                        } else if (moveAndScore.score >= beta) {
+                            // fail-high → widen upwards
+                            window *= 2.0;
+                            beta = moveAndScore.score + window;
+                            retries++;
+                            if (retries > 3) { alpha = Double.NEGATIVE_INFINITY; beta = Double.POSITIVE_INFINITY; }
+                            else continue;
+                        }
+                        break; // in-window → accept
+                    }
                 }
 
                 if (moveAndScore == null) {
-                    break;
+                    // First iterations or after giving up on aspiration → full window
+                    if (SEARCH_THREADS > 1) {
+                        moveAndScore = getBestMoveParallel(simulatorEngine, isWhite, currentDepth, deadline,
+                                Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY);
+                    } else {
+                        moveAndScore = getBestMove(simulatorEngine, isWhite, currentDepth, deadline,
+                                Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY);
+                    }
+                    if (moveAndScore == null) break; // timeout/stop
                 }
 
                 if (isNewBestMove(moveAndScore, bestScore, isWhite)) {
@@ -341,6 +365,8 @@ public class AI {
                     bestMove = moveAndScore.move;
                     updateTranspositionTable(boardStateHash, moveAndScore, currentDepth);
                 }
+
+                lastIterScore = moveAndScore.score; // center next window here
             }
         } finally {
             if (!positionChanged() && keepCalculating && !Thread.currentThread().isInterrupted()) {
@@ -352,7 +378,6 @@ public class AI {
                 currentBestMove = bestMove;
                 fillCalculatedLine(simulatorEngine);
             } else {
-                // The board changed while/just after we searched: don't publish a stale result.
                 currentBestMove = -1;
             }
         }
@@ -812,16 +837,32 @@ public class AI {
         return (isWhite && state == GameStateEnum.WHITE_IN_CHECK) || (!isWhite && state == GameStateEnum.BLACK_IN_CHECK);
     }
 
-    private double maximizer(Engine simulatorEngine, int depth, double alpha, double beta, boolean isWhite, long boardHash, double alphaOriginal, MoveList moves, long deadline) {
-        long start = log.isDebugEnabled() ? System.nanoTime() : 0L; // Start timing only for debugging
+    /** LMR reduction: larger for deeper plies and later moves; tuned to be safe. */
+    private int lmrReduction(int depth, int moveIndex) {
+        // depth >= 2, index >= 3 enforced by callers
+        // log-log curve is common; tweak divisor to taste.
+        int r = (int) Math.floor((Math.log(1 + depth) * Math.log(2 + moveIndex)) / 1.7);
+        if (r < 1) r = 1;
+        if (r > depth - 1) r = depth - 1;
+        return r;
+    }
+
+    private double maximizer(Engine simulatorEngine, int depth, double alpha, double beta,
+                             boolean isWhite, long boardHash, double alphaOriginal,
+                             MoveList moves, long deadline) {
+
+        long start = log.isDebugEnabled() ? System.nanoTime() : 0L;
         double maxEval = Double.NEGATIVE_INFINITY;
-        int bestMoveAtThisNode = -1; // Variable to track the best move at this node
+        int bestMoveAtThisNode = -1;
+
+        final boolean inCheckAtNode = isSideInCheck(simulatorEngine, isWhite);
 
         ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, depth, boardHash);
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
                 return EXIT_FLAG;
             }
+
             int move = orderedMoves.get(index);
             simulatorEngine.performMove(move);
             long newBoardHash = simulatorEngine.getBoardStateHash();
@@ -830,30 +871,44 @@ public class AI {
             TranspositionTableEntry entry = transpositionTable.get(newBoardHash);
 
             if (entry != null && entry.depth >= depth) {
-                eval = entry.score; // Use the score from the transposition table
+                eval = entry.score;
             } else {
                 int nextDepth = depth - 1;
 
-                // PVS: use a narrow window for moves after the first
+                // PVS window for non-first moves
                 boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
                 double pAlpha = alpha;
-                double pBeta = beta;
-                if (usePvs) {
-                    pBeta = alpha + 1;
-                }
+                double pBeta  = usePvs ? (alpha + 1) : beta;
 
-                eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline);
+                // ---- LMR: reduce late quiets when we’re not in check at this node ----
+                boolean isTactical = MoveHelper.isCapture(move) || MoveHelper.isPawnPromotionMove(move);
+                boolean canReduce = !inCheckAtNode && !isTactical && nextDepth >= 2 && index >= 3;
 
-                if (eval == EXIT_FLAG || positionChanged()) {
-                    simulatorEngine.undoLastMove();
-                    return EXIT_FLAG;
-                }
+                if (canReduce) {
+                    int r = lmrReduction(nextDepth, index);
+                    int reduced = Math.max(1, nextDepth - r);
 
-                if (usePvs && eval > alpha && eval < beta) {
-                    eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline);
-                    if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
+                    eval = alphaBeta(simulatorEngine, reduced, pAlpha, pBeta, !isWhite, deadline);
+                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+
+                    // If the reduced result looks promising, re-search deeper (PVS/full as needed)
+                    boolean promising = eval > alpha;
+                    if (promising) {
+                        if (usePvs && eval > alpha && eval < beta) {
+                            eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline);
+                        } else {
+                            eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline);
+                        }
+                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                    }
+                } else {
+                    // Normal PVS
+                    eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline);
+                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+
+                    if (usePvs && eval > alpha && eval < beta) {
+                        eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline);
+                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
                     }
                 }
             }
@@ -861,29 +916,25 @@ public class AI {
             if (log.isDebugEnabled()) {
                 long endTime = System.nanoTime();
                 log.debug("DEPTH: {} --- {}", depth, Move.convertIntToMove(move));
-                log.debug("DEPTH: {}", depth);
                 log.debug("--> [+] Time taken for maximizer: {} ms", (endTime - start) / 1e6);
             }
 
             simulatorEngine.undoLastMove();
 
-            if (eval > maxEval) { // Found a better evaluation
+            if (eval > maxEval) {
                 maxEval = eval;
-                bestMoveAtThisNode = move; // Update the best move
+                bestMoveAtThisNode = move;
             }
 
             alpha = Math.max(alpha, eval);
             if (beta <= alpha) {
                 updateKillerMoves(depth, move);
                 incrementHistory(move, depth);
-                if (log.isDebugEnabled()) {
-                    log.debug(" Maxi New Killer Move is {}", Move.convertIntToMove(move));
-                }
-                break; // Alpha-beta pruning
+                if (log.isDebugEnabled()) log.debug(" Maxi New Killer Move is {}", Move.convertIntToMove(move));
+                break;
             }
         }
 
-        // After the for loop, update the transposition table with the best move
         TranspositionTableEntry existingEntry = transpositionTable.get(boardHash);
         boolean shouldUpdate = existingEntry == null || existingEntry.depth < depth;
 
@@ -900,20 +951,25 @@ public class AI {
 
 
     private double minimizer(Engine simulatorEngine, int depth, double alpha, double beta,
-                             boolean isWhite, long boardHash,
-                             double betaOriginal, MoveList moves, long deadline) {
-        long start = log.isDebugEnabled() ? System.nanoTime() : 0L; // Start timing only for debugging
+                             boolean isWhite, long boardHash, double betaOriginal,
+                             MoveList moves, long deadline) {
+
+        long start = log.isDebugEnabled() ? System.nanoTime() : 0L;
         double minEval = Double.POSITIVE_INFINITY;
-        int bestMoveAtThisNode = -1; // Track the best move at this node
+        int bestMoveAtThisNode = -1;
+
+        final boolean inCheckAtNode = isSideInCheck(simulatorEngine, isWhite);
 
         ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, depth, boardHash);
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
                 return EXIT_FLAG;
             }
+
             int move = orderedMoves.get(index);
             simulatorEngine.performMove(move);
             long newBoardHash = simulatorEngine.getBoardStateHash();
+
             double eval;
             TranspositionTableEntry entry = transpositionTable.get(newBoardHash);
 
@@ -922,26 +978,36 @@ public class AI {
             } else {
                 int nextDepth = depth - 1;
 
-                // PVS: use a narrow window for moves after the first
                 boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
-                double pAlpha = alpha;
-                double pBeta = beta;
-                if (usePvs) {
-                    pAlpha = beta - 1;
-                }
+                double pAlpha = usePvs ? (beta - 1) : alpha;
+                double pBeta  = beta;
 
-                eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline);
+                boolean isTactical = MoveHelper.isCapture(move) || MoveHelper.isPawnPromotionMove(move);
+                boolean canReduce = !inCheckAtNode && !isTactical && nextDepth >= 2 && index >= 3;
 
-                if (eval == EXIT_FLAG || positionChanged()) {
-                    simulatorEngine.undoLastMove();
-                    return EXIT_FLAG;
-                }
+                if (canReduce) {
+                    int r = lmrReduction(nextDepth, index);
+                    int reduced = Math.max(1, nextDepth - r);
 
-                if (usePvs && eval > alpha && eval < beta) {
-                    eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline);
-                    if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
+                    eval = alphaBeta(simulatorEngine, reduced, pAlpha, pBeta, !isWhite, deadline);
+                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+
+                    boolean promising = eval < beta;
+                    if (promising) {
+                        if (usePvs && eval > alpha && eval < beta) {
+                            eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline);
+                        } else {
+                            eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline);
+                        }
+                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                    }
+                } else {
+                    eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline);
+                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+
+                    if (usePvs && eval > alpha && eval < beta) {
+                        eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline);
+                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
                     }
                 }
             }
@@ -956,16 +1022,14 @@ public class AI {
 
             if (eval < minEval) {
                 minEval = eval;
-                bestMoveAtThisNode = move; // Update the best move at this node
+                bestMoveAtThisNode = move;
             }
 
             beta = Math.min(beta, eval);
             if (alpha >= beta) {
                 updateKillerMoves(depth, move);
                 incrementHistory(move, depth);
-                if (log.isDebugEnabled()) {
-                    log.debug("Mini New Killer Move is {}", Move.convertIntToMove(move));
-                }
+                if (log.isDebugEnabled()) log.debug("Mini New Killer Move is {}", Move.convertIntToMove(move));
                 break;
             }
         }
@@ -983,6 +1047,7 @@ public class AI {
 
         return minEval;
     }
+
 
 
     ArrayList<Integer> sortMovesByEfficiency(MoveList moves, int currentDepth, long boardHash) {
@@ -1176,6 +1241,14 @@ public class AI {
         ArrayList<Integer> ordered = sortMovesByEfficiency(moves, 0, simulatorEngine.getBoardStateHash());
 
         for (int m : ordered) {
+            // --- SEE pruning: drop clearly losing captures (keeps promotions) ---
+            if (!inCheck && MoveHelper.isCapture(m) && !MoveHelper.isPawnPromotionMove(m)) {
+                int see = simulatorEngine.see(m);
+                if (see < 0) {
+                    // hopeless capture → prune
+                    continue;
+                }
+            }
             simulatorEngine.performMove(m);
             // FIX: propagate timeout BEFORE negation
             double child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);

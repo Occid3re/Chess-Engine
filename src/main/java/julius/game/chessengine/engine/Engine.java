@@ -161,6 +161,11 @@ public class Engine {
         onPositionChanged.accept(getBoardStateHash());
     }
 
+    /** Expose BitBoard's SEE to callers (AI). */
+    public int see(int move) {
+        return bitBoard.see(move);
+    }
+
     public MoveList getAllLegalMoves() {
         if (gameState.isGameOver()) {
             if (legalMoves == null) {

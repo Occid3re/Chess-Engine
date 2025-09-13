@@ -6,6 +6,9 @@ import julius.game.chessengine.helper.KnightHelper;
 import julius.game.chessengine.helper.RookHelper;
 import julius.game.chessengine.helper.ZobristTable;
 import julius.game.chessengine.utils.Color;
+import julius.game.chessengine.board.MoveHelper;
+import julius.game.chessengine.utils.Score;
+
 import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
 
@@ -239,6 +242,195 @@ public class BitBoard {
         whiteAttackDirty = true;
         blackAttackDirty = true;
     }
+
+    /** Bishop-ray attacks from 'sq' with an explicit occupancy. */
+    private long bishopAttacksFromWithOcc(int sq, long occ) {
+        long mask = bishopHelper.bishopMasks[sq];
+        long occMasked = occ & mask;
+        return bishopHelper.calculateMovesUsingBishopMagic(sq, occMasked);
+    }
+
+    /** Rook-ray attacks from 'sq' with an explicit occupancy. */
+    private long rookAttacksFromWithOcc(int sq, long occ) {
+        long mask = rookHelper.rookMasks[sq];
+        long occMasked = occ & mask;
+        return rookHelper.calculateMovesUsingRookMagic(sq, occMasked);
+    }
+
+    /** Bitboard of pawns (for the given side) that attack 'sq'. */
+    private long pawnAttackersToSquare(int sq, boolean whiteSide, long whitePawnsBB, long blackPawnsBB) {
+        int file = sq & 7;
+        long res = 0L;
+        if (whiteSide) {
+            if (file != 7 && sq >= 7)  res |= (1L << (sq - 7));  // from ... -> to = +7
+            if (file != 0 && sq >= 9)  res |= (1L << (sq - 9));  // from ... -> to = +9
+            return res & whitePawnsBB;
+        } else {
+            if (file != 0 && sq <= 56) res |= (1L << (sq + 7));  // from ... -> to = -7
+            if (file != 7 && sq <= 54) res |= (1L << (sq + 9));  // from ... -> to = -9
+            return res & blackPawnsBB;
+        }
+    }
+
+    /**
+     * Simple Static Exchange Evaluation (SEE).
+     * Returns the minimal guaranteed material gain (centipawns) for the side that plays 'move'.
+     * Positive => winning capture; Negative => losing capture.
+     */
+    public int see(int move) {
+        // Only meaningful for captures/promotions (we keep 0 for non-captures).
+        boolean isCapture = MoveHelper.isCapture(move);
+        int promoBits = MoveHelper.derivePromotionPieceTypeBits(move);
+        if (!isCapture && promoBits == 0) return 0;
+
+        int from = MoveHelper.deriveFromIndex(move);
+        int to   = MoveHelper.deriveToIndex(move);
+        boolean whiteMove = MoveHelper.isWhitesMove(move);
+        int moverBits = MoveHelper.derivePieceTypeBits(move);
+        boolean isEp = MoveHelper.isEnPassantMove(move);
+        int capturedBits = MoveHelper.deriveCapturedPieceTypeBits(move);
+
+        long occ = allPieces;
+        long toMask = 1L << to;
+        long fromMask = 1L << from;
+
+        // Local mutable copies of per-piece bitboards (index 1..6)
+        long[] W = new long[7];
+        long[] B = new long[7];
+        W[1]=whitePawns; W[2]=whiteKnights; W[3]=whiteBishops; W[4]=whiteRooks; W[5]=whiteQueens; W[6]=whiteKing;
+        B[1]=blackPawns; B[2]=blackKnights; B[3]=blackBishops; B[4]=blackRooks; B[5]=blackQueens; B[6]=blackKing;
+
+        // Remove captured piece from its set/occ
+        int capIndex = isEp ? (whiteMove ? (to - 8) : (to + 8)) : to;
+        if (isCapture) {
+            long capMask = 1L << capIndex;
+            if (whiteMove) {
+                if (capturedBits >= 1 && capturedBits <= 6) B[capturedBits] &= ~capMask;
+            } else {
+                if (capturedBits >= 1 && capturedBits <= 6) W[capturedBits] &= ~capMask;
+            }
+            occ &= ~capMask;
+        }
+
+        // Move the attacking piece onto 'to' (promotion changes its type/value)
+        int placedBits = (promoBits != 0 ? promoBits : moverBits);
+        if (whiteMove) { W[moverBits] &= ~fromMask; W[placedBits] |= toMask; }
+        else           { B[moverBits] &= ~fromMask; B[placedBits] |= toMask; }
+        occ &= ~fromMask;
+        occ |= toMask;
+
+        // Gain stack (swap-off)
+        int[] gain = new int[32];
+        int d = 0;
+
+        int capVal = isCapture ? Score.getPieceValue(isEp ? 1 : capturedBits) : 0;
+        if (promoBits != 0) {
+            capVal += Score.getPieceValue(promoBits) - Score.getPieceValue(1); // promotion delta (to piece - pawn)
+        }
+        gain[0] = capVal;
+
+        // Track current occupant of 'to' (side/piece) – initially the mover after first capture
+        int victimValue = Score.getPieceValue(placedBits);
+        int toPieceBits = placedBits;
+        boolean toPieceWhite = whiteMove;
+
+        boolean sideWhite = !whiteMove; // opponent to recapture first
+
+        while (true) {
+            // Build attackers for the side to move now
+            long pawns   = sideWhite ? W[1] : B[1];
+            long knights = sideWhite ? W[2] : B[2];
+            long bishops = sideWhite ? W[3] : B[3];
+            long rooks   = sideWhite ? W[4] : B[4];
+            long queens  = sideWhite ? W[5] : B[5];
+            long king    = sideWhite ? W[6] : B[6];
+
+            long attPawns   = pawnAttackersToSquare(to, sideWhite, W[1], B[1]);
+            long attKnights = KnightHelper.knightMoveTable[to] & knights;
+            long bRay = bishopAttacksFromWithOcc(to, occ);
+            long rRay = rookAttacksFromWithOcc(to, occ);
+            long attBishops = bRay & bishops;
+            long attRooks   = rRay & rooks;
+            long attQueens  = (bRay | rRay) & queens;
+            long attKing    = KING_ATTACKS[to] & king;
+
+            long fromBB = 0L;
+            int  attBits = 0;
+
+            if      (attPawns != 0)   { fromBB = attPawns;   attBits = 1; }
+            else if (attKnights != 0) { fromBB = attKnights; attBits = 2; }
+            else if (attBishops != 0) { fromBB = attBishops; attBits = 3; }
+            else if (attRooks != 0)   { fromBB = attRooks;   attBits = 4; }
+            else if (attQueens != 0)  { fromBB = attQueens;  attBits = 5; }
+            else if (attKing != 0)    { fromBB = attKing;    attBits = 6; }
+            else break; // no more recaptures
+
+            int attFrom = Long.numberOfTrailingZeros(fromBB);
+            long attMask = 1L << attFrom;
+
+            // Remove previous occupant of 'to' (it is being captured now)
+            if (toPieceWhite) W[toPieceBits] &= ~toMask;
+            else              B[toPieceBits] &= ~toMask;
+
+            // Move this attacker onto 'to'
+            if (sideWhite) {
+                switch (attBits) {
+                    case 1 -> W[1] &= ~attMask;
+                    case 2 -> W[2] &= ~attMask;
+                    case 3 -> W[3] &= ~attMask;
+                    case 4 -> W[4] &= ~attMask;
+                    case 5 -> W[5] &= ~attMask;
+                    case 6 -> W[6] &= ~attMask;
+                }
+            } else {
+                switch (attBits) {
+                    case 1 -> B[1] &= ~attMask;
+                    case 2 -> B[2] &= ~attMask;
+                    case 3 -> B[3] &= ~attMask;
+                    case 4 -> B[4] &= ~attMask;
+                    case 5 -> B[5] &= ~attMask;
+                    case 6 -> B[6] &= ~attMask;
+                }
+            }
+            occ &= ~attMask; // from-square cleared
+            // place on 'to'
+            if (sideWhite) {
+                switch (attBits) {
+                    case 1 -> W[1] |= toMask;
+                    case 2 -> W[2] |= toMask;
+                    case 3 -> W[3] |= toMask;
+                    case 4 -> W[4] |= toMask;
+                    case 5 -> W[5] |= toMask;
+                    case 6 -> W[6] |= toMask;
+                }
+            } else {
+                switch (attBits) {
+                    case 1 -> B[1] |= toMask;
+                    case 2 -> B[2] |= toMask;
+                    case 3 -> B[3] |= toMask;
+                    case 4 -> B[4] |= toMask;
+                    case 5 -> B[5] |= toMask;
+                    case 6 -> B[6] |= toMask;
+                }
+            }
+            // 'to' stays occupied in occ
+
+            // Push gain and toggle
+            d++;
+            gain[d] = victimValue - gain[d - 1];
+            victimValue = Score.getPieceValue(attBits);
+            toPieceBits = attBits;
+            toPieceWhite = sideWhite;
+            sideWhite = !sideWhite;
+        }
+
+        // Resolve swaps back (fail-soft)
+        for (int i = d - 1; i >= 0; i--) {
+            gain[i] = Math.max(-gain[i + 1], gain[i]);
+        }
+        return gain[0];
+    }
+
 
     private void setPieces(long bitboard, PieceType type) {
         while (bitboard != 0) {
