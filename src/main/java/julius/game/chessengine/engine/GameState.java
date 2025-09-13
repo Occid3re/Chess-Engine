@@ -1,26 +1,36 @@
 package julius.game.chessengine.engine;
 
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.utils.Score;
 import lombok.Data;
+import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
 
-import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.HashMap;
+
 
 @Data
 @Log4j2
 public class GameState {
 
-    private Long2IntOpenHashMap repetitionCounter;
+    private final Deque<Long> hashHistory = new ArrayDeque<>(256);
+    private final HashMap<Long, Integer> repetition = new HashMap<>();
+    private final IntArrayList halfmoveStack = new IntArrayList();
 
     private GameStateEnum state;
 
     private Score score;
 
+    @Getter
+    private int halfmoveClock = 0;          // resets on pawn move or capture
+    private long lastZobrist = 0L;          // last committed root hash
+
     public GameState(BitBoard bitBoard) {
-        repetitionCounter = new Long2IntOpenHashMap();
         state = GameStateEnum.PLAY;
         score = new Score();
         initializeScore(bitBoard);
@@ -28,9 +38,13 @@ public class GameState {
     }
 
     public GameState(GameState other) {
-        this.repetitionCounter = new Long2IntOpenHashMap(other.repetitionCounter); // Deep copy of the map
         this.state = other.state; // Enum, so a direct copy is fine
         this.score = new Score(other.score);
+        this.halfmoveClock = other.halfmoveClock;
+        this.lastZobrist = other.lastZobrist;
+        this.hashHistory.addAll(other.hashHistory);
+        this.repetition.putAll(other.repetition);
+        this.halfmoveStack.addAll(other.halfmoveStack);
     }
 
 
@@ -40,6 +54,18 @@ public class GameState {
 
     public void update(BitBoard bitBoard, MoveList legalMoves, int move, boolean isOpeningMove) {
         updateState(bitBoard, legalMoves, isOpeningMove);
+
+        // 50-move clock maintenance
+        boolean isCapture = MoveHelper.isCapture(move);
+        boolean isPawnMove = (MoveHelper.derivePieceTypeBits(move) == 1);
+        if (isCapture || isPawnMove) resetHalfmoveClock();
+        else incHalfmoveClock();
+
+        // Threefold / 50-move adjudication
+        if (isThreefoldRepetition() || isFiftyMoveRule()) {
+            this.state = GameStateEnum.DRAW;
+        }
+
         updateScore(bitBoard, move);
     }
 
@@ -207,40 +233,49 @@ public class GameState {
 
     private boolean isDraw(BitBoard bitBoard, MoveList legalMoves) {
         boolean insufficientMaterial = bitBoard.hasInsufficientMaterial();
-        boolean isThreeFoldRepetition = isThreeFoldRepetition(bitBoard.getBoardStateHash());
-        return legalMoves.size() == 0 || insufficientMaterial || isThreeFoldRepetition;
+        return legalMoves.size() == 0 || insufficientMaterial;
     }
 
     /**
      * Threefold Repetition Logic
      */
-    public void recordHash(long hash) {
-        repetitionCounter.addTo(hash, 1);
+    public void recordHash(long zKey) {
+        hashHistory.addLast(zKey);
+        repetition.merge(zKey, 1, Integer::sum);
+        lastZobrist = zKey;
     }
 
-    public void removeHash(long hash) {
-        int count = repetitionCounter.get(hash);
-        if (count <= 1) {
-            repetitionCounter.remove(hash);
-        } else {
-            repetitionCounter.put(hash, count - 1);
+    public void removeHash(long zKey) {
+        // Called on undo at the current head
+        Integer c = repetition.get(zKey);
+        if (c != null) {
+            if (c <= 1) repetition.remove(zKey);
+            else repetition.put(zKey, c - 1);
         }
-        state = GameStateEnum.PLAY;
+        // We only ever remove the most recent
+        if (!hashHistory.isEmpty()) hashHistory.removeLast();
+        lastZobrist = hashHistory.isEmpty() ? 0L : hashHistory.getLast();
     }
 
-    private boolean isThreeFoldRepetition(long hash) {
-        return repetitionCounter.getOrDefault(hash, 0) >= 3;
+    public boolean isThreefoldRepetition() {
+        return repetition.getOrDefault(lastZobrist, 0) >= 3;
     }
+
+    public void resetHalfmoveClock() { halfmoveClock = 0; }
+    public void incHalfmoveClock() { halfmoveClock++; }
+    public boolean isFiftyMoveRule() { return halfmoveClock >= 100; }
+
+    public void pushHalfmoveClock() { halfmoveStack.addLast(halfmoveClock); }
+    public void popHalfmoveClock()  { if (!halfmoveStack.isEmpty()) halfmoveClock = halfmoveStack.removeLast(); }
 
     @Override
     public String toString() {
-        String sb = "GameState {" +
+        return "GameState {" +
                 "\n  State: " + state +
                 "\n  White Score: " + score.calculateTotalWhiteScore() +
                 "\n  Black Score: " + score.calculateTotalBlackScore() +
                 "\n  Score Difference: " + score.getScoreDifference() +
-                "\n  Repetition Count: " + repetitionCounter +
+                "\n  Repetition Count: " + repetition +
                 "\n}";
-        return sb;
     }
 }

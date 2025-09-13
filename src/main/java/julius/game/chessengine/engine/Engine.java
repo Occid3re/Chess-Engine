@@ -194,6 +194,7 @@ public class Engine {
                 isOpeningMove = true;
             }
             generateLegalMoves();
+            gameState.pushHalfmoveClock();
             gameState.update(bitBoard, legalMoves, move, isOpeningMove);
             line.add(move);
             notifyPositionChanged();
@@ -410,6 +411,7 @@ public class Engine {
 
         // 2) Recompute legal moves
         generateLegalMoves();
+        gameState.popHalfmoveClock();
         gameState.updateState(bitBoard, legalMoves, false);
         gameState.updateScore(bitBoard, undoMove);
 
