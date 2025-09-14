@@ -1,118 +1,240 @@
 #!/usr/bin/env python3
+import os
+import sys
+import glob
+import re
+import time
+import shlex
+import platform
+from pathlib import Path
+
 import berserk
 import chess
 import chess.engine
-import os
-import sys
 
-# ==========================
-# CONFIGURATION
-# ==========================
+# $env:LICHESS_TOKEN="paste_your_token_here"
+# $env:CHESSENGINE_THREADS=$env:NUMBER_OF_PROCESSORS
+# $env:CHESSENGINE_ROOT_PAR_LIMIT="128"
+
+
+# ========= USER CONFIG (edit these) =========
+# Prefer a .bat if you have one. Otherwise leave ENGINE_BAT empty and set JAR_DIR.
+ENGINE_BAT = ""  # e.g. r"E:\ChessEngines\chess-engine-3.0.9.bat"
+JAR_DIR = r"C:\Development\Chess-Engine\target"  # where chess-engine-*-uci.jar is built
+JAVA_EXE = r"java"  # or full path to java.exe if needed
+
+# Java system properties mirrored from your .bat
+ROOT_PAR_LIMIT = os.environ.get("CHESSENGINE_ROOT_PAR_LIMIT", "128")
+SEARCH_THREADS = os.environ.get("CHESSENGINE_THREADS") or os.environ.get("NUMBER_OF_PROCESSORS") or "4"
+
+# Lichess auth
 LICHESS_TOKEN = os.environ.get("LICHESS_TOKEN") or "YOUR_TOKEN_HERE"
 
-# Path to your UCI engine binary. Override with the ENGINE_PATH environment
-# variable or edit the default below.
-ENGINE_PATH = os.environ.get("ENGINE_PATH", "/home/julius/engines/myengine")
-ENGINE_OPTIONS = {
-    "Threads": 4,
-    "Hash": 256
-}
+# Engine thinking time per move (seconds)
+MOVE_TIME = float(os.environ.get("BOT_MOVE_TIME", "0.5"))
 
-# ==========================
-# CONNECT TO LICHESS
-# ==========================
-session = berserk.TokenSession(LICHESS_TOKEN)
-client = berserk.Client(session=session)
+# Accept/decline policy
+ACCEPT_VARIANTS = {"standard"}  # only accept standard
 
-account_info = client.account.get()
-BOT_ID = account_info["id"]
-print("[+] Connected to Lichess as:", account_info["username"])
 
-# ==========================
-# LAUNCH UCI ENGINE
-# ==========================
-try:
-    engine = chess.engine.SimpleEngine.popen_uci(ENGINE_PATH)
-    for name, value in ENGINE_OPTIONS.items():
-        try:
-            engine.configure({name: value})
-        except Exception:
-            pass
-    print("[+] Engine started:", ENGINE_PATH)
-except FileNotFoundError:
-    print("[-] Engine not found at", ENGINE_PATH)
+# ===========================================
+
+
+def fail(msg: str):
+    print(msg, file=sys.stderr)
     sys.exit(1)
 
-# ==========================
-# MAIN GAME LOOP
-# ==========================
-def play_game(game_id):
-    board = chess.Board()
+
+def find_latest_uci_jar(dir_path: str) -> Path:
+    """
+    Find the latest chess-engine-*-uci.jar by semantic version in dir_path.
+    Matches chess-engine-X.Y.Z-uci.jar (or more segments X.Y.Z.W).
+    """
+    candidates = list(Path(dir_path).glob("chess-engine-*-uci.jar"))
+    if not candidates:
+        return None
+
+    semver_re = re.compile(r"chess-engine-(\d+(?:\.\d+)*?)-uci\.jar$", re.IGNORECASE)
+
+    def parse_ver(p: Path):
+        m = semver_re.search(p.name)
+        if not m:
+            return ()
+        return tuple(int(x) for x in m.group(1).split("."))
+
+    candidates.sort(key=parse_ver)
+    return candidates[-1]
+
+
+def build_engine_cmd() -> list:
+    """
+    Build a subprocess command list to launch the UCI engine on Windows:
+    - If ENGINE_BAT exists -> run via cmd /c <bat>
+    - Else find latest *-uci.jar in JAR_DIR and construct: java -D... -jar <jar> <UciMain (if needed)>
+      (Your jar already exposes UCI via main class; no extra args should be needed.)
+    """
+    # Prefer the .bat if present
+    if ENGINE_BAT and Path(ENGINE_BAT).exists():
+        # Launch .bat through cmd to ensure proper execution on Windows
+        return ["cmd", "/c", ENGINE_BAT]
+
+    # Otherwise try the newest jar
+    if not JAR_DIR or not Path(JAR_DIR).exists():
+        fail(f"[-] Neither ENGINE_BAT found nor valid JAR_DIR: {JAR_DIR}")
+
+    jar = find_latest_uci_jar(JAR_DIR)
+    if not jar:
+        fail(f"[-] No chess-engine-*-uci.jar found in {JAR_DIR}")
+
+    # Mirror your .bat’s Java opts
+    java_opts = [
+        f"-Dchessengine.searchThreads={SEARCH_THREADS}",
+        f"-Dchessengine.rootParallelLimit={ROOT_PAR_LIMIT}",
+    ]
+
+    # If your UCI main class must be specified as argument after jar, add it here.
+    # Your .bat calls: `-jar chess-engine-*-uci.jar julius.game.chessengine.uci.UciMain`
+    # If your jar requires that class name, keep it; if the jar's Main-Class handles UCI already, you can drop it.
+    return [JAVA_EXE, *java_opts, "-jar", str(jar), "julius.game.chessengine.uci.UciMain"]
+
+
+def connect_lichess():
+    if not LICHESS_TOKEN or LICHESS_TOKEN == "YOUR_TOKEN_HERE":
+        fail("[-] LICHESS_TOKEN not set. Set $env:LICHESS_TOKEN in PowerShell or hardcode it in the script.")
+
+    session = berserk.TokenSession(LICHESS_TOKEN)
+    client = berserk.Client(session=session)
+    me = client.account.get()
+    username = me.get("username", "<unknown>")
+    user_id = me.get("id")
+    print(f"[+] Connected to Lichess as: {username}")
+    return client, username, user_id
+
+
+def start_engine():
+    cmd = build_engine_cmd()
+    print("[+] Engine command:", " ".join(shlex.quote(x) for x in cmd))
+    try:
+        # python-chess handles Popen internally; we pass a list command
+        engine = chess.engine.SimpleEngine.popen_uci(cmd)
+    except FileNotFoundError as e:
+        fail(f"[-] Could not start engine. File not found: {e}")
+    except Exception as e:
+        fail(f"[-] Could not start engine: {e}")
+
+    # You can configure UCI options here if your engine supports them via UCI (separate from -D props)
+    # Example:
+    # try:
+    #     engine.configure({"Threads": int(SEARCH_THREADS), "Hash": 256})
+    # except Exception:
+    #     pass
+
+    print("[+] Engine started successfully")
+    return engine
+
+
+def is_my_turn(board: chess.Board, my_color_is_white: bool) -> bool:
+    return (board.turn is chess.WHITE) == my_color_is_white
+
+
+def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id: str, me_id: str):
     stream = client.bots.stream_game_state(game_id)
-    white_id = black_id = None
+
+    # We need to know which color we are; capture from gameFull
+    my_color_is_white = None
+    board = chess.Board()
 
     for event in stream:
-        if event["type"] == "gameFull":
+        t = event.get("type")
+
+        if t == "gameFull":
+            # initial snapshot
             white_id = event["white"]["id"]
             black_id = event["black"]["id"]
-            state = event["state"]
-            moves = state.get("moves", "").split()
-            for move in moves:
-                board.push_uci(move)
+            my_color_is_white = (white_id == me_id)
 
-        elif event["type"] == "gameState":
-            moves = event.get("moves", "").split()
+            moves = event.get("state", {}).get("moves", "")
             board = chess.Board()
-            for move in moves:
-                board.push_uci(move)
+            if moves:
+                for mv in moves.split():
+                    board.push_uci(mv)
 
-            if white_id and black_id:
-                is_my_turn = (board.turn and white_id == BOT_ID) or (
-                    not board.turn and black_id == BOT_ID
-                )
-                if is_my_turn:
-                    result = engine.play(board, chess.engine.Limit(time=0.5))
-                    best_move = result.move
-                    print(f"[+] Playing {best_move}")
-                    client.bots.make_move(game_id, best_move.uci())
+            # If it's already our turn at start, move
+            if is_my_turn(board, my_color_is_white):
+                result = engine.play(board, chess.engine.Limit(time=MOVE_TIME))
+                client.bots.make_move(game_id, result.move.uci())
+                # print eval info if available
+                # print(f"[move] {result.move}")
 
-        elif event["type"] == "chatLine":
-            print("[chat]", event["username"], ":", event["text"])
+        elif t == "gameState":
+            moves = event.get("moves", "")
+            board = chess.Board()
+            if moves:
+                for mv in moves.split():
+                    board.push_uci(mv)
 
-    print("[*] Game finished:", game_id)
+            if my_color_is_white is None:
+                # Shouldn't happen after gameFull, but be defensive
+                continue
+
+            if is_my_turn(board, my_color_is_white) and not board.is_game_over():
+                result = engine.play(board, chess.engine.Limit(time=MOVE_TIME))
+                client.bots.make_move(game_id, result.move.uci())
+                # print(f"[move] {result.move}")
+
+        elif t == "chatLine":
+            # Optional: respond or log
+            username = event.get("username")
+            text = event.get("text")
+            print(f"[chat] {username}: {text}")
+
+        elif t == "gameFinish":
+            print(f"[*] Game finished: {game_id}")
+            break
 
 
-# ==========================
-# CHALLENGE HANDLING
-# ==========================
 def run_bot():
-    print("[+] Waiting for challenges...")
-    for event in client.bots.stream_incoming_events():
-        if event["type"] == "challenge":
-            chal = event["challenge"]
-            challenger = chal["challenger"]["id"]
-            variant = chal["variant"]["key"]
-            tc = chal["timeControl"]["type"]
+    client, username, me_id = connect_lichess()
+    engine = start_engine()
+    print("[+] Waiting for challenges... (accepting: standard)")
 
-            print(f"[+] Challenge from {challenger} ({variant}, {tc})")
+    try:
+        for event in client.bots.stream_incoming_events():
+            et = event.get("type")
 
-            if variant == "standard":
-                client.bots.accept_challenge(chal["id"])
-                print("[+] Accepted challenge")
-            else:
-                client.bots.decline_challenge(chal["id"], reason="variant")
-                print("[-] Declined non-standard challenge")
+            if et == "challenge":
+                chal = event["challenge"]
+                chal_id = chal["id"]
+                variant = chal["variant"]["key"]
+                tc_type = chal["timeControl"]["type"]
+                rated = chal.get("rated", False)
+                challenger = chal["challenger"]["name"]
 
-        elif event["type"] == "gameStart":
-            game_id = event["game"]["id"]
-            print("[+] Game started:", game_id)
-            play_game(game_id)
+                print(f"[event] Challenge from {challenger} | {variant} | {tc_type} | rated={rated}")
+
+                if variant in ACCEPT_VARIANTS:
+                    client.bots.accept_challenge(chal_id)
+                    print("[+] Accepted challenge")
+                else:
+                    client.bots.decline_challenge(chal_id, reason="variant")
+                    print("[-] Declined challenge (variant)")
+
+            elif et == "gameStart":
+                game_id = event["game"]["id"]
+                print(f"[event] Game start: {game_id}")
+                play_game(client, engine, game_id, me_id)
+
+    except KeyboardInterrupt:
+        print("\n[+] Shutting down (Ctrl+C)")
+    finally:
+        try:
+            engine.quit()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
-    try:
-        run_bot()
-    except KeyboardInterrupt:
-        print("Exiting...")
-    finally:
-        engine.quit()
+    if platform.system().lower() == "windows":
+        # Make sure stdout flushes promptly in PowerShell
+        import msvcrt  # noqa: F401
+    run_bot()
