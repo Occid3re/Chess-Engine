@@ -54,7 +54,10 @@ public class UciHandler {
     }
 
     private void newGame() {
-        engine.startNewGame();
+        // ucinewgame is used to clear the search state of the engine/AI.
+        // The board position will be set with a subsequent "position" command,
+        // therefore we only reset the AI/engine state here and leave the board
+        // untouched.
         ai.reset();
     }
 
@@ -85,10 +88,31 @@ public class UciHandler {
     }
 
     private void applyMove(String moveStr) {
+        if (moveStr == null || moveStr.length() < 4) {
+            return; // malformed move string
+        }
+
+        int from = MoveHelper.convertStringToIndex(moveStr.substring(0, 2));
+        int to = MoveHelper.convertStringToIndex(moveStr.substring(2, 4));
+
+        int promo = 0;
+        if (moveStr.length() > 4) {
+            char p = moveStr.charAt(4);
+            promo = switch (p) {
+                case 'n' -> 2;
+                case 'b' -> 3;
+                case 'r' -> 4;
+                case 'q' -> 5;
+                default -> 0;
+            };
+        }
+
         MoveList legal = engine.getAllLegalMoves();
         for (int i = 0; i < legal.size(); i++) {
             int move = legal.getMove(i);
-            if (toUci(move).equals(moveStr)) {
+            if (from == MoveHelper.deriveFromIndex(move)
+                    && to == MoveHelper.deriveToIndex(move)
+                    && promo == MoveHelper.derivePromotionPieceTypeBits(move)) {
                 engine.performMove(move);
                 return;
             }
