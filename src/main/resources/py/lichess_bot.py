@@ -37,6 +37,10 @@ LICHESS_TOKEN = os.environ.get("LICHESS_TOKEN") or "YOUR_TOKEN_HERE"
 # Engine thinking time floor per move (seconds)
 MOVE_TIME = float(os.environ.get("BOT_MOVE_TIME", "0.5"))
 
+# Estimated number of full moves in a typical game.  Used for time management
+# to distribute the remaining time across upcoming moves more intelligently.
+ESTIMATED_GAME_MOVES = int(os.environ.get("BOT_GAME_MOVES", "40"))
+
 # Accept/decline policy
 ACCEPT_VARIANTS = {"standard"}                           # e.g. {"standard","chess960"}
 ALLOW_RATED = True                                       # accept rated games?
@@ -248,7 +252,16 @@ def calc_move_time(state: dict, my_color_is_white: bool) -> float:
     else:
         increment = float(inc_ms) / 1000.0 if inc_ms else 0.0
 
-    think = remaining / 100.0 + 0.8 * increment
+    # Estimate how many full moves are left in the game using the moves list
+    moves_str = state.get("moves", "")
+    moves_played = len(moves_str.split()) if moves_str else 0
+    moves_remaining = max(10, ESTIMATED_GAME_MOVES - moves_played // 2)
+
+    # Distribute remaining time across the estimated moves and add a portion
+    # of the increment.  This tends to spend more time early in the game while
+    # still safeguarding against time trouble in longer games.
+    think = (remaining / moves_remaining) + 0.8 * increment
+
     return max(MOVE_TIME, min(think, max(0.2, remaining - 0.1)))
 
 
