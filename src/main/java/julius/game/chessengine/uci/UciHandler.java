@@ -211,7 +211,6 @@ public class UciHandler {
 
         long wtime = 0, btime = 0, winc = 0, binc = 0, movetime = 0;
         int depth = 0;
-        int movestogo = 0;
         for (int i = 1; i < tokens.length; i++) {
             switch (tokens[i]) {
                 case "wtime" -> wtime = Long.parseLong(tokens[++i]);
@@ -220,7 +219,6 @@ public class UciHandler {
                 case "binc" -> binc = Long.parseLong(tokens[++i]);
                 case "movetime" -> movetime = Long.parseLong(tokens[++i]);
                 case "depth" -> depth = Integer.parseInt(tokens[++i]);
-                case "movestogo" -> movestogo = Integer.parseInt(tokens[++i]);
                 default -> { /* ignore */ }
             }
         }
@@ -229,14 +227,13 @@ public class UciHandler {
             ai.setMaxDepth(depth);
         }
 
-        boolean whitesTurn = engine.whitesTurn();
-        long timeLeft = whitesTurn ? wtime : btime;
-        long inc = whitesTurn ? winc : binc;
-        long movesToGo = (movestogo > 0 ? movestogo : 30);
-        long limit = (movetime > 0 ? movetime :
-                (timeLeft / movesToGo) + inc - moveOverheadMs);
-        limit = Math.max(limit, 1);
-        ai.setTimeLimit(limit);
+        ai.setClock(wtime, btime, winc, binc);
+        ai.setMoveOverhead(moveOverheadMs);
+        if (movetime > 0) {
+            ai.setTimeLimit(movetime);
+        } else {
+            ai.clearTimeLimitOverride();
+        }
 
         searchThread = new Thread(() -> {
             ai.startAutoPlay(false, false); // start calculation without auto-move

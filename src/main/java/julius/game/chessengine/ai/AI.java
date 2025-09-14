@@ -117,8 +117,19 @@ public class AI {
     private int maxDepth = 18; // Adjust the level of depth according to your requirements
 
     @Getter
-    @Setter
     private long timeLimit; // milliseconds
+
+    // Remaining clock times (milliseconds)
+    private long whiteTimeMs;
+    private long blackTimeMs;
+    private long whiteIncrementMs;
+    private long blackIncrementMs;
+
+    // Optional explicit override for the search time of the next move
+    private long explicitTimeLimit = 50; // default used for REST/autoplay
+
+    // Additional buffer to account for UI/communication delay
+    private long moveOverheadMs = 0;
 
     private boolean useNullMovePruning = Boolean.parseBoolean(
             System.getProperty("chessengine.nullMove", "true")
@@ -133,6 +144,10 @@ public class AI {
     public AI(Engine mainEngine) {
         this.mainEngine = mainEngine;
         this.timeLimit = 50;
+        this.whiteTimeMs = 0L;
+        this.blackTimeMs = 0L;
+        this.whiteIncrementMs = 0L;
+        this.blackIncrementMs = 0L;
 
         // Initialize killer moves etc...
         this.killerMoves = new int[maxDepth][numKillerMoves];
@@ -173,6 +188,69 @@ public class AI {
         this.maxDepth = Math.max(1, Math.min(depth, killerMoves.length));
     }
 
+    /**
+     * Set an explicit search time for the next move. Used by REST and when a
+     * "movetime" is supplied via UCI. Passing a value here overrides any
+     * time-management heuristics until {@link #clearTimeLimitOverride()} is
+     * called.
+     */
+    public void setTimeLimit(long millis) {
+        this.explicitTimeLimit = millis;
+        this.timeLimit = millis;
+    }
+
+    /**
+     * Remove any previously set explicit search time so the engine will compute
+     * a time budget from the remaining clocks instead.
+     */
+    public void clearTimeLimitOverride() {
+        this.explicitTimeLimit = -1;
+    }
+
+    /**
+     * Update internal clock information (all values in milliseconds).
+     */
+    public void setClock(long wtime, long btime, long winc, long binc) {
+        this.whiteTimeMs = wtime;
+        this.blackTimeMs = btime;
+        this.whiteIncrementMs = winc;
+        this.blackIncrementMs = binc;
+    }
+
+    public void setMoveOverhead(long overheadMs) {
+        this.moveOverheadMs = overheadMs;
+    }
+
+    /**
+     * Compute the search time for the current move. If an explicit time limit
+     * has been set it is used directly; otherwise we allocate time based on the
+     * remaining clock and a crude game phase heuristic.
+     */
+    private void updateTimeLimit() {
+        if (explicitTimeLimit > 0) {
+            this.timeLimit = explicitTimeLimit;
+            return;
+        }
+
+        boolean whitesTurn = mainEngine.whitesTurn();
+        long remaining = whitesTurn ? whiteTimeMs : blackTimeMs;
+        remaining = Math.max(0, remaining - moveOverheadMs);
+        long inc = whitesTurn ? whiteIncrementMs : blackIncrementMs;
+
+        int moveNumber = mainEngine.getLine().size() / 2 + 1;
+        int movesToGo;
+        if (moveNumber <= 20) {
+            movesToGo = 30; // opening
+        } else if (moveNumber <= 40) {
+            movesToGo = 20; // middlegame
+        } else {
+            movesToGo = 10; // endgame
+        }
+
+        long limit = remaining / Math.max(1, movesToGo) + inc;
+        this.timeLimit = Math.max(1L, limit);
+    }
+
 
     public Integer getCurrentBestMoveInt() {
         return currentBestMove;
@@ -193,6 +271,9 @@ public class AI {
         calculatedLine = Collections.synchronizedList(new ArrayList<>());
         mainEngine.startNewGame();
         clearHistoryTable();
+        explicitTimeLimit = 50;
+        timeLimit = 50;
+        whiteTimeMs = blackTimeMs = whiteIncrementMs = blackIncrementMs = 0L;
     }
 
     public void stopCalculation() {
@@ -288,6 +369,7 @@ public class AI {
         log.debug(" --- TranspositionTable[{}] --- ", transpositionTable.size());
         decayHistoryTable();
         try {
+            updateTimeLimit();
             Engine simulatorEngine = mainEngine.createSimulation();
             long boardStateHash = simulatorEngine.getBoardStateHash();
             log.debug("boardStateBeforeCalculation {}, currentBoardState {}", beforeCalculationBoardState, currentBoardState);
