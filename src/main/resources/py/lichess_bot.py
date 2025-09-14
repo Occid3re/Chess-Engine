@@ -9,6 +9,8 @@ from pathlib import Path
 import datetime
 from typing import Optional, List
 import threading
+import asyncio
+import random
 
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -298,7 +300,7 @@ def safe_make_move(client: berserk.Client, game_id: str, uci: str) -> None:
     raise berserk.exceptions.ApiError(last_err or "Unknown error when sending move")
 
 
-def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id: str, me_id: str):
+def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id: str, me_id: str) -> chess.engine.SimpleEngine:
     stream = client.bots.stream_game_state(game_id)
 
     my_color_is_white = None
@@ -321,9 +323,27 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
 
             if is_my_turn(board, my_color_is_white) and not board.is_game_over():
                 think_time = calc_move_time(state, my_color_is_white)
-                result = engine.play(board, chess.engine.Limit(time=think_time), ponder=True)
-                ponder_move = result.ponder
-                safe_make_move(client, game_id, result.move.uci())
+                try:
+                    result = engine.play(board, chess.engine.Limit(time=think_time), ponder=True)
+                    ponder_move = result.ponder
+                    safe_make_move(client, game_id, result.move.uci())
+                except (asyncio.TimeoutError,
+                        chess.engine.EngineError,
+                        chess.engine.EngineTerminatedError) as e:
+                    print(f"[error] engine.play failed: {e}")
+                    try:
+                        engine.stop()
+                    except Exception:
+                        pass
+                    try:
+                        engine = start_engine()
+                    except Exception as ex:
+                        print(f"[error] could not restart engine: {ex}")
+                    moves = list(board.legal_moves)
+                    if moves:
+                        fallback = random.choice(moves)
+                        safe_make_move(client, game_id, fallback.uci())
+                    ponder_move = None
 
         elif t == "gameState":
             state = event
@@ -356,9 +376,27 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
                     ponder_move = None
 
                 think_time = calc_move_time(state, my_color_is_white)
-                result = engine.play(board, chess.engine.Limit(time=think_time), ponder=True)
-                ponder_move = result.ponder
-                safe_make_move(client, game_id, result.move.uci())
+                try:
+                    result = engine.play(board, chess.engine.Limit(time=think_time), ponder=True)
+                    ponder_move = result.ponder
+                    safe_make_move(client, game_id, result.move.uci())
+                except (asyncio.TimeoutError,
+                        chess.engine.EngineError,
+                        chess.engine.EngineTerminatedError) as e:
+                    print(f"[error] engine.play failed: {e}")
+                    try:
+                        engine.stop()
+                    except Exception:
+                        pass
+                    try:
+                        engine = start_engine()
+                    except Exception as ex:
+                        print(f"[error] could not restart engine: {ex}")
+                    moves = list(board.legal_moves)
+                    if moves:
+                        fallback = random.choice(moves)
+                        safe_make_move(client, game_id, fallback.uci())
+                    ponder_move = None
 
         elif t == "chatLine":
             username = event.get("username")
@@ -368,6 +406,8 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
         elif t == "gameFinish":
             print(f"[*] Game finished: {game_id}")
             break
+
+    return engine
 
 
 # ---------- Outbound challenge helpers ----------
@@ -610,7 +650,7 @@ def run_bot():
                 game_id = event["game"]["id"]
                 print(f"[event] Game start: {game_id}")
                 active_counter.inc()
-                play_game(client, engine, game_id, me_id)
+                engine = play_game(client, engine, game_id, me_id)
 
             elif et == "gameFinish":
                 # Top-level finish notices; keep the counter accurate
