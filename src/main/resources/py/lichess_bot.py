@@ -7,6 +7,7 @@ import time
 import shlex
 import platform
 from pathlib import Path
+import datetime
 
 import berserk
 import chess
@@ -153,8 +154,17 @@ def calc_move_time(state: dict, my_color_is_white: bool) -> float:
     if time_ms is None:
         return MOVE_TIME
 
-    remaining = time_ms / 1000.0
-    increment = inc_ms / 1000.0 if inc_ms else 0.0
+    # time_ms and inc_ms may be delivered as milliseconds or timedelta objects
+    # Convert them to float seconds to avoid type errors when subtracting
+    if isinstance(time_ms, datetime.timedelta):
+        remaining = time_ms.total_seconds()
+    else:
+        remaining = float(time_ms) / 1000.0
+
+    if isinstance(inc_ms, datetime.timedelta):
+        increment = inc_ms.total_seconds()
+    else:
+        increment = float(inc_ms) / 1000.0 if inc_ms else 0.0
 
     # use a small fraction of remaining time plus most of the increment,
     # but never exceed the remaining time
