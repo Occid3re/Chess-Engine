@@ -417,12 +417,12 @@ public class AI {
         if (orderedMoves.isEmpty()) return null;
 
         //Quick, human-friendly banner so you can grep logs and *see* parallel tasks:
-        if (log.isInfoEnabled()) {
+/*        if (log.isInfoEnabled()) {
             long msLeft = Math.max(0L, (deadline - System.nanoTime()) / 1_000_000L);
             int fanoutPreview = Math.min(ROOT_PARALLEL_LIMIT, Math.max(0, orderedMoves.size() - 1));
             log.info("[PAR] depth={} legalMoves={} fanout<={} threads={} timeLeftMs~{}",
                     depth, orderedMoves.size(), fanoutPreview, searchThreads, msLeft);
-        }
+        }*/
 
         // === 1) Search first move FULL WINDOW to seed the bounds (YBWC) ===
         int firstMove = orderedMoves.get(0);
@@ -614,10 +614,10 @@ public class AI {
             }
         }
 
-        if (log.isInfoEnabled()) {
+/*        if (log.isInfoEnabled()) {
             log.info("[PAR] depth={} best={} score={}",
                     depth, bestMove == -1 ? "-" : Move.convertIntToMove(bestMove), bestScore);
-        }
+        }*/
         return bestMove != -1 ? new MoveAndScore(bestMove, bestScore) : null;
     }
 
