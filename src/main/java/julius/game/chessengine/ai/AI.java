@@ -24,9 +24,25 @@ public class AI {
     @Getter
     private final Engine mainEngine;
 
-    // ADD these fields (near other fields):
     /**
-     * Thread pool for root-split parallel search (created only if SEARCH_THREADS > 1).
+     * Number of threads used for searching. Defaults to single-threaded search but
+     * can be adjusted at runtime via the UCI "Threads" option.
+     */
+    @Getter
+    @Setter
+    private int searchThreads = Integer.getInteger("chessengine.searchThreads", 1);
+
+    /**
+     * Requested size of the transposition table in megabytes. The current
+     * implementation does not dynamically resize the table, but the value is
+     * tracked so that future improvements can honour it.
+     */
+    @Getter
+    @Setter
+    private int hashSizeMb = 16;
+
+    /**
+     * Thread pool for root-split parallel search (created only if searchThreads > 1).
      */
     private final ExecutorService searchPool;
 
@@ -50,27 +66,15 @@ public class AI {
     private static final int CAPTURE_TRANSPOSITION_TABLE_MAX_ENTRIES = 500_000;
 
     /**
-     * Number of threads used for searching. Configurable via the system property
-     * {@code chessengine.searchThreads}. Defaults to single-threaded search.
-     */
-    private static final int SEARCH_THREADS = Integer.getInteger("chessengine.searchThreads", 1);
-
-    /**
      * Fixed-size transposition table. Uses a non-atomic implementation when running
      * with a single search thread to avoid the overhead of atomic operations.
      */
-    private static final TranspositionTable<TranspositionTableEntry> transpositionTable =
-            SEARCH_THREADS == 1
-                    ? new PlainFixedSizeTranspositionTable<>(TRANSPOSITION_TABLE_MAX_ENTRIES, TranspositionTableEntry.class)
-                    : new FixedSizeTranspositionTable<>(TRANSPOSITION_TABLE_MAX_ENTRIES);
+    private final TranspositionTable<TranspositionTableEntry> transpositionTable;
 
     /**
      * Separate table for capture searches using the same fixed-size structure.
      */
-    private static final TranspositionTable<CaptureTranspositionTableEntry> captureTranspositionTable =
-            SEARCH_THREADS == 1
-                    ? new PlainFixedSizeTranspositionTable<>(CAPTURE_TRANSPOSITION_TABLE_MAX_ENTRIES, CaptureTranspositionTableEntry.class)
-                    : new FixedSizeTranspositionTable<>(CAPTURE_TRANSPOSITION_TABLE_MAX_ENTRIES);
+    private final TranspositionTable<CaptureTranspositionTableEntry> captureTranspositionTable;
 
     private final int[][] killerMoves; // 2D array for killer moves, initialized in the constructor
     private final int numKillerMoves = 2;
@@ -141,9 +145,17 @@ public class AI {
         this.counterMove = new int[64][64];
         for (int f = 0; f < 64; f++) Arrays.fill(counterMove[f], -1);
 
-        // NEW: create a fixed-size pool only when useful
-        this.searchPool = SEARCH_THREADS > 1
-                ? Executors.newFixedThreadPool(SEARCH_THREADS, r -> {
+        // Initialize transposition tables based on the configured thread count
+        this.transpositionTable = searchThreads == 1
+                ? new PlainFixedSizeTranspositionTable<>(TRANSPOSITION_TABLE_MAX_ENTRIES, TranspositionTableEntry.class)
+                : new FixedSizeTranspositionTable<>(TRANSPOSITION_TABLE_MAX_ENTRIES);
+        this.captureTranspositionTable = searchThreads == 1
+                ? new PlainFixedSizeTranspositionTable<>(CAPTURE_TRANSPOSITION_TABLE_MAX_ENTRIES, CaptureTranspositionTableEntry.class)
+                : new FixedSizeTranspositionTable<>(CAPTURE_TRANSPOSITION_TABLE_MAX_ENTRIES);
+
+        // create a fixed-size pool only when useful
+        this.searchPool = searchThreads > 1
+                ? Executors.newFixedThreadPool(searchThreads, r -> {
             Thread t = new Thread(r, "AI-Search-" + System.identityHashCode(r));
             t.setDaemon(true);
             return t;
@@ -164,13 +176,6 @@ public class AI {
 
     public Integer getCurrentBestMoveInt() {
         return currentBestMove;
-    }
-
-    /**
-     * Expose the number of search threads configured for the engine.
-     */
-    public int getSearchThreads() {
-        return SEARCH_THREADS;
     }
 
     private void startCalculationThread() {
@@ -333,7 +338,7 @@ public class AI {
 
                     int retries = 0;
                     while (true) {
-                        if (SEARCH_THREADS > 1) {
+                        if (searchThreads > 1) {
                             moveAndScore = getBestMoveParallel(simulatorEngine, isWhite, currentDepth, deadline, alpha, beta);
                         } else {
                             moveAndScore = getBestMove(simulatorEngine, isWhite, currentDepth, deadline, alpha, beta);
@@ -362,7 +367,7 @@ public class AI {
 
                 if (moveAndScore == null) {
                     // First iterations or after giving up on aspiration → full window
-                    if (SEARCH_THREADS > 1) {
+                    if (searchThreads > 1) {
                         moveAndScore = getBestMoveParallel(simulatorEngine, isWhite, currentDepth, deadline,
                                 Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY);
                     } else {
@@ -416,7 +421,7 @@ public class AI {
             long msLeft = Math.max(0L, (deadline - System.nanoTime()) / 1_000_000L);
             int fanoutPreview = Math.min(ROOT_PARALLEL_LIMIT, Math.max(0, orderedMoves.size() - 1));
             log.info("[PAR] depth={} legalMoves={} fanout<={} threads={} timeLeftMs~{}",
-                    depth, orderedMoves.size(), fanoutPreview, SEARCH_THREADS, msLeft);
+                    depth, orderedMoves.size(), fanoutPreview, searchThreads, msLeft);
         }
 
         // === 1) Search first move FULL WINDOW to seed the bounds (YBWC) ===
