@@ -252,12 +252,13 @@ def calc_move_time(state: dict, my_color_is_white: bool) -> float:
     return max(MOVE_TIME, min(think, max(0.2, remaining - 0.1)))
 
 
-def safe_make_move(client: berserk.Client, game_id: str, uci: str) -> None:
-    """
-    Try to post a move. Swallow non-fatal server rejections like:
-      - game already over
-      - not our turn
-    Retry briefly on transient network issues. Never crash the bot.
+def safe_make_move(client: berserk.Client, game_id: str, uci: str) -> bool:
+    """Attempt to post a move.
+
+    Returns ``True`` if the move was accepted by Lichess.  If the move is
+    rejected (e.g. game already over or not our turn) or if we exhaust retry
+    attempts due to transient errors, a warning is logged and ``False`` is
+    returned so the caller may decide how to proceed.
     """
     delay = 0.4
     last_err = None
@@ -265,7 +266,7 @@ def safe_make_move(client: berserk.Client, game_id: str, uci: str) -> None:
     for attempt in range(1, SEND_RETRIES + 1):
         try:
             client.bots.make_move(game_id, uci)
-            return
+            return True
 
         except (berserk.exceptions.ResponseError, berserk.exceptions.ApiError) as e:
             msg = str(e)
@@ -274,12 +275,12 @@ def safe_make_move(client: berserk.Client, game_id: str, uci: str) -> None:
             # Non-fatal: invalid move due to game state
             if ("Not your turn" in msg) or ("game already over" in msg) or status in (400, 409):
                 print(f"[warn] Move rejected by server (not our turn / game over). uci={uci}")
-                return
+                return False
 
             # Game gone; treat as finished
             if status in (404, 410):
                 print(f"[warn] Game no longer available (HTTP {status}).")
-                return
+                return False
 
             transient_markers = (
                 "Remote end closed connection without response",
@@ -297,7 +298,8 @@ def safe_make_move(client: berserk.Client, game_id: str, uci: str) -> None:
 
             raise
 
-    raise berserk.exceptions.ApiError(last_err or "Unknown error when sending move")
+    print(f"[warn] Failed to send move after {SEND_RETRIES} attempts: {last_err}")
+    return False
 
 
 def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id: str, me_id: str) -> chess.engine.SimpleEngine:
@@ -326,7 +328,10 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
                 try:
                     result = engine.play(board, chess.engine.Limit(time=think_time), ponder=True)
                     ponder_move = result.ponder
-                    safe_make_move(client, game_id, result.move.uci())
+                    move_sent = safe_make_move(client, game_id, result.move.uci())
+                    if not move_sent:
+                        print("[warn] Move send failed, retrying once")
+                        safe_make_move(client, game_id, result.move.uci())
                 except (asyncio.TimeoutError,
                         chess.engine.EngineError,
                         chess.engine.EngineTerminatedError) as e:
@@ -342,7 +347,10 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
                     moves = list(board.legal_moves)
                     if moves:
                         fallback = random.choice(moves)
-                        safe_make_move(client, game_id, fallback.uci())
+                        move_sent = safe_make_move(client, game_id, fallback.uci())
+                        if not move_sent:
+                            print("[warn] Fallback move send failed, retrying once")
+                            safe_make_move(client, game_id, fallback.uci())
                     ponder_move = None
 
         elif t == "gameState":
@@ -379,7 +387,10 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
                 try:
                     result = engine.play(board, chess.engine.Limit(time=think_time), ponder=True)
                     ponder_move = result.ponder
-                    safe_make_move(client, game_id, result.move.uci())
+                    move_sent = safe_make_move(client, game_id, result.move.uci())
+                    if not move_sent:
+                        print("[warn] Move send failed, retrying once")
+                        safe_make_move(client, game_id, result.move.uci())
                 except (asyncio.TimeoutError,
                         chess.engine.EngineError,
                         chess.engine.EngineTerminatedError) as e:
@@ -395,7 +406,10 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
                     moves = list(board.legal_moves)
                     if moves:
                         fallback = random.choice(moves)
-                        safe_make_move(client, game_id, fallback.uci())
+                        move_sent = safe_make_move(client, game_id, fallback.uci())
+                        if not move_sent:
+                            print("[warn] Fallback move send failed, retrying once")
+                            safe_make_move(client, game_id, fallback.uci())
                     ponder_move = None
 
         elif t == "chatLine":
