@@ -14,6 +14,7 @@ public class UciHandler {
 
     private final Engine engine;
     private final AI ai;
+    private Thread searchThread;
 
     public UciHandler() {
         this.engine = new Engine();
@@ -35,7 +36,7 @@ public class UciHandler {
             case "isready" -> System.out.println("readyok");
             case "ucinewgame" -> newGame();
             case "position" -> setPosition(tokens);
-            case "go" -> go();
+            case "go" -> go(tokens);
             case "stop" -> stop();
             case "quit" -> {
                 return false;
@@ -136,18 +137,86 @@ public class UciHandler {
         return from + to;
     }
 
-    private void go() {
-        MoveList legal = engine.getAllLegalMoves();
-        if (legal.size() > 0) {
-            int move = legal.getMove(0);
-            System.out.println("bestmove " + toUci(move));
-        } else {
-            System.out.println("bestmove (none)");
+    private void go(String[] tokens) {
+        // Stop any previous search thread
+        stop();
+
+        long wtime = 0, btime = 0, winc = 0, binc = 0, movetime = 0;
+        int depth = 0;
+        for (int i = 1; i < tokens.length; i++) {
+            switch (tokens[i]) {
+                case "wtime" -> wtime = Long.parseLong(tokens[++i]);
+                case "btime" -> btime = Long.parseLong(tokens[++i]);
+                case "winc" -> winc = Long.parseLong(tokens[++i]);
+                case "binc" -> binc = Long.parseLong(tokens[++i]);
+                case "movetime" -> movetime = Long.parseLong(tokens[++i]);
+                case "depth" -> depth = Integer.parseInt(tokens[++i]);
+                default -> { /* ignore */ }
+            }
         }
+
+        if (depth > 0) {
+            ai.setMaxDepth(depth);
+        }
+
+        long limit = movetime;
+        if (limit == 0) {
+            if (engine.whitesTurn()) {
+                limit = wtime;
+                if (winc > 0) limit += winc;
+            } else {
+                limit = btime;
+                if (binc > 0) limit += binc;
+            }
+        }
+        if (limit <= 0) {
+            limit = 1000; // default 1 second
+        }
+        ai.setTimeLimit(limit);
+
+        searchThread = new Thread(() -> {
+            ai.startAutoPlay(false, false); // start calculation without auto-move
+            try {
+                while (!Thread.currentThread().isInterrupted()) {
+                    Integer bm = ai.getCurrentBestMoveInt();
+                    if (bm != null && bm != -1) {
+                        System.out.println("bestmove " + toUci(bm));
+                        return;
+                    }
+                    Thread.sleep(50);
+                }
+            } catch (InterruptedException ignored) {
+                // interrupted by stop()
+            } finally {
+                Integer bm = ai.getCurrentBestMoveInt();
+                if (bm != null && bm != -1) {
+                    System.out.println("bestmove " + toUci(bm));
+                } else {
+                    MoveList legal = engine.getAllLegalMoves();
+                    if (legal.size() > 0) {
+                        System.out.println("bestmove " + toUci(legal.getMove(0)));
+                    } else {
+                        System.out.println("bestmove (none)");
+                    }
+                }
+                ai.stopCalculation();
+                UciHandler.this.searchThread = null;
+            }
+        });
+        searchThread.start();
     }
 
     private void stop() {
         ai.stopCalculation();
+        if (searchThread != null && searchThread.isAlive()) {
+            searchThread.interrupt();
+            try {
+                searchThread.join();
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+            searchThread = null;
+        }
     }
 }
 
