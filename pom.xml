@@ -83,6 +83,17 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                        <configuration>
+                            <classifier>uci</classifier>
+                            <mainClass>julius.game.chessengine.uci.UciMain</mainClass>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
 
             <!-- Guardrails: fail on version drift and wrong toolchains -->
