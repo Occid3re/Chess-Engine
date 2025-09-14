@@ -57,7 +57,7 @@ public class UciHandler {
     }
 
     private void sendId() {
-        System.out.println("id name JuliusChessEngine " + VersionInfo.getVersion());
+        System.out.println("id name Alieknek " + VersionInfo.getVersion());
         System.out.println("id author Julius");
         for (UciOption opt : options.values()) {
             System.out.printf("option name %s type %s default %s min %d max %d%n",
