@@ -227,7 +227,7 @@ def is_my_turn(board: chess.Board, my_color_is_white: bool) -> bool:
     return (board.turn is chess.WHITE) == my_color_is_white
 
 
-def calc_move_time(state: dict, my_color_is_white: bool) -> float:
+def calc_move_time(state: dict, board: chess.Board, my_color_is_white: bool) -> float:
     key_time = "wtime" if my_color_is_white else "btime"
     key_inc = "winc" if my_color_is_white else "binc"
     time_ms = state.get(key_time)
@@ -246,7 +246,15 @@ def calc_move_time(state: dict, my_color_is_white: bool) -> float:
     else:
         increment = float(inc_ms) / 1000.0 if inc_ms else 0.0
 
-    think = remaining / 100.0 + 0.8 * increment
+    move_no = board.fullmove_number
+    if move_no <= 20:
+        divisor = 30.0
+    elif move_no <= 40:
+        divisor = 20.0
+    else:
+        divisor = 10.0
+
+    think = remaining / divisor + 0.8 * increment
     return max(MOVE_TIME, min(think, max(0.2, remaining - 0.1)))
 
 
@@ -320,8 +328,19 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
                     board.push_uci(mv)
 
             if is_my_turn(board, my_color_is_white) and not board.is_game_over():
-                think_time = calc_move_time(state, my_color_is_white)
-                result = engine.play(board, chess.engine.Limit(time=think_time), ponder=True)
+                think_time = calc_move_time(state, board, my_color_is_white)
+                wtime = state.get("wtime")
+                btime = state.get("btime")
+                winc = state.get("winc", 0)
+                binc = state.get("binc", 0)
+                limit = chess.engine.Limit(
+                    time=think_time,
+                    white_clock=float(wtime) / 1000.0 if wtime is not None else None,
+                    black_clock=float(btime) / 1000.0 if btime is not None else None,
+                    white_inc=float(winc) / 1000.0 if winc else 0.0,
+                    black_inc=float(binc) / 1000.0 if binc else 0.0,
+                )
+                result = engine.play(board, limit, ponder=True)
                 ponder_move = result.ponder
                 safe_make_move(client, game_id, result.move.uci())
 
@@ -355,8 +374,19 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
                         pass
                     ponder_move = None
 
-                think_time = calc_move_time(state, my_color_is_white)
-                result = engine.play(board, chess.engine.Limit(time=think_time), ponder=True)
+                think_time = calc_move_time(state, board, my_color_is_white)
+                wtime = state.get("wtime")
+                btime = state.get("btime")
+                winc = state.get("winc", 0)
+                binc = state.get("binc", 0)
+                limit = chess.engine.Limit(
+                    time=think_time,
+                    white_clock=float(wtime) / 1000.0 if wtime is not None else None,
+                    black_clock=float(btime) / 1000.0 if btime is not None else None,
+                    white_inc=float(winc) / 1000.0 if winc else 0.0,
+                    black_inc=float(binc) / 1000.0 if binc else 0.0,
+                )
+                result = engine.play(board, limit, ponder=True)
                 ponder_move = result.ponder
                 safe_make_move(client, game_id, result.move.uci())
 
