@@ -4,14 +4,15 @@ import chess
 import chess.engine
 import os
 import sys
-import time
 
 # ==========================
 # CONFIGURATION
 # ==========================
 LICHESS_TOKEN = os.environ.get("LICHESS_TOKEN") or "YOUR_TOKEN_HERE"
 
-ENGINE_PATH = "/home/julius/engines/myengine"  # <-- adjust this
+# Path to your UCI engine binary. Override with the ENGINE_PATH environment
+# variable or edit the default below.
+ENGINE_PATH = os.environ.get("ENGINE_PATH", "/home/julius/engines/myengine")
 ENGINE_OPTIONS = {
     "Threads": 4,
     "Hash": 256
@@ -23,7 +24,9 @@ ENGINE_OPTIONS = {
 session = berserk.TokenSession(LICHESS_TOKEN)
 client = berserk.Client(session=session)
 
-print("[+] Connected to Lichess as:", client.account.get()["username"])
+account_info = client.account.get()
+BOT_ID = account_info["id"]
+print("[+] Connected to Lichess as:", account_info["username"])
 
 # ==========================
 # LAUNCH UCI ENGINE
@@ -46,32 +49,34 @@ except FileNotFoundError:
 def play_game(game_id):
     board = chess.Board()
     stream = client.bots.stream_game_state(game_id)
+    white_id = black_id = None
 
     for event in stream:
         if event["type"] == "gameFull":
+            white_id = event["white"]["id"]
+            black_id = event["black"]["id"]
             state = event["state"]
             moves = state.get("moves", "").split()
             for move in moves:
                 board.push_uci(move)
 
-        if event["type"] == "gameState":
-            moves = event["moves"].split()
+        elif event["type"] == "gameState":
+            moves = event.get("moves", "").split()
             board = chess.Board()
             for move in moves:
                 board.push_uci(move)
 
-            if (board.turn and event["white"]["id"] == client.account.get()["id"]) or \
-                    (not board.turn and event["black"]["id"] == client.account.get()["id"]):
-                # Bot's turn
-                with engine.analysis(board, limit=chess.engine.Limit(time=0.5)) as analysis:
-                    for info in analysis:
-                        if "pv" in info:
-                            best_move = info["pv"][0]
-                            break
-                print(f"[+] Playing {best_move}")
-                client.bots.make_move(game_id, best_move.uci())
+            if white_id and black_id:
+                is_my_turn = (board.turn and white_id == BOT_ID) or (
+                    not board.turn and black_id == BOT_ID
+                )
+                if is_my_turn:
+                    result = engine.play(board, chess.engine.Limit(time=0.5))
+                    best_move = result.move
+                    print(f"[+] Playing {best_move}")
+                    client.bots.make_move(game_id, best_move.uci())
 
-        if event["type"] == "chatLine":
+        elif event["type"] == "chatLine":
             print("[chat]", event["username"], ":", event["text"])
 
     print("[*] Game finished:", game_id)
