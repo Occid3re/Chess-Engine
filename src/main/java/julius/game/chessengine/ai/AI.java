@@ -109,7 +109,8 @@ public class AI {
 
     // Game configuration parameters
 
-    private final int maxDepth = 18; // Adjust the level of depth according to your requirements
+    @Getter
+    private int maxDepth = 18; // Adjust the level of depth according to your requirements
 
     @Getter
     @Setter
@@ -150,6 +151,14 @@ public class AI {
                 : null;
 
         this.mainEngine.setOnPositionChanged(h -> updateBoardStateHash());
+    }
+
+    /**
+     * Override the maximum depth for iterative deepening. Depth values greater than
+     * the preallocated tables are clamped.
+     */
+    public void setMaxDepth(int depth) {
+        this.maxDepth = Math.max(1, Math.min(depth, killerMoves.length));
     }
 
 
