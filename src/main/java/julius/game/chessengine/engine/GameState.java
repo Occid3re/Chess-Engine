@@ -233,7 +233,9 @@ public class GameState {
 
     private boolean isDraw(BitBoard bitBoard, MoveList legalMoves) {
         boolean insufficientMaterial = bitBoard.hasInsufficientMaterial();
-        return legalMoves.size() == 0 || insufficientMaterial;
+        boolean noLegalMoves = legalMoves.size() == 0;
+        boolean inCheck = bitBoard.isInCheck(bitBoard.isWhitesTurn());
+        return (noLegalMoves && !inCheck) || insufficientMaterial;
     }
 
     /**
