@@ -6,6 +6,10 @@ import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.utils.VersionInfo;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.function.Consumer;
+
 /**
  * Very small UCI protocol handler used for interacting with the engine
  * over standard input/output.
@@ -15,10 +19,13 @@ public class UciHandler {
     private final Engine engine;
     private final AI ai;
     private Thread searchThread;
+    private final Map<String, UciOption> options = new LinkedHashMap<>();
+    private int moveOverheadMs = 0;
 
     public UciHandler() {
         this.engine = new Engine();
         this.ai = new AI(engine);
+        registerOptions();
     }
 
     /**
@@ -38,6 +45,7 @@ public class UciHandler {
             case "position" -> setPosition(tokens);
             case "go" -> go(tokens);
             case "stop" -> stop();
+            case "setoption" -> setOption(tokens);
             case "quit" -> {
                 return false;
             }
@@ -51,7 +59,67 @@ public class UciHandler {
     private void sendId() {
         System.out.println("id name JuliusChessEngine " + VersionInfo.getVersion());
         System.out.println("id author Julius");
+        for (UciOption opt : options.values()) {
+            System.out.printf("option name %s type %s default %s min %d max %d%n",
+                    opt.name, opt.type, opt.defaultValue, opt.min, opt.max);
+        }
         System.out.println("uciok");
+    }
+
+    private void registerOptions() {
+        options.put("Threads", new UciOption("Threads", "spin", "1", 1, 128,
+                v -> ai.setSearchThreads(Integer.parseInt(v))));
+        options.put("Hash", new UciOption("Hash", "spin", "16", 1, 4096,
+                v -> ai.setHashSizeMb(Integer.parseInt(v))));
+        options.put("Move Overhead", new UciOption("Move Overhead", "spin", "0", 0, 5000,
+                v -> moveOverheadMs = Integer.parseInt(v)));
+    }
+
+    private void setOption(String[] tokens) {
+        String name = null;
+        StringBuilder value = new StringBuilder();
+        for (int i = 1; i < tokens.length; i++) {
+            if ("name".equals(tokens[i]) && i + 1 < tokens.length) {
+                i++;
+                StringBuilder sb = new StringBuilder();
+                while (i < tokens.length && !"value".equals(tokens[i])) {
+                    sb.append(tokens[i]).append(' ');
+                    i++;
+                }
+                name = sb.toString().trim();
+            }
+            if (i < tokens.length && "value".equals(tokens[i]) && i + 1 < tokens.length) {
+                i++;
+                while (i < tokens.length) {
+                    value.append(tokens[i]).append(' ');
+                    i++;
+                }
+            }
+        }
+        if (name != null) {
+            UciOption opt = options.get(name);
+            if (opt != null) {
+                opt.setter.accept(value.toString().trim());
+            }
+        }
+    }
+
+    private static class UciOption {
+        final String name;
+        final String type;
+        final String defaultValue;
+        final int min;
+        final int max;
+        final Consumer<String> setter;
+
+        UciOption(String name, String type, String defaultValue, int min, int max, Consumer<String> setter) {
+            this.name = name;
+            this.type = type;
+            this.defaultValue = defaultValue;
+            this.min = min;
+            this.max = max;
+            this.setter = setter;
+        }
     }
 
     private void newGame() {
@@ -171,6 +239,9 @@ public class UciHandler {
         }
         if (limit <= 0) {
             limit = 1000; // default 1 second
+        }
+        if (limit > moveOverheadMs) {
+            limit -= moveOverheadMs;
         }
         ai.setTimeLimit(limit);
 
