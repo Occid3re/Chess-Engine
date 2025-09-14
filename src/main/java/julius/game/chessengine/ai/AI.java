@@ -129,6 +129,8 @@ public class AI {
     @Getter
     private long nullMoveCount = 0;
 
+    /** Ply hint for distance-to-mate normalization (set per ID iteration). */
+    private int rootDepthForMateScoring = 0;
 
     public AI(Engine mainEngine) {
         this.mainEngine = mainEngine;
@@ -327,6 +329,9 @@ public class AI {
             for (int currentDepth = 1; currentDepth <= maxDepth; currentDepth++) {
                 if (shouldStopCalculating(deadline)) break;
 
+                // Set ply hint for consistent mate distance normalization
+                rootDepthForMateScoring = currentDepth;
+
                 MoveAndScore moveAndScore = null;
 
                 // --- Aspiration window around lastIterScore (if known) ---
@@ -416,14 +421,6 @@ public class AI {
         ArrayList<Integer> orderedMoves = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1);
         if (orderedMoves.isEmpty()) return null;
 
-        //Quick, human-friendly banner so you can grep logs and *see* parallel tasks:
-/*        if (log.isInfoEnabled()) {
-            long msLeft = Math.max(0L, (deadline - System.nanoTime()) / 1_000_000L);
-            int fanoutPreview = Math.min(ROOT_PARALLEL_LIMIT, Math.max(0, orderedMoves.size() - 1));
-            log.info("[PAR] depth={} legalMoves={} fanout<={} threads={} timeLeftMs~{}",
-                    depth, orderedMoves.size(), fanoutPreview, searchThreads, msLeft);
-        }*/
-
         // === 1) Search first move FULL WINDOW to seed the bounds (YBWC) ===
         int firstMove = orderedMoves.get(0);
         int bestMove = -1;
@@ -436,7 +433,8 @@ public class AI {
         simulatorEngine.performMove(firstMove);
         double firstScore;
         if (simulatorEngine.getGameState().isInStateCheckMate()) {
-            firstScore = isWhitesTurn ? (CHECKMATE - depth) : -(CHECKMATE - depth);
+            // prefer fastest mate invariantly at root
+            firstScore = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
         } else if (simulatorEngine.getGameState().isInStateDraw()) {
             firstScore = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, depth);
         } else {
@@ -506,11 +504,11 @@ public class AI {
 
                 double probe;
                 if (e.getGameState().isInStateCheckMate()) {
-                    probe = isWhitesTurn ? (CHECKMATE - depth) : -(CHECKMATE - depth);
+                    probe = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
                 } else if (e.getGameState().isInStateDraw()) {
                     probe = evaluateStaticPosition(e.getGameState(), !isWhitesTurn, depth);
                 } else {
-            probe = alphaBeta(e, depth - 1, pAlpha, pBeta, !isWhitesTurn, deadline, moveInt);
+                    probe = alphaBeta(e, depth - 1, pAlpha, pBeta, !isWhitesTurn, deadline, moveInt);
                     if (probe == EXIT_FLAG) return null;
                 }
 
@@ -614,10 +612,6 @@ public class AI {
             }
         }
 
-/*        if (log.isInfoEnabled()) {
-            log.info("[PAR] depth={} best={} score={}",
-                    depth, bestMove == -1 ? "-" : Move.convertIntToMove(bestMove), bestScore);
-        }*/
         return bestMove != -1 ? new MoveAndScore(bestMove, bestScore) : null;
     }
 
@@ -706,11 +700,6 @@ public class AI {
         for (int i = 0; i < movesPerformed; i++) simulation.undoLastMove();
 
         this.calculatedLine = new ArrayList<>(pv);
-
-        /*if (log.isInfoEnabled()) {
-            String line = pv.stream().map(ms -> Move.convertIntToMove(ms.move).toString()).collect(Collectors.joining(", "));
-            log.info("Move Line: {}", line);
-        }*/
     }
 
 
@@ -733,9 +722,10 @@ public class AI {
             double score;
 
             if (simulatorEngine.getGameState().isInStateCheckMate()) {
-                score = isWhitesTurn ? (CHECKMATE - depth) : -(CHECKMATE - depth);
+                // prefer fastest mate invariantly at root
+                score = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
             } else if (simulatorEngine.getGameState().isInStateDraw()) {
-                // FIX: keep draw policy consistent (use same static evaluation as elsewhere)
+                // keep draw policy consistent
                 score = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, depth);
             } else {
                 score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt);
@@ -773,36 +763,45 @@ public class AI {
      * 5rkr/pp2Rp2/1b1p1Pb1/3P2Q1/2n3P1/2p5/P4P2/4R1K1 w - - 1 0
      * *
      */
-// AI.java
-    private double alphaBeta(Engine simulatorEngine, int depth, double alpha, double beta, boolean isWhite, long deadline, int prevMove) {
+    // AI.java
+    private double alphaBeta(Engine simulatorEngine, int depth, double alpha, double beta,
+                             boolean isWhite, long deadline, int prevMove) {
         nodesVisited++;
-        // Stop if the search was cancelled, the position changed, or time ran out
+
+        // stop conditions
         if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
             return EXIT_FLAG;
         }
 
-        long boardHash = simulatorEngine.getBoardStateHash();
+        // ply-from-root for distance-to-mate normalization
+        final int plyFromRoot = Math.max(0, rootDepthForMateScoring - Math.max(0, depth));
 
-        // Consistent draw handling (use same policy everywhere)
+        // Terminal states first, with distance-to-mate
+        if (simulatorEngine.getGameState().isInStateCheckMate()) {
+            // Side to move is checkmated here
+            double m = CHECKMATE - plyFromRoot;
+            return isWhite ? -m : +m; // white maximizes; this node is bad for side-to-move
+        }
         if (simulatorEngine.getGameState().isInStateDraw()) {
-            return evaluateStaticPosition(simulatorEngine.getGameState(), isWhite, depth);
+            return evaluateStaticPosition(simulatorEngine.getGameState(), isWhite, plyFromRoot);
         }
 
-        if (depth == 0 || simulatorEngine.getGameState().isGameOver()) {
+        long boardHash = simulatorEngine.getBoardStateHash();
+
+        if (depth == 0) {
+            // Quiescence returns white-oriented score; flip for black-to-move
             double eval = evaluateBoard(simulatorEngine, isWhite, deadline);
             if (eval == EXIT_FLAG) { // propagate qsearch timeout
                 return EXIT_FLAG;
             }
-            log.trace("eval {}, alpha {}, beta {}, depth: {}, isWhite {}", eval, alpha, beta, depth, isWhite);
             if (!isWhite) {
                 eval = -eval;
             }
             return eval;
         }
 
+        // Transposition table lookup
         TranspositionTableEntry entry = transpositionTable.get(boardHash);
-
-        // Use TT entry if it is at least as deep as our current depth
         if (entry != null && entry.depth >= depth) {
             if (entry.nodeType == NodeType.EXACT) {
                 return entry.score;
@@ -817,8 +816,17 @@ public class AI {
             }
         }
 
-        // === NULL-MOVE PRUNING: use lean search-only path (no move-gen / no GameState churn) ===
-        if (useNullMovePruning && depth >= 3 && !isSideInCheck(simulatorEngine, isWhite) && !simulatorEngine.isEndgame()) {
+        // -------- Safer Null-move pruning --------
+        boolean inCheck = isSideInCheck(simulatorEngine, isWhite);
+        int mobility = simulatorEngine.getAllLegalMoves().size(); // guard against zugzwang-like nodes
+        boolean allowNullMove = useNullMovePruning
+                && depth >= 3
+                && !inCheck
+                && !simulatorEngine.isEndgame()
+                && prevMove != -1     // avoid consecutive null moves
+                && mobility >= 8;     // mobility guard
+
+        if (allowNullMove) {
             int savedEp = simulatorEngine.doNullMoveForSearch(); // O(1) flip side + clear EP
             nullMoveCount++;
             double nullScore = alphaBeta(simulatorEngine, depth - 1 - 2, alpha, beta, !isWhite, deadline, -1);
@@ -835,7 +843,7 @@ public class AI {
                 return alpha;
             }
         }
-        // === END NULL-MOVE BLOCK ===
+        // -----------------------------------------
 
         double alphaOriginal = alpha; // Store the original alpha value
         double betaOriginal = beta;   // Store the original beta value
@@ -1209,15 +1217,17 @@ public class AI {
     public double evaluateBoard(Engine simulatorEngine, boolean isWhitesTurn, long deadline) {
         if (simulatorEngine.getGameState().isInStateCheckMate()) {
             // Side to move has no legal moves and is in check → losing for side to move
-            return -CHECKMATE; // (or -(CHECKMATE - depth) if you thread depth in)
+            return -CHECKMATE; // alphaBeta handles mate distance; this path is rarely hit
         }
 
         if (simulatorEngine.getGameState().isInStateDraw()) {
             double scoreDiff = simulatorEngine.getGameState().getScore().getScoreDifference();
+            // stronger bias than ±1 to steer away from draws when ahead
+            final double DRAW_BIAS = 20.0;
             if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
-                return DRAW - 1; // discourage draws when ahead
+                return DRAW - DRAW_BIAS; // discourage draws when ahead
             } else if ((isWhitesTurn && scoreDiff < 0) || (!isWhitesTurn && scoreDiff > 0)) {
-                return DRAW + 1; // prefer draws when behind
+                return DRAW + DRAW_BIAS; // prefer draws when behind
             }
             return DRAW;
         }
@@ -1235,7 +1245,7 @@ public class AI {
 
         double score = quiescenceSearch(simulatorEngine, isWhitesTurn, alpha, beta, deadline, 0);
 
-        // FIX: don't cache timeouts in the capture TT (qsearch TT)
+        // don't cache timeouts in the capture TT (qsearch TT)
         if (score != EXIT_FLAG) {
             captureTranspositionTable.put(boardStateHash, new CaptureTranspositionTableEntry(score, isWhitesTurn));
         }
@@ -1245,7 +1255,7 @@ public class AI {
 
     private double quiescenceSearch(Engine simulatorEngine, boolean isWhitesTurn,
                                     double alpha, double beta, long deadline, int depth) {
-        // FIX: early stop conditions (mirror main search)
+        // early stop
         if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
             if (log.isDebugEnabled()) log.debug("qsearch stop (timeout/interrupt/positionChanged)");
             return AI.EXIT_FLAG; // Timeout / cancelled
@@ -1264,7 +1274,6 @@ public class AI {
             }
 
             // Simple delta/futility-like guard: if even a big swing cannot beat alpha, cut
-            // Keeps it conservative to avoid tactical blindness
             final int BIG_DELTA = 1000; // ~queen
             if (standPat + BIG_DELTA < alpha) {
                 return alpha;
@@ -1287,7 +1296,7 @@ public class AI {
                 }
             }
             simulatorEngine.performMove(m);
-            // FIX: propagate timeout BEFORE negation
+            // Propagate timeout BEFORE negation
             double child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
             simulatorEngine.undoLastMove();
 
@@ -1305,20 +1314,22 @@ public class AI {
         return alpha;
     }
 
-    private double evaluateStaticPosition(GameState gameState, boolean isWhitesTurn, int depth) {
+    private double evaluateStaticPosition(GameState gameState, boolean isWhitesTurn, int depthOrPly) {
 
         if (gameState.isInStateCheckMate()) {
-            return -(CHECKMATE - depth);
+            return -(CHECKMATE - depthOrPly);
         }
         if (gameState.isInStateDraw()) {
             if (log.isDebugEnabled()) {
                 log.debug("DRAW");
             }
             double scoreDiff = gameState.getScore().getScoreDifference();
+            // stronger bias than ±1 to steer decisively
+            final double DRAW_BIAS = 20.0;
             if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
-                return DRAW - 1; // avoid draws when ahead
+                return DRAW - DRAW_BIAS; // avoid draws when ahead
             } else if ((isWhitesTurn && scoreDiff < 0) || (!isWhitesTurn && scoreDiff > 0)) {
-                return DRAW + 1; // accept draws when behind
+                return DRAW + DRAW_BIAS; // accept draws when behind
             }
             return DRAW;
         }
