@@ -90,6 +90,7 @@ def build_engine_cmd() -> list:
     java_opts = [
         f"-Dchessengine.searchThreads={SEARCH_THREADS}",
         f"-Dchessengine.rootParallelLimit={ROOT_PAR_LIMIT}",
+        "-Dlogging.level.root=ERROR",
     ]
 
     # If your UCI main class must be specified as argument after jar, add it here.
@@ -137,12 +138,38 @@ def is_my_turn(board: chess.Board, my_color_is_white: bool) -> bool:
     return (board.turn is chess.WHITE) == my_color_is_white
 
 
+def calc_move_time(state: dict, my_color_is_white: bool) -> float:
+    """Compute a thinking time based on remaining clock and increment.
+
+    Falls back to MOVE_TIME if clock data is unavailable. The engine will
+    use a small portion of the remaining time plus most of the increment,
+    which slows play in longer time controls like 3/2.
+    """
+    key_time = "wtime" if my_color_is_white else "btime"
+    key_inc = "winc" if my_color_is_white else "binc"
+    time_ms = state.get(key_time)
+    inc_ms = state.get(key_inc, 0)
+
+    if time_ms is None:
+        return MOVE_TIME
+
+    remaining = time_ms / 1000.0
+    increment = inc_ms / 1000.0 if inc_ms else 0.0
+
+    # use a small fraction of remaining time plus most of the increment,
+    # but never exceed the remaining time
+    think = remaining / 100.0 + 0.8 * increment
+    think = max(MOVE_TIME, min(think, remaining - 0.1))
+    return think
+
+
 def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id: str, me_id: str):
     stream = client.bots.stream_game_state(game_id)
 
     # We need to know which color we are; capture from gameFull
     my_color_is_white = None
     board = chess.Board()
+    ponder_move = None
 
     for event in stream:
         t = event.get("type")
@@ -152,8 +179,8 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
             white_id = event["white"]["id"]
             black_id = event["black"]["id"]
             my_color_is_white = (white_id == me_id)
-
-            moves = event.get("state", {}).get("moves", "")
+            state = event.get("state", {})
+            moves = state.get("moves", "")
             board = chess.Board()
             if moves:
                 for mv in moves.split():
@@ -161,24 +188,44 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
 
             # If it's already our turn at start, move
             if is_my_turn(board, my_color_is_white):
-                result = engine.play(board, chess.engine.Limit(time=MOVE_TIME))
+                think_time = calc_move_time(state, my_color_is_white)
+                result = engine.play(board, chess.engine.Limit(time=think_time), ponder=True)
+                ponder_move = result.ponder
                 client.bots.make_move(game_id, result.move.uci())
                 # print eval info if available
                 # print(f"[move] {result.move}")
 
         elif t == "gameState":
-            moves = event.get("moves", "")
+            state = event
+            moves = state.get("moves", "")
             board = chess.Board()
+            last_move = None
             if moves:
-                for mv in moves.split():
+                mlist = moves.split()
+                for mv in mlist:
                     board.push_uci(mv)
+                if mlist:
+                    last_move = chess.Move.from_uci(mlist[-1])
 
             if my_color_is_white is None:
                 # Shouldn't happen after gameFull, but be defensive
                 continue
 
             if is_my_turn(board, my_color_is_white) and not board.is_game_over():
-                result = engine.play(board, chess.engine.Limit(time=MOVE_TIME))
+                # If the engine was pondering and predicted correctly, let it know
+                if ponder_move:
+                    try:
+                        if last_move == ponder_move:
+                            engine.ponderhit(board)
+                        else:
+                            engine.stop()
+                    except Exception:
+                        pass
+                    ponder_move = None
+
+                think_time = calc_move_time(state, my_color_is_white)
+                result = engine.play(board, chess.engine.Limit(time=think_time), ponder=True)
+                ponder_move = result.ponder
                 client.bots.make_move(game_id, result.move.uci())
                 # print(f"[move] {result.move}")
 
