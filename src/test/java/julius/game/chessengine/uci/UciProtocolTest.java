@@ -48,7 +48,7 @@ public class UciProtocolTest {
         }
 
         String output = out.toString();
-        assertTrue(output.contains("id name JuliusChessEngine"), output);
+        assertTrue(output.contains("id name Alieknek "), output);
         assertTrue(output.contains("uciok"), output);
         assertTrue(output.contains("readyok"), output);
         assertTrue(output.contains("bestmove"), output);
