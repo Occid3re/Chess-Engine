@@ -2,6 +2,7 @@ package julius.game.chessengine.utils;
 
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveList;
+import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.helper.BishopHelper;
 import julius.game.chessengine.helper.RookHelper;
@@ -22,6 +23,7 @@ import static julius.game.chessengine.helper.QueenHelper.QUEEN_MIDGAME_POSITIONA
 import static julius.game.chessengine.helper.RookHelper.*;
 import static julius.game.chessengine.helper.BitHelper.FileMasks;
 import static julius.game.chessengine.helper.BitHelper.RankMasks;
+import static julius.game.chessengine.helper.BitHelper.bitIndex;
 
 @Data
 @Log4j2
@@ -63,7 +65,17 @@ public class Score {
     private static final int ROOK_HALF_OPEN_FILE_BONUS = 15; // was 25
     private static final int ROOK_OPEN_FILE_BONUS      = 25; // was 35
 
-    private static final int MOBILITY_BONUS = 5;
+    // Piece-specific mobility weights
+    private static final int KNIGHT_MOBILITY_BONUS = 4;
+    private static final int BISHOP_MOBILITY_BONUS = 4;
+    private static final int ROOK_MOBILITY_BONUS   = 2;
+    private static final int QUEEN_MOBILITY_BONUS  = 1;
+
+    // Bonus for moves that reach or control central squares (d4, e4, d5, e5)
+    private static final int CENTER_CONTROL_BONUS = 3;
+    private static final long CENTRAL_SQUARES =
+            (1L << bitIndex('d', 4)) | (1L << bitIndex('e', 4)) |
+            (1L << bitIndex('d', 5)) | (1L << bitIndex('e', 5));
     private static final int MISSING_PAWN_SHIELD_PENALTY = -15;
     private static final int HALF_OPEN_FILE_PENALTY = -15;
     private static final int OPEN_FILE_PENALTY = -25;
@@ -722,17 +734,22 @@ public class Score {
         }
     }
 
-    public void updateMobilityScores(int movesWhite, int movesBlack) {
-        whiteMobilityScore = movesWhite * MOBILITY_BONUS;
-        blackMobilityScore = movesBlack * MOBILITY_BONUS;
+    public void updateMobilityScores(int whiteScore, int blackScore) {
+        whiteMobilityScore = whiteScore;
+        blackMobilityScore = blackScore;
     }
 
     public void updateMobilityScores(BitBoard bitBoard) {
-        // Count pseudo-legal moves for a fast mobility estimate. This avoids
-        // the expensive per-move legality checks that slowed down search.
-        int movesWhite = bitBoard.generateAllPossibleMoves(true).size();
-        int movesBlack = bitBoard.generateAllPossibleMoves(false).size();
-        updateMobilityScores(movesWhite, movesBlack);
+        // Generate pseudo-legal moves for mobility estimation. We process
+        // each side separately because the move generator reuses an internal
+        // buffer for efficiency.
+        MoveList moves = bitBoard.generateAllPossibleMoves(true);
+        int whiteScore = calculateMobility(moves);
+
+        moves = bitBoard.generateAllPossibleMoves(false);
+        int blackScore = calculateMobility(moves);
+
+        updateMobilityScores(whiteScore, blackScore);
 
         // Detect stalemate by verifying if any legal moves exist. We only
         // search until the first legal move is found, keeping the check cheap.
@@ -742,6 +759,35 @@ public class Score {
         if (hasNoLegalMove(bitBoard, true) && !bitBoard.isInCheck(true)) {
             blackStateBonus += CHECK;
         }
+    }
+
+    private int calculateMobility(MoveList moves) {
+        int score = 0;
+        for (int i = 0; i < moves.size(); i++) {
+            int move = moves.getMove(i);
+            switch (MoveHelper.derivePieceTypeBits(move)) {
+                case 2:
+                    score += KNIGHT_MOBILITY_BONUS;
+                    break;
+                case 3:
+                    score += BISHOP_MOBILITY_BONUS;
+                    break;
+                case 4:
+                    score += ROOK_MOBILITY_BONUS;
+                    break;
+                case 5:
+                    score += QUEEN_MOBILITY_BONUS;
+                    break;
+                default:
+                    break;
+            }
+
+            int toIndex = MoveHelper.deriveToIndex(move);
+            if (((1L << toIndex) & CENTRAL_SQUARES) != 0) {
+                score += CENTER_CONTROL_BONUS;
+            }
+        }
+        return score;
     }
 
     private boolean hasNoLegalMove(BitBoard board, boolean white) {
