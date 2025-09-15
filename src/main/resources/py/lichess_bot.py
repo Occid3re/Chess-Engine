@@ -114,13 +114,8 @@ def build_engine_cmd() -> List[str]:
         "-Dlogging.level.root=ERROR",
     ]
 
-    return [
-        JAVA_EXE,
-        *java_opts,
-        "-jar",
-        str(jar),
-        "julius.game.chessengine.uci.UciMain",
-    ]
+    # Note: with -jar the main class argument is ignored; drop it.
+    return [JAVA_EXE, *java_opts, "-jar", str(jar)]
 
 
 def _make_retry():
@@ -221,7 +216,13 @@ def start_engine():
     cmd = build_engine_cmd()
     print("[+] Engine command:", " ".join(shlex.quote(x) for x in cmd))
     try:
+        # No debug_log kwarg (keeps compatibility with older python-chess)
         engine = chess.engine.SimpleEngine.popen_uci(cmd)
+        # Be defensive: no pondering; add some overhead to avoid deadline misses.
+        try:
+            engine.configure({"Ponder": False, "MoveOverhead": 150})
+        except chess.engine.EngineError:
+            pass
     except FileNotFoundError as e:
         fail(f"[-] Could not start engine. File not found: {e}")
     except Exception as e:
@@ -229,6 +230,7 @@ def start_engine():
 
     print("[+] Engine started successfully")
     return engine
+
 
 
 def is_my_turn(board: chess.Board, my_color_is_white: bool) -> bool:
@@ -322,7 +324,6 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
 
     my_color_is_white = None
     board = chess.Board()
-    ponder_move = None
 
     for event in stream:
         t = event.get("type")
@@ -340,9 +341,9 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
 
             if is_my_turn(board, my_color_is_white) and not board.is_game_over():
                 think_time = calc_move_time(state, my_color_is_white)
+                slack = 0.15  # end a bit early to avoid deadline timeouts
                 try:
-                    result = engine.play(board, chess.engine.Limit(time=think_time), ponder=True)
-                    ponder_move = result.ponder
+                    result = engine.play(board, chess.engine.Limit(time=max(0.05, think_time - slack)))
                     move_sent = safe_make_move(client, game_id, result.move.uci())
                     if not move_sent:
                         print("[warn] Move send failed, retrying once")
@@ -350,7 +351,7 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
                 except (asyncio.TimeoutError,
                         chess.engine.EngineError,
                         chess.engine.EngineTerminatedError) as e:
-                    print(f"[error] engine.play failed: {e}")
+                    print(f"[error] engine.play failed: {repr(e)}")
                     try:
                         engine.stop()
                     except Exception:
@@ -359,49 +360,30 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
                         engine = start_engine()
                     except Exception as ex:
                         print(f"[error] could not restart engine: {ex}")
-                    moves = list(board.legal_moves)
-                    if moves:
-                        fallback = random.choice(moves)
+                    moves_list = list(board.legal_moves)
+                    if moves_list:
+                        fallback = random.choice(moves_list)
                         move_sent = safe_make_move(client, game_id, fallback.uci())
                         if not move_sent:
                             print("[warn] Fallback move send failed, retrying once")
                             safe_make_move(client, game_id, fallback.uci())
-                    ponder_move = None
 
         elif t == "gameState":
             state = event
             moves = state.get("moves", "")
             board = chess.Board()
-            last_move = None
             if moves:
-                mlist = moves.split()
-                for mv in mlist:
+                for mv in moves.split():
                     board.push_uci(mv)
-                if mlist:
-                    last_move = chess.Move.from_uci(mlist[-1])
 
-            # Check after applying moves
-            if board.is_game_over():
+            if board.is_game_over() or my_color_is_white is None:
                 continue
 
-            if my_color_is_white is None:
-                continue
-
-            if is_my_turn(board, my_color_is_white) and not board.is_game_over():
-                if ponder_move:
-                    try:
-                        if last_move == ponder_move:
-                            engine.ponderhit(board)
-                        else:
-                            engine.stop()
-                    except Exception:
-                        pass
-                    ponder_move = None
-
+            if is_my_turn(board, my_color_is_white):
                 think_time = calc_move_time(state, my_color_is_white)
+                slack = 0.15
                 try:
-                    result = engine.play(board, chess.engine.Limit(time=think_time), ponder=True)
-                    ponder_move = result.ponder
+                    result = engine.play(board, chess.engine.Limit(time=max(0.05, think_time - slack)))
                     move_sent = safe_make_move(client, game_id, result.move.uci())
                     if not move_sent:
                         print("[warn] Move send failed, retrying once")
@@ -409,7 +391,7 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
                 except (asyncio.TimeoutError,
                         chess.engine.EngineError,
                         chess.engine.EngineTerminatedError) as e:
-                    print(f"[error] engine.play failed: {e}")
+                    print(f"[error] engine.play failed: {repr(e)}")
                     try:
                         engine.stop()
                     except Exception:
@@ -418,19 +400,16 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
                         engine = start_engine()
                     except Exception as ex:
                         print(f"[error] could not restart engine: {ex}")
-                    moves = list(board.legal_moves)
-                    if moves:
-                        fallback = random.choice(moves)
+                    moves_list = list(board.legal_moves)
+                    if moves_list:
+                        fallback = random.choice(moves_list)
                         move_sent = safe_make_move(client, game_id, fallback.uci())
                         if not move_sent:
                             print("[warn] Fallback move send failed, retrying once")
                             safe_make_move(client, game_id, fallback.uci())
-                    ponder_move = None
 
         elif t == "chatLine":
-            username = event.get("username")
-            text = event.get("text")
-            print(f"[chat] {username}: {text}")
+            print(f"[chat] {event.get('username')}: {event.get('text')}")
 
         elif t == "gameFinish":
             print(f"[*] Game finished: {game_id}")
