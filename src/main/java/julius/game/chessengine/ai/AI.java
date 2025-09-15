@@ -824,10 +824,13 @@ public class AI {
         }
 
         // -------- Safer Null-move pruning --------
+        // Workflow: perform a reduced-depth null search, verify apparent fail-highs
+        // with a second (depth - 1) search, and only prune when both agree. This
+        // dramatically reduces the risk of zugzwangs or other tactical misses.
         boolean inCheck = isSideInCheck(simulatorEngine, isWhite);
         int mobility = simulatorEngine.getAllLegalMoves().size(); // guard against zugzwang-like nodes
         boolean allowNullMove = useNullMovePruning
-                && depth >= 3
+                && depth >= 4
                 && !inCheck
                 && !simulatorEngine.isEndgame()
                 && prevMove != -1     // avoid consecutive null moves
@@ -843,11 +846,17 @@ public class AI {
                 return EXIT_FLAG;
             }
 
-            // Fail-high/low pruning based on side to move
-            if (isWhite && nullScore >= beta) {
-                return beta;
-            } else if (!isWhite && nullScore <= alpha) {
-                return alpha;
+            boolean nullFailHigh = isWhite ? nullScore >= beta : nullScore <= alpha;
+            if (nullFailHigh) {
+                double verificationScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, isWhite, deadline, prevMove);
+                if (verificationScore == EXIT_FLAG) {
+                    return EXIT_FLAG;
+                }
+                nullFailHigh = isWhite ? verificationScore >= beta : verificationScore <= alpha;
+            }
+
+            if (nullFailHigh) {
+                return isWhite ? beta : alpha;
             }
         }
         // -----------------------------------------
