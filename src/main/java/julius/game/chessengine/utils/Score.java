@@ -87,6 +87,7 @@ public class Score {
     private static final int ROOK_ATTACK_PENALTY = -15;
     private static final int QUEEN_ATTACK_PENALTY = -20;
     private static final int DEFENDER_BONUS = 5;
+    private static final int QUEEN_ATTACKED_PENALTY = -80; // small but noticeable
     public static final int BISHOP_PAIR_BONUS = 40;
     private static final int KNIGHT_OUTPOST_BONUS = 30;
     private static final int KNIGHT_OUTPOST_DEFENDED_BONUS = 10;
@@ -115,6 +116,8 @@ public class Score {
     // King safety
     private int whiteKingSafetyScore = 0;
     private int blackKingSafetyScore = 0;
+    private int whiteQueenSafetyScore = 0;
+    private int blackQueenSafetyScore = 0;
 
     // Initialize bonuses and penalties
     private int whiteCenterPawnBonus = 0;
@@ -242,6 +245,8 @@ public class Score {
         this.blackMobilityScore = other.blackMobilityScore;
         this.whiteKingSafetyScore = other.whiteKingSafetyScore;
         this.blackKingSafetyScore = other.blackKingSafetyScore;
+        this.whiteQueenSafetyScore = other.whiteQueenSafetyScore;
+        this.blackQueenSafetyScore = other.blackQueenSafetyScore;
 
         this.whiteCenterPawnBonus = other.whiteCenterPawnBonus;
         this.blackCenterPawnBonus = other.blackCenterPawnBonus;
@@ -426,6 +431,7 @@ public class Score {
 
         totalWhiteScore += whiteMobilityScore;
         totalWhiteScore += whiteKingSafetyScore;
+        totalWhiteScore += whiteQueenSafetyScore;
 
         totalWhiteScore += whiteStateBonus;
 
@@ -471,6 +477,7 @@ public class Score {
 
         totalBlackScore += blackMobilityScore;
         totalBlackScore += blackKingSafetyScore;
+        totalBlackScore += blackQueenSafetyScore;
 
         totalBlackScore += blackStateBonus;
 
@@ -937,6 +944,12 @@ public class Score {
         return true;
     }
 
+    private int evaluateQueenSafety(long queenBits, long enemyAttacks) {
+        if (queenBits == 0) return 0;
+        int qSq = Long.numberOfTrailingZeros(queenBits);
+        return ((enemyAttacks & (1L << qSq)) != 0) ? QUEEN_ATTACKED_PENALTY : 0;
+    }
+
     public void updateKingSafety(BitBoard bitBoard) {
         boolean isEndgame = bitBoard.isEndgame();
         long whiteKing = bitBoard.getWhiteKing();
@@ -972,6 +985,10 @@ public class Score {
                 allPieces,
                 false,
                 isEndgame);
+
+        // --- NEW: queen safety (simple "queen is attacked" penalty) ---
+        whiteQueenSafetyScore = evaluateQueenSafety(bitBoard.getWhiteQueens(), blackAttacks);
+        blackQueenSafetyScore = evaluateQueenSafety(bitBoard.getBlackQueens(), whiteAttacks);
     }
 
     private int evaluateKingSafety(long king, long friendlyPawns, long enemyPawns,
