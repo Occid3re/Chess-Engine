@@ -59,4 +59,33 @@ public class UciProtocolTest {
         UciHandler handler = new UciHandler();
         assertFalse(handler.handle("quit"));
     }
+
+    @Test
+    void testIsreadyStopsOngoingSearch() throws Exception {
+        String commands = String.join("\n",
+                "uci",
+                "position startpos",
+                "go movetime 1000",
+                "isready",
+                "quit") + "\n";
+
+        InputStream originalIn = System.in;
+        PrintStream originalOut = System.out;
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try {
+            System.setIn(new ByteArrayInputStream(commands.getBytes(StandardCharsets.UTF_8)));
+            System.setOut(new PrintStream(out, true));
+
+            UciMain.main(new String[0]);
+        } finally {
+            System.setIn(originalIn);
+            System.setOut(originalOut);
+        }
+
+        String output = out.toString();
+        long bestmoveCount = output.lines().filter(l -> l.startsWith("bestmove")).count();
+        assertEquals(1, bestmoveCount, output);
+        assertTrue(output.contains("readyok"), output);
+        assertTrue(output.indexOf("bestmove") < output.indexOf("readyok"), output);
+    }
 }

@@ -40,7 +40,10 @@ public class UciHandler {
         String cmd = tokens[0];
         switch (cmd) {
             case "uci" -> sendId();
-            case "isready" -> System.out.println("readyok");
+            case "isready" -> {
+                stop();
+                System.out.println("readyok");
+            }
             case "ucinewgame" -> newGame();
             case "position" -> setPosition(tokens);
             case "go" -> go(tokens);
