@@ -531,34 +531,47 @@ def find_similar_bots(client: berserk.Client,
                       exclude: Optional[List[str]] = None) -> List[str]:
     """
     Return up to `max_candidates` bot IDs close to our rating for the given TC.
-    STRICT & LIGHTWEIGHT: do not perform per-user lookups; rely only on the
-    perfs included with the online bots list. If missing, we skip that user.
+
+    Strategy (very gentle on API):
+      1) Fetch my rating (1 call).
+      2) Fetch online bots (1 call).
+      3) First, use any ratings included in the online list (if present).
+      4) If still short, do ONE bulk profile lookup for a tiny random sample
+         (<= OUTBOUND_INSPECT_LIMIT ids) and filter on that.
     """
     exclude = set(exclude or [])
     perf_key = PERF_FOR_TC.get(tc_type, "blitz")
 
-    # My rating (1 call). Cache would be nice, but we keep one call here.
+    # (1) My rating
     try:
         me = client.users.get_public_data(my_username)
-    except Exception:
-        # If even this is rate-limited, just bail this cycle.
+    except Exception as e:
+        print(f"[outbound] get_public_data({my_username}) failed: {e}")
         return []
     time.sleep(API_REQUEST_DELAY)
     my_rating, _ = _get_perf_rating(me, perf_key)
     if not my_rating:
         my_rating = 1200
+    print(f"[outbound] my {perf_key} rating: {my_rating}")
 
-    # Online bots (1 call)
+    # (2) Online bots
     try:
         bots = list(client.bots.get_online_bots())
+        source = "bots.get_online_bots"
     except AttributeError:
         try:
             bots = list(client.users.get_online_bots())
-        except Exception:
+            source = "users.get_online_bots"
+        except Exception as e:
+            print(f"[outbound] get_online_bots failed: {e}")
             bots = []
+            source = "unknown"
     time.sleep(API_REQUEST_DELAY)
+    print(f"[outbound] {source} returned {len(bots)} entries")
 
-    matches = []
+    # (3) Use any perfs that are already present
+    matches: List[tuple[str, int]] = []
+    ids_needing_lookup: List[str] = []
     for b in bots:
         uid = b.get("id")
         if not uid or uid == my_username or uid in exclude:
@@ -569,9 +582,39 @@ def find_similar_bots(client: berserk.Client,
         prov = perf.get("prov", False)
         if r and not prov and abs(r - my_rating) <= delta:
             matches.append((uid, r))
+        else:
+            ids_needing_lookup.append(uid)
+
+    print(f"[outbound] initial matches (from online list perfs): {len(matches)} ; need lookup for {len(ids_needing_lookup)}")
+
+    # (4) If still short, ONE bulk lookup for a tiny random subset
+    if len(matches) < max_candidates and ids_needing_lookup:
+        random.shuffle(ids_needing_lookup)
+        ids_sample = ids_needing_lookup[:max(1, min(OUTBOUND_INSPECT_LIMIT, 20))]
+        try:
+            # ONE request for up to ~20 users
+            bulk = list(client.users.get_by_ids(ids_sample))
+            print(f"[outbound] bulk lookup for {len(ids_sample)} users returned {len(bulk)}")
+        except Exception as e:
+            print(f"[outbound] bulk get_by_ids failed: {e}")
+            bulk = []
+        time.sleep(API_REQUEST_DELAY)
+
+        # index by id
+        idx = {u.get("id"): u for u in bulk if u.get("id")}
+        for uid in ids_sample:
+            u = idx.get(uid)
+            if not u:
+                continue
+            r, prov = _get_perf_rating(u, perf_key)
+            if r and not prov and abs(r - my_rating) <= delta:
+                matches.append((uid, r))
 
     matches.sort(key=lambda t: abs(t[1] - my_rating))
-    return [u for (u, _) in matches[:max_candidates]]
+    chosen = [u for (u, _) in matches[:max_candidates]]
+    print(f"[outbound] chosen targets: {chosen}")
+    return chosen
+
 
 
 
@@ -641,51 +684,54 @@ def outbound_challenge_loop(stop_event: threading.Event,
                             active_counter: ActiveCounter):
     """
     Periodically find similar-rated online bots and challenge a few.
-    IDLE-ONLY: will NOT challenge while any game is active.
-    Uses a persistent client and global rate limiting to avoid 429s.
-    Fully honors Retry-After by parking the loop for that duration.
+    IDLE-ONLY. Honors Retry-After by parking the loop for that duration.
     """
     if not ENABLE_OUTBOUND_CHALLENGES:
+        print("[outbound] disabled via OUTBOUND_ENABLED=0")
         return
 
-    # Persistent client
     session = make_hardened_session(base_token)
     client = berserk.Client(session=session)
 
     recently_challenged: Dict[str, float] = {}
-    period = max(300, OUTBOUND_PERIOD_SEC)     # be very gentle by default
+    period = max(300, OUTBOUND_PERIOD_SEC)     # gentle default
     max_per_cycle = max(1, OUTBOUND_MAX_PER_CYCLE)
 
-    penalty_until = 0.0  # absolute timestamp; when in the penalty box
+    penalty_until = 0.0
+
+    print(f"[outbound] started. period={period}s, max_per_cycle={max_per_cycle}, cooldown={OUTBOUND_COOLDOWN_SEC}s")
 
     while not stop_event.is_set():
         try:
             now = time.time()
 
-            # Respect penalty box up front
+            # Penalty box
             if now < penalty_until:
                 sleep_for = int(penalty_until - now) + 1
-                print(f"[warn] outbound in penalty box. Sleeping {sleep_for}s")
+                print(f"[outbound] penalty box. sleeping {sleep_for}s")
                 for _ in range(sleep_for):
                     if stop_event.is_set():
                         return
                     time.sleep(1)
                 continue
 
-            # Cooldown map pruning
-            recently_challenged = {
-                u: ts for u, ts in recently_challenged.items()
-                if now - ts < OUTBOUND_COOLDOWN_SEC
-            }
+            # Prune cooldown map
+            before = len(recently_challenged)
+            recently_challenged = {u: ts for u, ts in recently_challenged.items() if now - ts < OUTBOUND_COOLDOWN_SEC}
+            after = len(recently_challenged)
+            if before != after:
+                print(f"[outbound] pruned cooldown list: {before} -> {after}")
 
-            # IDLE-ONLY
+            # Idle-only
             if active_counter.get() != 0:
+                print("[outbound] a game is active -> skipping this cycle")
                 for _ in range(period):
                     if stop_event.is_set():
                         return
                     time.sleep(1)
                 continue
 
+            print("[outbound] scanning for targets...")
             targets = find_similar_bots(
                 client,
                 my_username=my_username,
@@ -695,10 +741,14 @@ def outbound_challenge_loop(stop_event: threading.Event,
                 exclude=list(recently_challenged.keys()),
             )
 
+            if not targets:
+                print("[outbound] no targets this cycle")
             for opp in targets:
                 if active_counter.get() != 0:
+                    print("[outbound] game became active; stopping send loop")
                     break
 
+                print(f"[outbound] challenging {opp} ({OUTBOUND_TC} {OUTBOUND_CLOCK_LIMIT}+{OUTBOUND_INCREMENT})")
                 ok = challenge_user(
                     client,
                     opponent=opp,
@@ -710,29 +760,28 @@ def outbound_challenge_loop(stop_event: threading.Event,
                 if ok:
                     recently_challenged[opp] = time.time()
 
-                # Small spacing in addition to global limiter
                 time.sleep(max(0.5, API_REQUEST_DELAY))
 
         except (berserk.exceptions.ResponseError, berserk.exceptions.ApiError) as e:
             status = getattr(getattr(e, "response", None), "status_code", None)
             if status == 429:
-                delay = _retry_after_from_exc(e, default_sec=600)  # default to 10 minutes if unspecified
-                print(f"[warn] outbound loop hit 429. Backing off {delay}s.")
+                delay = _retry_after_from_exc(e, default_sec=600)
+                print(f"[warn] outbound 429. backing off {delay}s.")
                 _GLOBAL_RL.bump(delay)
                 penalty_until = time.time() + delay
-                # Sleep immediately (don’t try anything else this cycle)
                 for _ in range(delay):
                     if stop_event.is_set():
                         return
                     time.sleep(1)
                 continue
             else:
-                print(f"[warn] outbound loop error: {e}")
+                print(f"[warn] outbound loop API error: {e}")
         except Exception as e:
             print(f"[warn] outbound loop error: {e}")
 
-        # Gentle base period + jitter to avoid sync with others
+        # Base period + jitter
         total = period + random.randint(0, 30)
+        print(f"[outbound] sleeping {total}s until next cycle")
         for _ in range(total):
             if stop_event.is_set():
                 break
