@@ -88,6 +88,8 @@ public class Score {
     private static final int QUEEN_ATTACK_PENALTY = -20;
     private static final int DEFENDER_BONUS = 5;
     public static final int BISHOP_PAIR_BONUS = 40;
+    private static final int KNIGHT_OUTPOST_BONUS = 30;
+    private static final int KNIGHT_OUTPOST_DEFENDED_BONUS = 10;
 
     private Double cachedScoreDifference = null;
 
@@ -139,6 +141,8 @@ public class Score {
     private int blackRooksOpenFileBonus = 0;
     private int whiteBishopPairBonus = 0;
     private int blackBishopPairBonus = 0;
+    private int whiteKnightOutpostBonus = 0;
+    private int blackKnightOutpostBonus = 0;
 
     // Initialize positional values
     private int whitePawnsPosition = 0;
@@ -263,6 +267,8 @@ public class Score {
         this.blackRooksOpenFileBonus = other.blackRooksOpenFileBonus;
         this.whiteBishopPairBonus = other.whiteBishopPairBonus;
         this.blackBishopPairBonus = other.blackBishopPairBonus;
+        this.whiteKnightOutpostBonus = other.whiteKnightOutpostBonus;
+        this.blackKnightOutpostBonus = other.blackKnightOutpostBonus;
 
         this.whitePawnsPosition = other.whitePawnsPosition;
         this.blackPawnsPosition = other.blackPawnsPosition;
@@ -341,6 +347,8 @@ public class Score {
         updateRookHalfOpenFileBonusBlack(blackRooks, blackPawns, whitePawns);
         updateRookOpenFileBonusWhite(whiteRooks, allPawns);
         updateRookOpenFileBonusBlack(blackRooks, allPawns);
+        updateKnightOutpostBonusWhite(whiteKnights, whitePawns, blackPawns);
+        updateKnightOutpostBonusBlack(blackKnights, blackPawns, whitePawns);
 
         // Apply positional values to the pawns
         updatePawnsPositionBonusWhite(whitePawns, phase);
@@ -406,6 +414,7 @@ public class Score {
 
         totalWhiteScore += whiteRooksHalfOpenFileBonus;
         totalWhiteScore += whiteRooksOpenFileBonus;
+        totalWhiteScore += whiteKnightOutpostBonus;
 
         totalWhiteScore += whitePawnsPosition;
         totalWhiteScore += whiteKnightsPosition;
@@ -450,6 +459,7 @@ public class Score {
 
         totalBlackScore += blackRooksHalfOpenFileBonus;
         totalBlackScore += blackRooksOpenFileBonus;
+        totalBlackScore += blackKnightOutpostBonus;
 
         totalBlackScore += blackPawnsPosition;
         totalBlackScore += blackKnightsPosition;
@@ -679,6 +689,34 @@ public class Score {
 
     public void updateRookOpenFileBonusBlack(long blackRooks, long allPawns) {
         blackRooksOpenFileBonus = countRooksOnOpenFiles(blackRooks, allPawns) * ROOK_OPEN_FILE_BONUS;
+    }
+
+    public void updateKnightOutpostBonusWhite(long whiteKnights, long whitePawns, long blackPawns) {
+        long enemyAttacks = ((blackPawns & NOT_H_FILE) >>> 7) | ((blackPawns & NOT_A_FILE) >>> 9);
+        long ownAttacks = ((whitePawns & NOT_A_FILE) << 7) | ((whitePawns & NOT_H_FILE) << 9);
+        whiteKnightOutpostBonus = calculateKnightOutpostBonus(whiteKnights, ownAttacks, enemyAttacks);
+    }
+
+    public void updateKnightOutpostBonusBlack(long blackKnights, long blackPawns, long whitePawns) {
+        long enemyAttacks = ((whitePawns & NOT_A_FILE) << 7) | ((whitePawns & NOT_H_FILE) << 9);
+        long ownAttacks = ((blackPawns & NOT_H_FILE) >>> 7) | ((blackPawns & NOT_A_FILE) >>> 9);
+        blackKnightOutpostBonus = calculateKnightOutpostBonus(blackKnights, ownAttacks, enemyAttacks);
+    }
+
+    private int calculateKnightOutpostBonus(long knights, long ownPawnAttacks, long enemyPawnAttacks) {
+        int bonus = 0;
+        long remaining = knights;
+        while (remaining != 0) {
+            long knight = remaining & -remaining;
+            if ((enemyPawnAttacks & knight) == 0) {
+                bonus += KNIGHT_OUTPOST_BONUS;
+                if ((ownPawnAttacks & knight) != 0) {
+                    bonus += KNIGHT_OUTPOST_DEFENDED_BONUS;
+                }
+            }
+            remaining ^= knight;
+        }
+        return bonus;
     }
 
     /**
@@ -1101,6 +1139,8 @@ public class Score {
         //check if Rook is now on an HalfOpen/Open File
         updateBlackRookValues(bitBoard);
         updateWhiteRookValues(bitBoard);
+        updateWhiteKnightValues(bitBoard);
+        updateBlackKnightValues(bitBoard);
     }
 
     public void updateBlackPawnValues(BitBoard bitBoard) {
@@ -1137,15 +1177,20 @@ public class Score {
         //check if Rook is now on an HalfOpen/Open File
         updateBlackRookValues(bitBoard);
         updateWhiteRookValues(bitBoard);
+        updateWhiteKnightValues(bitBoard);
+        updateBlackKnightValues(bitBoard);
     }
 
     public void updateWhiteKnightValues(BitBoard bitBoard) {
         long whiteKnights = bitBoard.getWhiteKnights();
         long whiteBishops = bitBoard.getWhiteBishops();
         long whiteRooks = bitBoard.getWhiteRooks();
+        long whitePawns = bitBoard.getWhitePawns();
+        long blackPawns = bitBoard.getBlackPawns();
         int phase = bitBoard.getPhase();
         this.whiteKnightsAmountScore = Long.bitCount(whiteKnights) * KNIGHT_VALUE;
         updateKnightsPositionBonusWhite(whiteKnights, phase);
+        updateKnightOutpostBonusWhite(whiteKnights, whitePawns, blackPawns);
         updateStartingSquarePenaltyWhite(whiteKnights, whiteBishops, whiteRooks);
     }
 
@@ -1153,9 +1198,12 @@ public class Score {
         long blackKnights = bitBoard.getBlackKnights();
         long blackBishops = bitBoard.getBlackBishops();
         long blackRooks = bitBoard.getBlackRooks();
+        long blackPawns = bitBoard.getBlackPawns();
+        long whitePawns = bitBoard.getWhitePawns();
         int phase = bitBoard.getPhase();
         this.blackKnightsAmountScore = Long.bitCount(blackKnights) * KNIGHT_VALUE;
         updateKnightsPositionBonusBlack(blackKnights, phase);
+        updateKnightOutpostBonusBlack(blackKnights, blackPawns, whitePawns);
         updateStartingSquarePenaltyBlack(blackKnights, blackBishops, blackRooks);
     }
 
