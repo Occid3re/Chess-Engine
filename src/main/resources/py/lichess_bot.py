@@ -902,4 +902,13 @@ def run_bot():
 if __name__ == "__main__":
     if platform.system().lower() == "windows":
         import msvcrt  # noqa: F401
+    cpu_count = os.cpu_count()
+    cpu_display = cpu_count if cpu_count is not None else "unknown"
+    print(f"[+] Detected logical CPU cores: {cpu_display}")
+    print(f"[+] Python active threads at startup: {threading.active_count()}")
+    configured_threads = str(SEARCH_THREADS).strip()
+    print(
+        "[+] Configured engine search threads (CHESSENGINE_THREADS/NUMBER_OF_PROCESSORS):"
+        f" {configured_threads}"
+    )
     run_bot()
