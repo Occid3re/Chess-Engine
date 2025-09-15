@@ -244,8 +244,7 @@ public class UciHandler {
                 while (!Thread.currentThread().isInterrupted()) {
                     Integer bm = ai.getCurrentBestMoveInt();
                     if (bm != null && bm != -1) {
-                        System.out.println("bestmove " + toUci(bm));
-                        return;
+                        break;
                     }
                     Thread.sleep(50);
                 }
