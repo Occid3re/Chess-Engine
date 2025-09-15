@@ -890,7 +890,23 @@ public class AI {
 
             int move = orderedMoves.get(index);
 
-            boolean isTactical = MoveHelper.isCapture(move) || MoveHelper.isPawnPromotionMove(move);
+            boolean isCapture = MoveHelper.isCapture(move);
+            boolean isPromotion = MoveHelper.isPawnPromotionMove(move);
+
+            // Skip obviously losing captures based on SEE, unless the move gives check or is a promotion
+            if (!inCheckAtNode && isCapture && !isPromotion) {
+                int see = simulatorEngine.see(move);
+                if (see < 0) {
+                    simulatorEngine.performMove(move);
+                    boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
+                    simulatorEngine.undoLastMove();
+                    if (!givesCheck) {
+                        continue;
+                    }
+                }
+            }
+
+            boolean isTactical = isCapture || isPromotion;
             int lmpThreshold = 8 + depth * 2;
             if (!inCheckAtNode && !isTactical && depth <= 3 && index > lmpThreshold) {
                 continue;
@@ -1002,6 +1018,22 @@ public class AI {
             }
 
             int move = orderedMoves.get(index);
+
+            boolean isCapture = MoveHelper.isCapture(move);
+            boolean isPromotion = MoveHelper.isPawnPromotionMove(move);
+
+            if (!inCheckAtNode && isCapture && !isPromotion) {
+                int see = simulatorEngine.see(move);
+                if (see < 0) {
+                    simulatorEngine.performMove(move);
+                    boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
+                    simulatorEngine.undoLastMove();
+                    if (!givesCheck) {
+                        continue;
+                    }
+                }
+            }
+
             simulatorEngine.performMove(move);
             long newBoardHash = simulatorEngine.getBoardStateHash();
 
@@ -1017,7 +1049,7 @@ public class AI {
                 double pAlpha = usePvs ? (beta - 1) : alpha;
                 double pBeta  = beta;
 
-                boolean isTactical = MoveHelper.isCapture(move) || MoveHelper.isPawnPromotionMove(move);
+                boolean isTactical = isCapture || isPromotion;
                 boolean canReduce = !inCheckAtNode && !isTactical && nextDepth >= 2 && index >= 3;
 
                 if (canReduce) {
