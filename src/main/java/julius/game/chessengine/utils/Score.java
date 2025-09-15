@@ -87,7 +87,7 @@ public class Score {
     private static final int ROOK_ATTACK_PENALTY = -15;
     private static final int QUEEN_ATTACK_PENALTY = -20;
     private static final int DEFENDER_BONUS = 5;
-    private static final int QUEEN_ATTACKED_PENALTY = -80; // small but noticeable
+    private static final int QUEEN_ATTACKED_PENALTY = -135;
     public static final int BISHOP_PAIR_BONUS = 40;
     private static final int KNIGHT_OUTPOST_BONUS = 30;
     private static final int KNIGHT_OUTPOST_DEFENDED_BONUS = 10;
