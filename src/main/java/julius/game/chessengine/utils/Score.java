@@ -75,7 +75,7 @@ public class Score {
     private static final int ROOK_OPEN_FILE_BONUS      = 25; // was 35
 
     // Piece-specific mobility weights
-    private static final int KNIGHT_MOBILITY_BONUS = 4;
+    private static final int KNIGHT_MOBILITY_BONUS = 2;
     private static final int BISHOP_MOBILITY_BONUS = 4;
     private static final int ROOK_MOBILITY_BONUS   = 2;
     private static final int QUEEN_MOBILITY_BONUS  = 1;
@@ -98,8 +98,8 @@ public class Score {
     private static final int MINOR_PIECE_ATTACK_PENALTY = -12;
     private static final int MINOR_PIECE_PAWN_ATTACK_PENALTY = -15;
     public static final int BISHOP_PAIR_BONUS = 40;
-    private static final int KNIGHT_OUTPOST_BONUS = 30;
-    private static final int KNIGHT_OUTPOST_DEFENDED_BONUS = 10;
+    private static final int KNIGHT_OUTPOST_BONUS = 15;
+    private static final int KNIGHT_OUTPOST_DEFENDED_BONUS = 5;
 
     private Double cachedScoreDifference = null;
 
