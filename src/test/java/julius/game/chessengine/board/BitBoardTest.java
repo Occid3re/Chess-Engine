@@ -88,6 +88,24 @@ public class BitBoardTest {
     }
 
     @Test
+    void seeConsidersKingRecaptureOnCheckingCapture() {
+        Engine engine = new Engine();
+        engine.importBoardFromFen("6k1/5p2/4Q3/8/8/8/6P1/6K1 w - - 0 1");
+
+        int from = convertStringToIndex("e6");
+        int to = convertStringToIndex("f7");
+        PieceType captured = engine.getBitBoard().getPieceTypeAtIndex(to);
+
+        int move = MoveHelper.createMoveInt(from, to, PieceType.QUEEN, true,
+                true, false, false, null, captured, false, false,
+                engine.getBitBoard().getLastMoveDoubleStepPawnIndex());
+
+        int see = engine.see(move);
+
+        assertTrue(see < 0, "King recapture after checking capture should be evaluated");
+    }
+
+    @Test
     public void PERFT() {
         long startTime = System.nanoTime(); // Start timing
 
