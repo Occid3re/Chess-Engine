@@ -427,7 +427,8 @@ public class AI {
 
         // Order root moves once
         MoveList legal = simulatorEngine.getAllLegalMoves();
-        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1);
+        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1,
+                simulatorEngine);
         if (orderedMoves.isEmpty()) return null;
 
         // === 1) Search first move FULL WINDOW to seed the bounds (YBWC) ===
@@ -718,7 +719,7 @@ public class AI {
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
 
         ArrayList<Integer> sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth,
-                simulatorEngine.getBoardStateHash(), -1);
+                simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
 
         for (int moveInt : sortedMoves) {
 
@@ -948,7 +949,7 @@ public class AI {
 
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, isWhite);
 
-        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove);
+        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
                 return EXIT_FLAG;
@@ -1131,7 +1132,7 @@ public class AI {
 
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, isWhite);
 
-        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove);
+        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
                 return EXIT_FLAG;
@@ -1292,7 +1293,17 @@ public class AI {
     }
 
 
-    ArrayList<Integer> sortMovesByEfficiency(MoveList moves, int currentDepth, long boardHash, int prevMove) {
+    /**
+     * Orders moves using a combination of transposition-table hints, promotions,
+     * SEE-aware capture sorting, killer moves and history heuristics. Static
+     * Exchange Evaluation (SEE) is used to distinguish between winning and
+     * losing captures: winning trades (positive SEE) are promoted ahead of
+     * neutral/losing captures while negative SEE trades are demoted within
+     * their capture bucket. Results are cached per move within this ordering
+     * pass so repeated SEE queries are avoided.
+     */
+    ArrayList<Integer> sortMovesByEfficiency(MoveList moves, int currentDepth, long boardHash, int prevMove,
+                                             Engine simulatorEngine) {
         final int size = moves.size();
         final int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
 
@@ -1323,6 +1334,7 @@ public class AI {
 
 
         final long[] sortKeys = new long[size];
+        final Map<Integer, Integer> seeCache = new HashMap<>();
 
         for (int i = 0; i < size; i++) {
             final int moveInt = moves.getMove(i);
@@ -1336,6 +1348,13 @@ public class AI {
             final boolean isCapture = MoveHelper.isCapture(moveInt);
             final boolean isPromotion = MoveHelper.isPawnPromotionMove(moveInt);
 
+            int seeValue = 0;
+            boolean hasSee = false;
+            if (isCapture) {
+                seeValue = seeCache.computeIfAbsent(moveInt, m -> simulatorEngine.see(m));
+                hasSee = true;
+            }
+
             int category;
             int score;
 
@@ -1347,19 +1366,28 @@ public class AI {
                 // Promotions are extremely forcing — sort before captures
                 category = CAT_PROMO;
                 int base = calculateMvvLvaScore(moveInt); // promotion-captures benefit, quiet promos keep 0
-                score = base + PROMOTION_ORDER_BONUS;
+                int seeBonus = 0;
+                if (hasSee) {
+                    int cappedSee = Math.max(-512, Math.min(512, seeValue));
+                    seeBonus = cappedSee * 16; // modest SEE influence within promotion bucket
+                }
+                score = base + PROMOTION_ORDER_BONUS + seeBonus;
             } else if (isCapture) {
                 // MVV-LVA for captures; classify as good/equal/bad without SEE
                 final int mvvLva = calculateMvvLvaScore(moveInt); // victim - attacker (can be negative)
-                if (mvvLva > 0) {
+                if (seeValue > 0) {
                     category = CAT_CAP_GOOD;
-                } else if (mvvLva == 0) {
+                } else if (seeValue == 0) {
                     category = CAT_CAP_EQUAL;
                 } else {
                     category = CAT_CAP_BAD;
                 }
                 // Scale captures so bigger victims / smaller attackers bubble up
-                score = (mvvLva * 16); // small scale keeps room for tie-breaks
+                int cappedSee = Math.max(-2048, Math.min(2048, seeValue));
+                score = (mvvLva * 16) + (cappedSee * 32);
+                if (score < 0) {
+                    score = 0;
+                }
             } else if (moveInt == k0) {
                 category = CAT_KILLER0;
                 score = KILLER_MOVE_SCORE + KILLER0_BONUS;
@@ -1487,7 +1515,8 @@ public class AI {
         MoveList moves = inCheck ? simulatorEngine.getAllLegalMoves() : getPossibleCapturesOrPromotions(simulatorEngine);
 
         // Order them (captures first via MVV-LVA/promotion bonus, killers/history still help)
-        ArrayList<Integer> ordered = sortMovesByEfficiency(moves, 0, simulatorEngine.getBoardStateHash(), -1);
+        ArrayList<Integer> ordered = sortMovesByEfficiency(moves, 0, simulatorEngine.getBoardStateHash(), -1,
+                simulatorEngine);
 
         for (int m : ordered) {
             // --- SEE pruning: drop clearly losing captures (keeps promotions) ---
