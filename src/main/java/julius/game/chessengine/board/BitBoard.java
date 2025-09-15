@@ -413,6 +413,14 @@ public class BitBoard {
             else if (attBishops != 0) { fromBB = attBishops; attBits = 3; }
             else if (attRooks != 0)   { fromBB = attRooks;   attBits = 4; }
             else if (attQueens != 0)  { fromBB = attQueens;  attBits = 5; }
+            else if (attKing != 0) {
+                int kingFrom = Long.numberOfTrailingZeros(attKing);
+                if (!isKingCaptureLegal(sideWhite, kingFrom, to, W, B, occ, toPieceWhite, toPieceBits)) {
+                    break;
+                }
+                fromBB = 1L << kingFrom;
+                attBits = 6;
+            }
             else break; // no more recaptures
 
             int attFrom = Long.numberOfTrailingZeros(fromBB);
@@ -476,9 +484,69 @@ public class BitBoard {
 
         // Resolve swaps back (fail-soft)
         for (int i = d - 1; i >= 0; i--) {
-            gain[i] = Math.max(-gain[i + 1], gain[i]);
+            gain[i] = -Math.max(-gain[i], gain[i + 1]);
         }
         return gain[0];
+    }
+
+    private boolean isKingCaptureLegal(boolean kingIsWhite, int kingFrom, int target,
+                                       long[] whiteByType, long[] blackByType, long occ,
+                                       boolean toPieceWhite, int toPieceBits) {
+        long[] wCopy = whiteByType.clone();
+        long[] bCopy = blackByType.clone();
+        long occCopy = occ;
+
+        long toMask = 1L << target;
+        long fromMask = 1L << kingFrom;
+
+        if (toPieceBits >= 1 && toPieceBits <= 6) {
+            if (toPieceWhite) {
+                wCopy[toPieceBits] &= ~toMask;
+            } else {
+                bCopy[toPieceBits] &= ~toMask;
+            }
+        }
+
+        if (kingIsWhite) {
+            wCopy[6] &= ~fromMask;
+            wCopy[6] |= toMask;
+        } else {
+            bCopy[6] &= ~fromMask;
+            bCopy[6] |= toMask;
+        }
+
+        occCopy &= ~fromMask;
+
+        return !isSquareAttackedInSee(target, !kingIsWhite, wCopy, bCopy, occCopy);
+    }
+
+    private boolean isSquareAttackedInSee(int square, boolean attackerWhite,
+                                          long[] whiteByType, long[] blackByType, long occ) {
+        if (pawnAttackersToSquare(square, attackerWhite, whiteByType[1], blackByType[1]) != 0) {
+            return true;
+        }
+
+        long knights = attackerWhite ? whiteByType[2] : blackByType[2];
+        if ((KnightHelper.knightMoveTable[square] & knights) != 0) {
+            return true;
+        }
+
+        long bishops = attackerWhite ? whiteByType[3] : blackByType[3];
+        long rooks = attackerWhite ? whiteByType[4] : blackByType[4];
+        long queens = attackerWhite ? whiteByType[5] : blackByType[5];
+        long king = attackerWhite ? whiteByType[6] : blackByType[6];
+
+        long bishopRays = bishopAttacksFromWithOcc(square, occ);
+        if ((bishopRays & (bishops | queens)) != 0) {
+            return true;
+        }
+
+        long rookRays = rookAttacksFromWithOcc(square, occ);
+        if ((rookRays & (rooks | queens)) != 0) {
+            return true;
+        }
+
+        return (KING_ATTACKS[square] & king) != 0;
     }
 
 
