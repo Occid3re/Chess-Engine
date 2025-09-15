@@ -8,6 +8,8 @@ import julius.game.chessengine.helper.BishopHelper;
 import julius.game.chessengine.helper.RookHelper;
 import lombok.Data;
 import lombok.extern.log4j.Log4j2;
+import java.util.Map;
+import java.util.HashMap;
 
 import static julius.game.chessengine.helper.BishopHelper.BISHOP_ENDGAME_POSITIONAL_VALUES;
 import static julius.game.chessengine.helper.BishopHelper.BISHOP_MIDGAME_POSITIONAL_VALUES;
@@ -169,6 +171,47 @@ public class Score {
     private static final long INITIAL_BLACK_BISHOP_POSITION = 0x2400000000000000L; // Bishops on c8 and f8
     private static final long INITIAL_WHITE_ROOK_POSITION = 0x0000000000000081L; // Rooks on a1 and h1
     private static final long INITIAL_BLACK_ROOK_POSITION = 0x8100000000000000L; // Rooks on a8 and h8
+
+
+    // Cache for pawn structure evaluations to avoid recomputation
+    private static final Map<Long, PawnStructure> pawnStructureCache = new HashMap<>();
+
+    private static class PawnStructure {
+        int whiteCenterPawnBonus;
+        int blackCenterPawnBonus;
+        int whiteDoubledPawnPenalty;
+        int blackDoubledPawnPenalty;
+        int whiteIsolatedPawnPenalty;
+        int blackIsolatedPawnPenalty;
+        int whiteConnectedPawnBonus;
+        int blackConnectedPawnBonus;
+        int whitePawnIslandPenalty;
+        int blackPawnIslandPenalty;
+    }
+
+    private static long pawnHash(long whitePawns, long blackPawns) {
+        return whitePawns ^ (blackPawns << 1);
+    }
+
+    private static PawnStructure getPawnStructure(long whitePawns, long blackPawns) {
+        long key = pawnHash(whitePawns, blackPawns);
+        PawnStructure ps = pawnStructureCache.get(key);
+        if (ps == null) {
+            ps = new PawnStructure();
+            ps.whiteCenterPawnBonus = countCenterPawns(whitePawns) * CENTER_PAWN_BONUS;
+            ps.blackCenterPawnBonus = countCenterPawns(blackPawns) * CENTER_PAWN_BONUS;
+            ps.whiteDoubledPawnPenalty = countDoubledPawns(whitePawns) * DOUBLED_PAWN_PENALTY;
+            ps.blackDoubledPawnPenalty = countDoubledPawns(blackPawns) * DOUBLED_PAWN_PENALTY;
+            ps.whiteIsolatedPawnPenalty = countIsolatedPawns(whitePawns) * ISOLATED_PAWN_PENALTY;
+            ps.blackIsolatedPawnPenalty = countIsolatedPawns(blackPawns) * ISOLATED_PAWN_PENALTY;
+            ps.whiteConnectedPawnBonus = countConnectedPawns(whitePawns) * CONNECTED_PAWN_BONUS;
+            ps.blackConnectedPawnBonus = countConnectedPawns(blackPawns) * CONNECTED_PAWN_BONUS;
+            ps.whitePawnIslandPenalty = Math.max(0, countPawnIslands(whitePawns) - 1) * PAWN_ISLAND_PENALTY;
+            ps.blackPawnIslandPenalty = Math.max(0, countPawnIslands(blackPawns) - 1) * PAWN_ISLAND_PENALTY;
+            pawnStructureCache.put(key, ps);
+        }
+        return ps;
+    }
 
 
     public Score() {
@@ -964,25 +1007,34 @@ public class Score {
 
     public void updateWhitePawnValues(BitBoard bitBoard) {
         long whitePawns = bitBoard.getWhitePawns();
+        long blackPawns = bitBoard.getBlackPawns();
         long allPieces = bitBoard.getAllPieces();
         long blackAttacks = bitBoard.generateAttackBitboard(false);
         long whiteKing = bitBoard.getWhiteKing();
         int phase = bitBoard.getPhase();
 
         this.whitePawnsAmountScore = Long.bitCount(whitePawns) * PAWN_VALUE;
-        updateIsolatedPawnPenaltyWhite(whitePawns);
-        updateDoubledPawnPenaltyWhite(whitePawns);
+
+        PawnStructure ps = getPawnStructure(whitePawns, blackPawns);
+        whiteCenterPawnBonus = ps.whiteCenterPawnBonus;
+        blackCenterPawnBonus = ps.blackCenterPawnBonus;
+        whiteDoubledPawnPenalty = ps.whiteDoubledPawnPenalty;
+        blackDoubledPawnPenalty = ps.blackDoubledPawnPenalty;
+        whiteIsolatedPawnPenalty = ps.whiteIsolatedPawnPenalty;
+        blackIsolatedPawnPenalty = ps.blackIsolatedPawnPenalty;
+        whiteConnectedPawnBonus = ps.whiteConnectedPawnBonus;
+        blackConnectedPawnBonus = ps.blackConnectedPawnBonus;
+        whitePawnIslandPenalty = ps.whitePawnIslandPenalty;
+        blackPawnIslandPenalty = ps.blackPawnIslandPenalty;
+
         updatePawnsPositionBonusWhite(whitePawns, phase);
-        updateCenterPawnBonusWhite(whitePawns);
-        updateConnectedPawnBonusWhite(whitePawns);
-        updatePawnIslandPenaltyWhite(whitePawns);
 
         // FIX: pass allPieces + own king
-        updatePassedPawnBonusWhite(whitePawns, bitBoard.getBlackPawns(), allPieces, whiteKing);
+        updatePassedPawnBonusWhite(whitePawns, blackPawns, allPieces, whiteKing);
 
         whitePawnAdvanceBonus = calculatePawnAdvanceBonus(whitePawns, allPieces, blackAttacks, true, phase);
         whiteBlockedPawnPenalty = calculateBlockedPawnPenalty(whitePawns, allPieces, true, phase);
-        whiteBackwardPawnPenalty = calculateBackwardPawnPenalty(whitePawns, bitBoard.getBlackPawns(), allPieces, true, phase);
+        whiteBackwardPawnPenalty = calculateBackwardPawnPenalty(whitePawns, blackPawns, allPieces, true, phase);
 
         //check if Rook is now on an HalfOpen/Open File
         updateBlackRookValues(bitBoard);
@@ -991,25 +1043,34 @@ public class Score {
 
     public void updateBlackPawnValues(BitBoard bitBoard) {
         long blackPawns = bitBoard.getBlackPawns();
+        long whitePawns = bitBoard.getWhitePawns();
         long allPieces = bitBoard.getAllPieces();
         long whiteAttacks = bitBoard.generateAttackBitboard(true);
         long blackKing = bitBoard.getBlackKing();
         int phase = bitBoard.getPhase();
 
         this.blackPawnsAmountScore = Long.bitCount(blackPawns) * PAWN_VALUE;
-        updateIsolatedPawnPenaltyBlack(blackPawns);
-        updateDoubledPawnPenaltyBlack(blackPawns);
+
+        PawnStructure ps = getPawnStructure(whitePawns, blackPawns);
+        whiteCenterPawnBonus = ps.whiteCenterPawnBonus;
+        blackCenterPawnBonus = ps.blackCenterPawnBonus;
+        whiteDoubledPawnPenalty = ps.whiteDoubledPawnPenalty;
+        blackDoubledPawnPenalty = ps.blackDoubledPawnPenalty;
+        whiteIsolatedPawnPenalty = ps.whiteIsolatedPawnPenalty;
+        blackIsolatedPawnPenalty = ps.blackIsolatedPawnPenalty;
+        whiteConnectedPawnBonus = ps.whiteConnectedPawnBonus;
+        blackConnectedPawnBonus = ps.blackConnectedPawnBonus;
+        whitePawnIslandPenalty = ps.whitePawnIslandPenalty;
+        blackPawnIslandPenalty = ps.blackPawnIslandPenalty;
+
         updatePawnsPositionBonusBlack(blackPawns, phase);
-        updateCenterPawnBonusBlack(blackPawns);
-        updateConnectedPawnBonusBlack(blackPawns);
-        updatePawnIslandPenaltyBlack(blackPawns);
 
         // FIX: pass allPieces + own king
-        updatePassedPawnBonusBlack(blackPawns, bitBoard.getWhitePawns(), allPieces, blackKing);
+        updatePassedPawnBonusBlack(blackPawns, whitePawns, allPieces, blackKing);
 
         blackPawnAdvanceBonus = calculatePawnAdvanceBonus(blackPawns, allPieces, whiteAttacks, false, phase);
         blackBlockedPawnPenalty = calculateBlockedPawnPenalty(blackPawns, allPieces, false, phase);
-        blackBackwardPawnPenalty = calculateBackwardPawnPenalty(blackPawns, bitBoard.getWhitePawns(), allPieces, false, phase);
+        blackBackwardPawnPenalty = calculateBackwardPawnPenalty(blackPawns, whitePawns, allPieces, false, phase);
 
         //check if Rook is now on an HalfOpen/Open File
         updateBlackRookValues(bitBoard);
@@ -1124,6 +1185,87 @@ public class Score {
         int phase = bitBoard.getPhase();
         this.blackQueensAmountScore = Long.bitCount(blackQueens) * QUEEN_VALUE;
         updateQueensPositionBonusBlack(blackQueens, phase);
+    }
+
+    public void applyMove(BitBoard bitBoard, int move, GameStateEnum state) {
+        resetCachedScoreDifference();
+        boolean isWhite = MoveHelper.isWhitesMove(move);
+        int pieceTypeBits = MoveHelper.derivePieceTypeBits(move);
+        int capturedPieceTypeBits = MoveHelper.deriveCapturedPieceTypeBits(move);
+        int promotionPieceTypeBits = MoveHelper.derivePromotionPieceTypeBits(move);
+
+        updatePieceValues(isWhite, pieceTypeBits, bitBoard, state);
+
+        if (capturedPieceTypeBits != 0) {
+            updateCapturedPieceValues(isWhite, capturedPieceTypeBits, bitBoard);
+        }
+        if (promotionPieceTypeBits != 0) {
+            updatePromotionPieceValues(isWhite, promotionPieceTypeBits, bitBoard);
+        }
+
+        updateMobilityScores(bitBoard);
+        updateKingSafety(bitBoard);
+    }
+
+    public void undoMove(BitBoard bitBoard, int move, GameStateEnum state) {
+        // Board has already been reverted; reuse applyMove logic
+        applyMove(bitBoard, move, state);
+    }
+
+    private void updatePieceValues(boolean isWhite, int pieceTypeBits, BitBoard bitBoard, GameStateEnum state) {
+        if (isWhite) {
+            updateValuesForWhite(pieceTypeBits, bitBoard);
+            updateStateValuesWhite(state);
+        } else {
+            updateValuesForBlack(pieceTypeBits, bitBoard);
+            updateStateValuesBlack(state);
+        }
+    }
+
+    private void updateValuesForWhite(int pieceTypeBits, BitBoard bitBoard) {
+        int phase = bitBoard.getPhase();
+        switch (pieceTypeBits) {
+            case 1 -> updateWhitePawnValues(bitBoard);
+            case 2 -> updateWhiteKnightValues(bitBoard);
+            case 3 -> updateWhiteBishopValues(bitBoard);
+            case 4 -> updateWhiteRookValues(bitBoard);
+            case 5 -> updateWhiteQueenValues(bitBoard);
+            case 6 -> updateKingValuesWhite(bitBoard.getWhiteKing(), bitBoard.isWhiteKingHasCastled(),
+                    bitBoard.isWhiteKingMoved(), bitBoard.isWhiteRookA1Moved(), bitBoard.isWhiteRookH1Moved(), phase);
+            default -> {
+            }
+        }
+    }
+
+    private void updateValuesForBlack(int pieceTypeBits, BitBoard bitBoard) {
+        int phase = bitBoard.getPhase();
+        switch (pieceTypeBits) {
+            case 1 -> updateBlackPawnValues(bitBoard);
+            case 2 -> updateBlackKnightValues(bitBoard);
+            case 3 -> updateBlackBishopValues(bitBoard);
+            case 4 -> updateBlackRookValues(bitBoard);
+            case 5 -> updateBlackQueenValues(bitBoard);
+            case 6 -> updateKingValuesBlack(bitBoard.getBlackKing(), bitBoard.isBlackKingHasCastled(),
+                    bitBoard.isBlackKingMoved(), bitBoard.isBlackRookA8Moved(), bitBoard.isBlackRookH8Moved(), phase);
+            default -> {
+            }
+        }
+    }
+
+    private void updateCapturedPieceValues(boolean isWhite, int capturedPieceTypeBits, BitBoard bitBoard) {
+        if (isWhite) {
+            updateValuesForBlack(capturedPieceTypeBits, bitBoard);
+        } else {
+            updateValuesForWhite(capturedPieceTypeBits, bitBoard);
+        }
+    }
+
+    private void updatePromotionPieceValues(boolean isWhite, int promotionPieceTypeBits, BitBoard bitBoard) {
+        if (isWhite) {
+            updateValuesForWhite(promotionPieceTypeBits, bitBoard);
+        } else {
+            updateValuesForBlack(promotionPieceTypeBits, bitBoard);
+        }
     }
 
     public void updateKingValuesWhite(long whiteKing, boolean isCastled, boolean isWhiteKingMoved, boolean rookA1Moved, boolean rookH1Moved, int phase) {
