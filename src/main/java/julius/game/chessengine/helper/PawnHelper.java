@@ -9,7 +9,7 @@ import static julius.game.chessengine.helper.BitHelper.fileBitboard;
 @Log4j2
 public class PawnHelper {
 
-    public final static int[] WHITE_PAWN_POSITIONAL_VALUES = {
+    public final static int[] WHITE_PAWN_MIDGAME_POSITIONAL_VALUES = {
             // R1
             0,  0,  0,  0,  0,  0,  0,  0,
             // R2
@@ -28,7 +28,38 @@ public class PawnHelper {
             0,  0,  0,  0,  0,  0,  0,  0
     };
 
-    public final static int[] BLACK_PAWN_POSITIONAL_VALUES = {
+    public final static int[] WHITE_PAWN_ENDGAME_POSITIONAL_VALUES = {
+            // R1
+            0,  0,  0,  0,  0,  0,  0,  0,
+            // R2
+            5, 10, 10,-20,-20,10, 10,  5,
+            // R3
+            5, -5,-10,  0,  0,-10, -5,  5,
+            // R4
+            0,  0,  0, 20, 20,  0,  0,  0,
+            // R5
+            5,  5, 10, 25, 25, 10,  5,  5,
+            // R6
+            10, 10, 20, 30, 30, 20, 10, 10,
+            // R7
+            50, 50, 50, 50, 50, 50, 50, 50,
+            // R8
+            0,  0,  0,  0,  0,  0,  0,  0
+    };
+
+    public final static int[] BLACK_PAWN_MIDGAME_POSITIONAL_VALUES = {
+            // mirror of white (rank-flipped)
+            0,  0,  0,  0,  0,  0,  0,  0, // R1
+            50, 50, 50, 50, 50, 50, 50, 50, // R2
+            10, 10, 20, 30, 30, 20, 10, 10, // R3
+            5,  5, 10, 25, 25, 10,  5,  5, // R4
+            0,  0,  0, 20, 20,  0,  0,  0, // R5
+            5, -5,-10,  0,  0,-10, -5,  5, // R6
+            5, 10, 10,-20,-20,10, 10,  5, // R7
+            0,  0,  0,  0,  0,  0,  0,  0  // R8
+    };
+
+    public final static int[] BLACK_PAWN_ENDGAME_POSITIONAL_VALUES = {
             // mirror of white (rank-flipped)
             0,  0,  0,  0,  0,  0,  0,  0, // R1
             50, 50, 50, 50, 50, 50, 50, 50, // R2
