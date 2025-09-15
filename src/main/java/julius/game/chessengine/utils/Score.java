@@ -60,9 +60,9 @@ public class Score {
     private static final int PASSED_PAWN_FREE_PATH_BONUS_PER_RANK = 12;  // small but helps pushing
 
     // Other bonuses and penalties
-    private static final int NOT_CASTLED_AND_ROOK_MOVE_PENALTY = -20; // was -50 (too harsh early)
+    private static final int NOT_CASTLED_AND_ROOK_MOVE_PENALTY = -10; // further reduced
     private static final int START_POSITION_PENALTY            = -40; // was -50
-    private static final int CASTLING_BONUS                    = 40;  // was 75 (more balanced)
+    private static final int CASTLING_BONUS                    = 20;  // further reduced
 
     private static final int ROOK_HALF_OPEN_FILE_BONUS = 15; // was 25
     private static final int ROOK_OPEN_FILE_BONUS      = 25; // was 35
@@ -727,34 +727,38 @@ public class Score {
 
     public void updateWhiteKingsPositionBonus(long whiteKing, boolean isCastled, boolean isWhiteKingMoved, boolean rookA1Moved, boolean rookH1Moved, int phase) {
         whiteKingsPosition = applyPositionalValues(whiteKing, WHITE_KING_POSITIONAL_VALUES, KING_ENDGAME_POSITIONAL_VALUES, phase);
+        int castlingBonus = CASTLING_BONUS * (256 - phase) / 256;
+        int rookMovePenalty = NOT_CASTLED_AND_ROOK_MOVE_PENALTY * (256 - phase) / 256;
         if (isCastled) {
-            whiteKingsPosition += CASTLING_BONUS;
+            whiteKingsPosition += castlingBonus;
         } else {
             if (rookA1Moved) {
-                whiteKingsPosition += NOT_CASTLED_AND_ROOK_MOVE_PENALTY;
+                whiteKingsPosition += rookMovePenalty;
             }
             if (rookH1Moved) {
-                whiteKingsPosition += NOT_CASTLED_AND_ROOK_MOVE_PENALTY;
+                whiteKingsPosition += rookMovePenalty;
             }
             if (isWhiteKingMoved) {
-                whiteKingsPosition += NOT_CASTLED_AND_ROOK_MOVE_PENALTY * 2;
+                whiteKingsPosition += rookMovePenalty * 2;
             }
         }
     }
 
     public void updateBlackKingsPositionBonus(long blackKing, boolean isCastled, boolean isBlackKingMoved, boolean rookA8Moved, boolean rookH8Moved, int phase) {
         blackKingsPosition = applyPositionalValues(blackKing, BLACK_KING_POSITIONAL_VALUES, KING_ENDGAME_POSITIONAL_VALUES, phase);
+        int castlingBonus = CASTLING_BONUS * (256 - phase) / 256;
+        int rookMovePenalty = NOT_CASTLED_AND_ROOK_MOVE_PENALTY * (256 - phase) / 256;
         if (isCastled) {
-            blackKingsPosition += CASTLING_BONUS;
+            blackKingsPosition += castlingBonus;
         } else {
             if (rookA8Moved) {
-                blackKingsPosition += NOT_CASTLED_AND_ROOK_MOVE_PENALTY;
+                blackKingsPosition += rookMovePenalty;
             }
             if (rookH8Moved) {
-                blackKingsPosition += NOT_CASTLED_AND_ROOK_MOVE_PENALTY;
+                blackKingsPosition += rookMovePenalty;
             }
             if (isBlackKingMoved) {
-                blackKingsPosition += NOT_CASTLED_AND_ROOK_MOVE_PENALTY * 2;
+                blackKingsPosition += rookMovePenalty * 2;
             }
         }
     }
