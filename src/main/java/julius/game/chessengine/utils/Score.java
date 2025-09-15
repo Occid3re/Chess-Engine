@@ -3,6 +3,8 @@ package julius.game.chessengine.utils;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.GameStateEnum;
+import julius.game.chessengine.helper.BishopHelper;
+import julius.game.chessengine.helper.RookHelper;
 import lombok.Data;
 import lombok.extern.log4j.Log4j2;
 
@@ -11,6 +13,7 @@ import static julius.game.chessengine.helper.BishopHelper.BISHOP_MIDGAME_POSITIO
 import static julius.game.chessengine.helper.KingHelper.*;
 import static julius.game.chessengine.helper.KnightHelper.KNIGHT_ENDGAME_POSITIONAL_VALUES;
 import static julius.game.chessengine.helper.KnightHelper.KNIGHT_MIDGAME_POSITIONAL_VALUES;
+import static julius.game.chessengine.helper.KnightHelper.knightMoveTable;
 import static julius.game.chessengine.helper.PawnHelper.*;
 import static julius.game.chessengine.helper.PawnMoveTables.PAWN_ATTACKS;
 import static julius.game.chessengine.helper.PawnMoveTables.PAWN_PUSHES;
@@ -62,7 +65,14 @@ public class Score {
 
     private static final int MOBILITY_BONUS = 5;
     private static final int MISSING_PAWN_SHIELD_PENALTY = -15;
-    private static final int KING_ATTACK_PENALTY = -10;
+    private static final int HALF_OPEN_FILE_PENALTY = -15;
+    private static final int OPEN_FILE_PENALTY = -25;
+    private static final int PAWN_ATTACK_PENALTY = -5;
+    private static final int KNIGHT_ATTACK_PENALTY = -10;
+    private static final int BISHOP_ATTACK_PENALTY = -10;
+    private static final int ROOK_ATTACK_PENALTY = -15;
+    private static final int QUEEN_ATTACK_PENALTY = -20;
+    private static final int DEFENDER_BONUS = 5;
     public static final int BISHOP_PAIR_BONUS = 40;
 
     private Double cachedScoreDifference = null;
@@ -756,12 +766,38 @@ public class Score {
 
         long whiteAttacks = bitBoard.generateAttackBitboard(true);
         long blackAttacks = bitBoard.generateAttackBitboard(false);
+        long allPieces = bitBoard.getAllPieces();
 
-        whiteKingSafetyScore = evaluateKingSafety(whiteKing, whitePawns, blackAttacks, true, isEndgame);
-        blackKingSafetyScore = evaluateKingSafety(blackKing, blackPawns, whiteAttacks, false, isEndgame);
+        whiteKingSafetyScore = evaluateKingSafety(
+                whiteKing,
+                whitePawns,
+                blackPawns,
+                bitBoard.getBlackKnights(),
+                bitBoard.getBlackBishops(),
+                bitBoard.getBlackRooks(),
+                bitBoard.getBlackQueens(),
+                whiteAttacks,
+                allPieces,
+                true,
+                isEndgame);
+        blackKingSafetyScore = evaluateKingSafety(
+                blackKing,
+                blackPawns,
+                whitePawns,
+                bitBoard.getWhiteKnights(),
+                bitBoard.getWhiteBishops(),
+                bitBoard.getWhiteRooks(),
+                bitBoard.getWhiteQueens(),
+                blackAttacks,
+                allPieces,
+                false,
+                isEndgame);
     }
 
-    private int evaluateKingSafety(long king, long friendlyPawns, long enemyAttacks, boolean isWhite, boolean isEndgame) {
+    private int evaluateKingSafety(long king, long friendlyPawns, long enemyPawns,
+                                   long enemyKnights, long enemyBishops, long enemyRooks, long enemyQueens,
+                                   long friendlyAttacks, long allPieces,
+                                   boolean isWhite, boolean isEndgame) {
         if (king == 0) {
             return 0;
         }
@@ -780,11 +816,75 @@ public class Score {
         int missing = 3 - Long.bitCount(friendlyPawns & forwardMask);
         int shieldPenalty = missing * MISSING_PAWN_SHIELD_PENALTY;
 
-        long kingZone = KING_ATTACKS[kingIndex];
-        int attacks = Long.bitCount(enemyAttacks & kingZone);
-        int attackPenalty = attacks * KING_ATTACK_PENALTY;
+        int fileIndex = kingIndex % 8;
+        long fileMask = FileMasks[fileIndex];
+        int filePenalty = 0;
+        if ((friendlyPawns & fileMask) == 0) {
+            filePenalty = (enemyPawns & fileMask) != 0 ? HALF_OPEN_FILE_PENALTY : OPEN_FILE_PENALTY;
+        }
 
-        int total = shieldPenalty + attackPenalty;
+        long kingZone = KING_ATTACKS[kingIndex];
+        int enemyColor = isWhite ? 1 : 0;
+
+        int pawnAttackCount = 0;
+        long pawns = enemyPawns;
+        while (pawns != 0) {
+            long sq = pawns & -pawns;
+            int idx = Long.numberOfTrailingZeros(sq);
+            pawnAttackCount += Long.bitCount(PAWN_ATTACKS[enemyColor][idx] & kingZone);
+            pawns ^= sq;
+        }
+
+        int knightAttackCount = 0;
+        long knights = enemyKnights;
+        while (knights != 0) {
+            long sq = knights & -knights;
+            int idx = Long.numberOfTrailingZeros(sq);
+            knightAttackCount += Long.bitCount(knightMoveTable[idx] & kingZone);
+            knights ^= sq;
+        }
+
+        BishopHelper bishopHelper = BishopHelper.getInstance();
+        RookHelper rookHelper = RookHelper.getInstance();
+
+        int bishopAttackCount = 0;
+        long bishops = enemyBishops;
+        while (bishops != 0) {
+            long sq = bishops & -bishops;
+            int idx = Long.numberOfTrailingZeros(sq);
+            bishopAttackCount += Long.bitCount(bishopHelper.calculateBishopMoves(idx, allPieces) & kingZone);
+            bishops ^= sq;
+        }
+
+        int rookAttackCount = 0;
+        long rooks = enemyRooks;
+        while (rooks != 0) {
+            long sq = rooks & -rooks;
+            int idx = Long.numberOfTrailingZeros(sq);
+            rookAttackCount += Long.bitCount(rookHelper.calculateRookMoves(idx, allPieces) & kingZone);
+            rooks ^= sq;
+        }
+
+        int queenAttackCount = 0;
+        long queens = enemyQueens;
+        while (queens != 0) {
+            long sq = queens & -queens;
+            int idx = Long.numberOfTrailingZeros(sq);
+            long attacks = bishopHelper.calculateBishopMoves(idx, allPieces) | rookHelper.calculateRookMoves(idx, allPieces);
+            queenAttackCount += Long.bitCount(attacks & kingZone);
+            queens ^= sq;
+        }
+
+        int attackPenalty = pawnAttackCount * PAWN_ATTACK_PENALTY
+                + knightAttackCount * KNIGHT_ATTACK_PENALTY
+                + bishopAttackCount * BISHOP_ATTACK_PENALTY
+                + rookAttackCount * ROOK_ATTACK_PENALTY
+                + queenAttackCount * QUEEN_ATTACK_PENALTY;
+
+        int defenders = Long.bitCount(friendlyAttacks & kingZone);
+        int defenderBonus = defenders * DEFENDER_BONUS;
+
+        int total = shieldPenalty + filePenalty + attackPenalty + defenderBonus;
         if (isEndgame) {
             total /= 2;
         }
