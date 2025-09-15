@@ -16,6 +16,8 @@ import org.springframework.stereotype.Component;
 import java.util.*;
 import java.util.concurrent.*;
 
+import static julius.game.chessengine.helper.BitHelper.FileMasks;
+import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
 import static julius.game.chessengine.utils.Score.*;
 
 @Log4j2
@@ -886,15 +888,53 @@ public class AI {
         return (myAttacks & enemyQueen) != 0L;
     }
 
+    private boolean attacksOpponentKingZone(Engine e, boolean moverIsWhite) {
+        BitBoard bb = e.getBitBoard();
+        long enemyKing = moverIsWhite ? bb.getBlackKing() : bb.getWhiteKing();
+        if (enemyKing == 0L) {
+            return false;
+        }
+        int kingIndex = Long.numberOfTrailingZeros(enemyKing);
+        long kingZone = KING_ATTACKS[kingIndex];
+        long myAttacks = bb.generateAttackBitboard(moverIsWhite);
+        return (myAttacks & kingZone) != 0L;
+    }
+
+    private int countPawnsOnFile(BitBoard board, long fileMask) {
+        if (fileMask == 0L) {
+            return 0;
+        }
+        long pawns = (board.getWhitePawns() | board.getBlackPawns()) & fileMask;
+        return Long.bitCount(pawns);
+    }
+
+    private boolean openedFileTowardKing(BitBoard boardAfterMove, long kingFileMask,
+                                         int pawnsBefore, boolean interactsWithKingFile) {
+        if (!interactsWithKingFile || kingFileMask == 0L || pawnsBefore <= 0) {
+            return false;
+        }
+        int pawnsAfter = countPawnsOnFile(boardAfterMove, kingFileMask);
+        return pawnsAfter < pawnsBefore;
+    }
+
     /**
      * LMR reduction: larger for deeper plies and later moves; tuned to be safe.
      */
-    private int lmrReduction(int depth, int moveIndex) {
-        // depth >= 2, index >= 3 enforced by callers
-        // log-log curve is common; tweak divisor to taste.
-        int r = (int) Math.floor((Math.log(1 + depth) * Math.log(2 + moveIndex)) / 1.7);
-        if (r < 1) r = 1;
-        if (r > depth - 1) r = depth - 1;
+    private static final int HISTORY_REDUCTION_MAX = 4000;
+
+    private int lmrReduction(int depth, int moveIndex, int historyScore) {
+        double base = Math.log(1 + depth) * Math.log(2 + moveIndex);
+        int history = Math.max(0, historyScore);
+        double normalized = Math.min(1.0, history / (double) HISTORY_REDUCTION_MAX);
+        double historyWeight = 1.0 - 0.5 * normalized; // strong history shrinks reductions
+        double scaled = base * historyWeight / 1.5;
+        int r = (int) Math.floor(scaled);
+        if (r < 0) {
+            r = 0;
+        }
+        if (r > depth - 1) {
+            r = depth - 1;
+        }
         return r;
     }
 
@@ -916,22 +956,40 @@ public class AI {
 
             int move = orderedMoves.get(index);
 
+            int from = MoveHelper.deriveFromIndex(move);
+            int to = MoveHelper.deriveToIndex(move);
+            int movingPieceBits = MoveHelper.derivePieceTypeBits(move);
+            int capturedPieceBits = MoveHelper.deriveCapturedPieceTypeBits(move);
+            int historyScore = historyTable[from][to];
+            int seeGain = simulatorEngine.see(move);
+            boolean seeWinsMaterial = seeGain > 0;
+
             boolean isCapture = MoveHelper.isCapture(move);
             boolean isPromotion = MoveHelper.isPawnPromotionMove(move);
 
+            BitBoard boardBefore = simulatorEngine.getBitBoard();
+            long enemyKingBB = isWhite ? boardBefore.getBlackKing() : boardBefore.getWhiteKing();
+            int enemyKingSquare = enemyKingBB != 0L ? Long.numberOfTrailingZeros(enemyKingBB) : -1;
+            int enemyKingFile = enemyKingSquare >= 0 ? (enemyKingSquare & 7) : -1;
+            long kingFileMask = enemyKingFile >= 0 ? FileMasks[enemyKingFile] : 0L;
+            boolean touchesKingFile = enemyKingSquare >= 0
+                    && (((from & 7) == enemyKingFile) || ((to & 7) == enemyKingFile));
+            boolean affectsKingFilePawns = touchesKingFile
+                    && (movingPieceBits == 1 || capturedPieceBits == 1);
+            int pawnsOnFileBefore = (enemyKingSquare >= 0 && affectsKingFilePawns)
+                    ? countPawnsOnFile(boardBefore, kingFileMask)
+                    : 0;
+
             // Skip obviously losing captures based on SEE, unless the move gives check or is a promotion
             if (!inCheckAtNode && isCapture && !isPromotion) {
-                int see = simulatorEngine.see(move);
-
                 // only prune clearly losing captures; keep equal trades
-                if (see < 0) {
+                if (seeGain < 0) {
                     // but allow if it gives check (very tactical)
                     simulatorEngine.performMove(move);
                     boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
                     simulatorEngine.undoLastMove();
                     if (!givesCheck) continue;
                 }
-                // remove the 'see == 0 and attacker > 2' prune entirely
             }
             boolean isTactical = isCapture || isPromotion;
             int lmpThreshold = 8 + depth * 2;
@@ -956,6 +1014,10 @@ public class AI {
                 // Compute extension/gating signals AFTER making the move
                 boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
                 boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, isWhite);
+                boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, isWhite);
+                boolean opensKingFile = openedFileTowardKing(
+                        simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns
+                );
 
                 // depth for child
                 int nextDepth = depth - 1;
@@ -964,8 +1026,11 @@ public class AI {
                 // Decide if we can reduce this move
                 boolean canReduce = !inCheckAtNode
                         && !isTactical
-                        && !givesCheck
+                        && !givesCheck // checks are too forcing to reduce
                         && !attacksQueen
+                        && !attacksKingZone // direct king pressure keeps full depth
+                        && !opensKingFile // opening lines to the king needs verification
+                        && !seeWinsMaterial // SEE winning moves deserve the full depth
                         && nextDepth >= 2
                         && index >= 3;
 
@@ -974,9 +1039,16 @@ public class AI {
                 double pAlpha = alpha;
                 double pBeta = usePvs ? (alpha + 1) : beta;
 
+                int reduction = 0;
                 if (canReduce) {
-                    int r = lmrReduction(nextDepth, index);
-                    int reduced = Math.max(1, nextDepth - r);
+                    reduction = lmrReduction(nextDepth, index, historyScore);
+                    if (reduction <= 0) {
+                        canReduce = false;
+                    }
+                }
+
+                if (canReduce) {
+                    int reduced = Math.max(1, nextDepth - reduction);
                     eval = alphaBeta(simulatorEngine, reduced, pAlpha, pBeta, !isWhite, deadline, move);
                     if (eval == EXIT_FLAG || positionChanged()) {
                         simulatorEngine.undoLastMove();
@@ -1067,21 +1139,40 @@ public class AI {
 
             int move = orderedMoves.get(index);
 
+            int from = MoveHelper.deriveFromIndex(move);
+            int to = MoveHelper.deriveToIndex(move);
+            int movingPieceBits = MoveHelper.derivePieceTypeBits(move);
+            int capturedPieceBits = MoveHelper.deriveCapturedPieceTypeBits(move);
+            int historyScore = historyTable[from][to];
+            int seeGain = simulatorEngine.see(move);
+            boolean seeWinsMaterial = seeGain > 0;
+
             boolean isCapture = MoveHelper.isCapture(move);
             boolean isPromotion = MoveHelper.isPawnPromotionMove(move);
+            boolean isTactical = isCapture || isPromotion;
+
+            BitBoard boardBefore = simulatorEngine.getBitBoard();
+            long enemyKingBB = isWhite ? boardBefore.getBlackKing() : boardBefore.getWhiteKing();
+            int enemyKingSquare = enemyKingBB != 0L ? Long.numberOfTrailingZeros(enemyKingBB) : -1;
+            int enemyKingFile = enemyKingSquare >= 0 ? (enemyKingSquare & 7) : -1;
+            long kingFileMask = enemyKingFile >= 0 ? FileMasks[enemyKingFile] : 0L;
+            boolean touchesKingFile = enemyKingSquare >= 0
+                    && (((from & 7) == enemyKingFile) || ((to & 7) == enemyKingFile));
+            boolean affectsKingFilePawns = touchesKingFile
+                    && (movingPieceBits == 1 || capturedPieceBits == 1);
+            int pawnsOnFileBefore = (enemyKingSquare >= 0 && affectsKingFilePawns)
+                    ? countPawnsOnFile(boardBefore, kingFileMask)
+                    : 0;
 
             if (!inCheckAtNode && isCapture && !isPromotion) {
-                int see = simulatorEngine.see(move);
-
                 // only prune clearly losing captures; keep equal trades
-                if (see < 0) {
+                if (seeGain < 0) {
                     // but allow if it gives check (very tactical)
                     simulatorEngine.performMove(move);
                     boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
                     simulatorEngine.undoLastMove();
                     if (!givesCheck) continue;
                 }
-                // remove the 'see == 0 and attacker > 2' prune entirely
             }
 
             simulatorEngine.performMove(move);
@@ -1096,15 +1187,21 @@ public class AI {
                 // Compute extension/gating signals AFTER making the move
                 boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
                 boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, isWhite);
+                boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, isWhite);
+                boolean opensKingFile = openedFileTowardKing(
+                        simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns
+                );
 
                 int nextDepth = depth - 1;
                 if (givesCheck || attacksQueen) nextDepth = Math.min(nextDepth + 1, depth);
 
-                boolean isTactical = isCapture || isPromotion;
                 boolean canReduce = !inCheckAtNode
                         && !isTactical
-                        && !givesCheck
+                        && !givesCheck // keep full depth on checks
                         && !attacksQueen
+                        && !attacksKingZone // king pressure stays unreduced
+                        && !opensKingFile // freshly opened king file needs full depth
+                        && !seeWinsMaterial // SEE-positive moves shouldn't be reduced
                         && nextDepth >= 2
                         && index >= 3;
 
@@ -1112,9 +1209,16 @@ public class AI {
                 double pAlpha = usePvs ? (beta - 1) : alpha;
                 double pBeta = beta;
 
+                int reduction = 0;
                 if (canReduce) {
-                    int r = lmrReduction(nextDepth, index);
-                    int reduced = Math.max(1, nextDepth - r);
+                    reduction = lmrReduction(nextDepth, index, historyScore);
+                    if (reduction <= 0) {
+                        canReduce = false;
+                    }
+                }
+
+                if (canReduce) {
+                    int reduced = Math.max(1, nextDepth - reduction);
 
                     eval = alphaBeta(simulatorEngine, reduced, pAlpha, pBeta, !isWhite, deadline, move);
                     if (eval == EXIT_FLAG || positionChanged()) {
