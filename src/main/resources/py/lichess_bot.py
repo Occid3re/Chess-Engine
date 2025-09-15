@@ -7,7 +7,7 @@ import shlex
 import platform
 from pathlib import Path
 import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict
 import threading
 import asyncio
 import random
@@ -70,6 +70,8 @@ OUTBOUND_INCREMENT = int(os.environ.get("OUTBOUND_INCREMENT", "2"))
 RATING_DELTA = int(os.environ.get("OUTBOUND_RATING_DELTA", "100"))             # ± rating window
 OUTBOUND_MAX_PER_CYCLE = int(os.environ.get("OUTBOUND_MAX_PER_CYCLE", "3"))    # how many to try per cycle
 OUTBOUND_PERIOD_SEC = int(os.environ.get("OUTBOUND_PERIOD_SEC", "120"))        # how often to try
+# Avoid re-challenging the same bot within this many seconds
+OUTBOUND_COOLDOWN_SEC = int(os.environ.get("OUTBOUND_COOLDOWN_SEC", "300"))
 # =================================================
 
 
@@ -542,9 +544,18 @@ def outbound_challenge_loop(stop_event: threading.Event,
     """
     if not ENABLE_OUTBOUND_CHALLENGES:
         return
+    # Track bots we've recently challenged to avoid pestering the same ones.
+    recently_challenged: Dict[str, float] = {}
 
     while not stop_event.is_set():
         try:
+            # Prune old entries beyond the cooldown window
+            now = time.time()
+            recently_challenged = {
+                u: ts for u, ts in recently_challenged.items()
+                if now - ts < OUTBOUND_COOLDOWN_SEC
+            }
+
             # IDLE-ONLY: do nothing if we're playing any game
             if active_counter.get() != 0:
                 # sleep the whole period; try again later
@@ -563,6 +574,7 @@ def outbound_challenge_loop(stop_event: threading.Event,
                 tc_type=OUTBOUND_TC,
                 delta=RATING_DELTA,
                 max_candidates=OUTBOUND_MAX_PER_CYCLE,
+                exclude=list(recently_challenged.keys()),
             )
 
             for opp in targets:
@@ -577,6 +589,8 @@ def outbound_challenge_loop(stop_event: threading.Event,
                     clock_increment=OUTBOUND_INCREMENT,
                     color="random",
                 )
+                # Remember that we tried this opponent
+                recently_challenged[opp] = time.time()
                 time.sleep(1.0)
 
         except (berserk.exceptions.ResponseError, berserk.exceptions.ApiError) as e:
