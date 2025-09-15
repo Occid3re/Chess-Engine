@@ -136,27 +136,27 @@ public class GameState {
     }
 
     private void updateValuesForWhite(int pieceTypeBits, BitBoard bitBoard) {
-        boolean isEndgame = bitBoard.isEndgame();
+        int phase = bitBoard.getPhase();
         switch (pieceTypeBits) {
             case 1: score.updateWhitePawnValues(bitBoard); break;
-            case 2: score.updateWhiteKnightValues(bitBoard.getWhiteKnights(), bitBoard.getWhiteBishops(), bitBoard.getWhiteRooks()); break;
-            case 3: score.updateWhiteBishopValues(bitBoard.getWhiteBishops(), bitBoard.getWhiteKnights(), bitBoard.getWhiteRooks()); break;
+            case 2: score.updateWhiteKnightValues(bitBoard); break;
+            case 3: score.updateWhiteBishopValues(bitBoard); break;
             case 4: score.updateWhiteRookValues(bitBoard); break;
-            case 5: score.updateWhiteQueenValues(bitBoard.getWhiteQueens()); break;
-            case 6: score.updateKingValuesWhite(bitBoard.getWhiteKing(), bitBoard.isWhiteKingHasCastled(), bitBoard.isWhiteKingMoved(), bitBoard.isWhiteRookA1Moved(), bitBoard.isWhiteRookH1Moved(), isEndgame); break;
+            case 5: score.updateWhiteQueenValues(bitBoard); break;
+            case 6: score.updateKingValuesWhite(bitBoard.getWhiteKing(), bitBoard.isWhiteKingHasCastled(), bitBoard.isWhiteKingMoved(), bitBoard.isWhiteRookA1Moved(), bitBoard.isWhiteRookH1Moved(), phase); break;
             default: break; // Optionally handle default case
         }
     }
 
     private void updateValuesForBlack(int pieceTypeBits, BitBoard bitBoard) {
-        boolean isEndgame = bitBoard.isEndgame();
+        int phase = bitBoard.getPhase();
         switch (pieceTypeBits) {
             case 1: score.updateBlackPawnValues(bitBoard); break;
-            case 2: score.updateBlackKnightValues(bitBoard.getBlackKnights(), bitBoard.getBlackBishops(), bitBoard.getBlackRooks()); break;
-            case 3: score.updateBlackBishopValues(bitBoard.getBlackBishops(), bitBoard.getBlackKnights(), bitBoard.getBlackRooks()); break;
+            case 2: score.updateBlackKnightValues(bitBoard); break;
+            case 3: score.updateBlackBishopValues(bitBoard); break;
             case 4: score.updateBlackRookValues(bitBoard); break;
-            case 5: score.updateBlackQueenValues(bitBoard.getBlackQueens()); break;
-            case 6: score.updateKingValuesBlack(bitBoard.getBlackKing(), bitBoard.isBlackKingHasCastled(), bitBoard.isBlackKingMoved(), bitBoard.isBlackRookA8Moved(), bitBoard.isBlackRookH8Moved(), isEndgame); break;
+            case 5: score.updateBlackQueenValues(bitBoard); break;
+            case 6: score.updateKingValuesBlack(bitBoard.getBlackKing(), bitBoard.isBlackKingHasCastled(), bitBoard.isBlackKingMoved(), bitBoard.isBlackRookA8Moved(), bitBoard.isBlackRookH8Moved(), phase); break;
             default: break; // Optionally handle default case
         }
     }

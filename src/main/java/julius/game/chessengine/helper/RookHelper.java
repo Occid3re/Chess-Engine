@@ -28,7 +28,7 @@ public class RookHelper {
 
     private static RookHelper instance = null;
 
-    public final static int[] WHITE_ROOK_POSITIONAL_VALUES = {
+    public final static int[] WHITE_ROOK_MIDGAME_POSITIONAL_VALUES = {
             // R1
             0,  0,  0,  0,  0,  0,  0,  0,
             // R2
@@ -47,7 +47,38 @@ public class RookHelper {
             0,  0,  0,  5,  5,  0,  0,  0
     };
 
-    public final static int[] BLACK_ROOK_POSITIONAL_VALUES = {
+    public final static int[] WHITE_ROOK_ENDGAME_POSITIONAL_VALUES = {
+            // R1
+            0,  0,  0,  0,  0,  0,  0,  0,
+            // R2
+            5, 10, 10, 10, 10, 10, 10,  5,
+            // R3
+            -5,  0,  0,  0,  0,  0,  0, -5,
+            // R4
+            -5,  0,  0,  0,  0,  0,  0, -5,
+            // R5
+            -5,  0,  0,  0,  0,  0,  0, -5,
+            // R6
+            -5,  0,  0,  0,  0,  0,  0, -5,
+            // R7
+            -5,  0,  0,  5,  5,  0,  0, -5,
+            // R8
+            0,  0,  0,  5,  5,  0,  0,  0
+    };
+
+    public final static int[] BLACK_ROOK_MIDGAME_POSITIONAL_VALUES = {
+            // mirror of white
+            0,  0,  0,  5,  5,  0,  0,  0, // R1
+            -5,  0,  0,  5,  5,  0,  0, -5, // R2
+            -5,  0,  0,  0,  0,  0,  0, -5, // R3
+            -5,  0,  0,  0,  0,  0,  0, -5, // R4
+            -5,  0,  0,  0,  0,  0,  0, -5, // R5
+            -5,  0,  0,  0,  0,  0,  0, -5, // R6
+            5, 10, 10, 10, 10, 10, 10,  5, // R7
+            0,  0,  0,  0,  0,  0,  0,  0  // R8
+    };
+
+    public final static int[] BLACK_ROOK_ENDGAME_POSITIONAL_VALUES = {
             // mirror of white
             0,  0,  0,  5,  5,  0,  0,  0, // R1
             -5,  0,  0,  5,  5,  0,  0, -5, // R2

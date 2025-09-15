@@ -2,7 +2,26 @@ package julius.game.chessengine.helper;
 
 public class QueenHelper {
 
-    public static final int[] QUEEN_POSITIONAL_VALUES = {
+    public static final int[] QUEEN_MIDGAME_POSITIONAL_VALUES = {
+            // R1
+            -20,-10,-10, -5, -5,-10,-10,-20,
+            // R2
+            -10,  0,  0,  0,  0,  0,  0,-10,
+            // R3
+            -10,  0,  5,  5,  5,  5,  0,-10,
+            // R4
+            -5,  0,  5,  5,  5,  5,  0, -5,
+            // R5
+            0,  0,  5,  5,  5,  5,  0, -5,
+            // R6
+            -10,  5,  5,  5,  5,  5,  0,-10,
+            // R7
+            -10,  0,  5,  0,  0,  0,  0,-10,
+            // R8
+            -20,-10,-10, -5, -5,-10,-10,-20
+    };
+
+    public static final int[] QUEEN_ENDGAME_POSITIONAL_VALUES = {
             // R1
             -20,-10,-10, -5, -5,-10,-10,-20,
             // R2
