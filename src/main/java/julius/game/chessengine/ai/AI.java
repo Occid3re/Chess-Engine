@@ -129,7 +129,9 @@ public class AI {
     @Getter
     private long nullMoveCount = 0;
 
-    /** Ply hint for distance-to-mate normalization (set per ID iteration). */
+    /**
+     * Ply hint for distance-to-mate normalization (set per ID iteration).
+     */
     private int rootDepthForMateScoring = 0;
 
     public AI(Engine mainEngine) {
@@ -339,7 +341,7 @@ public class AI {
                 if (lastIterScore != null && currentDepth >= 3) {
                     double window = 50.0;            // ≈ 0.50 pawn; tune 25–100
                     alpha = lastIterScore - window;
-                    beta  = lastIterScore + window;
+                    beta = lastIterScore + window;
 
                     int retries = 0;
                     while (true) {
@@ -356,15 +358,19 @@ public class AI {
                             window *= 2.0;
                             alpha = moveAndScore.score - window;
                             retries++;
-                            if (retries > 3) { alpha = Double.NEGATIVE_INFINITY; beta = Double.POSITIVE_INFINITY; }
-                            else continue;
+                            if (retries > 3) {
+                                alpha = Double.NEGATIVE_INFINITY;
+                                beta = Double.POSITIVE_INFINITY;
+                            } else continue;
                         } else if (moveAndScore.score >= beta) {
                             // fail-high → widen upwards
                             window *= 2.0;
                             beta = moveAndScore.score + window;
                             retries++;
-                            if (retries > 3) { alpha = Double.NEGATIVE_INFINITY; beta = Double.POSITIVE_INFINITY; }
-                            else continue;
+                            if (retries > 3) {
+                                alpha = Double.NEGATIVE_INFINITY;
+                                beta = Double.POSITIVE_INFINITY;
+                            } else continue;
                         }
                         break; // in-window → accept
                     }
@@ -862,7 +868,9 @@ public class AI {
         return (isWhite && state == GameStateEnum.WHITE_IN_CHECK) || (!isWhite && state == GameStateEnum.BLACK_IN_CHECK);
     }
 
-    /** LMR reduction: larger for deeper plies and later moves; tuned to be safe. */
+    /**
+     * LMR reduction: larger for deeper plies and later moves; tuned to be safe.
+     */
     private int lmrReduction(int depth, int moveIndex) {
         // depth >= 2, index >= 3 enforced by callers
         // log-log curve is common; tweak divisor to taste.
@@ -897,12 +905,7 @@ public class AI {
             if (!inCheckAtNode && isCapture && !isPromotion) {
                 int see = simulatorEngine.see(move);
                 if (see < 0) {
-                    simulatorEngine.performMove(move);
-                    boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
-                    simulatorEngine.undoLastMove();
-                    if (!givesCheck) {
-                        continue;
-                    }
+                    continue;
                 }
             }
 
@@ -926,7 +929,7 @@ public class AI {
                 // PVS window for non-first moves
                 boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
                 double pAlpha = alpha;
-                double pBeta  = usePvs ? (alpha + 1) : beta;
+                double pBeta = usePvs ? (alpha + 1) : beta;
 
                 // ---- LMR: reduce late quiets when we’re not in check at this node ----
                 boolean canReduce = !inCheckAtNode && !isTactical && nextDepth >= 2 && index >= 3;
@@ -936,7 +939,10 @@ public class AI {
                     int reduced = Math.max(1, nextDepth - r);
 
                     eval = alphaBeta(simulatorEngine, reduced, pAlpha, pBeta, !isWhite, deadline, move);
-                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                    if (eval == EXIT_FLAG || positionChanged()) {
+                        simulatorEngine.undoLastMove();
+                        return EXIT_FLAG;
+                    }
 
                     // If the reduced result looks promising, re-search deeper (PVS/full as needed)
                     boolean promising = eval > alpha;
@@ -946,16 +952,25 @@ public class AI {
                         } else {
                             eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline, move);
                         }
-                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                        if (eval == EXIT_FLAG || positionChanged()) {
+                            simulatorEngine.undoLastMove();
+                            return EXIT_FLAG;
+                        }
                     }
                 } else {
                     // Normal PVS
                     eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline, move);
-                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                    if (eval == EXIT_FLAG || positionChanged()) {
+                        simulatorEngine.undoLastMove();
+                        return EXIT_FLAG;
+                    }
 
                     if (usePvs && eval > alpha && eval < beta) {
                         eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline, move);
-                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                        if (eval == EXIT_FLAG || positionChanged()) {
+                            simulatorEngine.undoLastMove();
+                            return EXIT_FLAG;
+                        }
                     }
                 }
             }
@@ -1025,12 +1040,7 @@ public class AI {
             if (!inCheckAtNode && isCapture && !isPromotion) {
                 int see = simulatorEngine.see(move);
                 if (see < 0) {
-                    simulatorEngine.performMove(move);
-                    boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
-                    simulatorEngine.undoLastMove();
-                    if (!givesCheck) {
-                        continue;
-                    }
+                    continue;
                 }
             }
 
@@ -1047,7 +1057,7 @@ public class AI {
 
                 boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
                 double pAlpha = usePvs ? (beta - 1) : alpha;
-                double pBeta  = beta;
+                double pBeta = beta;
 
                 boolean isTactical = isCapture || isPromotion;
                 boolean canReduce = !inCheckAtNode && !isTactical && nextDepth >= 2 && index >= 3;
@@ -1057,7 +1067,10 @@ public class AI {
                     int reduced = Math.max(1, nextDepth - r);
 
                     eval = alphaBeta(simulatorEngine, reduced, pAlpha, pBeta, !isWhite, deadline, move);
-                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                    if (eval == EXIT_FLAG || positionChanged()) {
+                        simulatorEngine.undoLastMove();
+                        return EXIT_FLAG;
+                    }
 
                     boolean promising = eval < beta;
                     if (promising) {
@@ -1066,15 +1079,24 @@ public class AI {
                         } else {
                             eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline, move);
                         }
-                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                        if (eval == EXIT_FLAG || positionChanged()) {
+                            simulatorEngine.undoLastMove();
+                            return EXIT_FLAG;
+                        }
                     }
                 } else {
                     eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline, move);
-                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                    if (eval == EXIT_FLAG || positionChanged()) {
+                        simulatorEngine.undoLastMove();
+                        return EXIT_FLAG;
+                    }
 
                     if (usePvs && eval > alpha && eval < beta) {
                         eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline, move);
-                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                        if (eval == EXIT_FLAG || positionChanged()) {
+                            simulatorEngine.undoLastMove();
+                            return EXIT_FLAG;
+                        }
                     }
                 }
             }
@@ -1120,7 +1142,6 @@ public class AI {
     }
 
 
-
     ArrayList<Integer> sortMovesByEfficiency(MoveList moves, int currentDepth, long boardHash, int prevMove) {
         final int size = moves.size();
         final int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
@@ -1146,7 +1167,7 @@ public class AI {
         final int k1 = killerMoves[depthIndex][1];
 
         final int prevFrom = (prevMove >= 0) ? (prevMove & 0x3F) : -1;
-        final int prevTo   = (prevMove >= 0) ? ((prevMove >>> 6) & 0x3F) : -1;
+        final int prevTo = (prevMove >= 0) ? ((prevMove >>> 6) & 0x3F) : -1;
         final int cm = (prevFrom >= 0) ? counterMove[prevFrom][prevTo] : -1;
         final int COUNTER_MOVE_BONUS = 400;
 
