@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Lichess bot runner with strict API compliance:
+- Serializes all NON-STREAMING HTTP requests (global mutex) — "only one request at a time"
+- Backs off a full minute on HTTP 429 (honors Retry-After), pushing back future calls
+- Persistent outbound session; fewer lookups; randomized jitter
+- Optional conservative global QPS limiter
+"""
+
 import os
 import sys
 import re
@@ -37,8 +46,7 @@ LICHESS_TOKEN = os.environ.get("LICHESS_TOKEN") or "YOUR_TOKEN_HERE"
 # Engine thinking time floor per move (seconds)
 MOVE_TIME = float(os.environ.get("BOT_MOVE_TIME", "0.5"))
 
-# Estimated number of full moves in a typical game.  Used for time management
-# to distribute the remaining time across upcoming moves more intelligently.
+# Estimated full moves to help time management
 ESTIMATED_GAME_MOVES = int(os.environ.get("BOT_GAME_MOVES", "40"))
 
 # Accept/decline policy
@@ -49,7 +57,7 @@ ALLOW_CORRESPONDENCE = False                             # accept correspondence
 ACCEPT_TC_TYPES = {"bullet", "blitz", "rapid", "classical"}  # which TCs to accept
 
 # Game concurrency (helps prevent overload)
-MAX_CONCURRENT_GAMES = int(os.environ.get("MAX_CONCURRENT_GAMES", "2"))
+MAX_CONCURRENT_GAMES = int(os.environ.get("MAX_CONCURRENT_GAMES", "1"))
 
 # Network hardening
 HTTP_TOTAL_RETRIES = int(os.environ.get("HTTP_TOTAL_RETRIES", "5"))
@@ -59,10 +67,11 @@ HTTP_TIMEOUT = float(os.environ.get("HTTP_TIMEOUT", "10"))  # seconds
 SEND_RETRIES = int(os.environ.get("SEND_RETRIES", "3"))
 DISABLE_PROXIES = os.environ.get("DISABLE_PROXIES", "0") == "1"
 
-USER_AGENT = os.environ.get("BOT_USER_AGENT", "JuliusChessBot/0.1")
+# Make your UA descriptive (project + contact)
+USER_AGENT = os.environ.get("BOT_USER_AGENT", "AlieknekChessBot/1.0 (+https://lichess.org/@/Alieknek)")
 
-# Minimum delay between successive API requests to avoid rate limiting
-API_REQUEST_DELAY = float(os.environ.get("BOT_API_REQUEST_DELAY", "1.0"))
+# Gentle extra delay between calls that we explicitly space in user code
+API_REQUEST_DELAY = float(os.environ.get("BOT_API_REQUEST_DELAY", "2.0"))
 
 # ---- Outbound challenge settings (idle-only) ----
 ENABLE_OUTBOUND_CHALLENGES = os.environ.get("OUTBOUND_ENABLED", "1") == "1"
@@ -71,10 +80,12 @@ OUTBOUND_RATED = os.environ.get("OUTBOUND_RATED", "1") == "1"
 OUTBOUND_CLOCK_LIMIT = int(os.environ.get("OUTBOUND_CLOCK_LIMIT", "180"))      # seconds (3+2 default)
 OUTBOUND_INCREMENT = int(os.environ.get("OUTBOUND_INCREMENT", "2"))
 RATING_DELTA = int(os.environ.get("OUTBOUND_RATING_DELTA", "100"))             # ± rating window
-OUTBOUND_MAX_PER_CYCLE = int(os.environ.get("OUTBOUND_MAX_PER_CYCLE", "3"))    # how many to try per cycle
-OUTBOUND_PERIOD_SEC = int(os.environ.get("OUTBOUND_PERIOD_SEC", "120"))        # how often to try
-# Avoid re-challenging the same bot within this many seconds
-OUTBOUND_COOLDOWN_SEC = int(os.environ.get("OUTBOUND_COOLDOWN_SEC", "300"))
+# Make the scanner very gentle by default
+OUTBOUND_MAX_PER_CYCLE = int(os.environ.get("OUTBOUND_MAX_PER_CYCLE", "1"))    # how many to try per cycle
+OUTBOUND_PERIOD_SEC = int(os.environ.get("OUTBOUND_PERIOD_SEC", "600"))        # how often to try (idle-only)
+OUTBOUND_COOLDOWN_SEC = int(os.environ.get("OUTBOUND_COOLDOWN_SEC", "900"))    # avoid re-challenging too soon
+# Inspect only a small random subset of online bots for rating lookups
+OUTBOUND_INSPECT_LIMIT = int(os.environ.get("OUTBOUND_INSPECT_LIMIT", "20"))
 # =================================================
 
 
@@ -176,13 +187,47 @@ def _set_trust_env(obj, value: bool):
         inner.trust_env = value
 
 
+# ---- Global rate limiting & strict serialization for NON-STREAM requests ----
+class _GlobalRateLimiter:
+    """
+    Token-bucket-ish: ensures a minimum interval between request starts,
+    and can be pushed forward (e.g., after Retry-After).
+    """
+    def __init__(self, qps: float):
+        self.min_interval = 1.0 / max(qps, 0.01)
+        self._lock = threading.Lock()
+        self._next_ts = 0.0
+
+    def wait(self):
+        with self._lock:
+            now = time.time()
+            sleep_for = max(0.0, self._next_ts - now)
+            base = max(now, self._next_ts)
+            self._next_ts = base + self.min_interval
+        if sleep_for > 0:
+            time.sleep(sleep_for + random.uniform(0.0, 0.12))  # jitter
+
+    def bump(self, seconds: float):
+        with self._lock:
+            self._next_ts = max(self._next_ts, time.time() + max(0.0, seconds))
+
+
+# Default: 0.5 qps => one call every 2s across the whole process
+BOT_QPS = float(os.environ.get("BOT_QPS", "0.5"))
+_GLOBAL_RL = _GlobalRateLimiter(qps=BOT_QPS)
+
+# This mutex guarantees **only one non-stream request in-flight at a time**.
+# (Streams are allowed concurrently by design.)
+_REQUEST_MUTEX = threading.Lock()
+
+
 def make_hardened_session(token: str) -> berserk.TokenSession:
     """
-    Create a TokenSession with robust retries for GET/POST, a larger pool,
-    default per-request timeout, and a clear User-Agent.
-    Works with both TokenSession-as-Session and TokenSession-wrapping-Session.
+    Create a TokenSession with robust retries, a global rate limiter,
+    default per-request timeout, strict serialization of NON-STREAM calls,
+    and a clear User-Agent.
     """
-    ts = berserk.TokenSession(token)  # shape varies by berserk version
+    ts = berserk.TokenSession(token)
 
     retry = _make_retry()
     adapter = HTTPAdapter(max_retries=retry, pool_maxsize=HTTP_POOL_MAXSIZE, pool_block=True)
@@ -191,14 +236,41 @@ def make_hardened_session(token: str) -> berserk.TokenSession:
     _set_headers(ts, {"User-Agent": USER_AGENT, "Accept": "application/json"})
     _set_trust_env(ts, not DISABLE_PROXIES)
 
-    # Inject a default timeout into every API call
+    # Wrap the underlying request with timeout + global pacing + 429 backoff
     _orig_request = ts.request
 
-    def _request_with_timeout(*args, **kwargs):
-        kwargs.setdefault("timeout", HTTP_TIMEOUT)
-        return _orig_request(*args, **kwargs)
+    def _request_wrapped(*args, **kwargs):
+        # Streaming endpoints (SSE/NDJSON) stay open; do NOT serialize or set a short timeout.
+        is_stream = kwargs.get("stream", False)
+        if not is_stream:
+            kwargs.setdefault("timeout", HTTP_TIMEOUT)
+            with _REQUEST_MUTEX:  # <- only one non-stream call at a time
+                _GLOBAL_RL.wait()
+                try:
+                    return _orig_request(*args, **kwargs)
+                except (berserk.exceptions.ResponseError, berserk.exceptions.ApiError) as e:
+                    status = getattr(getattr(e, "response", None), "status_code", None)
+                    if status == 429:
+                        # Honor Retry-After or fall back to 60s, and *pause all* future calls
+                        resp = getattr(e, "response", None)
+                        retry_after = None
+                        if resp is not None:
+                            ra = resp.headers.get("Retry-After")
+                            if ra and ra.isdigit():
+                                retry_after = int(ra)
+                        delay = retry_after if retry_after is not None else 600
+                        print(f"[warn] HTTP 429. Backing off {delay}s (per API rules).")
+                        _GLOBAL_RL.bump(delay)
+                        # While we hold the mutex, we sleep; this ensures no other non-stream calls happen.
+                        time.sleep(delay + random.uniform(0.0, 0.5))
+                        # Single retry after full backoff:
+                        return _orig_request(*args, **kwargs)
+                    raise
+        else:
+            # For long-lived event streams, just call through unthrottled.
+            return _orig_request(*args, **kwargs)
 
-    ts.request = _request_with_timeout
+    ts.request = _request_wrapped
     return ts
 
 
@@ -219,9 +291,7 @@ def start_engine():
     cmd = build_engine_cmd()
     print("[+] Engine command:", " ".join(shlex.quote(x) for x in cmd))
     try:
-        # No debug_log kwarg (keeps compatibility with older python-chess)
         engine = chess.engine.SimpleEngine.popen_uci(cmd)
-        # Be defensive: no pondering; add some overhead to avoid deadline misses.
         try:
             engine.configure({"Ponder": False, "MoveOverhead": 150})
         except chess.engine.EngineError:
@@ -233,7 +303,6 @@ def start_engine():
 
     print("[+] Engine started successfully")
     return engine
-
 
 
 def is_my_turn(board: chess.Board, my_color_is_white: bool) -> bool:
@@ -259,26 +328,17 @@ def calc_move_time(state: dict, my_color_is_white: bool) -> float:
     else:
         increment = float(inc_ms) / 1000.0 if inc_ms else 0.0
 
-    # Estimate how many full moves are left in the game using the moves list
     moves_str = state.get("moves", "")
     moves_played = len(moves_str.split()) if moves_str else 0
     moves_remaining = max(10, ESTIMATED_GAME_MOVES - moves_played // 2)
 
-    # Distribute remaining time across the estimated moves and add a portion
-    # of the increment.  This tends to spend more time early in the game while
-    # still safeguarding against time trouble in longer games.
     think = (remaining / moves_remaining) + 0.8 * increment
-
     return max(MOVE_TIME, min(think, max(0.2, remaining - 0.1)))
 
 
 def safe_make_move(client: berserk.Client, game_id: str, uci: str) -> bool:
-    """Attempt to post a move.
-
-    Returns ``True`` if the move was accepted by Lichess.  If the move is
-    rejected (e.g. game already over or not our turn) or if we exhaust retry
-    attempts due to transient errors, a warning is logged and ``False`` is
-    returned so the caller may decide how to proceed.
+    """
+    Attempt to post a move. True if accepted. Handles transient errors.
     """
     delay = 0.4
     last_err = None
@@ -292,16 +352,15 @@ def safe_make_move(client: berserk.Client, game_id: str, uci: str) -> bool:
             msg = str(e)
             status = getattr(getattr(e, "response", None), "status_code", None)
 
-            # Non-fatal: invalid move due to game state
             if ("Not your turn" in msg) or ("game already over" in msg) or status in (400, 409):
                 print(f"[warn] Move rejected by server (not our turn / game over). uci={uci}")
                 return False
 
-            # Game gone; treat as finished
             if status in (404, 410):
                 print(f"[warn] Game no longer available (HTTP {status}).")
                 return False
 
+            # Be careful: strong backoff on server pressure
             transient_markers = (
                 "Remote end closed connection without response",
                 "Connection aborted",
@@ -310,6 +369,9 @@ def safe_make_move(client: berserk.Client, game_id: str, uci: str) -> bool:
                 "502", "503", "504", "429",
             )
             if any(t in msg for t in transient_markers):
+                if status == 429:
+                    # Push the global limiter; don't block here for long (we’re in-game)
+                    _GLOBAL_RL.bump(60)
                 if attempt < SEND_RETRIES:
                     time.sleep(delay)
                     delay *= 1.5
@@ -344,7 +406,7 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
 
             if is_my_turn(board, my_color_is_white) and not board.is_game_over():
                 think_time = calc_move_time(state, my_color_is_white)
-                slack = 0.15  # end a bit early to avoid deadline timeouts
+                slack = 0.15
                 try:
                     result = engine.play(board, chess.engine.Limit(time=max(0.05, think_time - slack)))
                     move_sent = safe_make_move(client, game_id, result.move.uci())
@@ -434,51 +496,84 @@ def _get_perf_rating(user_json: dict, perf_key: str):
     perf = perfs.get(perf_key) or {}
     return perf.get("rating"), perf.get("prov", False)
 
+def classify_tc_from_challenge(chal: dict) -> str:
+    """
+    Return one of: 'bullet','blitz','rapid','classical','correspondence'
+    Prefer the server's perf key; fall back to estimated minutes.
+    """
+    perf_key = (chal.get("perf") or {}).get("key")
+    if perf_key in {"bullet", "blitz", "rapid", "classical", "correspondence"}:
+        return perf_key
+
+    tc = chal.get("timeControl") or {}
+    if tc.get("type") == "correspondence":
+        return "correspondence"
+
+    # Estimate clock category: base + 40*inc heuristic (minutes)
+    limit = float(tc.get("limit", 0))          # seconds
+    inc = float(tc.get("increment", 0))        # seconds
+    est_minutes = (limit + 40.0 * inc) / 60.0
+    if est_minutes < 3.0:
+        return "bullet"
+    if est_minutes <= 8.0:
+        return "blitz"
+    if est_minutes <= 25.0:
+        return "rapid"
+    return "classical"
+
+
+
 def find_similar_bots(client: berserk.Client,
                       my_username: str,
                       tc_type: str = "blitz",
-                      delta: int = 100,
-                      max_candidates: int = 5,
+                      delta: int = RATING_DELTA,
+                      max_candidates: int = 1,
                       exclude: Optional[List[str]] = None) -> List[str]:
+    """
+    Return up to `max_candidates` bot IDs close to our rating for the given TC.
+    STRICT & LIGHTWEIGHT: do not perform per-user lookups; rely only on the
+    perfs included with the online bots list. If missing, we skip that user.
+    """
     exclude = set(exclude or [])
     perf_key = PERF_FOR_TC.get(tc_type, "blitz")
 
-    # My rating
-    me = client.users.get_public_data(my_username)
+    # My rating (1 call). Cache would be nice, but we keep one call here.
+    try:
+        me = client.users.get_public_data(my_username)
+    except Exception:
+        # If even this is rate-limited, just bail this cycle.
+        return []
     time.sleep(API_REQUEST_DELAY)
     my_rating, _ = _get_perf_rating(me, perf_key)
     if not my_rating:
-        print(f"[-] No {perf_key} rating for {my_username}; falling back to 1200.")
         my_rating = 1200
 
-    # Get currently online bots (API naming differs across berserk versions)
-    bots = []
+    # Online bots (1 call)
     try:
         bots = list(client.bots.get_online_bots())
-        time.sleep(API_REQUEST_DELAY)
     except AttributeError:
         try:
-            bots = list(client.users.get_online_bots())  # rare fallback
-            time.sleep(API_REQUEST_DELAY)
+            bots = list(client.users.get_online_bots())
         except Exception:
-            pass
-
-    ids = [b.get("id") for b in bots if b.get("id") and b["id"] != my_username and b["id"] not in exclude]
+            bots = []
+    time.sleep(API_REQUEST_DELAY)
 
     matches = []
-    for uid in ids:
-        try:
-            u = client.users.get_public_data(uid)
-            r, prov = _get_perf_rating(u, perf_key)
-            if r and not prov and abs(r - my_rating) <= delta:
-                matches.append((uid, r))
-        except Exception:
+    for b in bots:
+        uid = b.get("id")
+        if not uid or uid == my_username or uid in exclude:
             continue
-        finally:
-            time.sleep(API_REQUEST_DELAY)  # be polite
+        perfs = b.get("perfs") or {}
+        perf = perfs.get(perf_key) or {}
+        r = perf.get("rating")
+        prov = perf.get("prov", False)
+        if r and not prov and abs(r - my_rating) <= delta:
+            matches.append((uid, r))
 
     matches.sort(key=lambda t: abs(t[1] - my_rating))
     return [u for (u, _) in matches[:max_candidates]]
+
+
 
 def challenge_user(client: berserk.Client,
                    opponent: str,
@@ -498,6 +593,11 @@ def challenge_user(client: berserk.Client,
         print(f"[+] Challenged {opponent} (rated={rated}, {clock_limit}+{clock_increment})")
         return True
     except (berserk.exceptions.ResponseError, berserk.exceptions.ApiError) as e:
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if status == 429:
+            # Back off hard if challenge creation is rate-limited
+            print("[warn] Challenge creation hit 429; backing off 60s.")
+            _GLOBAL_RL.bump(60)
         print(f"[-] Challenge to {opponent} rejected: {e}")
         return False
 
@@ -507,17 +607,32 @@ class ActiveCounter:
     def __init__(self):
         self._n = 0
         self._lock = threading.Lock()
+
     def inc(self):
         with self._lock:
             self._n += 1
             return self._n
+
     def dec(self):
         with self._lock:
             self._n = max(0, self._n - 1)
             return self._n
+
     def get(self):
         with self._lock:
             return self._n
+
+
+def _retry_after_from_exc(e, default_sec=60) -> int:
+    resp = getattr(e, "response", None)
+    if resp is not None:
+        ra = resp.headers.get("Retry-After") or resp.headers.get("retry-after")
+        if ra:
+            try:
+                return int(ra)
+            except ValueError:
+                pass
+    return default_sec
 
 
 def outbound_challenge_loop(stop_event: threading.Event,
@@ -527,47 +642,64 @@ def outbound_challenge_loop(stop_event: threading.Event,
     """
     Periodically find similar-rated online bots and challenge a few.
     IDLE-ONLY: will NOT challenge while any game is active.
+    Uses a persistent client and global rate limiting to avoid 429s.
+    Fully honors Retry-After by parking the loop for that duration.
     """
     if not ENABLE_OUTBOUND_CHALLENGES:
         return
-    # Track bots we've recently challenged to avoid pestering the same ones.
+
+    # Persistent client
+    session = make_hardened_session(base_token)
+    client = berserk.Client(session=session)
+
     recently_challenged: Dict[str, float] = {}
+    period = max(300, OUTBOUND_PERIOD_SEC)     # be very gentle by default
+    max_per_cycle = max(1, OUTBOUND_MAX_PER_CYCLE)
+
+    penalty_until = 0.0  # absolute timestamp; when in the penalty box
 
     while not stop_event.is_set():
         try:
-            # Prune old entries beyond the cooldown window
             now = time.time()
-            recently_challenged = {
-                u: ts for u, ts in recently_challenged.items()
-                if now - ts < OUTBOUND_COOLDOWN_SEC
-            }
 
-            # IDLE-ONLY: do nothing if we're playing any game
-            if active_counter.get() != 0:
-                # sleep the whole period; try again later
-                for _ in range(OUTBOUND_PERIOD_SEC):
+            # Respect penalty box up front
+            if now < penalty_until:
+                sleep_for = int(penalty_until - now) + 1
+                print(f"[warn] outbound in penalty box. Sleeping {sleep_for}s")
+                for _ in range(sleep_for):
                     if stop_event.is_set():
                         return
                     time.sleep(1)
                 continue
 
-            session = make_hardened_session(base_token)
-            client = berserk.Client(session=session)
+            # Cooldown map pruning
+            recently_challenged = {
+                u: ts for u, ts in recently_challenged.items()
+                if now - ts < OUTBOUND_COOLDOWN_SEC
+            }
+
+            # IDLE-ONLY
+            if active_counter.get() != 0:
+                for _ in range(period):
+                    if stop_event.is_set():
+                        return
+                    time.sleep(1)
+                continue
 
             targets = find_similar_bots(
                 client,
                 my_username=my_username,
                 tc_type=OUTBOUND_TC,
                 delta=RATING_DELTA,
-                max_candidates=OUTBOUND_MAX_PER_CYCLE,
+                max_candidates=max_per_cycle,
                 exclude=list(recently_challenged.keys()),
             )
 
             for opp in targets:
-                # still idle?
                 if active_counter.get() != 0:
                     break
-                challenge_user(
+
+                ok = challenge_user(
                     client,
                     opponent=opp,
                     rated=OUTBOUND_RATED,
@@ -575,19 +707,20 @@ def outbound_challenge_loop(stop_event: threading.Event,
                     clock_increment=OUTBOUND_INCREMENT,
                     color="random",
                 )
-                # Remember that we tried this opponent
-                recently_challenged[opp] = time.time()
-                time.sleep(API_REQUEST_DELAY)
+                if ok:
+                    recently_challenged[opp] = time.time()
+
+                # Small spacing in addition to global limiter
+                time.sleep(max(0.5, API_REQUEST_DELAY))
 
         except (berserk.exceptions.ResponseError, berserk.exceptions.ApiError) as e:
             status = getattr(getattr(e, "response", None), "status_code", None)
             if status == 429:
-                retry_after = None
-                resp = getattr(e, "response", None)
-                if resp is not None:
-                    retry_after = resp.headers.get("Retry-After")
-                delay = int(retry_after) if retry_after and retry_after.isdigit() else 60
-                print(f"[warn] outbound loop rate limited (HTTP 429). Sleeping {delay}s")
+                delay = _retry_after_from_exc(e, default_sec=600)  # default to 10 minutes if unspecified
+                print(f"[warn] outbound loop hit 429. Backing off {delay}s.")
+                _GLOBAL_RL.bump(delay)
+                penalty_until = time.time() + delay
+                # Sleep immediately (don’t try anything else this cycle)
                 for _ in range(delay):
                     if stop_event.is_set():
                         return
@@ -598,8 +731,9 @@ def outbound_challenge_loop(stop_event: threading.Event,
         except Exception as e:
             print(f"[warn] outbound loop error: {e}")
 
-        # Sleep between cycles
-        for _ in range(OUTBOUND_PERIOD_SEC):
+        # Gentle base period + jitter to avoid sync with others
+        total = period + random.randint(0, 30)
+        for _ in range(total):
             if stop_event.is_set():
                 break
             time.sleep(1)
@@ -617,6 +751,7 @@ def safe_accept_challenge(client: berserk.Client, chal_id: str) -> bool:
             return False
         print(f"[-] Accept failed for {chal_id}: {e}")
         return False
+
 
 def safe_decline_challenge(client: berserk.Client, chal_id: str, reason: str = "variant") -> bool:
     try:
@@ -656,11 +791,10 @@ def run_bot():
                 chal = event["challenge"]
                 chal_id = chal["id"]
                 variant = chal["variant"]["key"]               # "standard", "chess960", ...
-                tc_type = chal["timeControl"]["type"]          # "bullet","blitz","rapid","classical","correspondence"
+                tc_bucket = classify_tc_from_challenge(chal)   # bullet|blitz|rapid|classical|correspondence
                 rated = chal.get("rated", False)
-                challenger = chal["challenger"]["name"]
-
-                print(f"[event] Challenge from {challenger} | variant={variant} | tc={tc_type} | rated={rated}")
+                challenger = chal.get("challenger", {}).get("name") or chal.get("challenger", {}).get("id", "?")
+                print(f"[event] Challenge from {challenger} | variant={variant} | tc={tc_bucket} | rated={rated}")
 
                 accept = True
                 if variant not in ACCEPT_VARIANTS:
@@ -669,9 +803,9 @@ def run_bot():
                     accept = False
                 elif (not rated) and not ALLOW_CASUAL:
                     accept = False
-                elif (tc_type == "correspondence") and not ALLOW_CORRESPONDENCE:
+                elif (tc_bucket == "correspondence") and not ALLOW_CORRESPONDENCE:
                     accept = False
-                elif tc_type not in ACCEPT_TC_TYPES:
+                elif tc_bucket not in ACCEPT_TC_TYPES:
                     accept = False
                 elif active_counter.get() >= MAX_CONCURRENT_GAMES:
                     accept = False
@@ -679,7 +813,9 @@ def run_bot():
                 if accept:
                     safe_accept_challenge(client, chal_id)
                 else:
-                    safe_decline_challenge(client, chal_id, reason="variant")
+                    # Use a generic reason that isn't misleading
+                    reason = "later" if active_counter.get() >= MAX_CONCURRENT_GAMES else "variant"
+                    safe_decline_challenge(client, chal_id, reason=reason)
 
             elif et == "challengeCanceled":
                 chal = event.get("challenge", {})
@@ -711,6 +847,7 @@ def run_bot():
             thread.join(timeout=3.0)
         except Exception:
             pass
+
 
 
 if __name__ == "__main__":
