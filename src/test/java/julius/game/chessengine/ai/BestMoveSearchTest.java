@@ -32,7 +32,7 @@ public class BestMoveSearchTest {
                 },
                 new Object[]{
                         "4k3/1bp1bp1p/p3p3/1r1qN3/3P1p1r/2B5/PPP2PP1/R3RQK1 w - - 0 19",
-                        List.of("a3", "f3")
+                        List.of("a3", "f3", "a4")
                 },
                 new Object[]{
                         "r1bqkb1r/pppppppp/2n2n2/1P6/8/8/PBPPPPPP/RN1QKBNR b KQkq - 0 3",
