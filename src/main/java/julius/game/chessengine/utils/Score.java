@@ -64,6 +64,13 @@ public class Score {
     private static final int START_POSITION_PENALTY            = -40; // was -50
     private static final int CASTLING_BONUS                    = 20;  // further reduced
 
+    // Development tuning constants
+    private static final int DEVELOPMENT_PHASE_THRESHOLD              = 64;
+    private static final int QUEEN_DEVELOPMENT_PHASE_THRESHOLD        = 80;
+    private static final int UNDEVELOPED_MINOR_PENALTY                = -20;
+    private static final int EARLY_QUEEN_DEVELOPMENT_PENALTY_PER_MINOR = -15;
+    private static final int MIN_UNDEVELOPED_MINORS_FOR_QUEEN_PENALTY  = 2;
+
     private static final int ROOK_HALF_OPEN_FILE_BONUS = 15; // was 25
     private static final int ROOK_OPEN_FILE_BONUS      = 25; // was 35
 
@@ -163,6 +170,10 @@ public class Score {
 
     private int whiteStartingSquarePenalty = 0;
     private int blackStartingSquarePenalty = 0;
+    private int whiteMinorDevelopmentPenalty = 0;
+    private int blackMinorDevelopmentPenalty = 0;
+    private int whiteQueenDevelopmentPenalty = 0;
+    private int blackQueenDevelopmentPenalty = 0;
 
     // State bonuses
     private int whiteStateBonus = 0;
@@ -178,6 +189,8 @@ public class Score {
     private static final long INITIAL_BLACK_BISHOP_POSITION = 0x2400000000000000L; // Bishops on c8 and f8
     private static final long INITIAL_WHITE_ROOK_POSITION = 0x0000000000000081L; // Rooks on a1 and h1
     private static final long INITIAL_BLACK_ROOK_POSITION = 0x8100000000000000L; // Rooks on a8 and h8
+    private static final long INITIAL_WHITE_QUEEN_POSITION = 1L << bitIndex('d', 1);
+    private static final long INITIAL_BLACK_QUEEN_POSITION = 1L << bitIndex('d', 8);
 
 
     // Cache for pawn structure evaluations to avoid recomputation
@@ -289,6 +302,10 @@ public class Score {
         this.blackKingsPosition = other.blackKingsPosition;
         this.whiteStartingSquarePenalty = other.whiteStartingSquarePenalty;
         this.blackStartingSquarePenalty = other.blackStartingSquarePenalty;
+        this.whiteMinorDevelopmentPenalty = other.whiteMinorDevelopmentPenalty;
+        this.blackMinorDevelopmentPenalty = other.blackMinorDevelopmentPenalty;
+        this.whiteQueenDevelopmentPenalty = other.whiteQueenDevelopmentPenalty;
+        this.blackQueenDevelopmentPenalty = other.blackQueenDevelopmentPenalty;
 
         this.whiteStateBonus = other.whiteStateBonus;
         this.blackStateBonus = other.blackStateBonus;
@@ -378,6 +395,10 @@ public class Score {
 
         updateStartingSquarePenaltyWhite(whiteKnights, whiteBishops, whiteRooks);
         updateStartingSquarePenaltyBlack(blackKnights, blackBishops, blackRooks);
+        updateMinorDevelopmentPenaltyWhite(whiteKnights, whiteBishops, phase);
+        updateMinorDevelopmentPenaltyBlack(blackKnights, blackBishops, phase);
+        updateQueenDevelopmentPenaltyWhite(whiteQueens, whiteKnights, whiteBishops, phase);
+        updateQueenDevelopmentPenaltyBlack(blackQueens, blackKnights, blackBishops, phase);
 
         // Mobility and king safety
         updateMobilityScores(bitBoard);
@@ -428,6 +449,8 @@ public class Score {
         totalWhiteScore += whiteQueensPosition;
         totalWhiteScore += whiteKingsPosition;
         totalWhiteScore += whiteStartingSquarePenalty;
+        totalWhiteScore += whiteMinorDevelopmentPenalty;
+        totalWhiteScore += whiteQueenDevelopmentPenalty;
 
         totalWhiteScore += whiteMobilityScore;
         totalWhiteScore += whiteKingSafetyScore;
@@ -474,6 +497,8 @@ public class Score {
         totalBlackScore += blackQueensPosition;
         totalBlackScore += blackKingsPosition;
         totalBlackScore += blackStartingSquarePenalty;
+        totalBlackScore += blackMinorDevelopmentPenalty;
+        totalBlackScore += blackQueenDevelopmentPenalty;
 
         totalBlackScore += blackMobilityScore;
         totalBlackScore += blackKingSafetyScore;
@@ -884,6 +909,54 @@ public class Score {
         }
     }
 
+    private void updateMinorDevelopmentPenaltyWhite(long whiteKnights, long whiteBishops, int phase) {
+        if (phase >= DEVELOPMENT_PHASE_THRESHOLD) {
+            int undeveloped = Long.bitCount(whiteKnights & INITIAL_WHITE_KNIGHT_POSITION)
+                    + Long.bitCount(whiteBishops & INITIAL_WHITE_BISHOP_POSITION);
+            whiteMinorDevelopmentPenalty = undeveloped * UNDEVELOPED_MINOR_PENALTY;
+        } else {
+            whiteMinorDevelopmentPenalty = 0;
+        }
+    }
+
+    private void updateMinorDevelopmentPenaltyBlack(long blackKnights, long blackBishops, int phase) {
+        if (phase >= DEVELOPMENT_PHASE_THRESHOLD) {
+            int undeveloped = Long.bitCount(blackKnights & INITIAL_BLACK_KNIGHT_POSITION)
+                    + Long.bitCount(blackBishops & INITIAL_BLACK_BISHOP_POSITION);
+            blackMinorDevelopmentPenalty = undeveloped * UNDEVELOPED_MINOR_PENALTY;
+        } else {
+            blackMinorDevelopmentPenalty = 0;
+        }
+    }
+
+    private void updateQueenDevelopmentPenaltyWhite(long whiteQueens, long whiteKnights, long whiteBishops, int phase) {
+        if (phase <= QUEEN_DEVELOPMENT_PHASE_THRESHOLD
+                && Long.bitCount(whiteQueens) > 0
+                && (whiteQueens & INITIAL_WHITE_QUEEN_POSITION) == 0) {
+            int undevelopedMinors = Long.bitCount(whiteKnights & INITIAL_WHITE_KNIGHT_POSITION)
+                    + Long.bitCount(whiteBishops & INITIAL_WHITE_BISHOP_POSITION);
+            if (undevelopedMinors >= MIN_UNDEVELOPED_MINORS_FOR_QUEEN_PENALTY) {
+                whiteQueenDevelopmentPenalty = undevelopedMinors * EARLY_QUEEN_DEVELOPMENT_PENALTY_PER_MINOR;
+                return;
+            }
+        }
+        whiteQueenDevelopmentPenalty = 0;
+    }
+
+    private void updateQueenDevelopmentPenaltyBlack(long blackQueens, long blackKnights, long blackBishops, int phase) {
+        if (phase <= QUEEN_DEVELOPMENT_PHASE_THRESHOLD
+                && Long.bitCount(blackQueens) > 0
+                && (blackQueens & INITIAL_BLACK_QUEEN_POSITION) == 0) {
+            int undevelopedMinors = Long.bitCount(blackKnights & INITIAL_BLACK_KNIGHT_POSITION)
+                    + Long.bitCount(blackBishops & INITIAL_BLACK_BISHOP_POSITION);
+            if (undevelopedMinors >= MIN_UNDEVELOPED_MINORS_FOR_QUEEN_PENALTY) {
+                blackQueenDevelopmentPenalty = undevelopedMinors * EARLY_QUEEN_DEVELOPMENT_PENALTY_PER_MINOR;
+                return;
+            }
+        }
+        blackQueenDevelopmentPenalty = 0;
+    }
+
     public void updateMobilityScores(int whiteScore, int blackScore) {
         whiteMobilityScore = whiteScore;
         blackMobilityScore = blackScore;
@@ -1193,6 +1266,7 @@ public class Score {
         long whiteKnights = bitBoard.getWhiteKnights();
         long whiteBishops = bitBoard.getWhiteBishops();
         long whiteRooks = bitBoard.getWhiteRooks();
+        long whiteQueens = bitBoard.getWhiteQueens();
         long whitePawns = bitBoard.getWhitePawns();
         long blackPawns = bitBoard.getBlackPawns();
         int phase = bitBoard.getPhase();
@@ -1200,12 +1274,15 @@ public class Score {
         updateKnightsPositionBonusWhite(whiteKnights, phase);
         updateKnightOutpostBonusWhite(whiteKnights, whitePawns, blackPawns);
         updateStartingSquarePenaltyWhite(whiteKnights, whiteBishops, whiteRooks);
+        updateMinorDevelopmentPenaltyWhite(whiteKnights, whiteBishops, phase);
+        updateQueenDevelopmentPenaltyWhite(whiteQueens, whiteKnights, whiteBishops, phase);
     }
 
     public void updateBlackKnightValues(BitBoard bitBoard) {
         long blackKnights = bitBoard.getBlackKnights();
         long blackBishops = bitBoard.getBlackBishops();
         long blackRooks = bitBoard.getBlackRooks();
+        long blackQueens = bitBoard.getBlackQueens();
         long blackPawns = bitBoard.getBlackPawns();
         long whitePawns = bitBoard.getWhitePawns();
         int phase = bitBoard.getPhase();
@@ -1213,28 +1290,36 @@ public class Score {
         updateKnightsPositionBonusBlack(blackKnights, phase);
         updateKnightOutpostBonusBlack(blackKnights, blackPawns, whitePawns);
         updateStartingSquarePenaltyBlack(blackKnights, blackBishops, blackRooks);
+        updateMinorDevelopmentPenaltyBlack(blackKnights, blackBishops, phase);
+        updateQueenDevelopmentPenaltyBlack(blackQueens, blackKnights, blackBishops, phase);
     }
 
     public void updateWhiteBishopValues(BitBoard bitBoard) {
         long whiteBishops = bitBoard.getWhiteBishops();
         long whiteKnights = bitBoard.getWhiteKnights();
         long whiteRooks = bitBoard.getWhiteRooks();
+        long whiteQueens = bitBoard.getWhiteQueens();
         int phase = bitBoard.getPhase();
         this.whiteBishopsAmountScore = Long.bitCount(whiteBishops) * BISHOP_VALUE;
         updateBishopsPositionBonusWhite(whiteBishops, phase);
         updateStartingSquarePenaltyWhite(whiteKnights, whiteBishops, whiteRooks);
         whiteBishopPairBonus = Long.bitCount(whiteBishops) == 2 ? BISHOP_PAIR_BONUS : 0;
+        updateMinorDevelopmentPenaltyWhite(whiteKnights, whiteBishops, phase);
+        updateQueenDevelopmentPenaltyWhite(whiteQueens, whiteKnights, whiteBishops, phase);
     }
 
     public void updateBlackBishopValues(BitBoard bitBoard) {
         long blackBishops = bitBoard.getBlackBishops();
         long blackKnights = bitBoard.getBlackKnights();
         long blackRooks = bitBoard.getBlackRooks();
+        long blackQueens = bitBoard.getBlackQueens();
         int phase = bitBoard.getPhase();
         this.blackBishopsAmountScore = Long.bitCount(blackBishops) * BISHOP_VALUE;
         updateBishopsPositionBonusBlack(blackBishops, phase);
         updateStartingSquarePenaltyBlack(blackKnights, blackBishops, blackRooks);
         blackBishopPairBonus = Long.bitCount(blackBishops) == 2 ? BISHOP_PAIR_BONUS : 0;
+        updateMinorDevelopmentPenaltyBlack(blackKnights, blackBishops, phase);
+        updateQueenDevelopmentPenaltyBlack(blackQueens, blackKnights, blackBishops, phase);
     }
 
     public void updateWhiteRookValues(BitBoard bitBoard) {
@@ -1246,6 +1331,7 @@ public class Score {
         long whiteKnights = bitBoard.getWhiteKnights();
         long whiteBishops = bitBoard.getWhiteBishops();
         long whiteRooks = bitBoard.getWhiteRooks();
+        long whiteQueens = bitBoard.getWhiteQueens();
 
         boolean isCastled = bitBoard.isWhiteKingHasCastled();
         boolean isWhiteKingHasMoved = bitBoard.isWhiteKingMoved();
@@ -1263,6 +1349,8 @@ public class Score {
 
         updateStartingSquarePenaltyWhite(whiteKnights, whiteBishops, whiteRooks);
         updateKingValuesWhite(whiteKing, whitePawns, blackPawns, isCastled, isWhiteKingHasMoved, rookA1Moved, rookH1Moved, phase);
+        updateMinorDevelopmentPenaltyWhite(whiteKnights, whiteBishops, phase);
+        updateQueenDevelopmentPenaltyWhite(whiteQueens, whiteKnights, whiteBishops, phase);
     }
 
     public void updateBlackRookValues(BitBoard bitBoard) {
@@ -1273,6 +1361,7 @@ public class Score {
         long blackKnights = bitBoard.getBlackKnights();
         long blackBishops = bitBoard.getBlackBishops();
         long blackRooks = bitBoard.getBlackRooks();
+        long blackQueens = bitBoard.getBlackQueens();
 
         boolean isCastled = bitBoard.isBlackKingHasCastled();
         boolean isBlackKingMoved = bitBoard.isBlackKingMoved();
@@ -1289,20 +1378,30 @@ public class Score {
 
         updateStartingSquarePenaltyBlack(blackKnights, blackBishops, blackRooks);
         updateKingValuesBlack(blackKing, blackPawns, whitePawns, isCastled, isBlackKingMoved, rookA8Moved, rookH8Moved, phase);
+        updateMinorDevelopmentPenaltyBlack(blackKnights, blackBishops, phase);
+        updateQueenDevelopmentPenaltyBlack(blackQueens, blackKnights, blackBishops, phase);
     }
 
     public void updateWhiteQueenValues(BitBoard bitBoard) {
         long whiteQueens = bitBoard.getWhiteQueens();
+        long whiteKnights = bitBoard.getWhiteKnights();
+        long whiteBishops = bitBoard.getWhiteBishops();
         int phase = bitBoard.getPhase();
         this.whiteQueensAmountScore = Long.bitCount(whiteQueens) * QUEEN_VALUE;
         updateQueensPositionBonusWhite(whiteQueens, phase);
+        updateQueenDevelopmentPenaltyWhite(whiteQueens, whiteKnights, whiteBishops, phase);
+        updateMinorDevelopmentPenaltyWhite(whiteKnights, whiteBishops, phase);
     }
 
     public void updateBlackQueenValues(BitBoard bitBoard) {
         long blackQueens = bitBoard.getBlackQueens();
+        long blackKnights = bitBoard.getBlackKnights();
+        long blackBishops = bitBoard.getBlackBishops();
         int phase = bitBoard.getPhase();
         this.blackQueensAmountScore = Long.bitCount(blackQueens) * QUEEN_VALUE;
         updateQueensPositionBonusBlack(blackQueens, phase);
+        updateQueenDevelopmentPenaltyBlack(blackQueens, blackKnights, blackBishops, phase);
+        updateMinorDevelopmentPenaltyBlack(blackKnights, blackBishops, phase);
     }
 
     public void applyMove(BitBoard bitBoard, int move, GameStateEnum state) {
