@@ -138,6 +138,7 @@ public class AI {
     private int rootDepthForMateScoring = 0;
 
     public AI(Engine mainEngine) {
+        log.info("### SearchThreads = " + searchThreads);
         this.mainEngine = mainEngine;
         this.timeLimit = 50;
 

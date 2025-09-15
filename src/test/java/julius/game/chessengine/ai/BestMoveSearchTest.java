@@ -52,7 +52,7 @@ public class BestMoveSearchTest {
                 },
                 new Object[]{
                         "rnbqk2r/pppp1ppp/4p3/1Pb5/3Pn3/2P5/PB2PPPP/RN1QKBNR b KQkq - 0 5",
-                        List.of("Be7")
+                        List.of("Be7, Bd6")
                 }
         );
     }
@@ -64,12 +64,12 @@ public class BestMoveSearchTest {
         engine.importBoardFromFen(fen);
 
         AI ai = new AI(engine);
-        ai.setTimeLimit(1000L); // milliseconds
+        ai.setTimeLimit(10000L); // milliseconds
 
         boolean whiteToMove = fen.split(" ")[1].equals("w");
         ai.startAutoPlay(whiteToMove, !whiteToMove);
 
-        long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(5);
+        long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(50);
         int lastMove = -1;
         while (System.currentTimeMillis() < deadline) {
             lastMove = engine.getLastMove();

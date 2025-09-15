@@ -125,7 +125,7 @@ def build_engine_cmd() -> List[str]:
     java_opts = [
         f"-Dchessengine.searchThreads={SEARCH_THREADS}",
         f"-Dchessengine.rootParallelLimit={ROOT_PAR_LIMIT}",
-        "-Dlogging.level.root=ERROR",
+        "-Dlogging.level.root=INFO",
     ]
 
     # Note: with -jar the main class argument is ignored; drop it.
