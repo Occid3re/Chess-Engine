@@ -61,6 +61,9 @@ DISABLE_PROXIES = os.environ.get("DISABLE_PROXIES", "0") == "1"
 
 USER_AGENT = os.environ.get("BOT_USER_AGENT", "JuliusChessBot/0.1")
 
+# Minimum delay between successive API requests to avoid rate limiting
+API_REQUEST_DELAY = float(os.environ.get("BOT_API_REQUEST_DELAY", "1.0"))
+
 # ---- Outbound challenge settings (idle-only) ----
 ENABLE_OUTBOUND_CHALLENGES = os.environ.get("OUTBOUND_ENABLED", "1") == "1"
 OUTBOUND_TC = os.environ.get("OUTBOUND_TC", "blitz")        # bullet|blitz|rapid|classical
@@ -442,6 +445,7 @@ def find_similar_bots(client: berserk.Client,
 
     # My rating
     me = client.users.get_public_data(my_username)
+    time.sleep(API_REQUEST_DELAY)
     my_rating, _ = _get_perf_rating(me, perf_key)
     if not my_rating:
         print(f"[-] No {perf_key} rating for {my_username}; falling back to 1200.")
@@ -451,9 +455,11 @@ def find_similar_bots(client: berserk.Client,
     bots = []
     try:
         bots = list(client.bots.get_online_bots())
+        time.sleep(API_REQUEST_DELAY)
     except AttributeError:
         try:
             bots = list(client.users.get_online_bots())  # rare fallback
+            time.sleep(API_REQUEST_DELAY)
         except Exception:
             pass
 
@@ -468,7 +474,8 @@ def find_similar_bots(client: berserk.Client,
                 matches.append((uid, r))
         except Exception:
             continue
-        time.sleep(0.2)  # be polite
+        finally:
+            time.sleep(API_REQUEST_DELAY)  # be polite
 
     matches.sort(key=lambda t: abs(t[1] - my_rating))
     return [u for (u, _) in matches[:max_candidates]]
@@ -570,7 +577,7 @@ def outbound_challenge_loop(stop_event: threading.Event,
                 )
                 # Remember that we tried this opponent
                 recently_challenged[opp] = time.time()
-                time.sleep(1.0)
+                time.sleep(API_REQUEST_DELAY)
 
         except (berserk.exceptions.ResponseError, berserk.exceptions.ApiError) as e:
             status = getattr(getattr(e, "response", None), "status_code", None)
