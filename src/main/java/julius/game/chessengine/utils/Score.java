@@ -32,7 +32,7 @@ import static julius.game.chessengine.helper.BitHelper.bitIndex;
 public class Score {
 
     public static final int CHECKMATE = 100000;
-    public static final int CHECK = 50;     // was 100; lighter is more stable
+    public static final int CHECK = 0;
     public static final int DRAW = 0;
 
     public static final int KILLER_MOVE_SCORE = 10000;
@@ -893,15 +893,6 @@ public class Score {
         int blackScore = calculateMobility(moves);
 
         updateMobilityScores(whiteScore, blackScore);
-
-        // Detect stalemate by verifying if any legal moves exist. We only
-        // search until the first legal move is found, keeping the check cheap.
-        if (hasNoLegalMove(bitBoard, false) && !bitBoard.isInCheck(false)) {
-            whiteStateBonus += CHECK;
-        }
-        if (hasNoLegalMove(bitBoard, true) && !bitBoard.isInCheck(true)) {
-            blackStateBonus += CHECK;
-        }
     }
 
     private int calculateMobility(MoveList moves) {
@@ -1403,9 +1394,7 @@ public class Score {
     }
 
     public void updateStateValuesWhite(GameStateEnum state) {
-        if (state.equals(GameStateEnum.BLACK_IN_CHECK)) {
-            whiteStateBonus = CHECK;
-        } else if (state.equals(GameStateEnum.WHITE_WON)) {
+        if (state.equals(GameStateEnum.WHITE_WON)) {
             whiteStateBonus = CHECKMATE;
         } else {
             whiteStateBonus = 0;
@@ -1413,9 +1402,7 @@ public class Score {
     }
 
     public void updateStateValuesBlack(GameStateEnum state) {
-        if (state.equals(GameStateEnum.WHITE_IN_CHECK)) {
-            blackStateBonus = CHECK;
-        } else if (state.equals(GameStateEnum.BLACK_WON)) {
+        if (state.equals(GameStateEnum.BLACK_WON)) {
             blackStateBonus = CHECKMATE;
         } else {
             blackStateBonus = 0;
