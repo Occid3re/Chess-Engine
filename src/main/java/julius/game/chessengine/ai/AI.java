@@ -967,6 +967,16 @@ public class AI {
 
             boolean isCapture = MoveHelper.isCapture(move);
             boolean isPromotion = MoveHelper.isPawnPromotionMove(move);
+            boolean isQuiet = !isCapture && !isPromotion;
+
+            // Skip obviously losing captures or quiet moves based on SEE, unless the move gives check or is a promotion
+            boolean seePruneCandidate = (!inCheckAtNode && isCapture && !isPromotion) || isQuiet;
+            if (seePruneCandidate && seeGain < 0) {
+                simulatorEngine.performMove(move);
+                boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
+                simulatorEngine.undoLastMove();
+                if (!givesCheck) continue;
+            }
 
             BitBoard boardBefore = simulatorEngine.getBitBoard();
             long enemyKingBB = isWhite ? boardBefore.getBlackKing() : boardBefore.getWhiteKing();
@@ -980,18 +990,6 @@ public class AI {
             int pawnsOnFileBefore = (enemyKingSquare >= 0 && affectsKingFilePawns)
                     ? countPawnsOnFile(boardBefore, kingFileMask)
                     : 0;
-
-            // Skip obviously losing captures based on SEE, unless the move gives check or is a promotion
-            if (!inCheckAtNode && isCapture && !isPromotion) {
-                // only prune clearly losing captures; keep equal trades
-                if (seeGain < 0) {
-                    // but allow if it gives check (very tactical)
-                    simulatorEngine.performMove(move);
-                    boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
-                    simulatorEngine.undoLastMove();
-                    if (!givesCheck) continue;
-                }
-            }
             boolean isTactical = isCapture || isPromotion;
             int lmpThreshold = 8 + depth * 2;
             if (!inCheckAtNode && !isTactical && depth <= 3 && index > lmpThreshold) {
@@ -1150,7 +1148,16 @@ public class AI {
 
             boolean isCapture = MoveHelper.isCapture(move);
             boolean isPromotion = MoveHelper.isPawnPromotionMove(move);
-            boolean isTactical = isCapture || isPromotion;
+            boolean isQuiet = !isCapture && !isPromotion;
+
+            // Skip obviously losing captures or quiet moves based on SEE, unless the move gives check or is a promotion
+            boolean seePruneCandidate = (!inCheckAtNode && isCapture && !isPromotion) || isQuiet;
+            if (seePruneCandidate && seeGain < 0) {
+                simulatorEngine.performMove(move);
+                boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
+                simulatorEngine.undoLastMove();
+                if (!givesCheck) continue;
+            }
 
             BitBoard boardBefore = simulatorEngine.getBitBoard();
             long enemyKingBB = isWhite ? boardBefore.getBlackKing() : boardBefore.getWhiteKing();
@@ -1165,16 +1172,7 @@ public class AI {
                     ? countPawnsOnFile(boardBefore, kingFileMask)
                     : 0;
 
-            if (!inCheckAtNode && isCapture && !isPromotion) {
-                // only prune clearly losing captures; keep equal trades
-                if (seeGain < 0) {
-                    // but allow if it gives check (very tactical)
-                    simulatorEngine.performMove(move);
-                    boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
-                    simulatorEngine.undoLastMove();
-                    if (!givesCheck) continue;
-                }
-            }
+            boolean isTactical = isCapture || isPromotion;
 
             simulatorEngine.performMove(move);
             long newBoardHash = simulatorEngine.getBoardStateHash();
@@ -1519,8 +1517,12 @@ public class AI {
                 simulatorEngine);
 
         for (int m : ordered) {
-            // --- SEE pruning: drop clearly losing captures (keeps promotions) ---
-            if (!inCheck && MoveHelper.isCapture(m) && !MoveHelper.isPawnPromotionMove(m)) {
+            boolean isCapture = MoveHelper.isCapture(m);
+            boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
+            boolean isQuiet = !isCapture && !isPromotion;
+
+            // --- SEE pruning: drop clearly losing captures or quiet moves (keeps promotions) ---
+            if ((!inCheck && isCapture && !isPromotion) || isQuiet) {
                 int see = simulatorEngine.see(m);
                 if (see < 0) {
                     simulatorEngine.performMove(m);
