@@ -65,8 +65,6 @@ public class GameState {
         if (isThreefoldRepetition() || isFiftyMoveRule()) {
             this.state = GameStateEnum.DRAW;
         }
-
-        updateScore(bitBoard, move);
     }
 
     public void updateState(BitBoard bitBoard, MoveList legalMoves, boolean isOpeningMove) {
@@ -92,105 +90,6 @@ public class GameState {
         }
     }
 
-    public void updateScore(BitBoard bitBoard, int move) {
-        //reset cached score
-        score.resetCachedScoreDifference();
-
-        boolean isWhite = MoveHelper.isWhitesMove(move);
-        int pieceTypeBits = MoveHelper.derivePieceTypeBits(move);
-        int capturedPieceTypeBits = MoveHelper.deriveCapturedPieceTypeBits(move);
-        int promotionPieceTypeBits = MoveHelper.derivePromotionPieceTypeBits(move);
-
-        updatePieceValues(isWhite, pieceTypeBits, bitBoard, state);
-
-        if (capturedPieceTypeBits != 0) {
-            updateCapturedPieceValues(isWhite, capturedPieceTypeBits, bitBoard);
-        }
-        if (promotionPieceTypeBits != 0) {
-            updatePromotionPieceValues(isWhite, promotionPieceTypeBits, bitBoard);
-        }
-
-        log.debug("Piecetype: {}, CapturedType: {}, ScoreWhite: {}, ScoreBlack: {}",
-                pieceTypeBits, capturedPieceTypeBits, score.calculateTotalWhiteScore(), score.calculateTotalBlackScore());
-    }
-
-    private void updatePieceValues(boolean isWhite, int pieceTypeBits, BitBoard bitBoard, GameStateEnum state) {
-        if (isWhite) {
-/*            //TODO check if this could be done more efficient
-            int agilityWhite = bitBoard.generateAllPossibleMoves(true).size();*/
-
-            updateValuesForWhite(pieceTypeBits, bitBoard);
-/*            score.updateAgilityBonusWhite(agilityWhite);*/
-            score.updateStateValuesWhite(state);
-
-        } else {
-/*            //TODO check if this could be done more efficient
-            int agilityBlack = bitBoard.generateAllPossibleMoves(false).size();*/
-
-            updateValuesForBlack(pieceTypeBits, bitBoard);
-/*            score.updateAgilityBonusBlack(agilityBlack);*/
-            score.updateStateValuesBlack(state);
-        }
-
-
-    }
-
-    private void updateValuesForWhite(int pieceTypeBits, BitBoard bitBoard) {
-        int phase = bitBoard.getPhase();
-        switch (pieceTypeBits) {
-            case 1: score.updateWhitePawnValues(bitBoard); break;
-            case 2: score.updateWhiteKnightValues(bitBoard); break;
-            case 3: score.updateWhiteBishopValues(bitBoard); break;
-            case 4: score.updateWhiteRookValues(bitBoard); break;
-            case 5: score.updateWhiteQueenValues(bitBoard); break;
-            case 6: score.updateKingValuesWhite(bitBoard.getWhiteKing(), bitBoard.isWhiteKingHasCastled(), bitBoard.isWhiteKingMoved(), bitBoard.isWhiteRookA1Moved(), bitBoard.isWhiteRookH1Moved(), phase); break;
-            default: break; // Optionally handle default case
-        }
-    }
-
-    private void updateValuesForBlack(int pieceTypeBits, BitBoard bitBoard) {
-        int phase = bitBoard.getPhase();
-        switch (pieceTypeBits) {
-            case 1: score.updateBlackPawnValues(bitBoard); break;
-            case 2: score.updateBlackKnightValues(bitBoard); break;
-            case 3: score.updateBlackBishopValues(bitBoard); break;
-            case 4: score.updateBlackRookValues(bitBoard); break;
-            case 5: score.updateBlackQueenValues(bitBoard); break;
-            case 6: score.updateKingValuesBlack(bitBoard.getBlackKing(), bitBoard.isBlackKingHasCastled(), bitBoard.isBlackKingMoved(), bitBoard.isBlackRookA8Moved(), bitBoard.isBlackRookH8Moved(), phase); break;
-            default: break; // Optionally handle default case
-        }
-    }
-
-    private void updateCapturedPieceValues(boolean isWhite, int capturedPieceTypeBits, BitBoard bitBoard) {
-
-
-        if (isWhite) {
-            //TODO check if this could be done more efficient
-/*
-            int agilityBlack = bitBoard.generateAllPossibleMoves(false).size();
-            score.updateAgilityBonusBlack(agilityBlack);
-*/
-
-            updateValuesForBlack(capturedPieceTypeBits, bitBoard); // Update black pieces if white is capturing
-        } else {
-            //TODO check if this could be done more efficient
-/*
-            int agilityWhite = bitBoard.generateAllPossibleMoves(true).size();
-            score.updateAgilityBonusBlack(agilityWhite);
-*/
-
-            updateValuesForWhite(capturedPieceTypeBits, bitBoard); // Update white pieces if black is capturing
-        }
-    }
-
-    private void updatePromotionPieceValues(boolean isWhite, int promotionPieceTypeBits, BitBoard bitBoard) {
-        if (isWhite) {
-            updateValuesForWhite(promotionPieceTypeBits, bitBoard); // Update white pieces if black is capturing
-
-        } else {
-            updateValuesForBlack(promotionPieceTypeBits, bitBoard); // Update black pieces if white is capturing
-        }
-    }
 
 
     /**
