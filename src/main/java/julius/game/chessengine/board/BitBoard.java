@@ -413,7 +413,6 @@ public class BitBoard {
             else if (attBishops != 0) { fromBB = attBishops; attBits = 3; }
             else if (attRooks != 0)   { fromBB = attRooks;   attBits = 4; }
             else if (attQueens != 0)  { fromBB = attQueens;  attBits = 5; }
-            else if (attKing != 0)    { fromBB = attKing;    attBits = 6; }
             else break; // no more recaptures
 
             int attFrom = Long.numberOfTrailingZeros(fromBB);

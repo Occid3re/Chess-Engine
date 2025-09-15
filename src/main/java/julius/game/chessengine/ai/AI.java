@@ -913,11 +913,17 @@ public class AI {
             // Skip obviously losing captures based on SEE, unless the move gives check or is a promotion
             if (!inCheckAtNode && isCapture && !isPromotion) {
                 int see = simulatorEngine.see(move);
-                if (see < 0) continue;
-                // tiny margin helps drop "equal on paper but terrible" grabs
-                if (see == 0 && Score.getPieceValue(MoveHelper.derivePieceTypeBits(move)) > 2) continue;
-            }
 
+                // only prune clearly losing captures; keep equal trades
+                if (see < 0) {
+                    // but allow if it gives check (very tactical)
+                    simulatorEngine.performMove(move);
+                    boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
+                    simulatorEngine.undoLastMove();
+                    if (!givesCheck) continue;
+                }
+                // remove the 'see == 0 and attacker > 2' prune entirely
+            }
             boolean isTactical = isCapture || isPromotion;
             int lmpThreshold = 8 + depth * 2;
             if (!inCheckAtNode && !isTactical && depth <= 3 && index > lmpThreshold) {
@@ -957,26 +963,38 @@ public class AI {
                 // PVS windows as you had them
                 boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
                 double pAlpha = alpha;
-                double pBeta  = usePvs ? (alpha + 1) : beta;
+                double pBeta = usePvs ? (alpha + 1) : beta;
 
                 if (canReduce) {
                     int r = lmrReduction(nextDepth, index);
                     int reduced = Math.max(1, nextDepth - r);
                     eval = alphaBeta(simulatorEngine, reduced, pAlpha, pBeta, !isWhite, deadline, move);
-                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                    if (eval == EXIT_FLAG || positionChanged()) {
+                        simulatorEngine.undoLastMove();
+                        return EXIT_FLAG;
+                    }
 
                     boolean promising = eval > alpha;
                     if (promising) {
                         eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, usePvs ? beta : pBeta, !isWhite, deadline, move);
-                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                        if (eval == EXIT_FLAG || positionChanged()) {
+                            simulatorEngine.undoLastMove();
+                            return EXIT_FLAG;
+                        }
                     }
                 } else {
                     // No reduction for checks/queen-threats/tacticals
                     eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline, move);
-                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                    if (eval == EXIT_FLAG || positionChanged()) {
+                        simulatorEngine.undoLastMove();
+                        return EXIT_FLAG;
+                    }
                     if (usePvs && eval > alpha && eval < beta) {
                         eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline, move);
-                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                        if (eval == EXIT_FLAG || positionChanged()) {
+                            simulatorEngine.undoLastMove();
+                            return EXIT_FLAG;
+                        }
                     }
                 }
             }
@@ -1045,8 +1063,16 @@ public class AI {
 
             if (!inCheckAtNode && isCapture && !isPromotion) {
                 int see = simulatorEngine.see(move);
-                if (see < 0) continue;
-                if (see == 0 && Score.getPieceValue(MoveHelper.derivePieceTypeBits(move)) > 2) continue;
+
+                // only prune clearly losing captures; keep equal trades
+                if (see < 0) {
+                    // but allow if it gives check (very tactical)
+                    simulatorEngine.performMove(move);
+                    boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
+                    simulatorEngine.undoLastMove();
+                    if (!givesCheck) continue;
+                }
+                // remove the 'see == 0 and attacker > 2' prune entirely
             }
 
             simulatorEngine.performMove(move);
@@ -1082,20 +1108,32 @@ public class AI {
                     int reduced = Math.max(1, nextDepth - r);
 
                     eval = alphaBeta(simulatorEngine, reduced, pAlpha, pBeta, !isWhite, deadline, move);
-                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                    if (eval == EXIT_FLAG || positionChanged()) {
+                        simulatorEngine.undoLastMove();
+                        return EXIT_FLAG;
+                    }
 
                     boolean promising = eval < beta;
                     if (promising) {
                         eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, usePvs ? beta : pBeta, !isWhite, deadline, move);
-                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                        if (eval == EXIT_FLAG || positionChanged()) {
+                            simulatorEngine.undoLastMove();
+                            return EXIT_FLAG;
+                        }
                     }
                 } else {
                     eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline, move);
-                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                    if (eval == EXIT_FLAG || positionChanged()) {
+                        simulatorEngine.undoLastMove();
+                        return EXIT_FLAG;
+                    }
 
                     if (usePvs && eval > alpha && eval < beta) {
                         eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline, move);
-                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                        if (eval == EXIT_FLAG || positionChanged()) {
+                            simulatorEngine.undoLastMove();
+                            return EXIT_FLAG;
+                        }
                     }
                 }
             }
@@ -1343,8 +1381,10 @@ public class AI {
             if (!inCheck && MoveHelper.isCapture(m) && !MoveHelper.isPawnPromotionMove(m)) {
                 int see = simulatorEngine.see(m);
                 if (see < 0) {
-                    // hopeless capture → prune
-                    continue;
+                    simulatorEngine.performMove(m);
+                    boolean givesCheck = isSideInCheck(simulatorEngine, !isWhitesTurn);
+                    simulatorEngine.undoLastMove();
+                    if (!givesCheck) continue;
                 }
             }
             simulatorEngine.performMove(m);
