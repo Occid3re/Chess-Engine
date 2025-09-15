@@ -579,6 +579,22 @@ def outbound_challenge_loop(stop_event: threading.Event,
                 )
                 time.sleep(1.0)
 
+        except (berserk.exceptions.ResponseError, berserk.exceptions.ApiError) as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status == 429:
+                retry_after = None
+                resp = getattr(e, "response", None)
+                if resp is not None:
+                    retry_after = resp.headers.get("Retry-After")
+                delay = int(retry_after) if retry_after and retry_after.isdigit() else 60
+                print(f"[warn] outbound loop rate limited (HTTP 429). Sleeping {delay}s")
+                for _ in range(delay):
+                    if stop_event.is_set():
+                        return
+                    time.sleep(1)
+                continue
+            else:
+                print(f"[warn] outbound loop error: {e}")
         except Exception as e:
             print(f"[warn] outbound loop error: {e}")
 
