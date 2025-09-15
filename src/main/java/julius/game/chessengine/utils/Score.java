@@ -42,6 +42,8 @@ public class Score {
     private static final int ADVANCED_PAWN_BONUS   = 8;   // was 10
     private static final int BLOCKED_PAWN_PENALTY  = -10; // was -8
     private static final int BACKWARD_PAWN_PENALTY = -12; // ok
+    private static final int CONNECTED_PAWN_BONUS  = 8;
+    private static final int PAWN_ISLAND_PENALTY   = -5;
 
     // FIX: steer king away from blocking own passers / reward clear paths
     private static final int OWN_KING_BLOCKS_PASSED_PAWN_PENALTY = -150; // big to outweigh PST pull
@@ -100,6 +102,10 @@ public class Score {
     private int blackBlockedPawnPenalty = 0;
     private int whiteBackwardPawnPenalty = 0;
     private int blackBackwardPawnPenalty = 0;
+    private int whiteConnectedPawnBonus = 0;
+    private int blackConnectedPawnBonus = 0;
+    private int whitePawnIslandPenalty = 0;
+    private int blackPawnIslandPenalty = 0;
     private int whiteRooksHalfOpenFileBonus = 0;
     private int blackRooksHalfOpenFileBonus = 0;
     private int whiteRooksOpenFileBonus = 0;
@@ -179,6 +185,10 @@ public class Score {
         this.blackBlockedPawnPenalty = other.blackBlockedPawnPenalty;
         this.whiteBackwardPawnPenalty = other.whiteBackwardPawnPenalty;
         this.blackBackwardPawnPenalty = other.blackBackwardPawnPenalty;
+        this.whiteConnectedPawnBonus = other.whiteConnectedPawnBonus;
+        this.blackConnectedPawnBonus = other.blackConnectedPawnBonus;
+        this.whitePawnIslandPenalty = other.whitePawnIslandPenalty;
+        this.blackPawnIslandPenalty = other.blackPawnIslandPenalty;
         this.whiteRooksHalfOpenFileBonus = other.whiteRooksHalfOpenFileBonus;
         this.blackRooksHalfOpenFileBonus = other.blackRooksHalfOpenFileBonus;
         this.whiteRooksOpenFileBonus = other.whiteRooksOpenFileBonus;
@@ -323,6 +333,8 @@ public class Score {
         totalWhiteScore += whitePawnAdvanceBonus;
         totalWhiteScore += whiteBlockedPawnPenalty;
         totalWhiteScore += whiteBackwardPawnPenalty;
+        totalWhiteScore += whiteConnectedPawnBonus;
+        totalWhiteScore += whitePawnIslandPenalty;
 
         totalWhiteScore += whiteRooksHalfOpenFileBonus;
         totalWhiteScore += whiteRooksOpenFileBonus;
@@ -365,6 +377,8 @@ public class Score {
         totalBlackScore += blackPawnAdvanceBonus;
         totalBlackScore += blackBlockedPawnPenalty;
         totalBlackScore += blackBackwardPawnPenalty;
+        totalBlackScore += blackConnectedPawnBonus;
+        totalBlackScore += blackPawnIslandPenalty;
 
         totalBlackScore += blackRooksHalfOpenFileBonus;
         totalBlackScore += blackRooksOpenFileBonus;
@@ -412,6 +426,10 @@ public class Score {
     public void initializePawnScore(long whitePawns, long blackPawns) {
         this.whitePawnsAmountScore = Long.bitCount(whitePawns) * PAWN_VALUE;
         this.blackPawnsAmountScore = Long.bitCount(blackPawns) * PAWN_VALUE;
+        updatePawnIslandPenaltyWhite(whitePawns);
+        updatePawnIslandPenaltyBlack(blackPawns);
+        updateConnectedPawnBonusWhite(whitePawns);
+        updateConnectedPawnBonusBlack(blackPawns);
     }
 
     /**
@@ -434,6 +452,24 @@ public class Score {
 
     public void updateIsolatedPawnPenaltyBlack(long blackPawns) {
         blackIsolatedPawnPenalty = countIsolatedPawns(blackPawns) * ISOLATED_PAWN_PENALTY;
+    }
+
+    public void updatePawnIslandPenaltyWhite(long whitePawns) {
+        int islands = countPawnIslands(whitePawns);
+        whitePawnIslandPenalty = Math.max(0, islands - 1) * PAWN_ISLAND_PENALTY;
+    }
+
+    public void updatePawnIslandPenaltyBlack(long blackPawns) {
+        int islands = countPawnIslands(blackPawns);
+        blackPawnIslandPenalty = Math.max(0, islands - 1) * PAWN_ISLAND_PENALTY;
+    }
+
+    public void updateConnectedPawnBonusWhite(long whitePawns) {
+        whiteConnectedPawnBonus = countConnectedPawns(whitePawns) * CONNECTED_PAWN_BONUS;
+    }
+
+    public void updateConnectedPawnBonusBlack(long blackPawns) {
+        blackConnectedPawnBonus = countConnectedPawns(blackPawns) * CONNECTED_PAWN_BONUS;
     }
 
     // FIX: new signatures accept allPieces and own king to avoid rewarding self-blocked passers
@@ -786,6 +822,8 @@ public class Score {
         updateDoubledPawnPenaltyWhite(whitePawns);
         updatePawnsPositionBonusWhite(whitePawns);
         updateCenterPawnBonusWhite(whitePawns);
+        updateConnectedPawnBonusWhite(whitePawns);
+        updatePawnIslandPenaltyWhite(whitePawns);
 
         // FIX: pass allPieces + own king
         updatePassedPawnBonusWhite(whitePawns, bitBoard.getBlackPawns(), allPieces, whiteKing);
@@ -811,6 +849,8 @@ public class Score {
         updateDoubledPawnPenaltyBlack(blackPawns);
         updatePawnsPositionBonusBlack(blackPawns);
         updateCenterPawnBonusBlack(blackPawns);
+        updateConnectedPawnBonusBlack(blackPawns);
+        updatePawnIslandPenaltyBlack(blackPawns);
 
         // FIX: pass allPieces + own king
         updatePassedPawnBonusBlack(blackPawns, bitBoard.getWhitePawns(), allPieces, blackKing);

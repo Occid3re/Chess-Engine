@@ -2,6 +2,7 @@ package julius.game.chessengine.helper;
 
 import lombok.extern.log4j.Log4j2;
 
+import static julius.game.chessengine.helper.BitHelper.FileMasks;
 import static julius.game.chessengine.helper.BitHelper.bitIndex;
 import static julius.game.chessengine.helper.BitHelper.fileBitboard;
 
@@ -73,8 +74,26 @@ public class PawnHelper {
         }
         return isolatedPawns;
     }
+    // Method to count pawn islands (groups of pawns on adjacent files)
+    public static int countPawnIslands(long pawnsBitboard) {
+        int islands = 0;
+        boolean previousFileHasPawn = false;
+        for (char file = 'a'; file <= 'h'; file++) {
+            long fileMask = fileBitboard(file);
+            boolean hasPawn = (pawnsBitboard & fileMask) != 0;
+            if (hasPawn && !previousFileHasPawn) {
+                islands++;
+            }
+            previousFileHasPawn = hasPawn;
+        }
+        return islands;
+    }
 
-    // Helper method to get a bitboard representing a file
-
-
+    // Method to count connected pawns (side-by-side pawns on the same rank)
+    public static int countConnectedPawns(long pawnsBitboard) {
+        long eastConnections = (pawnsBitboard & ~FileMasks[7]) << 1 & pawnsBitboard;
+        long westConnections = (pawnsBitboard & ~FileMasks[0]) >>> 1 & pawnsBitboard;
+        long connected = eastConnections | westConnections;
+        return Long.bitCount(connected);
+    }
 }
