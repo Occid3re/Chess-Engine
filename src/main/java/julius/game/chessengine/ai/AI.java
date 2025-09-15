@@ -1,5 +1,6 @@
 package julius.game.chessengine.ai;
 
+import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.Move;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.MoveList;
@@ -868,6 +869,14 @@ public class AI {
         return (isWhite && state == GameStateEnum.WHITE_IN_CHECK) || (!isWhite && state == GameStateEnum.BLACK_IN_CHECK);
     }
 
+    private boolean attacksOpponentQueenNow(Engine e, boolean moverIsWhite) {
+        BitBoard bb = e.getBitBoard();
+        long enemyQueen = moverIsWhite ? bb.getBlackQueens() : bb.getWhiteQueens();
+        if (enemyQueen == 0) return false;
+        long myAttacks = bb.generateAttackBitboard(moverIsWhite);
+        return (myAttacks & enemyQueen) != 0L;
+    }
+
     /**
      * LMR reduction: larger for deeper plies and later moves; tuned to be safe.
      */
@@ -904,15 +913,20 @@ public class AI {
             // Skip obviously losing captures based on SEE, unless the move gives check or is a promotion
             if (!inCheckAtNode && isCapture && !isPromotion) {
                 int see = simulatorEngine.see(move);
-                if (see < 0) {
-                    continue;
-                }
+                if (see < 0) continue;
+                // tiny margin helps drop "equal on paper but terrible" grabs
+                if (see == 0 && Score.getPieceValue(MoveHelper.derivePieceTypeBits(move)) > 2) continue;
             }
 
             boolean isTactical = isCapture || isPromotion;
             int lmpThreshold = 8 + depth * 2;
             if (!inCheckAtNode && !isTactical && depth <= 3 && index > lmpThreshold) {
-                continue;
+                // But don't prune moves that give check or create an immediate queen threat
+                simulatorEngine.performMove(move);
+                boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
+                boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, isWhite);
+                simulatorEngine.undoLastMove();
+                if (!givesCheck && !attacksQueen) continue;
             }
 
             simulatorEngine.performMove(move);
@@ -924,53 +938,45 @@ public class AI {
             if (entry != null && entry.depth >= depth) {
                 eval = entry.score;
             } else {
-                int nextDepth = depth - 1;
+                // Compute extension/gating signals AFTER making the move
+                boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
+                boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, isWhite);
 
-                // PVS window for non-first moves
+                // depth for child
+                int nextDepth = depth - 1;
+                if (givesCheck || attacksQueen) nextDepth = Math.min(nextDepth + 1, depth);
+
+                // Decide if we can reduce this move
+                boolean canReduce = !inCheckAtNode
+                        && !isTactical
+                        && !givesCheck
+                        && !attacksQueen
+                        && nextDepth >= 2
+                        && index >= 3;
+
+                // PVS windows as you had them
                 boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
                 double pAlpha = alpha;
-                double pBeta = usePvs ? (alpha + 1) : beta;
-
-                // ---- LMR: reduce late quiets when we’re not in check at this node ----
-                boolean canReduce = !inCheckAtNode && !isTactical && nextDepth >= 2 && index >= 3;
+                double pBeta  = usePvs ? (alpha + 1) : beta;
 
                 if (canReduce) {
                     int r = lmrReduction(nextDepth, index);
                     int reduced = Math.max(1, nextDepth - r);
-
                     eval = alphaBeta(simulatorEngine, reduced, pAlpha, pBeta, !isWhite, deadline, move);
-                    if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
-                    }
+                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
 
-                    // If the reduced result looks promising, re-search deeper (PVS/full as needed)
                     boolean promising = eval > alpha;
                     if (promising) {
-                        if (usePvs && eval > alpha && eval < beta) {
-                            eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline, move);
-                        } else {
-                            eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline, move);
-                        }
-                        if (eval == EXIT_FLAG || positionChanged()) {
-                            simulatorEngine.undoLastMove();
-                            return EXIT_FLAG;
-                        }
+                        eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, usePvs ? beta : pBeta, !isWhite, deadline, move);
+                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
                     }
                 } else {
-                    // Normal PVS
+                    // No reduction for checks/queen-threats/tacticals
                     eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline, move);
-                    if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
-                    }
-
+                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
                     if (usePvs && eval > alpha && eval < beta) {
                         eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline, move);
-                        if (eval == EXIT_FLAG || positionChanged()) {
-                            simulatorEngine.undoLastMove();
-                            return EXIT_FLAG;
-                        }
+                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
                     }
                 }
             }
@@ -1039,9 +1045,8 @@ public class AI {
 
             if (!inCheckAtNode && isCapture && !isPromotion) {
                 int see = simulatorEngine.see(move);
-                if (see < 0) {
-                    continue;
-                }
+                if (see < 0) continue;
+                if (see == 0 && Score.getPieceValue(MoveHelper.derivePieceTypeBits(move)) > 2) continue;
             }
 
             simulatorEngine.performMove(move);
@@ -1053,50 +1058,44 @@ public class AI {
             if (entry != null && entry.depth >= depth) {
                 eval = entry.score;
             } else {
+                // Compute extension/gating signals AFTER making the move
+                boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
+                boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, isWhite);
+
                 int nextDepth = depth - 1;
+                if (givesCheck || attacksQueen) nextDepth = Math.min(nextDepth + 1, depth);
+
+                boolean isTactical = isCapture || isPromotion;
+                boolean canReduce = !inCheckAtNode
+                        && !isTactical
+                        && !givesCheck
+                        && !attacksQueen
+                        && nextDepth >= 2
+                        && index >= 3;
 
                 boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
                 double pAlpha = usePvs ? (beta - 1) : alpha;
                 double pBeta = beta;
-
-                boolean isTactical = isCapture || isPromotion;
-                boolean canReduce = !inCheckAtNode && !isTactical && nextDepth >= 2 && index >= 3;
 
                 if (canReduce) {
                     int r = lmrReduction(nextDepth, index);
                     int reduced = Math.max(1, nextDepth - r);
 
                     eval = alphaBeta(simulatorEngine, reduced, pAlpha, pBeta, !isWhite, deadline, move);
-                    if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
-                    }
+                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
 
                     boolean promising = eval < beta;
                     if (promising) {
-                        if (usePvs && eval > alpha && eval < beta) {
-                            eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline, move);
-                        } else {
-                            eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline, move);
-                        }
-                        if (eval == EXIT_FLAG || positionChanged()) {
-                            simulatorEngine.undoLastMove();
-                            return EXIT_FLAG;
-                        }
+                        eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, usePvs ? beta : pBeta, !isWhite, deadline, move);
+                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
                     }
                 } else {
                     eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline, move);
-                    if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
-                    }
+                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
 
                     if (usePvs && eval > alpha && eval < beta) {
                         eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline, move);
-                        if (eval == EXIT_FLAG || positionChanged()) {
-                            simulatorEngine.undoLastMove();
-                            return EXIT_FLAG;
-                        }
+                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
                     }
                 }
             }
