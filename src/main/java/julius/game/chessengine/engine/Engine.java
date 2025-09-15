@@ -166,6 +166,10 @@ public class Engine {
         return bitBoard.see(move);
     }
 
+    public BitBoard getBitBoard() {
+        return bitBoard;
+    }
+
     public MoveList getAllLegalMoves() {
         if (gameState.isGameOver()) {
             if (legalMoves == null) {
