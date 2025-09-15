@@ -196,6 +196,7 @@ public class Engine {
             generateLegalMoves();
             gameState.pushHalfmoveClock();
             gameState.update(bitBoard, legalMoves, move, isOpeningMove);
+            gameState.getScore().applyMove(bitBoard, move, gameState.getState());
             line.add(move);
             notifyPositionChanged();
         }
@@ -413,7 +414,7 @@ public class Engine {
         generateLegalMoves();
         gameState.popHalfmoveClock();
         gameState.updateState(bitBoard, legalMoves, false);
-        gameState.updateScore(bitBoard, undoMove);
+        gameState.getScore().undoMove(bitBoard, undoMove, gameState.getState());
 
         // 3) Bookkeeping
         redoLine.add(undoMove);
