@@ -14,7 +14,26 @@ public class BishopHelper {
     private static final String BISHOP_MAGIC_NUMBERS_PATH = "/magic/bishop_magic_numbers.txt";
     private static final String BISHOP_MAGIC_NUMBERS_PATH_write = "src/main/resources" + BISHOP_MAGIC_NUMBERS_PATH;
 
-    public static final int[] BISHOP_POSITIONAL_VALUES = {
+    public static final int[] BISHOP_MIDGAME_POSITIONAL_VALUES = {
+            // R1
+            -20,-10,-10,-10,-10,-10,-10,-20,
+            // R2
+            -10,  0,  0,  0,  0,  0,  0,-10,
+            // R3
+            -10,  0,  5, 10, 10,  5,  0,-10,
+            // R4
+            -10,  5,  5, 10, 10,  5,  5,-10,
+            // R5
+            -10,  0, 10, 10, 10, 10,  0,-10,
+            // R6
+            -10, 10, 10, 10, 10, 10, 10,-10,
+            // R7
+            -10,  5,  0,  0,  0,  0,  5,-10,
+            // R8
+            -20,-10,-10,-10,-10,-10,-10,-20
+    };
+
+    public static final int[] BISHOP_ENDGAME_POSITIONAL_VALUES = {
             // R1
             -20,-10,-10,-10,-10,-10,-10,-20,
             // R2

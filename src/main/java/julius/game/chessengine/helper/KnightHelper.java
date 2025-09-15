@@ -12,7 +12,26 @@ public class KnightHelper {
             {-1, 2}, {1, 2}    // Rightwards L-moves
     };
 
-    public static final int[] KNIGHT_POSITIONAL_VALUES = {
+    public static final int[] KNIGHT_MIDGAME_POSITIONAL_VALUES = {
+            // R1
+            -50,-40,-30,-30,-30,-30,-40,-50,
+            // R2
+            -40,-20,  0,  0,  0,  0,-20,-40,
+            // R3
+            -30,  0, 10, 15, 15, 10,  0,-30,
+            // R4
+            -30,  5, 15, 20, 20, 15,  5,-30,
+            // R5
+            -30,  0, 15, 20, 20, 15,  0,-30,
+            // R6
+            -30,  5, 10, 15, 15, 10,  5,-30,
+            // R7
+            -40,-20,  0,  5,  5,  0,-20,-40,
+            // R8
+            -50,-40,-30,-30,-30,-30,-40,-50
+    };
+
+    public static final int[] KNIGHT_ENDGAME_POSITIONAL_VALUES = {
             // R1
             -50,-40,-30,-30,-30,-30,-40,-50,
             // R2
