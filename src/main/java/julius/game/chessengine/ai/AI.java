@@ -107,14 +107,8 @@ public class AI {
     // allocations when ordering moves.
     private static final int MAX_MOVE_LIST_SIZE = 218; // maximum legal moves
 
-    private static final class SortBuffers {
-        final int[] moveBuffer = new int[MAX_MOVE_LIST_SIZE];
-        final int[] scoreBuffer = new int[MAX_MOVE_LIST_SIZE];
-        final long[] sortKeyBuffer = new long[MAX_MOVE_LIST_SIZE];
-    }
-
     private final ThreadLocal<SortBuffers> sortBuffers =
-            ThreadLocal.withInitial(SortBuffers::new);
+            ThreadLocal.withInitial(() -> new SortBuffers(MAX_MOVE_LIST_SIZE));
     private final ThreadLocal<Map<Integer, Integer>> seeCacheThreadLocal =
             ThreadLocal.withInitial(() -> new HashMap<>(64));
 
