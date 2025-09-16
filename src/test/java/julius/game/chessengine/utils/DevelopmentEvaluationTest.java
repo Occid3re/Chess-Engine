@@ -11,12 +11,10 @@ public class DevelopmentEvaluationTest {
     @Test
     void undevelopedBlackMinorsArePenalizedAfterOpening() {
         BitBoard undeveloped = FEN.translateFENtoBitBoard("rnb1kbnr/pppppppp/8/8/2B2B2/2N2N2/PPPPPPPP/R3K2R w KQkq - 0 1");
-        Score undevelopedScore = new Score();
-        undevelopedScore.initializeScore(undeveloped);
+        Score undevelopedScore = Score.initializeScore(undeveloped);
 
         BitBoard developed = FEN.translateFENtoBitBoard("r3k2r/pppbbppp/2n2n2/8/2B2B2/2N2N2/PPPPPPPP/R3K2R w KQkq - 0 1");
-        Score developedScore = new Score();
-        developedScore.initializeScore(developed);
+        Score developedScore = Score.initializeScore(developed);
 
         assertTrue(undevelopedScore.getBlackMinorDevelopmentPenalty() < 0,
                 "Black should be penalized for leaving minors on their home squares after the opening");
@@ -29,12 +27,10 @@ public class DevelopmentEvaluationTest {
     @Test
     void earlyQueenDevelopmentIsDiscouraged() {
         BitBoard queenHome = FEN.translateFENtoBitBoard("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
-        Score queenHomeScore = new Score();
-        queenHomeScore.initializeScore(queenHome);
+        Score queenHomeScore = Score.initializeScore(queenHome);
 
         BitBoard queenAdventure = FEN.translateFENtoBitBoard("rnbqkbnr/pppppppp/8/7Q/8/8/PPPPPPPP/RNB1KBNR w KQkq - 0 3");
-        Score queenAdventureScore = new Score();
-        queenAdventureScore.initializeScore(queenAdventure);
+        Score queenAdventureScore = Score.initializeScore(queenAdventure);
 
         assertEquals(0, queenHomeScore.getWhiteQueenDevelopmentPenalty(),
                 "Keeping the queen at home should avoid any penalty");
