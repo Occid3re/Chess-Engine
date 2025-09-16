@@ -208,6 +208,51 @@ public class UciHandler {
         return from + to;
     }
 
+    static long estimateMovesToGo(long timeLeft, long increment) {
+        if (timeLeft <= 0) {
+            return 1;
+        }
+        if (increment <= 0 && timeLeft <= 75_000) {
+            // Bullet-style controls burn through many moves with little time
+            return 60;
+        }
+        if (timeLeft <= 300_000) {
+            // Rapid/blitz without an explicit movestogo hint
+            return 40;
+        }
+        return 30;
+    }
+
+    static long computeTimeLimit(long timeLeft, long increment, long movetime, int movestogo, int overheadMs) {
+        if (movetime > 0) {
+            long adjusted = movetime - overheadMs;
+            if (timeLeft > overheadMs) {
+                long maxAvailable = timeLeft - overheadMs;
+                if (adjusted > maxAvailable) {
+                    adjusted = maxAvailable;
+                }
+            }
+            return Math.max(adjusted, 1);
+        }
+
+        long movesToGo = movestogo > 0 ? movestogo : estimateMovesToGo(timeLeft, increment);
+        if (movesToGo <= 0) {
+            movesToGo = 1;
+        }
+
+        long share = timeLeft > 0 ? timeLeft / movesToGo : 0;
+        long limit = share + increment - overheadMs;
+
+        if (timeLeft > overheadMs) {
+            long maxAvailable = timeLeft - overheadMs;
+            if (limit > maxAvailable) {
+                limit = maxAvailable;
+            }
+        }
+
+        return Math.max(limit, 1);
+    }
+
     private void go(String[] tokens) {
         // Stop any previous search thread
         stop();
@@ -235,10 +280,7 @@ public class UciHandler {
         boolean whitesTurn = engine.whitesTurn();
         long timeLeft = whitesTurn ? wtime : btime;
         long inc = whitesTurn ? winc : binc;
-        long movesToGo = (movestogo > 0 ? movestogo : 30);
-        long limit = (movetime > 0 ? movetime :
-                (timeLeft / movesToGo) + inc - moveOverheadMs);
-        limit = Math.max(limit, 1);
+        long limit = computeTimeLimit(timeLeft, inc, movetime, movestogo, moveOverheadMs);
         ai.setTimeLimit(limit);
 
         searchThread = new Thread(() -> {
