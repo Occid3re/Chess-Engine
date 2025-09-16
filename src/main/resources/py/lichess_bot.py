@@ -540,6 +540,7 @@ def find_similar_bots(client: berserk.Client,
          (<= OUTBOUND_INSPECT_LIMIT ids) and filter on that.
     """
     exclude = set(exclude or [])
+    exclude.add(my_username.lower())
     perf_key = PERF_FOR_TC.get(tc_type, "blitz")
 
     # (1) My rating
