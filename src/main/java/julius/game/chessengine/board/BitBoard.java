@@ -737,6 +737,25 @@ public class BitBoard {
         return attacks;
     }
 
+    /**
+     * Returns the cached attack bitboard for the given side, recomputing it only when
+     * marked dirty. This avoids rebuilding the entire attack map multiple times for the
+     * same position.
+     */
+    public long getAttackBitboard(boolean colorWhite) {
+        if (colorWhite) {
+            if (whiteAttackDirty) {
+                recomputeWhiteAttackMap();
+            }
+            return whiteAttackMap;
+        } else {
+            if (blackAttackDirty) {
+                recomputeBlackAttackMap();
+            }
+            return blackAttackMap;
+        }
+    }
+
     // Method to set the bitboard for a specific piece type and color
     void updateAggregatedBitboards() {
         whitePieces = whitePawns | whiteKnights | whiteBishops | whiteRooks | whiteQueens | whiteKing;

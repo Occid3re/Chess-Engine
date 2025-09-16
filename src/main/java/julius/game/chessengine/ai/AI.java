@@ -951,7 +951,7 @@ public class AI {
         BitBoard bb = e.getBitBoard();
         long enemyQueen = moverIsWhite ? bb.getBlackQueens() : bb.getWhiteQueens();
         if (enemyQueen == 0) return false;
-        long myAttacks = bb.generateAttackBitboard(moverIsWhite);
+        long myAttacks = bb.getAttackBitboard(moverIsWhite);
         return (myAttacks & enemyQueen) != 0L;
     }
 
@@ -963,7 +963,7 @@ public class AI {
         }
         int kingIndex = Long.numberOfTrailingZeros(enemyKing);
         long kingZone = KING_ATTACKS[kingIndex];
-        long myAttacks = bb.generateAttackBitboard(moverIsWhite);
+        long myAttacks = bb.getAttackBitboard(moverIsWhite);
         return (myAttacks & kingZone) != 0L;
     }
 
