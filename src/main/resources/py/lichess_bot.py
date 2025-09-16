@@ -529,17 +529,7 @@ def find_similar_bots(client: berserk.Client,
                       delta: int = RATING_DELTA,
                       max_candidates: int = 1,
                       exclude: Optional[List[str]] = None) -> List[str]:
-    """
-    Return up to `max_candidates` bot IDs close to our rating for the given TC.
-
-    Strategy (very gentle on API):
-      1) Fetch my rating (1 call).
-      2) Fetch online bots (1 call).
-      3) First, use any ratings included in the online list (if present).
-      4) If still short, do ONE bulk profile lookup for a tiny random sample
-         (<= OUTBOUND_INSPECT_LIMIT ids) and filter on that.
-    """
-    exclude = set(exclude or [])
+    exclude = set(x.lower() for x in (exclude or []))
     exclude.add(my_username.lower())
     perf_key = PERF_FOR_TC.get(tc_type, "blitz")
 
@@ -570,12 +560,12 @@ def find_similar_bots(client: berserk.Client,
     time.sleep(API_REQUEST_DELAY)
     print(f"[outbound] {source} returned {len(bots)} entries")
 
-    # (3) Use any perfs that are already present
+    # (3) Filter + matches
     matches: List[tuple[str, int]] = []
     ids_needing_lookup: List[str] = []
     for b in bots:
         uid = b.get("id")
-        if not uid or uid == my_username or uid in exclude:
+        if not uid or uid.lower() in exclude:
             continue
         perfs = b.get("perfs") or {}
         perf = perfs.get(perf_key) or {}
