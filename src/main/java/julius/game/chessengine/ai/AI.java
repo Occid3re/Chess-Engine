@@ -106,8 +106,11 @@ public class AI {
     // Buffers used for move ordering. Reused across calls to avoid repeated
     // allocations when ordering moves.
     private static final int MAX_MOVE_LIST_SIZE = 218; // maximum legal moves
-    private final int[] moveBuffer = new int[MAX_MOVE_LIST_SIZE];
-    private final int[] scoreBuffer = new int[MAX_MOVE_LIST_SIZE];
+
+    private final ThreadLocal<SortBuffers> sortBuffers =
+            ThreadLocal.withInitial(() -> new SortBuffers(MAX_MOVE_LIST_SIZE));
+    private final ThreadLocal<Map<Integer, Integer>> seeCacheThreadLocal =
+            ThreadLocal.withInitial(() -> new HashMap<>(64));
 
     private ScheduledExecutorService scheduler;
 
@@ -530,12 +533,36 @@ public class AI {
         fillCalculatedLine(simulatorEngine);
     }
 
-    private void maybeRotateRootMoves(List<Integer> moves, SplittableRandom rng) {
-        if (rng == null || moves.isEmpty()) return;
-        int bound = Math.min(moves.size(), 4);
+    private void maybeRotateRootMoves(MoveList moves, SplittableRandom rng) {
+        if (rng == null) return;
+        int size = moves.size();
+        if (size == 0) return;
+
+        int bound = Math.min(size, 4);
         if (bound <= 1) return;
+
         int rotation = rng.nextInt(bound);
-        if (rotation != 0) Collections.rotate(moves, -rotation);
+        if (rotation == 0) return;
+
+        rotateMoveListLeft(moves, rotation);
+    }
+
+    private void rotateMoveListLeft(MoveList moves, int distance) {
+        int size = moves.size();
+        if (size <= 1) return;
+
+        int shift = distance % size;
+        if (shift < 0) shift += size;
+        if (shift == 0) return;
+
+        for (int r = 0; r < shift; r++) {
+            int first = moves.getMove(0);
+            for (int i = 0; i < size - 1; i++) {
+                int next = moves.getMove(i + 1);
+                moves.setMove(i, next);
+            }
+            moves.setMove(size - 1, first);
+        }
     }
 
     private boolean abortRequested(long deadline) {
@@ -558,11 +585,11 @@ public class AI {
         }
 
         MoveList legal = simulatorEngine.getAllLegalMoves();
-        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
-        if (orderedMoves.isEmpty()) return null;
+        MoveList orderedMoves = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
+        if (orderedMoves.size() == 0) return null;
         maybeRotateRootMoves(orderedMoves, rng);
 
-        int firstMove = orderedMoves.get(0);
+        int firstMove = orderedMoves.getMove(0);
         int bestMove = -1;
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
 
@@ -605,7 +632,7 @@ public class AI {
         final java.util.concurrent.locks.ReentrantLock fullResLock = new java.util.concurrent.locks.ReentrantLock();
 
         for (int i = 1; i <= fanout; i++) {
-            final int moveInt = orderedMoves.get(i);
+            final int moveInt = orderedMoves.getMove(i);
             futures.add(ecs.submit(() -> {
                 if (stopRef.get() || abortRequested(deadline)) return null;
 
@@ -785,11 +812,12 @@ public class AI {
         int bestMove = -1;
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
 
-        ArrayList<Integer> sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth,
+        MoveList sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth,
                 simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
         maybeRotateRootMoves(sortedMoves, rng);
 
-        for (int moveInt : sortedMoves) {
+        for (int idx = 0; idx < sortedMoves.size(); idx++) {
+            int moveInt = sortedMoves.getMove(idx);
             if (abortRequested(deadline)) break;
 
             simulatorEngine.performMove(moveInt);
@@ -987,10 +1015,10 @@ public class AI {
 
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, isWhite);
 
-        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
+        MoveList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (abortRequested(deadline)) { return EXIT_FLAG; }
-            int move = orderedMoves.get(index);
+            int move = orderedMoves.getMove(index);
 
             int from = MoveHelper.deriveFromIndex(move);
             int to   = MoveHelper.deriveToIndex(move);
@@ -1142,13 +1170,13 @@ public class AI {
 
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, isWhite);
 
-        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
+        MoveList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
                 return EXIT_FLAG;
             }
 
-            int move = orderedMoves.get(index);
+            int move = orderedMoves.getMove(index);
 
             int from = MoveHelper.deriveFromIndex(move);
             int to   = MoveHelper.deriveToIndex(move);
@@ -1290,9 +1318,21 @@ public class AI {
      * their capture bucket. Results are cached per move within this ordering
      * pass so repeated SEE queries are avoided.
      */
-    ArrayList<Integer> sortMovesByEfficiency(MoveList moves, int currentDepth, long boardHash, int prevMove,
-                                             Engine simulatorEngine) {
+    MoveList sortMovesByEfficiency(MoveList moves, int currentDepth, long boardHash, int prevMove,
+                                   Engine simulatorEngine) {
         final int size = moves.size();
+        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
+        seeCache.clear();
+
+        if (size == 0) {
+            return moves;
+        }
+
+        final SortBuffers buffers = sortBuffers.get();
+        final int[] moveBuffer = buffers.moveBuffer;
+        final int[] scoreBuffer = buffers.scoreBuffer;
+        final long[] sortKeys = buffers.sortKeyBuffer;
+
         final int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
 
         // Category encoding (higher is earlier):
@@ -1319,10 +1359,6 @@ public class AI {
         final int prevTo = (prevMove >= 0) ? ((prevMove >>> 6) & 0x3F) : -1;
         final int cm = (prevFrom >= 0) ? counterMove[prevFrom][prevTo] : -1;
         final int COUNTER_MOVE_BONUS = 400;
-
-
-        final long[] sortKeys = new long[size];
-        final Map<Integer, Integer> seeCache = new HashMap<>();
 
         for (int i = 0; i < size; i++) {
             final int moveInt = moves.getMove(i);
@@ -1416,20 +1452,23 @@ public class AI {
         Arrays.sort(sortKeys, sortStart, size); // ascending by key
 
         // Build result in descending order (bigger category/score first)
-        ArrayList<Integer> sortedMoveList = new ArrayList<>(size);
+        int outIndex = 0;
         if (ttIndex != -1) {
-            // TT already at index 0
-            sortedMoveList.add((int) (sortKeys[0] & 0xFFFFFFFFL));
+            moveBuffer[outIndex++] = (int) (sortKeys[0] & 0xFFFFFFFFL);
             for (int i = size - 1; i >= 1; i--) {
-                sortedMoveList.add((int) (sortKeys[i] & 0xFFFFFFFFL));
+                moveBuffer[outIndex++] = (int) (sortKeys[i] & 0xFFFFFFFFL);
             }
         } else {
             for (int i = size - 1; i >= 0; i--) {
-                sortedMoveList.add((int) (sortKeys[i] & 0xFFFFFFFFL));
+                moveBuffer[outIndex++] = (int) (sortKeys[i] & 0xFFFFFFFFL);
             }
         }
 
-        return sortedMoveList;
+        for (int i = 0; i < size; i++) {
+            moves.setMove(i, moveBuffer[i]);
+        }
+
+        return moves;
     }
 
 
@@ -1502,10 +1541,11 @@ public class AI {
         MoveList moves = inCheck ? simulatorEngine.getAllLegalMoves() : getPossibleCapturesOrPromotions(simulatorEngine);
 
         // Order them (captures first via MVV-LVA/promotion bonus, killers/history still help)
-        ArrayList<Integer> ordered = sortMovesByEfficiency(moves, 0, simulatorEngine.getBoardStateHash(), -1,
+        MoveList ordered = sortMovesByEfficiency(moves, 0, simulatorEngine.getBoardStateHash(), -1,
                 simulatorEngine);
 
-        for (int m : ordered) {
+        for (int i = 0; i < ordered.size(); i++) {
+            int m = ordered.getMove(i);
             boolean isCapture = MoveHelper.isCapture(m);
             boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
             boolean isQuiet = !isCapture && !isPromotion;
