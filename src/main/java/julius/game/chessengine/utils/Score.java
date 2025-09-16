@@ -101,6 +101,8 @@ public class Score {
     private static final int KNIGHT_OUTPOST_BONUS = 15;
     private static final int KNIGHT_OUTPOST_DEFENDED_BONUS = 5;
 
+    private static final long[] EMPTY_LONG_ARRAY = new long[0];
+
     private Double cachedScoreDifference = null;
 
     private int whiteScore;
@@ -1249,28 +1251,45 @@ public class Score {
         long blackRooks = bitBoard.getBlackRooks();
         long blackQueens = bitBoard.getBlackQueens();
 
-        whiteKingSafetyScore = evaluateKingSafety(
-                whiteKing,
-                whitePawns,
+        PieceAttackMaps blackAttackMaps = computePieceAttackMaps(
                 blackPawns,
+                false,
                 blackKnights,
                 blackBishops,
                 blackRooks,
                 blackQueens,
+                allPieces);
+        PieceAttackMaps whiteAttackMaps = computePieceAttackMaps(
+                whitePawns,
+                true,
+                whiteKnights,
+                whiteBishops,
+                whiteRooks,
+                whiteQueens,
+                allPieces);
+
+        whiteKingSafetyScore = evaluateKingSafety(
+                whiteKing,
+                whitePawns,
+                blackPawns,
+                blackAttackMaps.pawnAttacks,
+                blackAttackMaps.knightAttacks,
+                blackAttackMaps.bishopAttacks,
+                blackAttackMaps.rookAttacks,
+                blackAttackMaps.queenAttacks,
                 whiteAttacks,
-                allPieces,
                 true,
                 isEndgame);
         blackKingSafetyScore = evaluateKingSafety(
                 blackKing,
                 blackPawns,
                 whitePawns,
-                whiteKnights,
-                whiteBishops,
-                whiteRooks,
-                whiteQueens,
+                whiteAttackMaps.pawnAttacks,
+                whiteAttackMaps.knightAttacks,
+                whiteAttackMaps.bishopAttacks,
+                whiteAttackMaps.rookAttacks,
+                whiteAttackMaps.queenAttacks,
                 blackAttacks,
-                allPieces,
                 false,
                 isEndgame);
 
@@ -1313,9 +1332,134 @@ public class Score {
         blackQueenSafetyScore = evaluateQueenSafety(blackQueens, whiteAttacks);
     }
 
+    private PieceAttackMaps computePieceAttackMaps(long pawns, boolean pawnsWhite,
+                                                   long knights, long bishops, long rooks, long queens,
+                                                   long occupancy) {
+        return new PieceAttackMaps(
+                computePawnAttackBitboards(pawns, pawnsWhite),
+                computeKnightAttackBitboards(knights),
+                computeBishopAttackBitboards(bishops, occupancy),
+                computeRookAttackBitboards(rooks, occupancy),
+                computeQueenAttackBitboards(queens, occupancy)
+        );
+    }
+
+    private long[] computePawnAttackBitboards(long pawns, boolean isWhite) {
+        if (pawns == 0) {
+            return EMPTY_LONG_ARRAY;
+        }
+        int colorIndex = isWhite ? 0 : 1;
+        long[] attacks = new long[Long.bitCount(pawns)];
+        int cursor = 0;
+        long remaining = pawns;
+        while (remaining != 0) {
+            long sq = remaining & -remaining;
+            int index = Long.numberOfTrailingZeros(sq);
+            attacks[cursor++] = PAWN_ATTACKS[colorIndex][index];
+            remaining ^= sq;
+        }
+        return attacks;
+    }
+
+    private long[] computeKnightAttackBitboards(long knights) {
+        if (knights == 0) {
+            return EMPTY_LONG_ARRAY;
+        }
+        long[] attacks = new long[Long.bitCount(knights)];
+        int cursor = 0;
+        long remaining = knights;
+        while (remaining != 0) {
+            long sq = remaining & -remaining;
+            int index = Long.numberOfTrailingZeros(sq);
+            attacks[cursor++] = knightMoveTable[index];
+            remaining ^= sq;
+        }
+        return attacks;
+    }
+
+    private long[] computeBishopAttackBitboards(long bishops, long occupancy) {
+        if (bishops == 0) {
+            return EMPTY_LONG_ARRAY;
+        }
+        long[] attacks = new long[Long.bitCount(bishops)];
+        int cursor = 0;
+        long remaining = bishops;
+        while (remaining != 0) {
+            long sq = remaining & -remaining;
+            int index = Long.numberOfTrailingZeros(sq);
+            long mask = BISHOP_HELPER.bishopMasks[index];
+            attacks[cursor++] = BISHOP_HELPER.calculateMovesUsingBishopMagic(index, occupancy & mask);
+            remaining ^= sq;
+        }
+        return attacks;
+    }
+
+    private long[] computeRookAttackBitboards(long rooks, long occupancy) {
+        if (rooks == 0) {
+            return EMPTY_LONG_ARRAY;
+        }
+        long[] attacks = new long[Long.bitCount(rooks)];
+        int cursor = 0;
+        long remaining = rooks;
+        while (remaining != 0) {
+            long sq = remaining & -remaining;
+            int index = Long.numberOfTrailingZeros(sq);
+            long mask = ROOK_HELPER.rookMasks[index];
+            attacks[cursor++] = ROOK_HELPER.calculateMovesUsingRookMagic(index, occupancy & mask);
+            remaining ^= sq;
+        }
+        return attacks;
+    }
+
+    private long[] computeQueenAttackBitboards(long queens, long occupancy) {
+        if (queens == 0) {
+            return EMPTY_LONG_ARRAY;
+        }
+        long[] attacks = new long[Long.bitCount(queens)];
+        int cursor = 0;
+        long remaining = queens;
+        while (remaining != 0) {
+            long sq = remaining & -remaining;
+            int index = Long.numberOfTrailingZeros(sq);
+            long bishopMask = BISHOP_HELPER.bishopMasks[index];
+            long rookMask = ROOK_HELPER.rookMasks[index];
+            long diagonal = BISHOP_HELPER.calculateMovesUsingBishopMagic(index, occupancy & bishopMask);
+            long straight = ROOK_HELPER.calculateMovesUsingRookMagic(index, occupancy & rookMask);
+            attacks[cursor++] = diagonal | straight;
+            remaining ^= sq;
+        }
+        return attacks;
+    }
+
+    private int countAttacksInZone(long[] attackBitboards, long zone) {
+        int count = 0;
+        for (long attacks : attackBitboards) {
+            count += Long.bitCount(attacks & zone);
+        }
+        return count;
+    }
+
+    private static final class PieceAttackMaps {
+        final long[] pawnAttacks;
+        final long[] knightAttacks;
+        final long[] bishopAttacks;
+        final long[] rookAttacks;
+        final long[] queenAttacks;
+
+        PieceAttackMaps(long[] pawnAttacks, long[] knightAttacks, long[] bishopAttacks,
+                        long[] rookAttacks, long[] queenAttacks) {
+            this.pawnAttacks = pawnAttacks;
+            this.knightAttacks = knightAttacks;
+            this.bishopAttacks = bishopAttacks;
+            this.rookAttacks = rookAttacks;
+            this.queenAttacks = queenAttacks;
+        }
+    }
+
     private int evaluateKingSafety(long king, long friendlyPawns, long enemyPawns,
-                                   long enemyKnights, long enemyBishops, long enemyRooks, long enemyQueens,
-                                   long friendlyAttacks, long allPieces,
+                                   long[] enemyPawnAttacks, long[] enemyKnightAttacks,
+                                   long[] enemyBishopAttacks, long[] enemyRookAttacks, long[] enemyQueenAttacks,
+                                   long friendlyAttacks,
                                    boolean isWhite, boolean isEndgame) {
         if (king == 0) {
             return 0;
@@ -1343,56 +1487,11 @@ public class Score {
         }
 
         long kingZone = KING_ATTACKS[kingIndex];
-        int enemyColor = isWhite ? 1 : 0;
-
-        int pawnAttackCount = 0;
-        long pawns = enemyPawns;
-        while (pawns != 0) {
-            long sq = pawns & -pawns;
-            int idx = Long.numberOfTrailingZeros(sq);
-            pawnAttackCount += Long.bitCount(PAWN_ATTACKS[enemyColor][idx] & kingZone);
-            pawns ^= sq;
-        }
-
-        int knightAttackCount = 0;
-        long knights = enemyKnights;
-        while (knights != 0) {
-            long sq = knights & -knights;
-            int idx = Long.numberOfTrailingZeros(sq);
-            knightAttackCount += Long.bitCount(knightMoveTable[idx] & kingZone);
-            knights ^= sq;
-        }
-
-        BishopHelper bishopHelper = BishopHelper.getInstance();
-        RookHelper rookHelper = RookHelper.getInstance();
-
-        int bishopAttackCount = 0;
-        long bishops = enemyBishops;
-        while (bishops != 0) {
-            long sq = bishops & -bishops;
-            int idx = Long.numberOfTrailingZeros(sq);
-            bishopAttackCount += Long.bitCount(bishopHelper.calculateBishopMoves(idx, allPieces) & kingZone);
-            bishops ^= sq;
-        }
-
-        int rookAttackCount = 0;
-        long rooks = enemyRooks;
-        while (rooks != 0) {
-            long sq = rooks & -rooks;
-            int idx = Long.numberOfTrailingZeros(sq);
-            rookAttackCount += Long.bitCount(rookHelper.calculateRookMoves(idx, allPieces) & kingZone);
-            rooks ^= sq;
-        }
-
-        int queenAttackCount = 0;
-        long queens = enemyQueens;
-        while (queens != 0) {
-            long sq = queens & -queens;
-            int idx = Long.numberOfTrailingZeros(sq);
-            long attacks = bishopHelper.calculateBishopMoves(idx, allPieces) | rookHelper.calculateRookMoves(idx, allPieces);
-            queenAttackCount += Long.bitCount(attacks & kingZone);
-            queens ^= sq;
-        }
+        int pawnAttackCount = countAttacksInZone(enemyPawnAttacks, kingZone);
+        int knightAttackCount = countAttacksInZone(enemyKnightAttacks, kingZone);
+        int bishopAttackCount = countAttacksInZone(enemyBishopAttacks, kingZone);
+        int rookAttackCount = countAttacksInZone(enemyRookAttacks, kingZone);
+        int queenAttackCount = countAttacksInZone(enemyQueenAttacks, kingZone);
 
         int attackPenalty = pawnAttackCount * PAWN_ATTACK_PENALTY
                 + knightAttackCount * KNIGHT_ATTACK_PENALTY
