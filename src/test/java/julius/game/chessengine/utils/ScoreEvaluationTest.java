@@ -11,12 +11,10 @@ public class ScoreEvaluationTest {
     @Test
     void stalemateHasLowestMobility() {
         BitBoard stalemate = FEN.translateFENtoBitBoard("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1");
-        Score scoreStalemate = new Score();
-        scoreStalemate.initializeScore(stalemate);
+        Score scoreStalemate = Score.initializeScore(stalemate);
 
         BitBoard active = FEN.translateFENtoBitBoard("7k/4Q3/6K1/8/8/8/8/8 b - - 0 1");
-        Score scoreActive = new Score();
-        scoreActive.initializeScore(active);
+        Score scoreActive = Score.initializeScore(active);
 
         assertTrue(scoreStalemate.getBlackMobilityScore() <= scoreActive.getBlackMobilityScore());
         assertTrue(scoreActive.getBlackMobilityScore() > 0);
@@ -26,12 +24,10 @@ public class ScoreEvaluationTest {
     @Test
     void exposedKingIsPenalized() {
         BitBoard safe = FEN.translateFENtoBitBoard("6k1/6pp/8/8/8/8/6PP/6K1 w - - 0 1");
-        Score scoreSafe = new Score();
-        scoreSafe.initializeScore(safe);
+        Score scoreSafe = Score.initializeScore(safe);
 
         BitBoard exposed = FEN.translateFENtoBitBoard("6k1/8/8/6pp/8/8/6PP/6K1 w - - 0 1");
-        Score scoreExposed = new Score();
-        scoreExposed.initializeScore(exposed);
+        Score scoreExposed = Score.initializeScore(exposed);
 
         assertTrue(scoreExposed.getBlackKingSafetyScore() < scoreSafe.getBlackKingSafetyScore());
         assertTrue(scoreExposed.getScoreDifference() > scoreSafe.getScoreDifference());
@@ -40,8 +36,7 @@ public class ScoreEvaluationTest {
     @Test
     void centerPawnsGrantBonusToWhite() {
         BitBoard board = FEN.translateFENtoBitBoard("4k3/8/8/8/4P3/8/8/4K3 w - - 0 1");
-        Score score = new Score();
-        score.initializeScore(board);
+        Score score = Score.initializeScore(board);
 
         assertEquals(Score.CENTER_PAWN_BONUS, score.getWhiteCenterPawnBonus());
         assertEquals(0, score.getBlackCenterPawnBonus());
@@ -50,8 +45,7 @@ public class ScoreEvaluationTest {
     @Test
     void centerPawnsGrantBonusToBlack() {
         BitBoard board = FEN.translateFENtoBitBoard("4k3/8/8/4p3/8/8/8/4K3 w - - 0 1");
-        Score score = new Score();
-        score.initializeScore(board);
+        Score score = Score.initializeScore(board);
 
         assertEquals(0, score.getWhiteCenterPawnBonus());
         assertEquals(Score.CENTER_PAWN_BONUS, score.getBlackCenterPawnBonus());

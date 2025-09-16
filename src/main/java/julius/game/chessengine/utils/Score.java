@@ -103,8 +103,6 @@ public class Score {
 
     private static final long[] EMPTY_LONG_ARRAY = new long[0];
 
-    private Double cachedScoreDifference = null;
-
     private int whiteScore;
     private int blackScore;
 
@@ -320,17 +318,19 @@ public class Score {
 
         this.whiteStateBonus = other.whiteStateBonus;
         this.blackStateBonus = other.blackStateBonus;
-
-        this.cachedScoreDifference = other.cachedScoreDifference;
     }
 
 
     /**
      * Score mechanisms of the Game
      */
-    public void initializeScore(BitBoard bitBoard) {
-        cachedScoreDifference = null;
+    public static Score initializeScore(BitBoard bitBoard) {
+        Score score = new Score();
+        score.initializeFrom(bitBoard);
+        return score;
+    }
 
+    private void initializeFrom(BitBoard bitBoard) {
         long whitePawns = bitBoard.getWhitePawns();
         long blackPawns = bitBoard.getBlackPawns();
         long allPawns = whitePawns | blackPawns;
@@ -421,11 +421,7 @@ public class Score {
 
 
     public double getScoreDifference() {
-        if (cachedScoreDifference == null) {
-            cachedScoreDifference = (calculateTotalWhiteScore() - calculateTotalBlackScore()) / 100.0;
-        }
-
-        return cachedScoreDifference;
+        return (calculateTotalWhiteScore() - calculateTotalBlackScore()) / 100.0;
     }
 
     public int calculateTotalWhiteScore() {
@@ -1753,7 +1749,6 @@ public class Score {
     }
 
     public void applyMove(BitBoard bitBoard, int move, GameStateEnum state) {
-        resetCachedScoreDifference();
         boolean isWhite = MoveHelper.isWhitesMove(move);
         int pieceTypeBits = MoveHelper.derivePieceTypeBits(move);
         int capturedPieceTypeBits = MoveHelper.deriveCapturedPieceTypeBits(move);
@@ -1871,10 +1866,6 @@ public class Score {
         } else {
             blackStateBonus = 0;
         }
-    }
-
-    public void resetCachedScoreDifference() {
-        this.cachedScoreDifference = null;
     }
 
     public static int getPieceValue(int pieceTypeBits) {

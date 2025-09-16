@@ -32,8 +32,7 @@ public class GameState {
 
     public GameState(BitBoard bitBoard) {
         state = GameStateEnum.PLAY;
-        score = new Score();
-        initializeScore(bitBoard);
+        score = Score.initializeScore(bitBoard);
         recordHash(bitBoard.getBoardStateHash());
     }
 
@@ -46,12 +45,6 @@ public class GameState {
         this.repetition.putAll(other.repetition);
         this.halfmoveStack.addAll(other.halfmoveStack);
     }
-
-
-    private void initializeScore(BitBoard bitBoard) {
-        score.initializeScore(bitBoard);
-    }
-
     public void update(BitBoard bitBoard, MoveList legalMoves, int move, boolean isOpeningMove) {
         updateState(bitBoard, legalMoves, isOpeningMove);
 
