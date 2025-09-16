@@ -558,6 +558,9 @@ public class AI {
             firstScore = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
         } else if (simulatorEngine.getGameState().isInStateDraw()) {
             firstScore = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, depth);
+            if (isWhitesTurn) {
+                firstScore = -firstScore;
+            }
         } else {
             firstScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, firstMove, 1);
             if (firstScore == EXIT_FLAG || abortRequested(deadline)) {
@@ -604,6 +607,9 @@ public class AI {
                     probe = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
                 } else if (e.getGameState().isInStateDraw()) {
                     probe = evaluateStaticPosition(e.getGameState(), !isWhitesTurn, depth);
+                    if (isWhitesTurn) {
+                        probe = -probe;
+                    }
                 } else {
                     probe = alphaBeta(e, depth - 1, pAlpha, pBeta, !isWhitesTurn, deadline, moveInt, 1);
                     if (probe == EXIT_FLAG || abortRequested(deadline)) return null;
@@ -776,6 +782,9 @@ public class AI {
                 score = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
             } else if (simulatorEngine.getGameState().isInStateDraw()) {
                 score = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, depth);
+                if (isWhitesTurn) {
+                    score = -score;
+                }
             } else {
                 score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1);
                 if (score == EXIT_FLAG || abortRequested(deadline)) {
