@@ -188,7 +188,17 @@ public class AI {
 
 
     public Integer getCurrentBestMoveInt() {
-        return currentBestMove;
+        int move = currentBestMove;
+        if (move == -1) {
+            return -1;
+        }
+
+        long currentHash = mainEngine.getBoardStateHash();
+        if (currentHash != bestMoveForHash) {
+            return -1;
+        }
+
+        return move;
     }
 
     private void startCalculationThread() {
@@ -308,6 +318,7 @@ public class AI {
     public void reset() {
         stopCalculation();
         currentBestMove = -1;
+        bestMoveForHash = -1;
         currentBoardState = -1;
         beforeCalculationBoardState = -2;
         calculatedLine = Collections.synchronizedList(new ArrayList<>());
