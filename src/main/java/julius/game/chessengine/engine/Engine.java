@@ -506,7 +506,7 @@ public class Engine {
 
     public FEN translateBoardToFen() {
         synchronized (boardLock) {
-            return FEN.translateBoardToFEN(bitBoard);
+            return FEN.translateBoardToFEN(bitBoard, gameState);
         }
     }
 
