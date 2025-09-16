@@ -8,8 +8,8 @@ import julius.game.chessengine.helper.BishopHelper;
 import julius.game.chessengine.helper.RookHelper;
 import lombok.Data;
 import lombok.extern.log4j.Log4j2;
-import java.util.Map;
-import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 import static julius.game.chessengine.helper.BishopHelper.BISHOP_ENDGAME_POSITIONAL_VALUES;
 import static julius.game.chessengine.helper.BishopHelper.BISHOP_MIDGAME_POSITIONAL_VALUES;
@@ -198,19 +198,32 @@ public class Score {
 
 
     // Cache for pawn structure evaluations to avoid recomputation
-    private static final Map<Long, PawnStructure> pawnStructureCache = new HashMap<>();
+    private static final ConcurrentMap<Long, PawnStructure> pawnStructureCache = new ConcurrentHashMap<>();
 
-    private static class PawnStructure {
-        int whiteCenterPawnBonus;
-        int blackCenterPawnBonus;
-        int whiteDoubledPawnPenalty;
-        int blackDoubledPawnPenalty;
-        int whiteIsolatedPawnPenalty;
-        int blackIsolatedPawnPenalty;
-        int whiteConnectedPawnBonus;
-        int blackConnectedPawnBonus;
-        int whitePawnIslandPenalty;
-        int blackPawnIslandPenalty;
+    private static final class PawnStructure {
+        private final int whiteCenterPawnBonus;
+        private final int blackCenterPawnBonus;
+        private final int whiteDoubledPawnPenalty;
+        private final int blackDoubledPawnPenalty;
+        private final int whiteIsolatedPawnPenalty;
+        private final int blackIsolatedPawnPenalty;
+        private final int whiteConnectedPawnBonus;
+        private final int blackConnectedPawnBonus;
+        private final int whitePawnIslandPenalty;
+        private final int blackPawnIslandPenalty;
+
+        private PawnStructure(long whitePawns, long blackPawns) {
+            this.whiteCenterPawnBonus = countCenterPawns(whitePawns) * CENTER_PAWN_BONUS;
+            this.blackCenterPawnBonus = countCenterPawns(blackPawns) * CENTER_PAWN_BONUS;
+            this.whiteDoubledPawnPenalty = countDoubledPawns(whitePawns) * DOUBLED_PAWN_PENALTY;
+            this.blackDoubledPawnPenalty = countDoubledPawns(blackPawns) * DOUBLED_PAWN_PENALTY;
+            this.whiteIsolatedPawnPenalty = countIsolatedPawns(whitePawns) * ISOLATED_PAWN_PENALTY;
+            this.blackIsolatedPawnPenalty = countIsolatedPawns(blackPawns) * ISOLATED_PAWN_PENALTY;
+            this.whiteConnectedPawnBonus = countConnectedPawns(whitePawns) * CONNECTED_PAWN_BONUS;
+            this.blackConnectedPawnBonus = countConnectedPawns(blackPawns) * CONNECTED_PAWN_BONUS;
+            this.whitePawnIslandPenalty = Math.max(0, countPawnIslands(whitePawns) - 1) * PAWN_ISLAND_PENALTY;
+            this.blackPawnIslandPenalty = Math.max(0, countPawnIslands(blackPawns) - 1) * PAWN_ISLAND_PENALTY;
+        }
     }
 
     private static long pawnHash(long whitePawns, long blackPawns) {
@@ -219,22 +232,7 @@ public class Score {
 
     private static PawnStructure getPawnStructure(long whitePawns, long blackPawns) {
         long key = pawnHash(whitePawns, blackPawns);
-        PawnStructure ps = pawnStructureCache.get(key);
-        if (ps == null) {
-            ps = new PawnStructure();
-            ps.whiteCenterPawnBonus = countCenterPawns(whitePawns) * CENTER_PAWN_BONUS;
-            ps.blackCenterPawnBonus = countCenterPawns(blackPawns) * CENTER_PAWN_BONUS;
-            ps.whiteDoubledPawnPenalty = countDoubledPawns(whitePawns) * DOUBLED_PAWN_PENALTY;
-            ps.blackDoubledPawnPenalty = countDoubledPawns(blackPawns) * DOUBLED_PAWN_PENALTY;
-            ps.whiteIsolatedPawnPenalty = countIsolatedPawns(whitePawns) * ISOLATED_PAWN_PENALTY;
-            ps.blackIsolatedPawnPenalty = countIsolatedPawns(blackPawns) * ISOLATED_PAWN_PENALTY;
-            ps.whiteConnectedPawnBonus = countConnectedPawns(whitePawns) * CONNECTED_PAWN_BONUS;
-            ps.blackConnectedPawnBonus = countConnectedPawns(blackPawns) * CONNECTED_PAWN_BONUS;
-            ps.whitePawnIslandPenalty = Math.max(0, countPawnIslands(whitePawns) - 1) * PAWN_ISLAND_PENALTY;
-            ps.blackPawnIslandPenalty = Math.max(0, countPawnIslands(blackPawns) - 1) * PAWN_ISLAND_PENALTY;
-            pawnStructureCache.put(key, ps);
-        }
-        return ps;
+        return pawnStructureCache.computeIfAbsent(key, k -> new PawnStructure(whitePawns, blackPawns));
     }
 
 
