@@ -87,6 +87,8 @@ public class GameState {
             }
         } else if (isDraw(bitBoard, legalMoves)) {
             state = GameStateEnum.DRAW;
+        } else if (isFiftyMoveRule() || isThreefoldRepetition()) {
+            state = GameStateEnum.DRAW;
         } else {
             if(isOpeningMove) {
                 state = GameStateEnum.PLAY_OPENING;
