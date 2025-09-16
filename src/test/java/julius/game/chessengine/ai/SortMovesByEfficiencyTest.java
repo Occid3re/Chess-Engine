@@ -7,7 +7,6 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -48,7 +47,7 @@ class SortMovesByEfficiencyTest {
         MoveList moves = engine.getAllLegalMoves();
         long hash = engine.getBoardStateHash();
 
-        ArrayList<Integer> ordered = ai.sortMovesByEfficiency(moves, 0, hash, -1, engine);
+        MoveList ordered = ai.sortMovesByEfficiency(moves, 0, hash, -1, engine);
 
         Set<Integer> captureMoves = new HashSet<>();
         for (int i = 0; i < moves.size(); i++) {
@@ -74,7 +73,7 @@ class SortMovesByEfficiencyTest {
         int firstCaptureIndex = -1;
         int firstCaptureMove = -1;
         for (int i = 0; i < ordered.size(); i++) {
-            int move = ordered.get(i);
+            int move = ordered.getMove(i);
             if (seeByMove.containsKey(move)) {
                 firstCaptureIndex = i;
                 firstCaptureMove = move;
@@ -86,7 +85,7 @@ class SortMovesByEfficiencyTest {
 
         int worstCaptureIndex = -1;
         for (int i = ordered.size() - 1; i >= 0; i--) {
-            int move = ordered.get(i);
+            int move = ordered.getMove(i);
             if (seeByMove.containsKey(move) && seeByMove.get(move) == worstSee) {
                 worstCaptureIndex = i;
                 break;
