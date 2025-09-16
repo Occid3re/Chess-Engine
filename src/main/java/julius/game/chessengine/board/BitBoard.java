@@ -1589,8 +1589,8 @@ public class BitBoard {
         // 3) move mover back on bitboards
         undoPieceMove(pieceTypeBits, fromIndex, toIndex, isWhite);
 
-        // 4) clear landing square on simple non-capture, non-promotion, non-ep
-        if (!isCapture && promotionPieceTypeBits == 0 && !isEnPassantMove) {
+        // 4) clear landing square when nothing should remain there (quiet moves or en passant)
+        if (isEnPassantMove || (!isCapture && promotionPieceTypeBits == 0)) {
             pieceBoard[toIndex] = null;
         }
 
