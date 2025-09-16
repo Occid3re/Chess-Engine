@@ -95,7 +95,6 @@ public class AI {
     private static final int MAX_MOVE_LIST_SIZE = 218; // maximum legal moves
     private final int[] moveBuffer = new int[MAX_MOVE_LIST_SIZE];
     private final int[] scoreBuffer = new int[MAX_MOVE_LIST_SIZE];
-    private final long[] sortBuffer = new long[MAX_MOVE_LIST_SIZE];
 
     private ScheduledExecutorService scheduler;
     private Thread calculationThread;
