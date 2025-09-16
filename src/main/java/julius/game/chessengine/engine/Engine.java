@@ -114,6 +114,8 @@ public class Engine {
     private static final CacheConfig CACHE_CFG = computeCacheConfig();
     private TimedLRUCache<MoveList> legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
 
+    private final Object boardLock = new Object();
+
     @Getter
     private OpeningBook openingBook;
 
@@ -135,23 +137,25 @@ public class Engine {
     }
 
     public Engine(Engine other) {
-        this.bitBoard = new BitBoard(other.bitBoard);
-        this.gameState = new GameState(other.gameState);
-        this.line = new ArrayList<>(other.line);
-        this.redoLine = new ArrayList<>(other.redoLine);
+        synchronized (other.boardLock) {
+            this.bitBoard = new BitBoard(other.bitBoard);
+            this.gameState = new GameState(other.gameState);
+            this.line = new ArrayList<>(other.line);
+            this.redoLine = new ArrayList<>(other.redoLine);
 
-        // ❌ heavy: cloning the current legal list and cache
-        // this.legalMoves = other.legalMoves == null ? null : new MoveList(other.legalMoves);
-        // this.legalMovesNeedUpdate = other.legalMovesNeedUpdate;
-        // this.legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
-        // other.legalMovesCache.forEach((k, v) -> this.legalMovesCache.put(k, new MoveList(v)));
+            // ❌ heavy: cloning the current legal list and cache
+            // this.legalMoves = other.legalMoves == null ? null : new MoveList(other.legalMoves);
+            // this.legalMovesNeedUpdate = other.legalMovesNeedUpdate;
+            // this.legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
+            // other.legalMovesCache.forEach((k, v) -> this.legalMovesCache.put(k, new MoveList(v)));
 
-        // ✅ light: fresh empty state for the clone; compute lazily when needed
-        this.legalMoves = null;
-        this.legalMovesNeedUpdate = true;
-        this.legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
+            // ✅ light: fresh empty state for the clone; compute lazily when needed
+            this.legalMoves = null;
+            this.legalMovesNeedUpdate = true;
+            this.legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
 
-        this.openingBook = other.openingBook;
+            this.openingBook = other.openingBook;
+        }
     }
 
     public void setOnPositionChanged(LongConsumer cb) {
@@ -163,7 +167,9 @@ public class Engine {
 
     /** Expose BitBoard's SEE to callers (AI). */
     public int see(int move) {
-        return bitBoard.see(move);
+        synchronized (boardLock) {
+            return bitBoard.see(move);
+        }
     }
 
     public BitBoard getBitBoard() {
@@ -171,110 +177,124 @@ public class Engine {
     }
 
     public MoveList getAllLegalMoves() {
-        if (gameState.isGameOver()) {
-            if (legalMoves == null) {
-                legalMoves = new MoveList();  // Create only if null
-            } else {
-                legalMoves.clear();  // Clear existing list instead of creating a new one
+        synchronized (boardLock) {
+            if (gameState.isGameOver()) {
+                if (legalMoves == null) {
+                    legalMoves = new MoveList();  // Create only if null
+                } else {
+                    legalMoves.clear();  // Clear existing list instead of creating a new one
+                }
+            } else if (legalMovesNeedUpdate) {
+                generateLegalMoves();
             }
-        } else if (legalMovesNeedUpdate) {
-            generateLegalMoves();
+            return legalMoves;
         }
-        return legalMoves;
     }
 
     public int getEnPassantTargetIndex() {
-        return bitBoard.getEnPassantTargetIndex();
+        synchronized (boardLock) {
+            return bitBoard.getEnPassantTargetIndex();
+        }
     }
 
-    public synchronized void performMove(int move) {
-        boolean isOpeningMove = false;
-        if (!gameState.isGameOver()) {
-            long boardStateHashBeforeMove = getBoardStateHash();
-            bitBoard.performMove(move);
-            long newHash = getBoardStateHash();
-            gameState.recordHash(newHash);
-            if (openingBook.containsMoveAndBoardStateHash(boardStateHashBeforeMove, move)) {
-                isOpeningMove = true;
+    public void performMove(int move) {
+        synchronized (boardLock) {
+            boolean isOpeningMove = false;
+            if (!gameState.isGameOver()) {
+                long boardStateHashBeforeMove = getBoardStateHash();
+                bitBoard.performMove(move);
+                long newHash = getBoardStateHash();
+                gameState.recordHash(newHash);
+                if (openingBook.containsMoveAndBoardStateHash(boardStateHashBeforeMove, move)) {
+                    isOpeningMove = true;
+                }
+                generateLegalMoves();
+                gameState.pushHalfmoveClock();
+                gameState.update(bitBoard, legalMoves, move, isOpeningMove);
+                gameState.getScore().applyMove(bitBoard, move, gameState.getState());
+                line.add(move);
+                notifyPositionChanged();
             }
-            generateLegalMoves();
-            gameState.pushHalfmoveClock();
-            gameState.update(bitBoard, legalMoves, move, isOpeningMove);
-            gameState.getScore().applyMove(bitBoard, move, gameState.getState());
-            line.add(move);
-            notifyPositionChanged();
         }
     }
 
     public void importBoardFromFen(String fen) {
-        this.bitBoard = FEN.translateFENtoBitBoard(fen);
-        this.gameState = new GameState(bitBoard);
-        generateLegalMoves();
-        gameState.updateState(bitBoard, legalMoves, false);
-        notifyPositionChanged();
+        synchronized (boardLock) {
+            this.bitBoard = FEN.translateFENtoBitBoard(fen);
+            this.gameState = new GameState(bitBoard);
+            generateLegalMoves();
+            gameState.updateState(bitBoard, legalMoves, false);
+            notifyPositionChanged();
+        }
     }
 
-    public synchronized Engine createSimulation() {
-        // Safe copy
-        return new Engine(this);
+    public Engine createSimulation() {
+        synchronized (boardLock) {
+            // Safe copy
+            return new Engine(this);
+        }
     }
 
     public void startNewGame() {
-        bitBoard = new BitBoard();
-        gameState = new GameState(bitBoard);
-        legalMovesNeedUpdate = true;
-        line = new ArrayList<>();
-        redoLine = new ArrayList<>();
-        this.openingBook = OpeningBook.getInstance();
-        legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
-        // Optional: one cleanup to ensure fresh state
-        legalMovesCache.cleanup();
-        notifyPositionChanged();
+        synchronized (boardLock) {
+            bitBoard = new BitBoard();
+            gameState = new GameState(bitBoard);
+            legalMovesNeedUpdate = true;
+            line = new ArrayList<>();
+            redoLine = new ArrayList<>();
+            this.openingBook = OpeningBook.getInstance();
+            legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
+            // Optional: one cleanup to ensure fresh state
+            legalMovesCache.cleanup();
+            notifyPositionChanged();
+        }
     }
 
     private void generateLegalMoves() {
-        final long boardStateHash = getBoardStateHash();
+        synchronized (boardLock) {
+            final long boardStateHash = getBoardStateHash();
 
-        // Use cached result if available
-        MoveList cached = legalMovesCache.get(boardStateHash);
-        if (cached != null) {
-            this.legalMoves = new MoveList(cached);
-            legalMovesNeedUpdate = false;
-            return;
-        }
-
-        if (gameState.isGameOver()) {
-            this.legalMoves = new MoveList();
-            legalMovesNeedUpdate = false;
-            return;
-        }
-
-        // Generate pseudo-legal moves on the current board
-        MoveList moves = bitBoard.getAllCurrentPossibleMoves();
-
-        // Filter in-place by making/unmaking on the SAME bitBoard (no BitBoard copy)
-        MoveList legal = new MoveList();
-        for (int i = 0; i < moves.size(); i++) {
-            int move = moves.getMove(i);
-
-            bitBoard.performMove(move);
-            // If the mover's king is not left in check, the move is legal
-            if (!bitBoard.isInCheck(MoveHelper.isWhitesMove(move))) {
-                legal.add(move);
+            // Use cached result if available
+            MoveList cached = legalMovesCache.get(boardStateHash);
+            if (cached != null) {
+                this.legalMoves = new MoveList(cached);
+                legalMovesNeedUpdate = false;
+                return;
             }
-            bitBoard.undoMove(move);
-        }
 
-        this.legalMoves = legal;
-        legalMovesNeedUpdate = false;
-        // Store a clone to keep the cache immutable from callers' perspective.
-        legalMovesCache.put(boardStateHash, new MoveList(legal));
+            if (gameState.isGameOver()) {
+                this.legalMoves = new MoveList();
+                legalMovesNeedUpdate = false;
+                return;
+            }
 
-        int size = legalMovesCache.size();
-        if (size > CACHE_CFG.maxSize) {
-            // This should be rare due to eviction, but keep the guard to surface misconfigurations.
-            throw new RuntimeException(String.format(
-                    "LegalMovesCache size %s is larger than configured MAX_SIZE %s", size, CACHE_CFG.maxSize));
+            // Generate pseudo-legal moves on the current board
+            MoveList moves = bitBoard.getAllCurrentPossibleMoves();
+
+            // Filter in-place by making/unmaking on the SAME bitBoard (no BitBoard copy)
+            MoveList legal = new MoveList();
+            for (int i = 0; i < moves.size(); i++) {
+                int move = moves.getMove(i);
+
+                bitBoard.performMove(move);
+                // If the mover's king is not left in check, the move is legal
+                if (!bitBoard.isInCheck(MoveHelper.isWhitesMove(move))) {
+                    legal.add(move);
+                }
+                bitBoard.undoMove(move);
+            }
+
+            this.legalMoves = legal;
+            legalMovesNeedUpdate = false;
+            // Store a clone to keep the cache immutable from callers' perspective.
+            legalMovesCache.put(boardStateHash, new MoveList(legal));
+
+            int size = legalMovesCache.size();
+            if (size > CACHE_CFG.maxSize) {
+                // This should be rare due to eviction, but keep the guard to surface misconfigurations.
+                throw new RuntimeException(String.format(
+                        "LegalMovesCache size %s is larger than configured MAX_SIZE %s", size, CACHE_CFG.maxSize));
+            }
         }
     }
 
@@ -302,40 +322,42 @@ public class Engine {
         performMove(randomMove);
     }
 
-    public synchronized GameState moveFigure(int fromIndex, int toIndex, int promotionPiece) {
+    public GameState moveFigure(int fromIndex, int toIndex, int promotionPiece) {
         return moveFigure(bitBoard, fromIndex, toIndex, promotionPiece);
     }
 
     // always queen
-    public synchronized void moveFigure(int fromIndex, int toIndex) {
+    public void moveFigure(int fromIndex, int toIndex) {
         moveFigure(bitBoard, fromIndex, toIndex, 5);
     }
 
-    public synchronized GameState moveFigure(BitBoard bitBoard, int fromIndex, int toIndex, int promotionPiece) {
-        // Determine the piece type and color from the bitboard based on the 'from' position
-        PieceType pieceType = bitBoard.getPieceTypeAtIndex(fromIndex);
-        Color color = bitBoard.getPieceColorAtIndex(fromIndex);
+    public GameState moveFigure(BitBoard bitBoard, int fromIndex, int toIndex, int promotionPiece) {
+        synchronized (boardLock) {
+            // Determine the piece type and color from the bitboard based on the 'from' position
+            PieceType pieceType = bitBoard.getPieceTypeAtIndex(fromIndex);
+            Color color = bitBoard.getPieceColorAtIndex(fromIndex);
 
-        if (pieceType == null || color == null) {
-            throw new IllegalStateException("No piece at the starting position");
+            if (pieceType == null || color == null) {
+                throw new IllegalStateException("No piece at the starting position");
+            }
+
+            // Check if it's the correct player's turn
+            Color pieceColor = bitBoard.getPieceColorAtIndex(fromIndex);
+            if ((pieceColor == Color.WHITE && !bitBoard.whitesTurn) || (pieceColor == Color.BLACK && bitBoard.whitesTurn)) {
+                bitBoard.logBoard();
+                throw new IllegalStateException("It's not " + pieceColor + "'s turn");
+            }
+
+            int move = getMove(fromIndex, toIndex, promotionPiece);
+
+            if (move == -1) {
+                log.warn("Move not legal!");
+            } else {
+                performMove(move);
+            }
+
+            return gameState;
         }
-
-        // Check if it's the correct player's turn
-        Color pieceColor = bitBoard.getPieceColorAtIndex(fromIndex);
-        if ((pieceColor == Color.WHITE && !bitBoard.whitesTurn) || (pieceColor == Color.BLACK && bitBoard.whitesTurn)) {
-            bitBoard.logBoard();
-            throw new IllegalStateException("It's not " + pieceColor + "'s turn");
-        }
-
-        int move = getMove(fromIndex, toIndex, promotionPiece);
-
-        if (move == -1) {
-            log.warn("Move not legal!");
-        } else {
-            performMove(move);
-        }
-
-        return gameState;
     }
 
     private int getMove(int fromIndex, int toIndex, int promotionPiece) {
@@ -362,78 +384,92 @@ public class Engine {
                 .collect(Collectors.toList());
     }
 
-    public synchronized long getBoardStateHash() {
-        return bitBoard.getBoardStateHash();
+    public long getBoardStateHash() {
+        synchronized (boardLock) {
+            return bitBoard.getBoardStateHash();
+        }
     }
 
     public void logBoard() {
-        bitBoard.logBoard();
+        synchronized (boardLock) {
+            bitBoard.logBoard();
+        }
     }
 
     public boolean whitesTurn() {
-        return bitBoard.whitesTurn;
+        synchronized (boardLock) {
+            return bitBoard.whitesTurn;
+        }
     }
 
     // Engine.java
     public int doNullMoveForSearch() {
         // Save current en-passant target (0 means none in your codebase)
-        int previousDoubleStep = bitBoard.getLastMoveDoubleStepPawnIndex();
+        synchronized (boardLock) {
+            int previousDoubleStep = bitBoard.getLastMoveDoubleStepPawnIndex();
 
-        // EP is not valid across a null move: clear it
-        bitBoard.setLastMoveDoubleStepPawnIndex(0);
+            // EP is not valid across a null move: clear it
+            bitBoard.setLastMoveDoubleStepPawnIndex(0);
 
-        // Flip side to move
-        bitBoard.flipSideToMove();
+            // Flip side to move
+            bitBoard.flipSideToMove();
 
-        // Mark move list stale so the next search ply regenerates for the new side.
-        legalMovesNeedUpdate = true;
+            // Mark move list stale so the next search ply regenerates for the new side.
+            legalMovesNeedUpdate = true;
 
-        return previousDoubleStep;
+            return previousDoubleStep;
+        }
     }
 
     // Engine.java
     public void undoNullMoveForSearch(int previousDoubleStep) {
-        // Flip side back
-        bitBoard.flipSideToMove();
+        synchronized (boardLock) {
+            // Flip side back
+            bitBoard.flipSideToMove();
 
-        // Restore EP target
-        bitBoard.setLastMoveDoubleStepPawnIndex(previousDoubleStep);
+            // Restore EP target
+            bitBoard.setLastMoveDoubleStepPawnIndex(previousDoubleStep);
 
-        // Mark stale again so we rebuild for the restored side.
-        legalMovesNeedUpdate = true;
+            // Mark stale again so we rebuild for the restored side.
+            legalMovesNeedUpdate = true;
+        }
     }
 
     public void undoLastMove() {
-        if (line.isEmpty()) throw new IllegalStateException("undoLastMoveWasNotPossible, line is empty");
+        synchronized (boardLock) {
+            if (line.isEmpty()) throw new IllegalStateException("undoLastMoveWasNotPossible, line is empty");
 
-        Integer undoMove = line.getLast();
+            Integer undoMove = line.getLast();
 
-        long currentHash = getBoardStateHash();
-        gameState.removeHash(currentHash);
+            long currentHash = getBoardStateHash();
+            gameState.removeHash(currentHash);
 
-        // 1) Undo on the board
-        this.bitBoard.undoMove(undoMove);
+            // 1) Undo on the board
+            this.bitBoard.undoMove(undoMove);
 
-        // 2) Recompute legal moves
-        generateLegalMoves();
-        gameState.popHalfmoveClock();
-        gameState.updateState(bitBoard, legalMoves, false);
-        gameState.getScore().undoMove(bitBoard, undoMove, gameState.getState());
+            // 2) Recompute legal moves
+            generateLegalMoves();
+            gameState.popHalfmoveClock();
+            gameState.updateState(bitBoard, legalMoves, false);
+            gameState.getScore().undoMove(bitBoard, undoMove, gameState.getState());
 
-        // 3) Bookkeeping
-        redoLine.add(undoMove);
-        line.removeLast();
-        notifyPositionChanged();
+            // 3) Bookkeeping
+            redoLine.add(undoMove);
+            line.removeLast();
+            notifyPositionChanged();
+        }
     }
 
 
     public void redoMove() {
-        if (!redoLine.isEmpty()) {
-            performMove(redoLine.getLast());
-            redoLine.removeLast();
-            notifyPositionChanged();
-        } else {
-            throw new IllegalStateException("redoLastMoveWasNotPossible, redoLine is empty");
+        synchronized (boardLock) {
+            if (!redoLine.isEmpty()) {
+                performMove(redoLine.getLast());
+                redoLine.removeLast();
+                notifyPositionChanged();
+            } else {
+                throw new IllegalStateException("redoLastMoveWasNotPossible, redoLine is empty");
+            }
         }
     }
 
@@ -446,40 +482,46 @@ public class Engine {
     }
 
     public FEN translateBoardToFen() {
-        return FEN.translateBoardToFEN(bitBoard);
+        synchronized (boardLock) {
+            return FEN.translateBoardToFEN(bitBoard);
+        }
     }
 
     // Engine.java
     public Map<String, String> buildRenderBoard() {
-        Map<String, String> map = new HashMap<>(64);
-        for (int i = 0; i < 64; i++) {
-            PieceType t = bitBoard.getPieceTypeAtIndex(i);
-            if (t == null) continue;
-            Color c = bitBoard.getPieceColorAtIndex(i);
-            String sq = convertIndexToString(i);
-            String code =
-                    (c == Color.WHITE ? "w" : "b") +
-                            switch (t) {
-                                case PAWN -> "P";
-                                case KNIGHT -> "N";
-                                case BISHOP -> "B";
-                                case ROOK -> "R";
-                                case QUEEN -> "Q";
-                                case KING -> "K";
-                            };
-            map.put(sq, code);
-        }
+        synchronized (boardLock) {
+            Map<String, String> map = new HashMap<>(64);
+            for (int i = 0; i < 64; i++) {
+                PieceType t = bitBoard.getPieceTypeAtIndex(i);
+                if (t == null) continue;
+                Color c = bitBoard.getPieceColorAtIndex(i);
+                String sq = convertIndexToString(i);
+                String code =
+                        (c == Color.WHITE ? "w" : "b") +
+                                switch (t) {
+                                    case PAWN -> "P";
+                                    case KNIGHT -> "N";
+                                    case BISHOP -> "B";
+                                    case ROOK -> "R";
+                                    case QUEEN -> "Q";
+                                    case KING -> "K";
+                                };
+                map.put(sq, code);
+            }
 
-        int epIdx = bitBoard.getEnPassantTargetIndex();
-        if (epIdx >= 0) {
-            map.remove(convertIndexToString(epIdx));
-        }
+            int epIdx = bitBoard.getEnPassantTargetIndex();
+            if (epIdx >= 0) {
+                map.remove(convertIndexToString(epIdx));
+            }
 
-        return map;
+            return map;
+        }
     }
 
 
     public boolean isEndgame() {
-        return bitBoard.isEndgame();
+        synchronized (boardLock) {
+            return bitBoard.isEndgame();
+        }
     }
 }
