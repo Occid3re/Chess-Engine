@@ -20,6 +20,7 @@ from typing import Optional, List, Dict
 import threading
 import asyncio
 import random
+import contextlib
 
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -355,6 +356,26 @@ def start_engine():
     return engine
 
 
+def shutdown_engine(engine: Optional[chess.engine.SimpleEngine]) -> None:
+    if engine is None:
+        return
+
+    with contextlib.suppress(Exception):
+        engine.stop()
+
+    try:
+        engine.quit()
+    except (chess.engine.EngineTerminatedError,
+            chess.engine.EngineError,
+            BrokenPipeError):
+        pass
+    except Exception:
+        kill = getattr(engine, "kill", None)
+        if callable(kill):
+            with contextlib.suppress(Exception):
+                kill()
+
+
 def is_my_turn(board: chess.Board, my_color_is_white: bool) -> bool:
     return (board.turn is chess.WHITE) == my_color_is_white
 
@@ -468,10 +489,7 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
                         chess.engine.EngineError,
                         chess.engine.EngineTerminatedError) as e:
                     print(f"[error] engine.play failed: {repr(e)}")
-                    try:
-                        engine.stop()
-                    except Exception:
-                        pass
+                    shutdown_engine(engine)
                     try:
                         engine = start_engine()
                     except Exception as ex:
@@ -508,10 +526,7 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
                         chess.engine.EngineError,
                         chess.engine.EngineTerminatedError) as e:
                     print(f"[error] engine.play failed: {repr(e)}")
-                    try:
-                        engine.stop()
-                    except Exception:
-                        pass
+                    shutdown_engine(engine)
                     try:
                         engine = start_engine()
                     except Exception as ex:
@@ -931,10 +946,7 @@ def run_bot():
     except KeyboardInterrupt:
         print("\n[+] Shutting down (Ctrl+C)")
     finally:
-        try:
-            engine.quit()
-        except Exception:
-            pass
+        shutdown_engine(engine)
         stop_event.set()
         try:
             thread.join(timeout=3.0)
