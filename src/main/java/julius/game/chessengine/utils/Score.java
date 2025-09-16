@@ -201,7 +201,10 @@ public class Score {
 
 
     // Cache for pawn structure evaluations to avoid recomputation
-    private static final ConcurrentMap<Long, PawnStructure> pawnStructureCache = new ConcurrentHashMap<>();
+    private static final ConcurrentMap<PawnStructureKey, PawnStructure> pawnStructureCache = new ConcurrentHashMap<>();
+
+    private static record PawnStructureKey(long whitePawns, long blackPawns) {
+    }
 
     private static final class PawnStructure {
         private final int whiteCenterPawnBonus;
@@ -229,12 +232,8 @@ public class Score {
         }
     }
 
-    private static long pawnHash(long whitePawns, long blackPawns) {
-        return whitePawns ^ (blackPawns << 1);
-    }
-
     private static PawnStructure getPawnStructure(long whitePawns, long blackPawns) {
-        long key = pawnHash(whitePawns, blackPawns);
+        PawnStructureKey key = new PawnStructureKey(whitePawns, blackPawns);
         return pawnStructureCache.computeIfAbsent(key, k -> new PawnStructure(whitePawns, blackPawns));
     }
 
