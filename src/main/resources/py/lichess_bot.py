@@ -38,6 +38,8 @@ LICHESS_TOKEN = os.environ.get("LICHESS_TOKEN") or "YOUR_TOKEN_HERE"
 
 # Engine thinking time floor per move (seconds)
 MOVE_TIME = float(os.environ.get("BOT_MOVE_TIME", "0.5"))
+# Dedicated lower floor for very fast games (bullet)
+BULLET_MOVE_TIME = float(os.environ.get("BOT_BULLET_MOVE_TIME", "0.4"))
 
 # Estimated full moves to help time management
 ESTIMATED_GAME_MOVES = int(os.environ.get("BOT_GAME_MOVES", "40"))
@@ -380,11 +382,41 @@ def is_my_turn(board: chess.Board, my_color_is_white: bool) -> bool:
     return (board.turn is chess.WHITE) == my_color_is_white
 
 
-def calc_move_time(state: dict, my_color_is_white: bool) -> float:
+def _estimate_tc_bucket(limit_seconds: Optional[float], increment_seconds: Optional[float]) -> Optional[str]:
+    """Infer a time-control bucket (bullet/blitz/rapid/classical) from clock limits."""
+
+    if limit_seconds is None and increment_seconds is None:
+        return None
+
+    def _to_float(val, default=0.0):
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return default
+
+    limit = max(0.0, _to_float(limit_seconds))
+    increment = max(0.0, _to_float(increment_seconds))
+    total = limit + 40.0 * increment
+    if total <= 0.0:
+        return "bullet"
+
+    est_minutes = total / 60.0
+    if est_minutes < 3.0:
+        return "bullet"
+    if est_minutes <= 8.0:
+        return "blitz"
+    if est_minutes <= 25.0:
+        return "rapid"
+    return "classical"
+
+
+def calc_move_time(state: dict, my_color_is_white: bool,
+                   clock_initial: Optional[float] = None,
+                   clock_increment: Optional[float] = None) -> float:
     key_time = "wtime" if my_color_is_white else "btime"
     key_inc = "winc" if my_color_is_white else "binc"
     time_ms = state.get(key_time)
-    inc_ms = state.get(key_inc, 0)
+    inc_ms = state.get(key_inc)
 
     if time_ms is None:
         return MOVE_TIME
@@ -392,19 +424,77 @@ def calc_move_time(state: dict, my_color_is_white: bool) -> float:
     if isinstance(time_ms, datetime.timedelta):
         remaining = time_ms.total_seconds()
     else:
-        remaining = float(time_ms) / 1000.0
+        try:
+            remaining = float(time_ms) / 1000.0
+        except (TypeError, ValueError):
+            return MOVE_TIME
+    remaining = max(0.0, remaining)
 
     if isinstance(inc_ms, datetime.timedelta):
         increment = inc_ms.total_seconds()
     else:
-        increment = float(inc_ms) / 1000.0 if inc_ms else 0.0
+        try:
+            increment = float(inc_ms) / 1000.0 if inc_ms else 0.0
+        except (TypeError, ValueError):
+            increment = 0.0
+    if increment <= 0.0 and clock_increment is not None:
+        try:
+            inc_hint = float(clock_increment)
+        except (TypeError, ValueError):
+            inc_hint = 0.0
+        if inc_hint > 0.0:
+            increment = inc_hint
+
+    tc_initial = clock_initial if clock_initial is not None else (remaining if remaining > 0 else None)
+    tc_bucket = _estimate_tc_bucket(tc_initial, clock_increment)
+    if tc_bucket is None:
+        tc_bucket = "blitz"
 
     moves_str = state.get("moves", "")
     moves_played = len(moves_str.split()) if moves_str else 0
-    moves_remaining = max(10, ESTIMATED_GAME_MOVES - moves_played // 2)
+    estimated_moves = ESTIMATED_GAME_MOVES
+    share_scale = 1.0
+    inc_scale = 0.8
+    margin = 0.1
+    min_cap = 0.2
+    cap_fraction = 0.9
+    floor = MOVE_TIME
 
-    think = (remaining / moves_remaining) + 0.8 * increment
-    return max(MOVE_TIME, min(think, max(0.2, remaining - 0.1)))
+    if tc_bucket == "bullet":
+        estimated_moves = max(ESTIMATED_GAME_MOVES, 48)
+        share_scale = 0.38
+        inc_scale = 0.5
+        margin = 0.06
+        min_cap = 0.1
+        cap_fraction = 0.6
+        bullet_floor = max(0.05, min(BULLET_MOVE_TIME, remaining * 0.45))
+        floor = min(MOVE_TIME, bullet_floor)
+    elif tc_bucket == "blitz":
+        share_scale = 0.7
+        inc_scale = 0.7
+        margin = 0.08
+        min_cap = 0.15
+        cap_fraction = 0.75
+    elif tc_bucket == "rapid":
+        share_scale = 0.85
+        inc_scale = 0.75
+        margin = 0.1
+        min_cap = 0.2
+        cap_fraction = 0.85
+
+    moves_remaining = max(8, estimated_moves - moves_played // 2)
+    base_share = remaining / max(1, moves_remaining)
+    think = share_scale * base_share + inc_scale * increment
+
+    cap_threshold = max(min_cap, max(0.0, remaining - margin))
+    cap_threshold = min(cap_threshold, max(0.0, remaining))
+    cap_threshold = min(cap_threshold, max(0.0, remaining * cap_fraction))
+
+    floor = min(floor, cap_threshold)
+    think = min(think, cap_threshold)
+    think = max(floor, think)
+
+    return max(0.05, think)
 
 
 def safe_make_move(client: berserk.Client, game_id: str, uci: str) -> bool:
@@ -461,6 +551,9 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
 
     my_color_is_white = None
     board = chess.Board()
+    clock_initial = None
+    clock_increment = None
+    tc_bucket = None
 
     for event in stream:
         t = event.get("type")
@@ -470,6 +563,12 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
             black_id = event["black"]["id"]
             my_color_is_white = (white_id == me_id)
             state = event.get("state", {})
+            clock = event.get("clock") or {}
+            if "initial" in clock:
+                clock_initial = clock.get("initial")
+            if "increment" in clock:
+                clock_increment = clock.get("increment")
+            tc_bucket = _estimate_tc_bucket(clock_initial, clock_increment)
             moves = state.get("moves", "")
             board = chess.Board()
             if moves:
@@ -477,8 +576,8 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
                     board.push_uci(mv)
 
             if is_my_turn(board, my_color_is_white) and not board.is_game_over():
-                think_time = calc_move_time(state, my_color_is_white)
-                slack = 0.15
+                think_time = calc_move_time(state, my_color_is_white, clock_initial, clock_increment)
+                slack = 0.1 if tc_bucket == "bullet" else 0.15
                 try:
                     result = engine.play(board, chess.engine.Limit(time=max(0.05, think_time - slack)))
                     move_sent = safe_make_move(client, game_id, result.move.uci())
@@ -514,8 +613,20 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
                 continue
 
             if is_my_turn(board, my_color_is_white):
-                think_time = calc_move_time(state, my_color_is_white)
-                slack = 0.15
+                think_time = calc_move_time(state, my_color_is_white, clock_initial, clock_increment)
+                if tc_bucket is None and clock_initial is None:
+                    key_time = "wtime" if my_color_is_white else "btime"
+                    time_val = state.get(key_time)
+                    if isinstance(time_val, datetime.timedelta):
+                        clock_initial = time_val.total_seconds()
+                    elif time_val is not None:
+                        try:
+                            clock_initial = float(time_val) / 1000.0
+                        except (TypeError, ValueError):
+                            clock_initial = None
+                    if tc_bucket is None:
+                        tc_bucket = _estimate_tc_bucket(clock_initial, clock_increment)
+                slack = 0.1 if tc_bucket == "bullet" else 0.15
                 try:
                     result = engine.play(board, chess.engine.Limit(time=max(0.05, think_time - slack)))
                     move_sent = safe_make_move(client, game_id, result.move.uci())
@@ -577,17 +688,8 @@ def classify_tc_from_challenge(chal: dict) -> str:
     if tc.get("type") == "correspondence":
         return "correspondence"
 
-    # Estimate clock category: base + 40*inc heuristic (minutes)
-    limit = float(tc.get("limit", 0))  # seconds
-    inc = float(tc.get("increment", 0))  # seconds
-    est_minutes = (limit + 40.0 * inc) / 60.0
-    if est_minutes < 3.0:
-        return "bullet"
-    if est_minutes <= 8.0:
-        return "blitz"
-    if est_minutes <= 25.0:
-        return "rapid"
-    return "classical"
+    bucket = _estimate_tc_bucket(tc.get("limit"), tc.get("increment"))
+    return bucket or "bullet"
 
 
 def find_similar_bots(client: berserk.Client,
