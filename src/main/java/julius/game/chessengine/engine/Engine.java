@@ -222,8 +222,31 @@ public class Engine {
         synchronized (boardLock) {
             this.bitBoard = FEN.translateFENtoBitBoard(fen);
             this.gameState = new GameState(bitBoard);
-            generateLegalMoves();
-            gameState.updateState(bitBoard, legalMoves, false);
+
+            // Ensure the imported state reflects the parsed halfmove/fullmove counters and
+            // repetition baseline.  The constructor copies the counters from the bitboard, but
+            // we explicitly reset the historical bookkeeping so future updates start from this
+            // root position.
+            gameState.setHalfmoveClock(bitBoard.getHalfmoveClock());
+            gameState.setFullmoveNumber(bitBoard.getFullmoveNumber());
+            gameState.getHashHistory().clear();
+            gameState.getRepetition().clear();
+            gameState.recordHash(getBoardStateHash());
+
+            // For terminal draw states (e.g., fifty-move rule) skip move generation entirely so
+            // callers observe an empty legal move list.
+            if (gameState.isFiftyMoveRule() || gameState.isThreefoldRepetition()) {
+                if (legalMoves == null) {
+                    legalMoves = new MoveList();
+                } else {
+                    legalMoves.clear();
+                }
+                legalMovesNeedUpdate = false;
+                gameState.setState(GameStateEnum.DRAW);
+            } else {
+                generateLegalMoves();
+                gameState.updateState(bitBoard, legalMoves, false);
+            }
             notifyPositionChanged();
         }
     }
