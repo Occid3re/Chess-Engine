@@ -158,6 +158,11 @@ public class Score {
     private int whiteKnightOutpostBonus = 0;
     private int blackKnightOutpostBonus = 0;
 
+    private static final BishopHelper BISHOP_HELPER = BishopHelper.getInstance();
+    private static final RookHelper ROOK_HELPER = RookHelper.getInstance();
+    // Thread-local accumulator reused to avoid per-call allocations when recomputing mobility.
+    private static final ThreadLocal<int[]> MOBILITY_BUFFER = ThreadLocal.withInitial(() -> new int[2]);
+
     // Initialize positional values
     private int whitePawnsPosition = 0;
     private int blackPawnsPosition = 0;
@@ -969,45 +974,66 @@ public class Score {
     }
 
     public void updateMobilityScores(BitBoard bitBoard) {
-        // Generate pseudo-legal moves for mobility estimation. We process
-        // each side separately because the move generator reuses an internal
-        // buffer for efficiency.
-        MoveList moves = bitBoard.generateAllPossibleMoves(true);
-        int whiteScore = calculateMobility(moves);
+        int[] mobility = MOBILITY_BUFFER.get();
+        mobility[0] = calculateMobility(bitBoard, true);
+        mobility[1] = calculateMobility(bitBoard, false);
 
-        moves = bitBoard.generateAllPossibleMoves(false);
-        int blackScore = calculateMobility(moves);
-
-        updateMobilityScores(whiteScore, blackScore);
+        updateMobilityScores(mobility[0], mobility[1]);
     }
 
-    private int calculateMobility(MoveList moves) {
-        int score = 0;
-        for (int i = 0; i < moves.size(); i++) {
-            int move = moves.getMove(i);
-            switch (MoveHelper.derivePieceTypeBits(move)) {
-                case 2:
-                    score += KNIGHT_MOBILITY_BONUS;
-                    break;
-                case 3:
-                    score += BISHOP_MOBILITY_BONUS;
-                    break;
-                case 4:
-                    score += ROOK_MOBILITY_BONUS;
-                    break;
-                case 5:
-                    score += QUEEN_MOBILITY_BONUS;
-                    break;
-                default:
-                    break;
-            }
+    private int calculateMobility(BitBoard bitBoard, boolean white) {
+        long friendlyPieces = white ? bitBoard.getWhitePieces() : bitBoard.getBlackPieces();
+        long knights = white ? bitBoard.getWhiteKnights() : bitBoard.getBlackKnights();
+        long bishops = white ? bitBoard.getWhiteBishops() : bitBoard.getBlackBishops();
+        long rooks = white ? bitBoard.getWhiteRooks() : bitBoard.getBlackRooks();
+        long queens = white ? bitBoard.getWhiteQueens() : bitBoard.getBlackQueens();
+        long occupancy = bitBoard.getAllPieces();
 
-            int toIndex = MoveHelper.deriveToIndex(move);
-            if (((1L << toIndex) & CENTRAL_SQUARES) != 0) {
-                score += CENTER_CONTROL_BONUS;
-            }
+        int score = 0;
+
+        while (knights != 0) {
+            int square = Long.numberOfTrailingZeros(knights);
+            long attacks = knightMoveTable[square] & ~friendlyPieces;
+            score += mobilityFromAttacks(attacks, KNIGHT_MOBILITY_BONUS);
+            knights &= knights - 1;
         }
+
+        while (bishops != 0) {
+            int square = Long.numberOfTrailingZeros(bishops);
+            long attacks = BISHOP_HELPER.calculateBishopMoves(square, occupancy) & ~friendlyPieces;
+            score += mobilityFromAttacks(attacks, BISHOP_MOBILITY_BONUS);
+            bishops &= bishops - 1;
+        }
+
+        while (rooks != 0) {
+            int square = Long.numberOfTrailingZeros(rooks);
+            long attacks = ROOK_HELPER.calculateRookMoves(square, occupancy) & ~friendlyPieces;
+            score += mobilityFromAttacks(attacks, ROOK_MOBILITY_BONUS);
+            rooks &= rooks - 1;
+        }
+
+        while (queens != 0) {
+            int square = Long.numberOfTrailingZeros(queens);
+            long attacks = (BISHOP_HELPER.calculateBishopMoves(square, occupancy)
+                    | ROOK_HELPER.calculateRookMoves(square, occupancy)) & ~friendlyPieces;
+            score += mobilityFromAttacks(attacks, QUEEN_MOBILITY_BONUS);
+            queens &= queens - 1;
+        }
+
         return score;
+    }
+
+    private static int mobilityFromAttacks(long attacks, int mobilityBonus) {
+        if (attacks == 0) {
+            return 0;
+        }
+        int moves = Long.bitCount(attacks);
+        return (mobilityBonus * moves) + centerControlContribution(attacks);
+    }
+
+    private static int centerControlContribution(long attacks) {
+        long centerTargets = attacks & CENTRAL_SQUARES;
+        return centerTargets != 0 ? CENTER_CONTROL_BONUS * Long.bitCount(centerTargets) : 0;
     }
 
     private boolean hasNoLegalMove(BitBoard board, boolean white) {
