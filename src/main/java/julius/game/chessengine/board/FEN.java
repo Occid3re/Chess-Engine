@@ -137,8 +137,33 @@ public class FEN {
             blackKingHasCastled = ((blackKing & (1L << 62)) != 0) || ((blackKing & (1L << 58)) != 0);
         }
 
+        int halfmoveClock = 0;
+        int fullmoveNumber = 1;
+
+        if (parts.length > 4) {
+            try {
+                halfmoveClock = Integer.parseInt(parts[4]);
+                if (halfmoveClock < 0) {
+                    halfmoveClock = 0;
+                }
+            } catch (NumberFormatException ignored) {
+                halfmoveClock = 0;
+            }
+        }
+
+        if (parts.length > 5) {
+            try {
+                fullmoveNumber = Integer.parseInt(parts[5]);
+                if (fullmoveNumber < 1) {
+                    fullmoveNumber = 1;
+                }
+            } catch (NumberFormatException ignored) {
+                fullmoveNumber = 1;
+            }
+        }
+
         // Pass these inferred values to the BitBoard constructor
-        return new BitBoard(whitesTurn, whitePawns, blackPawns, whiteKnights, blackKnights, whiteBishops, blackBishops, whiteRooks, blackRooks, whiteQueens, blackQueens, whiteKing, blackKing, whitePieces, blackPieces, allPieces, lastMoveDoubleStepPawnIndex, whiteKingMoved, blackKingMoved, whiteRookA1Moved, whiteRookH1Moved, blackRookA8Moved, blackRookH8Moved, whiteKingHasCastled, blackKingHasCastled);
+        return new BitBoard(whitesTurn, whitePawns, blackPawns, whiteKnights, blackKnights, whiteBishops, blackBishops, whiteRooks, blackRooks, whiteQueens, blackQueens, whiteKing, blackKing, whitePieces, blackPieces, allPieces, lastMoveDoubleStepPawnIndex, whiteKingMoved, blackKingMoved, whiteRookA1Moved, whiteRookH1Moved, blackRookA8Moved, blackRookH8Moved, whiteKingHasCastled, blackKingHasCastled, halfmoveClock, fullmoveNumber);
     }
 
 }

@@ -21,6 +21,7 @@ public class GameState {
     private final Deque<Long> hashHistory = new ArrayDeque<>(256);
     private final HashMap<Long, Integer> repetition = new HashMap<>();
     private final IntArrayList halfmoveStack = new IntArrayList();
+    private final IntArrayList fullmoveStack = new IntArrayList();
 
     private GameStateEnum state;
 
@@ -28,11 +29,15 @@ public class GameState {
 
     @Getter
     private int halfmoveClock = 0;          // resets on pawn move or capture
+    @Getter
+    private int fullmoveNumber = 1;
     private long lastZobrist = 0L;          // last committed root hash
 
     public GameState(BitBoard bitBoard) {
         state = GameStateEnum.PLAY;
         score = Score.initializeScore(bitBoard);
+        this.halfmoveClock = bitBoard.getHalfmoveClock();
+        this.fullmoveNumber = bitBoard.getFullmoveNumber();
         recordHash(bitBoard.getBoardStateHash());
     }
 
@@ -40,10 +45,12 @@ public class GameState {
         this.state = other.state; // Enum, so a direct copy is fine
         this.score = new Score(other.score);
         this.halfmoveClock = other.halfmoveClock;
+        this.fullmoveNumber = other.fullmoveNumber;
         this.lastZobrist = other.lastZobrist;
         this.hashHistory.addAll(other.hashHistory);
         this.repetition.putAll(other.repetition);
         this.halfmoveStack.addAll(other.halfmoveStack);
+        this.fullmoveStack.addAll(other.fullmoveStack);
     }
     public void update(BitBoard bitBoard, MoveList legalMoves, int move, boolean isOpeningMove) {
         updateState(bitBoard, legalMoves, isOpeningMove);
@@ -53,6 +60,13 @@ public class GameState {
         boolean isPawnMove = (MoveHelper.derivePieceTypeBits(move) == 1);
         if (isCapture || isPawnMove) resetHalfmoveClock();
         else incHalfmoveClock();
+
+        if (!MoveHelper.isWhitesMove(move)) {
+            fullmoveNumber++;
+        }
+
+        bitBoard.setHalfmoveClock(halfmoveClock);
+        bitBoard.setFullmoveNumber(fullmoveNumber);
 
         // Threefold / 50-move adjudication
         if (isThreefoldRepetition() || isFiftyMoveRule()) {
@@ -159,8 +173,20 @@ public class GameState {
     public void incHalfmoveClock() { halfmoveClock++; }
     public boolean isFiftyMoveRule() { return halfmoveClock >= 100; }
 
-    public void pushHalfmoveClock() { halfmoveStack.addLast(halfmoveClock); }
-    public void popHalfmoveClock()  { if (!halfmoveStack.isEmpty()) halfmoveClock = halfmoveStack.removeLast(); }
+    public void pushHalfmoveClock() {
+        halfmoveStack.addLast(halfmoveClock);
+        fullmoveStack.addLast(fullmoveNumber);
+    }
+    public void popHalfmoveClock(BitBoard bitBoard)  {
+        if (!halfmoveStack.isEmpty()) {
+            halfmoveClock = halfmoveStack.removeLast();
+        }
+        if (!fullmoveStack.isEmpty()) {
+            fullmoveNumber = fullmoveStack.removeLast();
+        }
+        bitBoard.setHalfmoveClock(halfmoveClock);
+        bitBoard.setFullmoveNumber(fullmoveNumber);
+    }
 
     @Override
     public String toString() {
