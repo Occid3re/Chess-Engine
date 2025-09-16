@@ -13,6 +13,10 @@ import lombok.Setter;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Component;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -31,10 +35,19 @@ public class AI {
      * Number of threads used for searching. Defaults to single-threaded search but
      * can be adjusted at runtime via the UCI "Threads" option.
      */
-    @Getter
-    @Setter
+    @Getter @Setter
     private int searchThreads = Integer.getInteger("chessengine.searchThreads", 1);
 
+    // number of Lazy SMP workers (≥1)
+    @Getter
+    private int lazySmpThreads = Math.max(1, Integer.getInteger("chessengine.lazySmpThreads", 1));
+
+    private Thread calculationCoordinator;
+    private Thread[] calculationThreads;
+
+    private final AtomicReference<SearchTask> activeSearch = new AtomicReference<>();
+    private final ThreadLocal<SearchTask> threadSearchTask = new ThreadLocal<>();
+    private final AtomicLong searchIdGenerator = new AtomicLong();
     /**
      * Requested size of the transposition table in megabytes. The current
      * implementation does not dynamically resize the table, but the value is
@@ -80,7 +93,6 @@ public class AI {
     private final TranspositionTable<CaptureTranspositionTableEntry> captureTranspositionTable;
 
     private final int[][] killerMoves; // 2D array for killer moves, initialized in the constructor
-    private final int numKillerMoves = 2;
 
     /**
      * History heuristic table. Indexed by from and to square (0-63), it stores a
@@ -97,7 +109,6 @@ public class AI {
     private final int[] scoreBuffer = new int[MAX_MOVE_LIST_SIZE];
 
     private ScheduledExecutorService scheduler;
-    private Thread calculationThread;
 
     private final Object calculationLock = new Object();
 
@@ -122,7 +133,7 @@ public class AI {
     @Setter
     private long timeLimit; // milliseconds
 
-    private boolean useNullMovePruning = Boolean.parseBoolean(
+    private final boolean useNullMovePruning = Boolean.parseBoolean(
             System.getProperty("chessengine.nullMove", "true")
     );
 
@@ -131,17 +142,13 @@ public class AI {
     @Getter
     private long nullMoveCount = 0;
 
-    /**
-     * Ply hint for distance-to-mate normalization (set per ID iteration).
-     */
-    private int rootDepthForMateScoring = 0;
-
     public AI(Engine mainEngine) {
-        log.info("### SearchThreads = " + searchThreads);
+        log.info("### SearchThreads = " + searchThreads + ", LazySmpThreads = " + lazySmpThreads);
         this.mainEngine = mainEngine;
         this.timeLimit = 50;
 
         // Initialize killer moves etc...
+        int numKillerMoves = 2;
         this.killerMoves = new int[maxDepth][numKillerMoves];
         for (int i = 0; i < maxDepth; i++) {
             for (int j = 0; j < numKillerMoves; j++) {
@@ -152,15 +159,14 @@ public class AI {
         this.counterMove = new int[64][64];
         for (int f = 0; f < 64; f++) Arrays.fill(counterMove[f], -1);
 
-        // Initialize transposition tables based on the configured thread count
-        this.transpositionTable = searchThreads == 1
+        int ttConcurrency = Math.max(searchThreads, lazySmpThreads);
+        this.transpositionTable = ttConcurrency == 1
                 ? new PlainFixedSizeTranspositionTable<>(TRANSPOSITION_TABLE_MAX_ENTRIES, TranspositionTableEntry.class)
                 : new FixedSizeTranspositionTable<>(TRANSPOSITION_TABLE_MAX_ENTRIES);
-        this.captureTranspositionTable = searchThreads == 1
+        this.captureTranspositionTable = ttConcurrency == 1
                 ? new PlainFixedSizeTranspositionTable<>(CAPTURE_TRANSPOSITION_TABLE_MAX_ENTRIES, CaptureTranspositionTableEntry.class)
                 : new FixedSizeTranspositionTable<>(CAPTURE_TRANSPOSITION_TABLE_MAX_ENTRIES);
 
-        // create a fixed-size pool only when useful
         this.searchPool = searchThreads > 1
                 ? Executors.newFixedThreadPool(searchThreads, r -> {
             Thread t = new Thread(r, "AI-Search-" + System.identityHashCode(r));
@@ -187,10 +193,117 @@ public class AI {
 
     private void startCalculationThread() {
         keepCalculating = true;
-        calculationThread = new Thread(this::calculateLine);
-        calculationThread.setName("Simulator");
-        calculationThread.start();
+
+        if (calculationCoordinator != null && calculationCoordinator.isAlive()) {
+            return;
+        }
+
+        calculationCoordinator = new Thread(this::calculateLine, "Simulator-Dispatcher");
+        calculationCoordinator.setDaemon(true);
+        calculationCoordinator.start();
+
+        calculationThreads = new Thread[lazySmpThreads];
+        for (int i = 0; i < lazySmpThreads; i++) {
+            final int workerIndex = i;
+            Thread worker = new Thread(() -> searchWorkerLoop(workerIndex), "Simulator-" + workerIndex);
+            worker.setDaemon(true);
+            worker.start();
+            calculationThreads[i] = worker;
+        }
     }
+
+    private void searchWorkerLoop(int workerIndex) {
+        long lastTaskId = -1L;
+        while (keepCalculating && !Thread.currentThread().isInterrupted()) {
+            SearchTask task;
+            synchronized (calculationLock) {
+                while (keepCalculating && !Thread.currentThread().isInterrupted()) {
+                    task = activeSearch.get();
+                    if (task != null && task.getId() != lastTaskId) break;
+                    task = null;
+                    try { calculationLock.wait(); } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt(); return;
+                    }
+                }
+                if (!keepCalculating || Thread.currentThread().isInterrupted()) return;
+                task = activeSearch.get();
+                if (task == null || task.getId() == lastTaskId) continue;
+            }
+            lastTaskId = task.getId();
+            runSearchOnTask(task, workerIndex);
+        }
+    }
+
+    private void runSearchOnTask(SearchTask task, int workerIndex) {
+        Engine simulator;
+        try {
+            simulator = mainEngine.createSimulation();
+        } catch (RuntimeException e) {
+            log.error("Failed to create simulation for worker {}", workerIndex, e);
+            task.workerDone(); return;
+        }
+
+        SplittableRandom rng = lazySmpThreads > 1
+                ? new SplittableRandom(task.getBoardHash() ^ (0x9E3779B97F4A7C15L * (workerIndex + 1L)))
+                : null;
+
+        threadSearchTask.set(task);
+        try {
+            iterativeDeepening(task, simulator, rng);
+        } catch (Exception e) {
+            log.error("Search worker {} encountered an error", workerIndex, e);
+        } finally {
+            threadSearchTask.remove();
+            task.workerDone();
+        }
+    }
+
+    private void iterativeDeepening(SearchTask task, Engine simulatorEngine, SplittableRandom rng) {
+        Double lastIterScore = null;
+
+        for (int currentDepth = 1; currentDepth <= maxDepth; currentDepth++) {
+            if (shouldStopCalculating(task.getDeadline())) break;
+
+            /**
+             * Ply hint for distance-to-mate normalization (set per ID iteration).
+             */
+            MoveAndScore ms = null;
+
+            double alpha = Double.NEGATIVE_INFINITY, beta = Double.POSITIVE_INFINITY;
+            if (lastIterScore != null && currentDepth >= 3) {
+                double window = 50.0;
+                if (rng != null) window = Math.max(10.0, window + rng.nextDouble(-10.0, 10.0));
+                alpha = lastIterScore - window;
+                beta  = lastIterScore + window;
+
+                int retries = 0;
+                while (!shouldStopCalculating(task.getDeadline())) {
+                    ms = searchRootMoves(simulatorEngine, task, currentDepth, alpha, beta, rng);
+                    if (ms == null) break;
+                    if (ms.score <= alpha) { window *= 2.0; alpha = ms.score - window; if (++retries > 3) { alpha = Double.NEGATIVE_INFINITY; beta = Double.POSITIVE_INFINITY; } else continue; }
+                    if (ms.score >= beta ) { window *= 2.0; beta  = ms.score + window; if (++retries > 3) { alpha = Double.NEGATIVE_INFINITY; beta = Double.POSITIVE_INFINITY; } else continue; }
+                    break;
+                }
+            }
+
+            if (ms == null) {
+                ms = searchRootMoves(simulatorEngine, task, currentDepth, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, rng);
+                if (ms == null) break;
+            }
+
+            lastIterScore = ms.score;
+            task.publishBest(ms, currentDepth, simulatorEngine);
+            if (task.isStopRequested()) break;
+        }
+    }
+
+    private MoveAndScore searchRootMoves(Engine sim, SearchTask task, int depth, double alpha, double beta, SplittableRandom rng) {
+        if (searchThreads > 1) {
+            return getBestMoveParallel(sim, task.isWhiteToMove(), depth, task.getDeadline(), alpha, beta, rng);
+        }
+        return getBestMove(sim, task.isWhiteToMove(), depth, task.getDeadline(), alpha, beta, rng);
+    }
+
 
     public void reset() {
         stopCalculation();
@@ -204,17 +317,44 @@ public class AI {
 
     public void stopCalculation() {
         keepCalculating = false;
-        if (calculationThread != null && calculationThread.isAlive()) {
-            calculationThread.interrupt();
-            try {
-                calculationThread.join(); // Wait for the thread to finish
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt(); // Preserve interrupt status
-                log.error("Thread interruption error", e);
+
+        SearchTask task = activeSearch.get();
+        if (task != null) task.requestStop();
+
+        synchronized (calculationLock) {
+            calculationLock.notifyAll();
+        }
+
+        if (calculationThreads != null) {
+            for (Thread worker : calculationThreads) {
+                if (worker != null && worker.isAlive()) worker.interrupt();
             }
         }
+        if (calculationCoordinator != null && calculationCoordinator.isAlive()) {
+            calculationCoordinator.interrupt();
+        }
+
+        if (calculationThreads != null) {
+            for (Thread worker : calculationThreads) {
+                if (worker == null) continue;
+                try { worker.join(); } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt(); log.error("Thread interruption error", e);
+                }
+            }
+            calculationThreads = null;
+        }
+
+        if (calculationCoordinator != null) {
+            try { calculationCoordinator.join(); } catch (InterruptedException e) {
+                Thread.currentThread().interrupt(); log.error("Thread interruption error", e);
+            }
+            calculationCoordinator = null;
+        }
+
+        activeSearch.set(null);
         calculatedLine = Collections.synchronizedList(new ArrayList<>());
     }
+
 
     public void startAutoPlay(boolean aiIsWhite, boolean aiIsBlack) {
         log.debug("timelimit is: " + timeLimit);
@@ -268,150 +408,115 @@ public class AI {
 
 
     private void calculateLine() {
-        log.debug("keepCalculating: {}, interrupted: {}", keepCalculating, Thread.currentThread().isInterrupted());
+        long lastObservedHash = Long.MIN_VALUE;
         while (keepCalculating && !Thread.currentThread().isInterrupted()) {
+            long targetHash;
             synchronized (calculationLock) {
-                while (!positionChanged() && keepCalculating && !Thread.currentThread().isInterrupted()) {
-                    try {
-                        calculationLock.wait();
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        return;
+                while (keepCalculating && !Thread.currentThread().isInterrupted()) {
+                    targetHash = currentBoardState;
+                    if (targetHash != lastObservedHash) break;
+                    try { calculationLock.wait(); } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt(); return;
                     }
                 }
+                if (!keepCalculating || Thread.currentThread().isInterrupted()) return;
+                targetHash = currentBoardState;
             }
-            if (!keepCalculating || Thread.currentThread().isInterrupted()) {
-                break;
-            }
-            do {
-                currentBoardState = mainEngine.getBoardStateHash();
-                beforeCalculationBoardState = currentBoardState;
-                performCalculation();
-            } while (!positionChanged() && keepCalculating && !Thread.currentThread().isInterrupted());
+
+            currentBoardState = mainEngine.getBoardStateHash();
+            beforeCalculationBoardState = currentBoardState;
+            performCalculation();
+            lastObservedHash = currentBoardState;
         }
     }
+
 
     private void performCalculation() {
         log.debug(" --- TranspositionTable[{}] --- ", transpositionTable.size());
         decayHistoryTable();
+
         try {
             Engine simulatorEngine = mainEngine.createSimulation();
             long boardStateHash = simulatorEngine.getBoardStateHash();
             log.debug("boardStateBeforeCalculation {}, currentBoardState {}", beforeCalculationBoardState, currentBoardState);
 
-            // Perform calculation only if the board state has actually changed
             boolean isWhite = simulatorEngine.whitesTurn();
             long deadline = System.nanoTime() + timeLimit * 1_000_000;
-            calculateBestMove(simulatorEngine, boardStateHash, isWhite, deadline);
+            beforeCalculationBoardState = boardStateHash;
+
+            int bookMove = mainEngine.getOpeningBook().getRandomMoveForBoardStateHash(boardStateHash);
+            if (bookMove != -1) {
+                currentBestMove = bookMove;
+                bestMoveForHash = boardStateHash;
+                this.calculatedLine = List.of(new MoveAndScore(bookMove, 0.0));
+                return;
+            }
+
+            SearchTask task = new SearchTask(searchIdGenerator.incrementAndGet(), boardStateHash, isWhite, deadline, lazySmpThreads);
+            activeSearch.set(task);
+            currentBestMove = -1;
+            bestMoveForHash = -1;
+            this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
+
+            synchronized (calculationLock) {
+                calculationLock.notifyAll();
+            }
+
+            task.awaitCompletion();
+            completeSearchTask(task, simulatorEngine);
+            task.requestStop();
+
         } catch (IllegalStateException e) {
             log.warn("Illegal board state during search: {}", e.getMessage());
             MoveList legalMoves = mainEngine.getAllLegalMoves();
-            if (legalMoves.size() > 0) {
-                currentBestMove = legalMoves.getMove(0);
-            } else {
-                currentBestMove = -1;
-            }
+            currentBestMove = (legalMoves.size() > 0) ? legalMoves.getMove(0) : -1;
         } catch (Exception e) {
             log.error("Unexpected error during calculation", e);
+        } finally {
+            activeSearch.set(null);
         }
-
     }
 
+    private void completeSearchTask(SearchTask task, Engine simulatorEngine) {
+        if (task == null) return;
+        if (currentBoardState != task.getBoardHash()) return;
 
-    private void calculateBestMove(Engine simulatorEngine, long boardStateHash, boolean isWhite, long deadline) {
-        double bestScore = isWhite ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
-        int bestMove = mainEngine.getOpeningBook().getRandomMoveForBoardStateHash(boardStateHash); // if none: -1
-        if (bestMove != -1) {
-            currentBestMove = bestMove;
-            return;
-        }
+        BestMoveDepth best = task.getBest();
+        int move = best.move;
 
-        // For aspiration windows we center around the previous iteration’s score.
-        // Start neutral; quickly stabilizes after depth 2.
-        Double lastIterScore = null;
-
-        try {
-            for (int currentDepth = 1; currentDepth <= maxDepth; currentDepth++) {
-                if (shouldStopCalculating(deadline)) break;
-
-                // Set ply hint for consistent mate distance normalization
-                rootDepthForMateScoring = currentDepth;
-
-                MoveAndScore moveAndScore = null;
-
-                // --- Aspiration window around lastIterScore (if known) ---
-                double alpha = Double.NEGATIVE_INFINITY, beta = Double.POSITIVE_INFINITY;
-                if (lastIterScore != null && currentDepth >= 3) {
-                    double window = 50.0;            // ≈ 0.50 pawn; tune 25–100
-                    alpha = lastIterScore - window;
-                    beta = lastIterScore + window;
-
-                    int retries = 0;
-                    while (true) {
-                        if (searchThreads > 1) {
-                            moveAndScore = getBestMoveParallel(simulatorEngine, isWhite, currentDepth, deadline, alpha, beta);
-                        } else {
-                            moveAndScore = getBestMove(simulatorEngine, isWhite, currentDepth, deadline, alpha, beta);
-                        }
-                        if (moveAndScore == null) break; // timeout/stop
-
-                        // Fail-low/high? Widen and re-search this same depth.
-                        if (moveAndScore.score <= alpha) {
-                            // fail-low → widen downwards
-                            window *= 2.0;
-                            alpha = moveAndScore.score - window;
-                            retries++;
-                            if (retries > 3) {
-                                alpha = Double.NEGATIVE_INFINITY;
-                                beta = Double.POSITIVE_INFINITY;
-                            } else continue;
-                        } else if (moveAndScore.score >= beta) {
-                            // fail-high → widen upwards
-                            window *= 2.0;
-                            beta = moveAndScore.score + window;
-                            retries++;
-                            if (retries > 3) {
-                                alpha = Double.NEGATIVE_INFINITY;
-                                beta = Double.POSITIVE_INFINITY;
-                            } else continue;
-                        }
-                        break; // in-window → accept
-                    }
-                }
-
-                if (moveAndScore == null) {
-                    // First iterations or after giving up on aspiration → full window
-                    if (searchThreads > 1) {
-                        moveAndScore = getBestMoveParallel(simulatorEngine, isWhite, currentDepth, deadline,
-                                Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY);
-                    } else {
-                        moveAndScore = getBestMove(simulatorEngine, isWhite, currentDepth, deadline,
-                                Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY);
-                    }
-                    if (moveAndScore == null) break; // timeout/stop
-                }
-
-                if (isNewBestMove(moveAndScore, bestScore, isWhite)) {
-                    bestScore = moveAndScore.score;
-                    bestMove = moveAndScore.move;
-                    updateTranspositionTable(boardStateHash, moveAndScore, currentDepth);
-                }
-
-                lastIterScore = moveAndScore.score; // center next window here
-            }
-        } finally {
-            if (!positionChanged() && keepCalculating && !Thread.currentThread().isInterrupted()) {
-                if (bestMove == -1) {
-                    MoveList legalMoves = simulatorEngine.getAllLegalMoves();
-                    if (legalMoves.size() > 0) bestMove = legalMoves.getMove(0);
-                }
-                bestMoveForHash = boardStateHash;
-                currentBestMove = bestMove;
-                fillCalculatedLine(simulatorEngine);
+        if (move == -1) {
+            MoveList legalMoves = simulatorEngine.getAllLegalMoves();
+            if (legalMoves.size() > 0) {
+                move = legalMoves.getMove(0);
+                currentBestMove = move;
+                bestMoveForHash = task.getBoardHash();
             } else {
                 currentBestMove = -1;
+                this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
+                return;
             }
+        } else {
+            currentBestMove = move;
+            bestMoveForHash = task.getBoardHash();
         }
+
+        fillCalculatedLine(simulatorEngine);
+    }
+
+    private void maybeRotateRootMoves(List<Integer> moves, SplittableRandom rng) {
+        if (rng == null || moves.isEmpty()) return;
+        int bound = Math.min(moves.size(), 4);
+        if (bound <= 1) return;
+        int rotation = rng.nextInt(bound);
+        if (rotation != 0) Collections.rotate(moves, -rotation);
+    }
+
+    private boolean abortRequested(long deadline) {
+        if (Thread.currentThread().isInterrupted()) return true;
+        if (System.nanoTime() > deadline) return true;
+        if (positionChanged()) return true;
+        SearchTask t = threadSearchTask.get();
+        return t != null && t.isStopRequested();
     }
 
     private MoveAndScore getBestMoveParallel(Engine simulatorEngine,
@@ -419,39 +524,33 @@ public class AI {
                                              int depth,
                                              long deadline,
                                              double alpha,
-                                             double beta) {
-        // Fallback: pool missing or time nearly gone
-        if (searchPool == null || Thread.currentThread().isInterrupted() || timeLimitExceeded(deadline)) {
-            return getBestMove(simulatorEngine, isWhitesTurn, depth, deadline, alpha, beta);
+                                             double beta,
+                                             SplittableRandom rng) {
+        if (searchPool == null || abortRequested(deadline)) {
+            return getBestMove(simulatorEngine, isWhitesTurn, depth, deadline, alpha, beta, rng);
         }
 
-        // Order root moves once
         MoveList legal = simulatorEngine.getAllLegalMoves();
-        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1,
-                simulatorEngine);
+        ArrayList<Integer> orderedMoves = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
         if (orderedMoves.isEmpty()) return null;
+        maybeRotateRootMoves(orderedMoves, rng);
 
-        // === 1) Search first move FULL WINDOW to seed the bounds (YBWC) ===
         int firstMove = orderedMoves.get(0);
         int bestMove = -1;
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
 
-        if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
-            return null;
-        }
+        if (abortRequested(deadline)) return null;
 
         simulatorEngine.performMove(firstMove);
         double firstScore;
         if (simulatorEngine.getGameState().isInStateCheckMate()) {
-            // prefer fastest mate invariantly at root
             firstScore = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
         } else if (simulatorEngine.getGameState().isInStateDraw()) {
             firstScore = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, depth);
         } else {
             firstScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, firstMove, 1);
-            if (firstScore == EXIT_FLAG || positionChanged()) {
-                simulatorEngine.undoLastMove();
-                return null;
+            if (firstScore == EXIT_FLAG || abortRequested(deadline)) {
+                simulatorEngine.undoLastMove(); return null;
             }
         }
         simulatorEngine.undoLastMove();
@@ -459,58 +558,35 @@ public class AI {
         bestMove = firstMove;
         bestScore = firstScore;
 
-        // Seed shared window after first child (like your sequential version)
-        if (isWhitesTurn) {
-            alpha = Math.max(alpha, firstScore);
-        } else {
-            beta = Math.min(beta, firstScore);
-        }
-        if (alpha >= beta) {
-            return new MoveAndScore(bestMove, bestScore);
-        }
+        if (isWhitesTurn) alpha = Math.max(alpha, firstScore); else beta = Math.min(beta, firstScore);
+        if (alpha >= beta) return new MoveAndScore(bestMove, bestScore);
 
-        // === 2) Submit siblings as NULL-WINDOW probes (YBWC) ===
         final int fanout = Math.min(ROOT_PARALLEL_LIMIT, orderedMoves.size() - 1);
-        if (fanout <= 0) {
-            return new MoveAndScore(bestMove, bestScore);
-        }
+        if (fanout <= 0) return new MoveAndScore(bestMove, bestScore);
 
         final CompletionService<MoveAndScore> ecs = new ExecutorCompletionService<>(searchPool);
         final List<Future<MoveAndScore>> futures = new ArrayList<>(fanout);
 
-        // Shared, dynamic bounds + re-search serialization
-        final java.util.concurrent.atomic.AtomicReference<Double> alphaRef = new java.util.concurrent.atomic.AtomicReference<>(alpha);
-        final java.util.concurrent.atomic.AtomicReference<Double> betaRef = new java.util.concurrent.atomic.AtomicReference<>(beta);
+        final AtomicReference<Double> alphaRef = new AtomicReference<>(alpha);
+        final AtomicReference<Double> betaRef  = new AtomicReference<>(beta);
         final java.util.concurrent.atomic.AtomicInteger bestMoveRef = new java.util.concurrent.atomic.AtomicInteger(bestMove);
-        final java.util.concurrent.atomic.AtomicReference<Double> bestScoreRef = new java.util.concurrent.atomic.AtomicReference<>(bestScore);
-        final java.util.concurrent.atomic.AtomicBoolean stopRef = new java.util.concurrent.atomic.AtomicBoolean(false);
+        final AtomicReference<Double> bestScoreRef = new AtomicReference<>(bestScore);
+        final AtomicBoolean stopRef = new AtomicBoolean(false);
         final java.util.concurrent.locks.ReentrantLock fullResLock = new java.util.concurrent.locks.ReentrantLock();
 
         for (int i = 1; i <= fanout; i++) {
             final int moveInt = orderedMoves.get(i);
             futures.add(ecs.submit(() -> {
-                // Bail early
-                if (stopRef.get() || Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
-                    return null;
-                }
+                if (stopRef.get() || abortRequested(deadline)) return null;
 
-                // Clone engine at root position, then play this move
                 Engine e = simulatorEngine.createSimulation();
                 e.performMove(moveInt);
 
-                // Probe with NULL window
                 double currentAlpha = alphaRef.get();
-                double currentBeta = betaRef.get();
-
+                double currentBeta  = betaRef.get();
                 double pAlpha, pBeta;
-                if (isWhitesTurn) {
-                    pAlpha = currentAlpha;
-                    pBeta = currentAlpha + 1;
-                } else {
-                    // For minimizer, mirror PVS: probe with [β-1, β]
-                    pAlpha = currentBeta - 1;
-                    pBeta = currentBeta;
-                }
+                if (isWhitesTurn) { pAlpha = currentAlpha; pBeta = currentAlpha + 1; }
+                else { pAlpha = currentBeta - 1; pBeta = currentBeta; }
 
                 double probe;
                 if (e.getGameState().isInStateCheckMate()) {
@@ -519,63 +595,36 @@ public class AI {
                     probe = evaluateStaticPosition(e.getGameState(), !isWhitesTurn, depth);
                 } else {
                     probe = alphaBeta(e, depth - 1, pAlpha, pBeta, !isWhitesTurn, deadline, moveInt, 1);
-                    if (probe == EXIT_FLAG) return null;
+                    if (probe == EXIT_FLAG || abortRequested(deadline)) return null;
                 }
 
-                // Decide if we need a FULL re-search (fail-high for max / fail-low for min)
-                boolean needsFull;
-                if (isWhitesTurn) {
-                    needsFull = probe > alphaRef.get();
-                } else {
-                    needsFull = probe < betaRef.get();
-                }
-
+                boolean needsFull = isWhitesTurn ? (probe > alphaRef.get()) : (probe < betaRef.get());
                 double finalScore = probe;
 
                 if (needsFull && !stopRef.get()) {
-                    // Serialize full re-search as per YBWC
                     fullResLock.lock();
                     try {
-                        if (!stopRef.get() && !Thread.currentThread().isInterrupted() && !positionChanged() && System.nanoTime() <= deadline) {
-                            // Refresh the current window before the real search
-                            double aNow = alphaRef.get();
-                            double bNow = betaRef.get();
-
+                        if (!stopRef.get() && !abortRequested(deadline)) {
+                            double aNow = alphaRef.get(), bNow = betaRef.get();
                             double full = alphaBeta(e, depth - 1, aNow, bNow, !isWhitesTurn, deadline, moveInt, 1);
                             if (full != EXIT_FLAG) {
                                 finalScore = full;
-                                // Tighten bounds + update best
-                                if (isWhitesTurn) {
-                                    if (full > aNow) {
-                                        alphaRef.set(full);
-                                    }
-                                } else {
-                                    if (full < bNow) {
-                                        betaRef.set(full);
-                                    }
-                                }
-                                // Update global best move/score (orientation aware)
+                                if (isWhitesTurn) { if (full > aNow) alphaRef.set(full); }
+                                else              { if (full < bNow) betaRef.set(full); }
                                 Double curBest = bestScoreRef.get();
                                 if (isBetterScore(isWhitesTurn, full, curBest)) {
-                                    bestScoreRef.set(full);
-                                    bestMoveRef.set(moveInt);
+                                    bestScoreRef.set(full); bestMoveRef.set(moveInt);
                                 }
-                                // If window collapsed, signal stop
-                                if (alphaRef.get() >= betaRef.get()) {
-                                    stopRef.set(true);
-                                }
+                                if (alphaRef.get() >= betaRef.get()) stopRef.set(true);
                             }
                         }
                     } finally {
                         fullResLock.unlock();
                     }
                 } else {
-                    // No re-search: we can still update "best" if it beats current best
                     Double curBest = bestScoreRef.get();
                     if (isBetterScore(isWhitesTurn, finalScore, curBest)) {
-                        bestScoreRef.set(finalScore);
-                        bestMoveRef.set(moveInt);
-                        // Also tighten bounds in the non-research direction (rare but harmless)
+                        bestScoreRef.set(finalScore); bestMoveRef.set(moveInt);
                         if (isWhitesTurn && finalScore > alphaRef.get()) alphaRef.set(finalScore);
                         if (!isWhitesTurn && finalScore < betaRef.get()) betaRef.set(finalScore);
                         if (alphaRef.get() >= betaRef.get()) stopRef.set(true);
@@ -586,40 +635,25 @@ public class AI {
             }));
         }
 
-        // Collect results, react to tightening window
         int completed = 0;
         try {
             while (completed < fanout) {
-                if (stopRef.get() || Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
-                    break;
-                }
-                Future<MoveAndScore> f = ecs.take(); // next finished task
-                completed++;
+                if (stopRef.get() || abortRequested(deadline)) break;
+                Future<MoveAndScore> f = ecs.take(); completed++;
                 MoveAndScore res = f.get();
                 if (res == null) continue;
 
-                // Pull tightened bounds updated by tasks
-                alpha = alphaRef.get();
-                beta = betaRef.get();
+                alpha = alphaRef.get(); beta = betaRef.get();
+                bestMove = bestMoveRef.get(); bestScore = bestScoreRef.get();
 
-                // Best move/score already kept by tasks, but keep local mirrors for return
-                bestMove = bestMoveRef.get();
-                bestScore = bestScoreRef.get();
-
-                if (alpha >= beta) {
-                    stopRef.set(true);
-                    break;
-                }
+                if (alpha >= beta) { stopRef.set(true); break; }
             }
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
         } catch (Exception ex) {
             log.warn("Parallel root YBWC error", ex);
         } finally {
-            // Try to cancel whatever is left
-            for (Future<MoveAndScore> f : futures) {
-                if (!f.isDone()) f.cancel(true);
-            }
+            for (Future<MoveAndScore> f : futures) if (!f.isDone()) f.cancel(true);
         }
 
         return bestMove != -1 ? new MoveAndScore(bestMove, bestScore) : null;
@@ -627,7 +661,7 @@ public class AI {
 
 
     private boolean shouldStopCalculating(long deadline) {
-        return positionChanged() || timeLimitExceeded(deadline) || Thread.currentThread().isInterrupted();
+        return abortRequested(deadline);
     }
 
     private void fillCalculatedLine(Engine simulation) {
@@ -676,7 +710,7 @@ public class AI {
 
         // If still nothing, no PV can be constructed
         if (seedMove == -1) {
-            this.calculatedLine = new ArrayList<>();
+            this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
             if (log.isDebugEnabled()) log.debug("PV empty: no root move available/legal.");
             return;
         }
@@ -709,64 +743,43 @@ public class AI {
         // Undo simulation
         for (int i = 0; i < movesPerformed; i++) simulation.undoLastMove();
 
-        this.calculatedLine = new ArrayList<>(pv);
+        this.calculatedLine = Collections.synchronizedList(pv);
     }
 
 
     private MoveAndScore getBestMove(Engine simulatorEngine, boolean isWhitesTurn, int depth, long deadline,
-                                     double alpha, double beta) {
-        int bestMove = -1; // Use an integer to represent the best move
+                                     double alpha, double beta, SplittableRandom rng) {
+        int bestMove = -1;
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
 
         ArrayList<Integer> sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth,
                 simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
+        maybeRotateRootMoves(sortedMoves, rng);
 
         for (int moveInt : sortedMoves) {
+            if (abortRequested(deadline)) break;
 
-            // Exit early if the search was cancelled or the position changed
-            if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
-                break;
-            }
-
-            simulatorEngine.performMove(moveInt); // Perform move using its integer representation
+            simulatorEngine.performMove(moveInt);
             double score;
-
             if (simulatorEngine.getGameState().isInStateCheckMate()) {
-                // prefer fastest mate invariantly at root
                 score = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
             } else if (simulatorEngine.getGameState().isInStateDraw()) {
-                // keep draw policy consistent
                 score = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, depth);
             } else {
                 score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1);
-                // Check for time limit exceeded after alphaBeta call
-                if (score == EXIT_FLAG || positionChanged()) {
-                    simulatorEngine.undoLastMove(); // Undo move using its integer representation
-                    break;
+                if (score == EXIT_FLAG || abortRequested(deadline)) {
+                    simulatorEngine.undoLastMove(); break;
                 }
             }
+            simulatorEngine.undoLastMove();
 
-            simulatorEngine.undoLastMove(); // Undo move using its integer representation
-
-            // Check if the current move leads to a better score
-            if (isBetterScore(isWhitesTurn, score, bestScore)) {
-                bestScore = score;
-                bestMove = moveInt; // Store the best move as an integer
-            }
-
-            if (isWhitesTurn) {
-                alpha = Math.max(alpha, score);
-            } else {
-                beta = Math.min(beta, score);
-            }
-
-            if (alpha >= beta) {
-                break;
-            }
+            if (isBetterScore(isWhitesTurn, score, bestScore)) { bestScore = score; bestMove = moveInt; }
+            if (isWhitesTurn) alpha = Math.max(alpha, score); else beta = Math.min(beta, score);
+            if (alpha >= beta) break;
         }
-
-        return bestMove != -1 ? new MoveAndScore(bestMove, bestScore) : null; // Return the best move and score
+        return bestMove != -1 ? new MoveAndScore(bestMove, bestScore) : null;
     }
+
 
     /**
      * *
@@ -778,10 +791,7 @@ public class AI {
                              boolean isWhite, long deadline, int prevMove, int plyFromRoot) {
         nodesVisited++;
 
-        // hard-stop guards
-        if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
-            return EXIT_FLAG;
-        }
+        if (abortRequested(deadline)) return EXIT_FLAG;
 
         boolean inCheck = isSideInCheck(simulatorEngine, isWhite);
 
@@ -796,8 +806,7 @@ public class AI {
 
         // STRICT DEPTH MANAGEMENT:
         // Do NOT increase 'depth' at node entry. Child must always use < this depth.
-        int depthHere = depth;
-        if (depthHere <= 0) {
+        if (depth <= 0) {
             // Quiescence returns white-oriented score; flip for black-to-move
             double eval = evaluateBoard(simulatorEngine, isWhite, deadline);
             if (eval == EXIT_FLAG) return EXIT_FLAG;
@@ -809,7 +818,7 @@ public class AI {
 
         // Transposition table lookup
         TranspositionTableEntry entry = transpositionTable.get(boardHash);
-        if (entry != null && entry.depth >= depthHere) {
+        if (entry != null && entry.depth >= depth) {
             if (entry.nodeType == NodeType.EXACT) return entry.score;
             if (entry.nodeType == NodeType.LOWERBOUND && entry.score > alpha) alpha = entry.score;
             else if (entry.nodeType == NodeType.UPPERBOUND && entry.score < beta) beta = entry.score;
@@ -820,7 +829,7 @@ public class AI {
         MoveList moves = simulatorEngine.getAllLegalMoves();
         int mobility = moves.size();
         boolean allowNullMove = useNullMovePruning
-                && depthHere >= 4
+                && depth >= 4
                 && !inCheck
                 && !simulatorEngine.isEndgame()
                 && prevMove != -1
@@ -836,14 +845,14 @@ public class AI {
         if (allowNullMove) {
             int savedEp = simulatorEngine.doNullMoveForSearch();
             nullMoveCount++;
-            double nullScore = alphaBeta(simulatorEngine, depthHere - 1 - 2, alpha, beta, !isWhite, deadline, -1, plyFromRoot + 1);
+            double nullScore = alphaBeta(simulatorEngine, depth - 1 - 2, alpha, beta, !isWhite, deadline, -1, plyFromRoot + 1);
             simulatorEngine.undoNullMoveForSearch(savedEp);
 
             if (nullScore == EXIT_FLAG) return EXIT_FLAG;
 
             boolean nullFailHigh = isWhite ? nullScore >= beta : nullScore <= alpha;
             if (nullFailHigh) {
-                double verificationScore = alphaBeta(simulatorEngine, depthHere - 1, alpha, beta, isWhite, deadline, prevMove, plyFromRoot);
+                double verificationScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, isWhite, deadline, prevMove, plyFromRoot);
                 if (verificationScore == EXIT_FLAG) return EXIT_FLAG;
                 if (Math.abs(verificationScore) < CHECKMATE - (plyFromRoot + 1)) {
                     nullFailHigh = isWhite ? verificationScore >= beta : verificationScore <= alpha;
@@ -862,9 +871,9 @@ public class AI {
         double betaOriginal = beta;
 
         if (isWhite) {
-            return maximizer(simulatorEngine, depthHere, alpha, beta, isWhite, boardHash, alphaOriginal, moves, deadline, prevMove, plyFromRoot);
+            return maximizer(simulatorEngine, depth, alpha, beta, isWhite, boardHash, alphaOriginal, moves, deadline, prevMove, plyFromRoot);
         } else {
-            return minimizer(simulatorEngine, depthHere, alpha, beta, isWhite, boardHash, betaOriginal, moves, deadline, prevMove, plyFromRoot);
+            return minimizer(simulatorEngine, depth, alpha, beta, isWhite, boardHash, betaOriginal, moves, deadline, prevMove, plyFromRoot);
         }
     }
 
@@ -944,10 +953,7 @@ public class AI {
 
         ArrayList<Integer> orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
         for (int index = 0; index < orderedMoves.size(); index++) {
-            if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
-                return EXIT_FLAG;
-            }
-
+            if (abortRequested(deadline)) { return EXIT_FLAG; }
             int move = orderedMoves.get(index);
 
             int from = MoveHelper.deriveFromIndex(move);
@@ -1297,7 +1303,7 @@ public class AI {
             int seeValue = 0;
             boolean hasSee = false;
             if (isCapture) {
-                seeValue = seeCache.computeIfAbsent(moveInt, m -> simulatorEngine.see(m));
+                seeValue = seeCache.computeIfAbsent(moveInt, simulatorEngine::see);
                 hasSee = true;
             }
 
@@ -1433,9 +1439,8 @@ public class AI {
     private double quiescenceSearch(Engine simulatorEngine, boolean isWhitesTurn,
                                     double alpha, double beta, long deadline, int depth) {
         // early stop
-        if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
-            if (log.isDebugEnabled()) log.debug("qsearch stop (timeout/interrupt/positionChanged)");
-            return AI.EXIT_FLAG; // Timeout / cancelled
+        if (abortRequested(deadline)) {
+            return AI.EXIT_FLAG;
         }
 
         // If side to move is in check, search all legal evasions (not only captures)
@@ -1539,26 +1544,6 @@ public class AI {
 
         return capturesAndPromotions;
     }
-
-
-    private boolean isNewBestMove(MoveAndScore moveAndScore, double currentBestScore, boolean isWhite) {
-        double score = moveAndScore.score;
-        return moveAndScore.move != -1 && (isWhite ? score > currentBestScore : score < currentBestScore);
-    }
-
-    private boolean timeLimitExceeded(long deadline) {
-        return System.nanoTime() > deadline;
-    }
-
-    private void updateTranspositionTable(long hash, MoveAndScore ms, int depth) {
-        if (depth < 4) return; // throttle shallow writes; keep reads
-        TranspositionTableEntry e = transpositionTable.get(hash);
-        if (e == null || e.depth < depth) {
-            transpositionTable.put(hash,
-                    new TranspositionTableEntry(ms.score, depth, NodeType.EXACT, ms.move));
-        }
-    }
-
 
     private synchronized boolean positionChanged() {
         return currentBoardState != beforeCalculationBoardState;
