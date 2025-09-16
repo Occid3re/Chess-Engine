@@ -449,7 +449,7 @@ public class Engine {
 
             // 2) Recompute legal moves
             generateLegalMoves();
-            gameState.popHalfmoveClock();
+            gameState.popHalfmoveClock(bitBoard);
             gameState.updateState(bitBoard, legalMoves, false);
             gameState.getScore().undoMove(bitBoard, undoMove, gameState.getState());
 
