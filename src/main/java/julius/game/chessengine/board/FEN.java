@@ -1,16 +1,24 @@
 package julius.game.chessengine.board;
 
+import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.utils.Color;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
+
+import java.util.Objects;
+
+import static julius.game.chessengine.board.MoveHelper.convertIndexToString;
 
 @Data
 @RequiredArgsConstructor
 public class FEN {
     private final String renderBoard;
 
-    public static FEN translateBoardToFEN(BitBoard board) {
+    public static FEN translateBoardToFEN(BitBoard board, GameState gameState) {
+        Objects.requireNonNull(board, "board");
+        Objects.requireNonNull(gameState, "gameState");
+
         StringBuilder fenBuilder = new StringBuilder();
         for (int rank = 8; rank >= 1; rank--) {
             int emptyCount = 0;
@@ -37,9 +45,76 @@ public class FEN {
                 fenBuilder.append('/');
             }
         }
-        // You would add the active color, castling availability, en passant target square,
-        // halfmove clock, and fullmove number after this
+        fenBuilder.append(' ');
+        fenBuilder.append(board.isWhitesTurn() ? 'w' : 'b');
+        fenBuilder.append(' ');
+
+        String castlingAvailability = buildCastlingAvailability(board);
+        fenBuilder.append(castlingAvailability.isEmpty() ? "-" : castlingAvailability);
+        fenBuilder.append(' ');
+
+        int enPassantIndex = board.getEnPassantTargetIndex();
+        fenBuilder.append(enPassantIndex == -1 ? "-" : convertIndexToString(enPassantIndex));
+        fenBuilder.append(' ');
+        fenBuilder.append(gameState.getHalfmoveClock());
+        fenBuilder.append(' ');
+        fenBuilder.append(gameState.getFullmoveNumber());
+
         return new FEN(fenBuilder.toString());
+    }
+
+    private static String buildCastlingAvailability(BitBoard board) {
+        StringBuilder castling = new StringBuilder();
+
+        if (canCastleKingSide(board, true)) {
+            castling.append('K');
+        }
+        if (canCastleQueenSide(board, true)) {
+            castling.append('Q');
+        }
+        if (canCastleKingSide(board, false)) {
+            castling.append('k');
+        }
+        if (canCastleQueenSide(board, false)) {
+            castling.append('q');
+        }
+
+        return castling.toString();
+    }
+
+    private static boolean canCastleKingSide(BitBoard board, boolean white) {
+        if (white) {
+            return !board.isWhiteKingMoved()
+                    && !board.isWhiteRookH1Moved()
+                    && hasHomeKingAndRook(board, 4, 7, Color.WHITE);
+        }
+        return !board.isBlackKingMoved()
+                && !board.isBlackRookH8Moved()
+                && hasHomeKingAndRook(board, 60, 63, Color.BLACK);
+    }
+
+    private static boolean canCastleQueenSide(BitBoard board, boolean white) {
+        if (white) {
+            return !board.isWhiteKingMoved()
+                    && !board.isWhiteRookA1Moved()
+                    && hasHomeKingAndRook(board, 4, 0, Color.WHITE);
+        }
+        return !board.isBlackKingMoved()
+                && !board.isBlackRookA8Moved()
+                && hasHomeKingAndRook(board, 60, 56, Color.BLACK);
+    }
+
+    private static boolean hasHomeKingAndRook(BitBoard board, int kingIndex, int rookIndex,
+                                              Color color) {
+        PieceType kingPiece = board.getPieceTypeAtIndex(kingIndex);
+        Color kingColor = board.getPieceColorAtIndex(kingIndex);
+        PieceType rookPiece = board.getPieceTypeAtIndex(rookIndex);
+        Color rookColor = board.getPieceColorAtIndex(rookIndex);
+
+        return kingPiece == PieceType.KING
+                && kingColor == color
+                && rookPiece == PieceType.ROOK
+                && rookColor == color;
     }
 
     private static char getFenCharacter(PieceType pieceType, Color color) {
