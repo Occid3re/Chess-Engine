@@ -79,13 +79,15 @@ OUTBOUND_TC = os.environ.get("OUTBOUND_TC", "blitz")        # bullet|blitz|rapid
 OUTBOUND_RATED = os.environ.get("OUTBOUND_RATED", "1") == "1"
 OUTBOUND_CLOCK_LIMIT = int(os.environ.get("OUTBOUND_CLOCK_LIMIT", "180"))      # seconds (3+2 default)
 OUTBOUND_INCREMENT = int(os.environ.get("OUTBOUND_INCREMENT", "2"))
+OUTBOUND_BLOCKLIST = {"implosio", "demolito_l1"}
 RATING_DELTA = int(os.environ.get("OUTBOUND_RATING_DELTA", "100"))             # ± rating window
 # Make the scanner very gentle by default
 OUTBOUND_MAX_PER_CYCLE = int(os.environ.get("OUTBOUND_MAX_PER_CYCLE", "1"))    # how many to try per cycle
 OUTBOUND_PERIOD_SEC = int(os.environ.get("OUTBOUND_PERIOD_SEC", "600"))        # how often to try (idle-only)
-OUTBOUND_COOLDOWN_SEC = int(os.environ.get("OUTBOUND_COOLDOWN_SEC", "900"))    # avoid re-challenging too soon
+OUTBOUND_COOLDOWN_SEC = int(os.environ.get("OUTBOUND_COOLDOWN_SEC", "9000"))    # avoid re-challenging too soon
 # Inspect only a small random subset of online bots for rating lookups
 OUTBOUND_INSPECT_LIMIT = int(os.environ.get("OUTBOUND_INSPECT_LIMIT", "20"))
+
 # =================================================
 
 
@@ -531,6 +533,7 @@ def find_similar_bots(client: berserk.Client,
                       exclude: Optional[List[str]] = None) -> List[str]:
     exclude = set(x.lower() for x in (exclude or []))
     exclude.add(my_username.lower())
+    exclude |= {u.lower() for u in OUTBOUND_BLOCKLIST}  # <- permanent exclusions
     perf_key = PERF_FOR_TC.get(tc_type, "blitz")
 
     # (1) My rating
