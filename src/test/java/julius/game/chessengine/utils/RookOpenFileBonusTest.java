@@ -11,12 +11,10 @@ public class RookOpenFileBonusTest {
     @Test
     void rooksOnOpenFilesScoreHigherThanHalfOpen() {
         BitBoard openFile = FEN.translateFENtoBitBoard("4k3/p7/8/8/8/8/8/1R2K3 w - - 0 1");
-        Score openScore = new Score();
-        openScore.initializeScore(openFile);
+        Score openScore = Score.initializeScore(openFile);
 
         BitBoard halfOpenFile = FEN.translateFENtoBitBoard("4k3/p7/8/8/8/8/8/R3K3 w - - 0 1");
-        Score halfScore = new Score();
-        halfScore.initializeScore(halfOpenFile);
+        Score halfScore = Score.initializeScore(halfOpenFile);
 
         assertTrue(openScore.getWhiteRooksOpenFileBonus() > halfScore.getWhiteRooksHalfOpenFileBonus());
         assertTrue(openScore.getScoreDifference() > halfScore.getScoreDifference());
