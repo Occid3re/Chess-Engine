@@ -92,7 +92,8 @@ public class AI {
      */
     private final TranspositionTable<CaptureTranspositionTableEntry> captureTranspositionTable;
 
-    private final int[][] killerMoves; // 2D array for killer moves, initialized in the constructor
+    private static final int NUM_KILLER_MOVES = 2;
+    private volatile int[][] killerMoves; // 2D array for killer moves, initialized in the constructor
 
     /**
      * History heuristic table. Indexed by from and to square (0-63), it stores a
@@ -148,13 +149,7 @@ public class AI {
         this.timeLimit = 50;
 
         // Initialize killer moves etc...
-        int numKillerMoves = 2;
-        this.killerMoves = new int[maxDepth][numKillerMoves];
-        for (int i = 0; i < maxDepth; i++) {
-            for (int j = 0; j < numKillerMoves; j++) {
-                killerMoves[i][j] = -1;
-            }
-        }
+        this.killerMoves = allocateKillerMoves(maxDepth);
         this.historyTable = new int[64][64];
         this.counterMove = new int[64][64];
         for (int f = 0; f < 64; f++) Arrays.fill(counterMove[f], -1);
@@ -179,11 +174,32 @@ public class AI {
     }
 
     /**
-     * Override the maximum depth for iterative deepening. Depth values greater than
-     * the preallocated tables are clamped.
+     * Override the maximum depth for iterative deepening. The killer-move table is
+     * grown on demand so deeper searches can proceed without being clamped by the
+     * previous allocation. The requested depth is always respected (minimum 1).
      */
-    public void setMaxDepth(int depth) {
-        this.maxDepth = Math.max(1, Math.min(depth, killerMoves.length));
+    public synchronized void setMaxDepth(int depth) {
+        int requestedDepth = Math.max(1, depth);
+        if (requestedDepth > killerMoves.length) {
+            killerMoves = resizeKillerMoves(killerMoves, requestedDepth);
+        }
+        this.maxDepth = requestedDepth;
+    }
+
+    private static int[][] allocateKillerMoves(int depth) {
+        int[][] table = new int[depth][NUM_KILLER_MOVES];
+        for (int i = 0; i < depth; i++) {
+            Arrays.fill(table[i], -1);
+        }
+        return table;
+    }
+
+    private static int[][] resizeKillerMoves(int[][] current, int newDepth) {
+        int[][] expanded = allocateKillerMoves(newDepth);
+        for (int i = 0; i < current.length; i++) {
+            System.arraycopy(current[i], 0, expanded[i], 0, current[i].length);
+        }
+        return expanded;
     }
 
 
@@ -307,7 +323,7 @@ public class AI {
         }
     }
 
-    private MoveAndScore searchRootMoves(Engine sim, SearchTask task, int depth, double alpha, double beta, SplittableRandom rng) {
+    protected MoveAndScore searchRootMoves(Engine sim, SearchTask task, int depth, double alpha, double beta, SplittableRandom rng) {
         if (searchThreads > 1) {
             return getBestMoveParallel(sim, task.isWhiteToMove(), depth, task.getDeadline(), alpha, beta, rng);
         }
