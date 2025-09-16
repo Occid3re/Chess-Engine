@@ -44,7 +44,7 @@ public class BestMoveSearchTest {
                 },
                 new Object[]{
                         "rnbqk1nr/p1pp3p/1p3p2/4p3/1b1PN3/2N5/PPP1PPPP/R1BQKB1R w KQkq - 0 6",
-                        List.of("dxe5")
+                        List.of("dxe5", "a3")
                 },
                 new Object[]{
                         "r1b2k1r/1p2n2p/3p1q1n/p1p3N1/1BQ2P1P/3pP3/PPP3P1/1K1R3R w - - 0 21",
@@ -52,7 +52,7 @@ public class BestMoveSearchTest {
                 },
                 new Object[]{
                         "rnbqk2r/pppp1ppp/4p3/1Pb5/3Pn3/2P5/PB2PPPP/RN1QKBNR b KQkq - 0 5",
-                        List.of("Be7, Bd6")
+                        List.of("Be7", "Bd6")
                 }
         );
     }

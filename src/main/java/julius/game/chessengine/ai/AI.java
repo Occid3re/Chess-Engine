@@ -778,71 +778,53 @@ public class AI {
                              boolean isWhite, long deadline, int prevMove, int plyFromRoot) {
         nodesVisited++;
 
-        // stop conditions
+        // hard-stop guards
         if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
             return EXIT_FLAG;
         }
 
         boolean inCheck = isSideInCheck(simulatorEngine, isWhite);
-        int depthRemaining = depth;
-        if (inCheck) {
-            depthRemaining++;
-        }
 
         // Terminal states first, with distance-to-mate
         if (simulatorEngine.getGameState().isInStateCheckMate()) {
-            // Side to move is checkmated here
             double m = CHECKMATE - plyFromRoot;
-            return isWhite ? -m : +m; // white maximizes; this node is bad for side-to-move
+            return isWhite ? -m : +m; // side-to-move is losing here
         }
         if (simulatorEngine.getGameState().isInStateDraw()) {
             return evaluateStaticPosition(simulatorEngine.getGameState(), isWhite, plyFromRoot);
         }
 
-        long boardHash = simulatorEngine.getBoardStateHash();
-
-        if (depthRemaining <= 0) {
+        // STRICT DEPTH MANAGEMENT:
+        // Do NOT increase 'depth' at node entry. Child must always use < this depth.
+        int depthHere = depth;
+        if (depthHere <= 0) {
             // Quiescence returns white-oriented score; flip for black-to-move
             double eval = evaluateBoard(simulatorEngine, isWhite, deadline);
-            if (eval == EXIT_FLAG) { // propagate qsearch timeout
-                return EXIT_FLAG;
-            }
-            if (!isWhite) {
-                eval = -eval;
-            }
+            if (eval == EXIT_FLAG) return EXIT_FLAG;
+            if (!isWhite) eval = -eval;
             return eval;
         }
 
-        depth = depthRemaining;
+        long boardHash = simulatorEngine.getBoardStateHash();
 
         // Transposition table lookup
         TranspositionTableEntry entry = transpositionTable.get(boardHash);
-        if (entry != null && entry.depth >= depth) {
-            if (entry.nodeType == NodeType.EXACT) {
-                return entry.score;
-            }
-            if (entry.nodeType == NodeType.LOWERBOUND && entry.score > alpha) {
-                alpha = entry.score;
-            } else if (entry.nodeType == NodeType.UPPERBOUND && entry.score < beta) {
-                beta = entry.score;
-            }
-            if (alpha >= beta) {
-                return entry.score;
-            }
+        if (entry != null && entry.depth >= depthHere) {
+            if (entry.nodeType == NodeType.EXACT) return entry.score;
+            if (entry.nodeType == NodeType.LOWERBOUND && entry.score > alpha) alpha = entry.score;
+            else if (entry.nodeType == NodeType.UPPERBOUND && entry.score < beta) beta = entry.score;
+            if (alpha >= beta) return entry.score;
         }
 
-        // -------- Safer Null-move pruning --------
-        // Workflow: perform a reduced-depth null search, verify apparent fail-highs
-        // with a second (depth - 1) search, and only prune when both agree. This
-        // dramatically reduces the risk of zugzwangs or other tactical misses.
+        // -------- Safer Null-move pruning (same as before, but use depthHere) --------
         MoveList moves = simulatorEngine.getAllLegalMoves();
-        int mobility = moves.size(); // guard against zugzwang-like nodes
+        int mobility = moves.size();
         boolean allowNullMove = useNullMovePruning
-                && depth >= 4
+                && depthHere >= 4
                 && !inCheck
                 && !simulatorEngine.isEndgame()
-                && prevMove != -1     // avoid consecutive null moves
-                && mobility >= 8;     // mobility guard
+                && prevMove != -1
+                && mobility >= 8;
 
         if (allowNullMove) {
             double mateThreatScore = CHECKMATE - (plyFromRoot + 1);
@@ -852,25 +834,21 @@ public class AI {
         }
 
         if (allowNullMove) {
-            int savedEp = simulatorEngine.doNullMoveForSearch(); // O(1) flip side + clear EP
+            int savedEp = simulatorEngine.doNullMoveForSearch();
             nullMoveCount++;
-            double nullScore = alphaBeta(simulatorEngine, depth - 1 - 2, alpha, beta, !isWhite, deadline, -1, plyFromRoot + 1);
-            simulatorEngine.undoNullMoveForSearch(savedEp); // O(1) restore
+            double nullScore = alphaBeta(simulatorEngine, depthHere - 1 - 2, alpha, beta, !isWhite, deadline, -1, plyFromRoot + 1);
+            simulatorEngine.undoNullMoveForSearch(savedEp);
 
-            if (nullScore == EXIT_FLAG) { // propagate timeout
-                return EXIT_FLAG;
-            }
+            if (nullScore == EXIT_FLAG) return EXIT_FLAG;
 
             boolean nullFailHigh = isWhite ? nullScore >= beta : nullScore <= alpha;
             if (nullFailHigh) {
-                double verificationScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, isWhite, deadline, prevMove, plyFromRoot);
-                if (verificationScore == EXIT_FLAG) {
-                    return EXIT_FLAG;
-                }
-                if (Math.abs(verificationScore) >= CHECKMATE - (plyFromRoot + 1)) {
-                    nullFailHigh = false;
-                } else {
+                double verificationScore = alphaBeta(simulatorEngine, depthHere - 1, alpha, beta, isWhite, deadline, prevMove, plyFromRoot);
+                if (verificationScore == EXIT_FLAG) return EXIT_FLAG;
+                if (Math.abs(verificationScore) < CHECKMATE - (plyFromRoot + 1)) {
                     nullFailHigh = isWhite ? verificationScore >= beta : verificationScore <= alpha;
+                } else {
+                    nullFailHigh = false;
                 }
             }
 
@@ -878,17 +856,18 @@ public class AI {
                 return isWhite ? beta : alpha;
             }
         }
-        // -----------------------------------------
+        // ---------------------------------------------------------------------------
 
-        double alphaOriginal = alpha; // Store the original alpha value
-        double betaOriginal = beta;   // Store the original beta value
+        double alphaOriginal = alpha;
+        double betaOriginal = beta;
 
         if (isWhite) {
-            return maximizer(simulatorEngine, depth, alpha, beta, isWhite, boardHash, alphaOriginal, moves, deadline, prevMove, plyFromRoot);
+            return maximizer(simulatorEngine, depthHere, alpha, beta, isWhite, boardHash, alphaOriginal, moves, deadline, prevMove, plyFromRoot);
         } else {
-            return minimizer(simulatorEngine, depth, alpha, beta, isWhite, boardHash, betaOriginal, moves, deadline, prevMove, plyFromRoot);
+            return minimizer(simulatorEngine, depthHere, alpha, beta, isWhite, boardHash, betaOriginal, moves, deadline, prevMove, plyFromRoot);
         }
     }
+
 
     private boolean isSideInCheck(Engine engine, boolean isWhite) {
         GameStateEnum state = engine.getGameState().getState();
@@ -972,8 +951,8 @@ public class AI {
             int move = orderedMoves.get(index);
 
             int from = MoveHelper.deriveFromIndex(move);
-            int to = MoveHelper.deriveToIndex(move);
-            int movingPieceBits = MoveHelper.derivePieceTypeBits(move);
+            int to   = MoveHelper.deriveToIndex(move);
+            int movingPieceBits   = MoveHelper.derivePieceTypeBits(move);
             int capturedPieceBits = MoveHelper.deriveCapturedPieceTypeBits(move);
             int historyScore = historyTable[from][to];
             int seeGain = simulatorEngine.see(move);
@@ -983,13 +962,13 @@ public class AI {
             boolean isPromotion = MoveHelper.isPawnPromotionMove(move);
             boolean isQuiet = !isCapture && !isPromotion;
 
-            // Skip obviously losing captures or quiet moves based on SEE, unless the move gives check or is a promotion
+            // SEE pruning for losing captures/quiets (keep checks/promotions)
             boolean seePruneCandidate = (!inCheckAtNode && isCapture && !isPromotion) || isQuiet;
             if (seePruneCandidate && seeGain < 0) {
                 simulatorEngine.performMove(move);
-                boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
+                boolean givesCheckTmp = isSideInCheck(simulatorEngine, !isWhite);
                 simulatorEngine.undoLastMove();
-                if (!givesCheck) continue;
+                if (!givesCheckTmp) continue;
             }
 
             BitBoard boardBefore = simulatorEngine.getBitBoard();
@@ -997,22 +976,18 @@ public class AI {
             int enemyKingSquare = enemyKingBB != 0L ? Long.numberOfTrailingZeros(enemyKingBB) : -1;
             int enemyKingFile = enemyKingSquare >= 0 ? (enemyKingSquare & 7) : -1;
             long kingFileMask = enemyKingFile >= 0 ? FileMasks[enemyKingFile] : 0L;
-            boolean touchesKingFile = enemyKingSquare >= 0
-                    && (((from & 7) == enemyKingFile) || ((to & 7) == enemyKingFile));
-            boolean affectsKingFilePawns = touchesKingFile
-                    && (movingPieceBits == 1 || capturedPieceBits == 1);
-            int pawnsOnFileBefore = (enemyKingSquare >= 0 && affectsKingFilePawns)
-                    ? countPawnsOnFile(boardBefore, kingFileMask)
-                    : 0;
+            boolean touchesKingFile = enemyKingSquare >= 0 && (((from & 7) == enemyKingFile) || ((to & 7) == enemyKingFile));
+            boolean affectsKingFilePawns = touchesKingFile && (movingPieceBits == 1 || capturedPieceBits == 1);
+            int pawnsOnFileBefore = (enemyKingSquare >= 0 && affectsKingFilePawns) ? countPawnsOnFile(boardBefore, kingFileMask) : 0;
+
             boolean isTactical = isCapture || isPromotion;
             int lmpThreshold = 8 + depth * 2;
             if (!inCheckAtNode && !isTactical && depth <= 3 && index > lmpThreshold) {
-                // But don't prune moves that give check or create an immediate queen threat
                 simulatorEngine.performMove(move);
-                boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
-                boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, isWhite);
+                boolean givesCheckTmp = isSideInCheck(simulatorEngine, !isWhite);
+                boolean attacksQueenTmp = attacksOpponentQueenNow(simulatorEngine, isWhite);
                 simulatorEngine.undoLastMove();
-                if (!givesCheck && !attacksQueen) continue;
+                if (!givesCheckTmp && !attacksQueenTmp) continue;
             }
 
             simulatorEngine.performMove(move);
@@ -1020,75 +995,56 @@ public class AI {
 
             double eval;
             TranspositionTableEntry entry = transpositionTable.get(newBoardHash);
-
             if (entry != null && entry.depth >= depth) {
                 eval = entry.score;
             } else {
-                // Compute extension/gating signals AFTER making the move
                 boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
                 boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, isWhite);
                 boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, isWhite);
-                boolean opensKingFile = openedFileTowardKing(
-                        simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns
-                );
+                boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
 
-                // depth for child
+                // STRICT DECREASE: child depth must be < depth
                 int nextDepth = depth - 1;
-                if (givesCheck || attacksQueen) nextDepth = Math.min(nextDepth + 1, depth);
+                // (optional check extension) — but clamp to ensure nextDepth < depth
+                if (givesCheck || attacksQueen) nextDepth = Math.min(nextDepth + 1, depth - 1);
 
-                // Decide if we can reduce this move
                 boolean canReduce = !inCheckAtNode
                         && !isTactical
-                        && !givesCheck // checks are too forcing to reduce
+                        && !givesCheck
                         && !attacksQueen
-                        && !attacksKingZone // direct king pressure keeps full depth
-                        && !opensKingFile // opening lines to the king needs verification
-                        && !seeWinsMaterial // SEE winning moves deserve the full depth
+                        && !attacksKingZone
+                        && !opensKingFile
+                        && !seeWinsMaterial
                         && nextDepth >= 2
                         && index >= 3;
 
-                // PVS windows as you had them
                 boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
                 double pAlpha = alpha;
-                double pBeta = usePvs ? (alpha + 1) : beta;
+                double pBeta  = usePvs ? (alpha + 1) : beta;
 
                 int reduction = 0;
                 if (canReduce) {
                     reduction = lmrReduction(nextDepth, index, historyScore);
-                    if (reduction <= 0) {
-                        canReduce = false;
-                    }
+                    if (reduction <= 0) canReduce = false;
                 }
 
                 if (canReduce) {
                     int reduced = Math.max(1, nextDepth - reduction);
                     eval = alphaBeta(simulatorEngine, reduced, pAlpha, pBeta, !isWhite, deadline, move, plyFromRoot + 1);
-                    if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
-                    }
+                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
 
                     boolean promising = eval > alpha;
                     if (promising) {
-                        eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, usePvs ? beta : pBeta, !isWhite, deadline, move, plyFromRoot + 1);
-                        if (eval == EXIT_FLAG || positionChanged()) {
-                            simulatorEngine.undoLastMove();
-                            return EXIT_FLAG;
-                        }
+                        eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, usePvs ? beta : pBeta,
+                                !isWhite, deadline, move, plyFromRoot + 1);
+                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
                     }
                 } else {
-                    // No reduction for checks/queen-threats/tacticals
                     eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline, move, plyFromRoot + 1);
-                    if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
-                    }
+                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
                     if (usePvs && eval > alpha && eval < beta) {
                         eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline, move, plyFromRoot + 1);
-                        if (eval == EXIT_FLAG || positionChanged()) {
-                            simulatorEngine.undoLastMove();
-                            return EXIT_FLAG;
-                        }
+                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
                     }
                 }
             }
@@ -1114,7 +1070,6 @@ public class AI {
                     int pf = prevMove & 0x3F, pt = (prevMove >>> 6) & 0x3F;
                     counterMove[pf][pt] = move;
                 }
-                if (log.isDebugEnabled()) log.debug(" Maxi New Killer Move is {}", Move.convertIntToMove(move));
                 break;
             }
         }
@@ -1132,6 +1087,7 @@ public class AI {
 
         return maxEval;
     }
+
 
 
     private double minimizer(Engine simulatorEngine, int depth, double alpha, double beta,
@@ -1153,8 +1109,8 @@ public class AI {
             int move = orderedMoves.get(index);
 
             int from = MoveHelper.deriveFromIndex(move);
-            int to = MoveHelper.deriveToIndex(move);
-            int movingPieceBits = MoveHelper.derivePieceTypeBits(move);
+            int to   = MoveHelper.deriveToIndex(move);
+            int movingPieceBits   = MoveHelper.derivePieceTypeBits(move);
             int capturedPieceBits = MoveHelper.deriveCapturedPieceTypeBits(move);
             int historyScore = historyTable[from][to];
             int seeGain = simulatorEngine.see(move);
@@ -1164,13 +1120,12 @@ public class AI {
             boolean isPromotion = MoveHelper.isPawnPromotionMove(move);
             boolean isQuiet = !isCapture && !isPromotion;
 
-            // Skip obviously losing captures or quiet moves based on SEE, unless the move gives check or is a promotion
             boolean seePruneCandidate = (!inCheckAtNode && isCapture && !isPromotion) || isQuiet;
             if (seePruneCandidate && seeGain < 0) {
                 simulatorEngine.performMove(move);
-                boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
+                boolean givesCheckTmp = isSideInCheck(simulatorEngine, !isWhite);
                 simulatorEngine.undoLastMove();
-                if (!givesCheck) continue;
+                if (!givesCheckTmp) continue;
             }
 
             BitBoard boardBefore = simulatorEngine.getBitBoard();
@@ -1178,13 +1133,9 @@ public class AI {
             int enemyKingSquare = enemyKingBB != 0L ? Long.numberOfTrailingZeros(enemyKingBB) : -1;
             int enemyKingFile = enemyKingSquare >= 0 ? (enemyKingSquare & 7) : -1;
             long kingFileMask = enemyKingFile >= 0 ? FileMasks[enemyKingFile] : 0L;
-            boolean touchesKingFile = enemyKingSquare >= 0
-                    && (((from & 7) == enemyKingFile) || ((to & 7) == enemyKingFile));
-            boolean affectsKingFilePawns = touchesKingFile
-                    && (movingPieceBits == 1 || capturedPieceBits == 1);
-            int pawnsOnFileBefore = (enemyKingSquare >= 0 && affectsKingFilePawns)
-                    ? countPawnsOnFile(boardBefore, kingFileMask)
-                    : 0;
+            boolean touchesKingFile = enemyKingSquare >= 0 && (((from & 7) == enemyKingFile) || ((to & 7) == enemyKingFile));
+            boolean affectsKingFilePawns = touchesKingFile && (movingPieceBits == 1 || capturedPieceBits == 1);
+            int pawnsOnFileBefore = (enemyKingSquare >= 0 && affectsKingFilePawns) ? countPawnsOnFile(boardBefore, kingFileMask) : 0;
 
             boolean isTactical = isCapture || isPromotion;
 
@@ -1193,73 +1144,56 @@ public class AI {
 
             double eval;
             TranspositionTableEntry entry = transpositionTable.get(newBoardHash);
-
             if (entry != null && entry.depth >= depth) {
                 eval = entry.score;
             } else {
-                // Compute extension/gating signals AFTER making the move
                 boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
                 boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, isWhite);
                 boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, isWhite);
-                boolean opensKingFile = openedFileTowardKing(
-                        simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns
-                );
+                boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
 
+                // STRICT DECREASE: child depth must be < depth
                 int nextDepth = depth - 1;
-                if (givesCheck || attacksQueen) nextDepth = Math.min(nextDepth + 1, depth);
+                if (givesCheck || attacksQueen) nextDepth = Math.min(nextDepth + 1, depth - 1);
 
                 boolean canReduce = !inCheckAtNode
                         && !isTactical
-                        && !givesCheck // keep full depth on checks
+                        && !givesCheck
                         && !attacksQueen
-                        && !attacksKingZone // king pressure stays unreduced
-                        && !opensKingFile // freshly opened king file needs full depth
-                        && !seeWinsMaterial // SEE-positive moves shouldn't be reduced
+                        && !attacksKingZone
+                        && !opensKingFile
+                        && !seeWinsMaterial
                         && nextDepth >= 2
                         && index >= 3;
 
                 boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
                 double pAlpha = usePvs ? (beta - 1) : alpha;
-                double pBeta = beta;
+                double pBeta  = beta;
 
                 int reduction = 0;
                 if (canReduce) {
                     reduction = lmrReduction(nextDepth, index, historyScore);
-                    if (reduction <= 0) {
-                        canReduce = false;
-                    }
+                    if (reduction <= 0) canReduce = false;
                 }
 
                 if (canReduce) {
                     int reduced = Math.max(1, nextDepth - reduction);
-
                     eval = alphaBeta(simulatorEngine, reduced, pAlpha, pBeta, !isWhite, deadline, move, plyFromRoot + 1);
-                    if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
-                    }
+                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
 
                     boolean promising = eval < beta;
                     if (promising) {
-                        eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, usePvs ? beta : pBeta, !isWhite, deadline, move, plyFromRoot + 1);
-                        if (eval == EXIT_FLAG || positionChanged()) {
-                            simulatorEngine.undoLastMove();
-                            return EXIT_FLAG;
-                        }
+                        eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, usePvs ? beta : pBeta,
+                                !isWhite, deadline, move, plyFromRoot + 1);
+                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
                     }
                 } else {
                     eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline, move, plyFromRoot + 1);
-                    if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
-                    }
+                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
 
                     if (usePvs && eval > alpha && eval < beta) {
                         eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline, move, plyFromRoot + 1);
-                        if (eval == EXIT_FLAG || positionChanged()) {
-                            simulatorEngine.undoLastMove();
-                            return EXIT_FLAG;
-                        }
+                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
                     }
                 }
             }
@@ -1285,7 +1219,6 @@ public class AI {
                     int pf = prevMove & 0x3F, pt = (prevMove >>> 6) & 0x3F;
                     counterMove[pf][pt] = move;
                 }
-                if (log.isDebugEnabled()) log.debug("Mini New Killer Move is {}", Move.convertIntToMove(move));
                 break;
             }
         }
@@ -1303,6 +1236,7 @@ public class AI {
 
         return minEval;
     }
+
 
 
     /**
