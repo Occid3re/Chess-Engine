@@ -9,10 +9,13 @@ import julius.game.chessengine.utils.Color;
 import julius.game.chessengine.board.MoveHelper;
 
 import julius.game.chessengine.utils.Score;
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
 
+import java.util.ArrayDeque;
 import java.util.Arrays;
+import java.util.Deque;
 import java.util.Objects;
 
 import static julius.game.chessengine.board.MoveHelper.createMoveInt;
@@ -47,6 +50,8 @@ public class BitBoard {
     private long blackPieces = 0L;
     private long allPieces = 0L;
     private long zKey = 0L;
+    private int halfmoveClock = 0;
+    private int fullmoveNumber = 1;
     /**
      * Bitboards caching the squares attacked by each side.
      */
@@ -58,6 +63,11 @@ public class BitBoard {
 
     // Reusable buffer for move generation to avoid frequent allocations.
     private final MoveList moveGenerationBuffer = new MoveList();
+
+    @Getter(AccessLevel.NONE)
+    private final Deque<Integer> halfmoveHistory = new ArrayDeque<>();
+    @Getter(AccessLevel.NONE)
+    private final Deque<Integer> fullmoveHistory = new ArrayDeque<>();
 
     // This variable needs to be set whenever a move is made
     @Getter
@@ -116,7 +126,7 @@ public class BitBoard {
         if (ep != -1) xorEp(ep);
     }
 
-    public BitBoard(boolean whitesTurn, long whitePawns, long blackPawns, long whiteKnights, long blackKnights, long whiteBishops, long blackBishops, long whiteRooks, long blackRooks, long whiteQueens, long blackQueens, long whiteKing, long blackKing, long whitePieces, long blackPieces, long allPieces, int lastMoveDoubleStepPawnIndex, boolean whiteKingMoved, boolean blackKingMoved, boolean whiteRookA1Moved, boolean whiteRookH1Moved, boolean blackRookA8Moved, boolean blackRookH8Moved, boolean whiteKingHasCastled, boolean blackKingHasCastled) {
+    public BitBoard(boolean whitesTurn, long whitePawns, long blackPawns, long whiteKnights, long blackKnights, long whiteBishops, long blackBishops, long whiteRooks, long blackRooks, long whiteQueens, long blackQueens, long whiteKing, long blackKing, long whitePieces, long blackPieces, long allPieces, int lastMoveDoubleStepPawnIndex, boolean whiteKingMoved, boolean blackKingMoved, boolean whiteRookA1Moved, boolean whiteRookH1Moved, boolean blackRookA8Moved, boolean blackRookH8Moved, boolean whiteKingHasCastled, boolean blackKingHasCastled, int halfmoveClock, int fullmoveNumber) {
         this.whitesTurn = whitesTurn;
         this.whitePawns = whitePawns;
         this.blackPawns = blackPawns;
@@ -142,6 +152,10 @@ public class BitBoard {
         this.blackRookH8Moved = blackRookH8Moved;
         this.whiteKingHasCastled = whiteKingHasCastled;
         this.blackKingHasCastled = blackKingHasCastled;
+        this.halfmoveClock = halfmoveClock;
+        this.fullmoveNumber = fullmoveNumber;
+        this.halfmoveHistory.clear();
+        this.fullmoveHistory.clear();
         initPieceBoardFromBitboards();
         recomputeWhiteAttackMap();
         recomputeBlackAttackMap();
@@ -195,6 +209,10 @@ public class BitBoard {
         this.blackAttackDirty = other.blackAttackDirty;
         this.zKey = other.zKey;
         this.pieceBoard = Arrays.copyOf(other.pieceBoard, other.pieceBoard.length);
+        this.halfmoveClock = other.halfmoveClock;
+        this.fullmoveNumber = other.fullmoveNumber;
+        this.halfmoveHistory.addAll(other.halfmoveHistory);
+        this.fullmoveHistory.addAll(other.fullmoveHistory);
     }
     public void setLastMoveDoubleStepPawnIndex(int index) {
         int oldEp = getEnPassantTargetIndex();
@@ -202,6 +220,14 @@ public class BitBoard {
         int newEp = getEnPassantTargetIndex();
         if (oldEp != -1) xorEp(oldEp);
         if (newEp != -1) xorEp(newEp);
+    }
+
+    public void setHalfmoveClock(int halfmoveClock) {
+        this.halfmoveClock = halfmoveClock;
+    }
+
+    public void setFullmoveNumber(int fullmoveNumber) {
+        this.fullmoveNumber = fullmoveNumber;
     }
 
     public void flipSideToMove() {
@@ -269,6 +295,10 @@ public class BitBoard {
         allPieces = whitePieces | blackPieces;
 
         lastMoveDoubleStepPawnIndex = 0;
+        halfmoveClock = 0;
+        fullmoveNumber = 1;
+        halfmoveHistory.clear();
+        fullmoveHistory.clear();
         initPieceBoardFromBitboards();
         recomputeWhiteAttackMap();
         recomputeBlackAttackMap();
@@ -1124,6 +1154,9 @@ public class BitBoard {
 
     // Replace your current performMove with this version
     public void performMove(int move) {
+        halfmoveHistory.push(halfmoveClock);
+        fullmoveHistory.push(fullmoveNumber);
+
         int fromIndex = MoveHelper.deriveFromIndex(move);
         int toIndex = MoveHelper.deriveToIndex(move);
         int pieceBits = MoveHelper.derivePieceTypeBits(move);
@@ -1345,6 +1378,16 @@ public class BitBoard {
         // Any move changes slider lines, so both sides’ maps become stale.
         whiteAttackDirty = true;
         blackAttackDirty = true;
+
+        if (isCapture || pieceBits == 1) {
+            halfmoveClock = 0;
+        } else {
+            halfmoveClock++;
+        }
+
+        if (!isWhite) {
+            fullmoveNumber++;
+        }
 
         flipSideToMove();
     }
@@ -1578,6 +1621,18 @@ public class BitBoard {
         whiteAttackDirty = true;
         blackAttackDirty = true;
 
+        if (!halfmoveHistory.isEmpty()) {
+            halfmoveClock = halfmoveHistory.pop();
+        } else {
+            halfmoveClock = 0;
+        }
+
+        if (!fullmoveHistory.isEmpty()) {
+            fullmoveNumber = fullmoveHistory.pop();
+        } else {
+            fullmoveNumber = 1;
+        }
+
         flipSideToMove();
     }
 
@@ -1753,7 +1808,9 @@ public class BitBoard {
                 whiteRookA1Moved == bitBoard.whiteRookA1Moved &&
                 whiteRookH1Moved == bitBoard.whiteRookH1Moved &&
                 blackRookA8Moved == bitBoard.blackRookA8Moved &&
-                blackRookH8Moved == bitBoard.blackRookH8Moved;
+                blackRookH8Moved == bitBoard.blackRookH8Moved &&
+                halfmoveClock == bitBoard.halfmoveClock &&
+                fullmoveNumber == bitBoard.fullmoveNumber;
     }
 
     @Override
@@ -1762,7 +1819,7 @@ public class BitBoard {
                 whiteRooks, blackRooks, whiteQueens, blackQueens, whiteKing, blackKing,
                 whitePieces, blackPieces, allPieces, whiteKingMoved, blackKingMoved,
                 whiteRookA1Moved, whiteRookH1Moved, blackRookA8Moved, blackRookH8Moved,
-                lastMoveDoubleStepPawnIndex);
+                lastMoveDoubleStepPawnIndex, halfmoveClock, fullmoveNumber);
     }
 
     /**
