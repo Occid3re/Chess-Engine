@@ -342,8 +342,8 @@ public class Score {
         long whiteKing = bitBoard.getWhiteKing();
         long blackKing = bitBoard.getBlackKing();
         long allPieces = bitBoard.getAllPieces();
-        long whiteAttacks = bitBoard.generateAttackBitboard(true);
-        long blackAttacks = bitBoard.generateAttackBitboard(false);
+        long whiteAttacks = bitBoard.getAttackBitboard(true);
+        long blackAttacks = bitBoard.getAttackBitboard(false);
         int phase = bitBoard.getPhase();
 
         updateCenterPawnBonusWhite(whitePawns);
@@ -1232,8 +1232,8 @@ public class Score {
         long whitePawns = bitBoard.getWhitePawns();
         long blackPawns = bitBoard.getBlackPawns();
 
-        long whiteAttacks = bitBoard.generateAttackBitboard(true);
-        long blackAttacks = bitBoard.generateAttackBitboard(false);
+        long whiteAttacks = bitBoard.getAttackBitboard(true);
+        long blackAttacks = bitBoard.getAttackBitboard(false);
         long allPieces = bitBoard.getAllPieces();
         long whiteKnights = bitBoard.getWhiteKnights();
         long whiteBishops = bitBoard.getWhiteBishops();
@@ -1484,7 +1484,7 @@ public class Score {
         long whitePawns = bitBoard.getWhitePawns();
         long blackPawns = bitBoard.getBlackPawns();
         long allPieces = bitBoard.getAllPieces();
-        long blackAttacks = bitBoard.generateAttackBitboard(false);
+        long blackAttacks = bitBoard.getAttackBitboard(false);
         long whiteKing = bitBoard.getWhiteKing();
         int phase = bitBoard.getPhase();
 
@@ -1522,7 +1522,7 @@ public class Score {
         long blackPawns = bitBoard.getBlackPawns();
         long whitePawns = bitBoard.getWhitePawns();
         long allPieces = bitBoard.getAllPieces();
-        long whiteAttacks = bitBoard.generateAttackBitboard(true);
+        long whiteAttacks = bitBoard.getAttackBitboard(true);
         long blackKing = bitBoard.getBlackKing();
         int phase = bitBoard.getPhase();
 
