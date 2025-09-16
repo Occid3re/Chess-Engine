@@ -106,9 +106,15 @@ public class AI {
     // Buffers used for move ordering. Reused across calls to avoid repeated
     // allocations when ordering moves.
     private static final int MAX_MOVE_LIST_SIZE = 218; // maximum legal moves
-    private final int[] moveBuffer = new int[MAX_MOVE_LIST_SIZE];
-    private final int[] scoreBuffer = new int[MAX_MOVE_LIST_SIZE];
-    private final long[] sortKeyBuffer = new long[MAX_MOVE_LIST_SIZE];
+
+    private static final class SortBuffers {
+        final int[] moveBuffer = new int[MAX_MOVE_LIST_SIZE];
+        final int[] scoreBuffer = new int[MAX_MOVE_LIST_SIZE];
+        final long[] sortKeyBuffer = new long[MAX_MOVE_LIST_SIZE];
+    }
+
+    private final ThreadLocal<SortBuffers> sortBuffers =
+            ThreadLocal.withInitial(SortBuffers::new);
     private final ThreadLocal<Map<Integer, Integer>> seeCacheThreadLocal =
             ThreadLocal.withInitial(() -> new HashMap<>(64));
 
@@ -1328,6 +1334,11 @@ public class AI {
             return moves;
         }
 
+        final SortBuffers buffers = sortBuffers.get();
+        final int[] moveBuffer = buffers.moveBuffer;
+        final int[] scoreBuffer = buffers.scoreBuffer;
+        final long[] sortKeys = buffers.sortKeyBuffer;
+
         final int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
 
         // Category encoding (higher is earlier):
@@ -1354,8 +1365,6 @@ public class AI {
         final int prevTo = (prevMove >= 0) ? ((prevMove >>> 6) & 0x3F) : -1;
         final int cm = (prevFrom >= 0) ? counterMove[prevFrom][prevTo] : -1;
         final int COUNTER_MOVE_BONUS = 400;
-
-        final long[] sortKeys = sortKeyBuffer;
 
         for (int i = 0; i < size; i++) {
             final int moveInt = moves.getMove(i);
