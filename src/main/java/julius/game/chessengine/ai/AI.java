@@ -449,7 +449,7 @@ public class AI {
         } else if (simulatorEngine.getGameState().isInStateDraw()) {
             firstScore = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, depth);
         } else {
-            firstScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, firstMove);
+            firstScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, firstMove, 1);
             if (firstScore == EXIT_FLAG || positionChanged()) {
                 simulatorEngine.undoLastMove();
                 return null;
@@ -519,7 +519,7 @@ public class AI {
                 } else if (e.getGameState().isInStateDraw()) {
                     probe = evaluateStaticPosition(e.getGameState(), !isWhitesTurn, depth);
                 } else {
-                    probe = alphaBeta(e, depth - 1, pAlpha, pBeta, !isWhitesTurn, deadline, moveInt);
+                    probe = alphaBeta(e, depth - 1, pAlpha, pBeta, !isWhitesTurn, deadline, moveInt, 1);
                     if (probe == EXIT_FLAG) return null;
                 }
 
@@ -542,7 +542,7 @@ public class AI {
                             double aNow = alphaRef.get();
                             double bNow = betaRef.get();
 
-                            double full = alphaBeta(e, depth - 1, aNow, bNow, !isWhitesTurn, deadline, moveInt);
+                            double full = alphaBeta(e, depth - 1, aNow, bNow, !isWhitesTurn, deadline, moveInt, 1);
                             if (full != EXIT_FLAG) {
                                 finalScore = full;
                                 // Tighten bounds + update best
@@ -739,7 +739,7 @@ public class AI {
                 // keep draw policy consistent
                 score = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, depth);
             } else {
-                score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt);
+                score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1);
                 // Check for time limit exceeded after alphaBeta call
                 if (score == EXIT_FLAG || positionChanged()) {
                     simulatorEngine.undoLastMove(); // Undo move using its integer representation
@@ -776,7 +776,7 @@ public class AI {
      */
     // AI.java
     private double alphaBeta(Engine simulatorEngine, int depth, double alpha, double beta,
-                             boolean isWhite, long deadline, int prevMove) {
+                             boolean isWhite, long deadline, int prevMove, int plyFromRoot) {
         nodesVisited++;
 
         // stop conditions
@@ -784,8 +784,11 @@ public class AI {
             return EXIT_FLAG;
         }
 
-        // ply-from-root for distance-to-mate normalization
-        final int plyFromRoot = Math.max(0, rootDepthForMateScoring - Math.max(0, depth));
+        boolean inCheck = isSideInCheck(simulatorEngine, isWhite);
+        int depthRemaining = depth;
+        if (inCheck) {
+            depthRemaining++;
+        }
 
         // Terminal states first, with distance-to-mate
         if (simulatorEngine.getGameState().isInStateCheckMate()) {
@@ -799,7 +802,7 @@ public class AI {
 
         long boardHash = simulatorEngine.getBoardStateHash();
 
-        if (depth == 0) {
+        if (depthRemaining <= 0) {
             // Quiescence returns white-oriented score; flip for black-to-move
             double eval = evaluateBoard(simulatorEngine, isWhite, deadline);
             if (eval == EXIT_FLAG) { // propagate qsearch timeout
@@ -810,6 +813,8 @@ public class AI {
             }
             return eval;
         }
+
+        depth = depthRemaining;
 
         // Transposition table lookup
         TranspositionTableEntry entry = transpositionTable.get(boardHash);
@@ -831,8 +836,8 @@ public class AI {
         // Workflow: perform a reduced-depth null search, verify apparent fail-highs
         // with a second (depth - 1) search, and only prune when both agree. This
         // dramatically reduces the risk of zugzwangs or other tactical misses.
-        boolean inCheck = isSideInCheck(simulatorEngine, isWhite);
-        int mobility = simulatorEngine.getAllLegalMoves().size(); // guard against zugzwang-like nodes
+        MoveList moves = simulatorEngine.getAllLegalMoves();
+        int mobility = moves.size(); // guard against zugzwang-like nodes
         boolean allowNullMove = useNullMovePruning
                 && depth >= 4
                 && !inCheck
@@ -841,9 +846,16 @@ public class AI {
                 && mobility >= 8;     // mobility guard
 
         if (allowNullMove) {
+            double mateThreatScore = CHECKMATE - (plyFromRoot + 1);
+            if ((isWhite && beta >= mateThreatScore) || (!isWhite && alpha <= -mateThreatScore)) {
+                allowNullMove = false;
+            }
+        }
+
+        if (allowNullMove) {
             int savedEp = simulatorEngine.doNullMoveForSearch(); // O(1) flip side + clear EP
             nullMoveCount++;
-            double nullScore = alphaBeta(simulatorEngine, depth - 1 - 2, alpha, beta, !isWhite, deadline, -1);
+            double nullScore = alphaBeta(simulatorEngine, depth - 1 - 2, alpha, beta, !isWhite, deadline, -1, plyFromRoot + 1);
             simulatorEngine.undoNullMoveForSearch(savedEp); // O(1) restore
 
             if (nullScore == EXIT_FLAG) { // propagate timeout
@@ -852,11 +864,15 @@ public class AI {
 
             boolean nullFailHigh = isWhite ? nullScore >= beta : nullScore <= alpha;
             if (nullFailHigh) {
-                double verificationScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, isWhite, deadline, prevMove);
+                double verificationScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, isWhite, deadline, prevMove, plyFromRoot);
                 if (verificationScore == EXIT_FLAG) {
                     return EXIT_FLAG;
                 }
-                nullFailHigh = isWhite ? verificationScore >= beta : verificationScore <= alpha;
+                if (Math.abs(verificationScore) >= CHECKMATE - (plyFromRoot + 1)) {
+                    nullFailHigh = false;
+                } else {
+                    nullFailHigh = isWhite ? verificationScore >= beta : verificationScore <= alpha;
+                }
             }
 
             if (nullFailHigh) {
@@ -868,12 +884,10 @@ public class AI {
         double alphaOriginal = alpha; // Store the original alpha value
         double betaOriginal = beta;   // Store the original beta value
 
-        MoveList moves = simulatorEngine.getAllLegalMoves();
-
         if (isWhite) {
-            return maximizer(simulatorEngine, depth, alpha, beta, isWhite, boardHash, alphaOriginal, moves, deadline, prevMove);
+            return maximizer(simulatorEngine, depth, alpha, beta, isWhite, boardHash, alphaOriginal, moves, deadline, prevMove, plyFromRoot);
         } else {
-            return minimizer(simulatorEngine, depth, alpha, beta, isWhite, boardHash, betaOriginal, moves, deadline, prevMove);
+            return minimizer(simulatorEngine, depth, alpha, beta, isWhite, boardHash, betaOriginal, moves, deadline, prevMove, plyFromRoot);
         }
     }
 
@@ -942,7 +956,7 @@ public class AI {
 
     private double maximizer(Engine simulatorEngine, int depth, double alpha, double beta,
                              boolean isWhite, long boardHash, double alphaOriginal,
-                             MoveList moves, long deadline, int prevMove) {
+                             MoveList moves, long deadline, int prevMove, int plyFromRoot) {
 
         long start = log.isDebugEnabled() ? System.nanoTime() : 0L;
         double maxEval = Double.NEGATIVE_INFINITY;
@@ -1049,7 +1063,7 @@ public class AI {
 
                 if (canReduce) {
                     int reduced = Math.max(1, nextDepth - reduction);
-                    eval = alphaBeta(simulatorEngine, reduced, pAlpha, pBeta, !isWhite, deadline, move);
+                    eval = alphaBeta(simulatorEngine, reduced, pAlpha, pBeta, !isWhite, deadline, move, plyFromRoot + 1);
                     if (eval == EXIT_FLAG || positionChanged()) {
                         simulatorEngine.undoLastMove();
                         return EXIT_FLAG;
@@ -1057,7 +1071,7 @@ public class AI {
 
                     boolean promising = eval > alpha;
                     if (promising) {
-                        eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, usePvs ? beta : pBeta, !isWhite, deadline, move);
+                        eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, usePvs ? beta : pBeta, !isWhite, deadline, move, plyFromRoot + 1);
                         if (eval == EXIT_FLAG || positionChanged()) {
                             simulatorEngine.undoLastMove();
                             return EXIT_FLAG;
@@ -1065,13 +1079,13 @@ public class AI {
                     }
                 } else {
                     // No reduction for checks/queen-threats/tacticals
-                    eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline, move);
+                    eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline, move, plyFromRoot + 1);
                     if (eval == EXIT_FLAG || positionChanged()) {
                         simulatorEngine.undoLastMove();
                         return EXIT_FLAG;
                     }
                     if (usePvs && eval > alpha && eval < beta) {
-                        eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline, move);
+                        eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline, move, plyFromRoot + 1);
                         if (eval == EXIT_FLAG || positionChanged()) {
                             simulatorEngine.undoLastMove();
                             return EXIT_FLAG;
@@ -1123,7 +1137,7 @@ public class AI {
 
     private double minimizer(Engine simulatorEngine, int depth, double alpha, double beta,
                              boolean isWhite, long boardHash, double betaOriginal,
-                             MoveList moves, long deadline, int prevMove) {
+                             MoveList moves, long deadline, int prevMove, int plyFromRoot) {
 
         long start = log.isDebugEnabled() ? System.nanoTime() : 0L;
         double minEval = Double.POSITIVE_INFINITY;
@@ -1220,7 +1234,7 @@ public class AI {
                 if (canReduce) {
                     int reduced = Math.max(1, nextDepth - reduction);
 
-                    eval = alphaBeta(simulatorEngine, reduced, pAlpha, pBeta, !isWhite, deadline, move);
+                    eval = alphaBeta(simulatorEngine, reduced, pAlpha, pBeta, !isWhite, deadline, move, plyFromRoot + 1);
                     if (eval == EXIT_FLAG || positionChanged()) {
                         simulatorEngine.undoLastMove();
                         return EXIT_FLAG;
@@ -1228,21 +1242,21 @@ public class AI {
 
                     boolean promising = eval < beta;
                     if (promising) {
-                        eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, usePvs ? beta : pBeta, !isWhite, deadline, move);
+                        eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, usePvs ? beta : pBeta, !isWhite, deadline, move, plyFromRoot + 1);
                         if (eval == EXIT_FLAG || positionChanged()) {
                             simulatorEngine.undoLastMove();
                             return EXIT_FLAG;
                         }
                     }
                 } else {
-                    eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline, move);
+                    eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline, move, plyFromRoot + 1);
                     if (eval == EXIT_FLAG || positionChanged()) {
                         simulatorEngine.undoLastMove();
                         return EXIT_FLAG;
                     }
 
                     if (usePvs && eval > alpha && eval < beta) {
-                        eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline, move);
+                        eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline, move, plyFromRoot + 1);
                         if (eval == EXIT_FLAG || positionChanged()) {
                             simulatorEngine.undoLastMove();
                             return EXIT_FLAG;
