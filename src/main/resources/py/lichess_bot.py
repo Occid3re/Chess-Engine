@@ -74,7 +74,7 @@ OUTBOUND_TC = os.environ.get("OUTBOUND_TC", "blitz")  # bullet|blitz|rapid|class
 OUTBOUND_RATED = os.environ.get("OUTBOUND_RATED", "1") == "1"
 OUTBOUND_CLOCK_LIMIT = int(os.environ.get("OUTBOUND_CLOCK_LIMIT", "180"))  # seconds (3+2 default)
 OUTBOUND_INCREMENT = int(os.environ.get("OUTBOUND_INCREMENT", "2"))
-OUTBOUND_BLOCKLIST = {"implosio", "demolito_l1", "lunanetengine"}
+OUTBOUND_BLOCKLIST = {"implosio", "demolito_l1", "demolito_l2", "lunanetengine"}
 RATING_DELTA = int(os.environ.get("OUTBOUND_RATING_DELTA", "100"))  # ± rating window
 # Make the scanner very gentle by default
 OUTBOUND_MAX_PER_CYCLE = int(os.environ.get("OUTBOUND_MAX_PER_CYCLE", "1"))  # how many to try per cycle
@@ -99,6 +99,7 @@ def _detect_cpus():
         physical = max(1, logical // 2)
     return logical, physical
 
+
 def _auto_thread_plan(max_concurrent_games: int = 1):
     logical, physical = _detect_cpus()
 
@@ -110,7 +111,7 @@ def _auto_thread_plan(max_concurrent_games: int = 1):
 
     # Root split scales poorly past ~3 on most PVS/YBWC setups
     search_threads = min(3, max(1, target_total // 4))
-    lazy_threads   = max(1, target_total - search_threads)
+    lazy_threads = max(1, target_total - search_threads)
 
     # Keep root fanout sane relative to root threads
     root_par_limit = max(24, min(96, search_threads * 12))
