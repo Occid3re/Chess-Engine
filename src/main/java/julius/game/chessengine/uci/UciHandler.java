@@ -298,11 +298,14 @@ public class UciHandler {
             } finally {
                 Integer bm = ai.getCurrentBestMoveInt();
                 if (bm != null && bm != -1) {
+                    engine.performMove(bm);
                     System.out.println("bestmove " + toUci(bm));
                 } else {
                     MoveList legal = engine.getAllLegalMoves();
                     if (legal.size() > 0) {
-                        System.out.println("bestmove " + toUci(legal.getMove(0)));
+                        int move = legal.getMove(0);
+                        engine.performMove(move);
+                        System.out.println("bestmove " + toUci(move));
                     } else {
                         System.out.println("bestmove (none)");
                     }
