@@ -33,14 +33,6 @@ ENGINE_BAT = ""  # e.g. r"E:\ChessEngines\chess-engine-3.0.9.bat"
 JAR_DIR = r"C:\Development\Chess-Engine\target"
 JAVA_EXE = r"java"
 
-# Java opts mirrored from your .bat
-ROOT_PAR_LIMIT = os.environ.get("CHESSENGINE_ROOT_PAR_LIMIT", "128")
-SEARCH_THREADS = (
-        os.environ.get("CHESSENGINE_THREADS")
-        or os.environ.get("NUMBER_OF_PROCESSORS")
-        or "4"
-)
-
 LICHESS_TOKEN = os.environ.get("LICHESS_TOKEN") or "YOUR_TOKEN_HERE"
 
 # Engine thinking time floor per move (seconds)
@@ -50,10 +42,10 @@ MOVE_TIME = float(os.environ.get("BOT_MOVE_TIME", "0.5"))
 ESTIMATED_GAME_MOVES = int(os.environ.get("BOT_GAME_MOVES", "40"))
 
 # Accept/decline policy
-ACCEPT_VARIANTS = {"standard"}                           # e.g. {"standard","chess960"}
-ALLOW_RATED = True                                       # accept rated games?
-ALLOW_CASUAL = True                                      # accept casual games?
-ALLOW_CORRESPONDENCE = False                             # accept correspondence TC?
+ACCEPT_VARIANTS = {"standard"}  # e.g. {"standard","chess960"}
+ALLOW_RATED = True  # accept rated games?
+ALLOW_CASUAL = True  # accept casual games?
+ALLOW_CORRESPONDENCE = False  # accept correspondence TC?
 ACCEPT_TC_TYPES = {"bullet", "blitz", "rapid", "classical"}  # which TCs to accept
 
 # Game concurrency (helps prevent overload)
@@ -75,20 +67,74 @@ API_REQUEST_DELAY = float(os.environ.get("BOT_API_REQUEST_DELAY", "2.0"))
 
 # ---- Outbound challenge settings (idle-only) ----
 ENABLE_OUTBOUND_CHALLENGES = os.environ.get("OUTBOUND_ENABLED", "1") == "1"
-OUTBOUND_TC = os.environ.get("OUTBOUND_TC", "blitz")        # bullet|blitz|rapid|classical
+OUTBOUND_TC = os.environ.get("OUTBOUND_TC", "blitz")  # bullet|blitz|rapid|classical
 OUTBOUND_RATED = os.environ.get("OUTBOUND_RATED", "1") == "1"
-OUTBOUND_CLOCK_LIMIT = int(os.environ.get("OUTBOUND_CLOCK_LIMIT", "180"))      # seconds (3+2 default)
+OUTBOUND_CLOCK_LIMIT = int(os.environ.get("OUTBOUND_CLOCK_LIMIT", "180"))  # seconds (3+2 default)
 OUTBOUND_INCREMENT = int(os.environ.get("OUTBOUND_INCREMENT", "2"))
 OUTBOUND_BLOCKLIST = {"implosio", "demolito_l1"}
-RATING_DELTA = int(os.environ.get("OUTBOUND_RATING_DELTA", "100"))             # ± rating window
+RATING_DELTA = int(os.environ.get("OUTBOUND_RATING_DELTA", "100"))  # ± rating window
 # Make the scanner very gentle by default
-OUTBOUND_MAX_PER_CYCLE = int(os.environ.get("OUTBOUND_MAX_PER_CYCLE", "1"))    # how many to try per cycle
-OUTBOUND_PERIOD_SEC = int(os.environ.get("OUTBOUND_PERIOD_SEC", "600"))        # how often to try (idle-only)
-OUTBOUND_COOLDOWN_SEC = int(os.environ.get("OUTBOUND_COOLDOWN_SEC", "9000"))    # avoid re-challenging too soon
+OUTBOUND_MAX_PER_CYCLE = int(os.environ.get("OUTBOUND_MAX_PER_CYCLE", "1"))  # how many to try per cycle
+OUTBOUND_PERIOD_SEC = int(os.environ.get("OUTBOUND_PERIOD_SEC", "600"))  # how often to try (idle-only)
+OUTBOUND_COOLDOWN_SEC = int(os.environ.get("OUTBOUND_COOLDOWN_SEC", "9000"))  # avoid re-challenging too soon
 # Inspect only a small random subset of online bots for rating lookups
 OUTBOUND_INSPECT_LIMIT = int(os.environ.get("OUTBOUND_INSPECT_LIMIT", "20"))
 
+
 # =================================================
+# ---- Auto thread planner (env vars still override) ----
+def _detect_cpus():
+    logical = os.cpu_count() or 2
+    physical = None
+    try:
+        import psutil  # optional but nice to have
+        physical = psutil.cpu_count(logical=False) or None
+    except Exception:
+        pass
+    # fallback if we can't see physical cores (approximate HT)
+    if physical is None:
+        physical = max(1, logical // 2)
+    return logical, physical
+
+def _auto_thread_plan(max_concurrent_games: int = 1):
+    logical, physical = _detect_cpus()
+
+    # Reserve a bit for OS/Python/GC (+ extra if you allow multiple concurrent games)
+    reserve = 2 + max(0, max_concurrent_games - 1)
+
+    # Aim around physical cores, not 1.25×
+    target_total = max(1, min(physical, (logical - reserve)))
+
+    # Root split scales poorly past ~3 on most PVS/YBWC setups
+    search_threads = min(3, max(1, target_total // 4))
+    lazy_threads   = max(1, target_total - search_threads)
+
+    # Keep root fanout sane relative to root threads
+    root_par_limit = max(24, min(96, search_threads * 12))
+
+    return {
+        "logical": logical,
+        "physical": physical,
+        "search": search_threads,
+        "lazy": lazy_threads,
+        "root_limit": root_par_limit,
+    }
+
+
+# If user set explicit env vars, honor them; else auto-plan.
+if os.environ.get("CHESSENGINE_THREADS") or os.environ.get("CHESSENGINE_LAZY_THREADS"):
+    SEARCH_THREADS = os.environ.get("CHESSENGINE_THREADS") or "4"
+    LAZY_SMP_THREADS = os.environ.get("CHESSENGINE_LAZY_THREADS") or SEARCH_THREADS
+    ROOT_PAR_LIMIT = os.environ.get("CHESSENGINE_ROOT_PAR_LIMIT", "128")
+else:
+    _plan = _auto_thread_plan(MAX_CONCURRENT_GAMES)
+    SEARCH_THREADS = str(_plan["search"])
+    LAZY_SMP_THREADS = str(_plan["lazy"])
+    ROOT_PAR_LIMIT = str(_plan["root_limit"])
+    print(
+        f"[+] Auto thread plan: logical={_plan['logical']}, physical={_plan['physical']}, "
+        f"search={SEARCH_THREADS}, lazy={LAZY_SMP_THREADS}, rootParallelLimit={ROOT_PAR_LIMIT}"
+    )
 
 
 def fail(msg: str):
@@ -126,6 +172,7 @@ def build_engine_cmd() -> List[str]:
 
     java_opts = [
         f"-Dchessengine.searchThreads={SEARCH_THREADS}",
+        f"-Dchessengine.lazySmpThreads={LAZY_SMP_THREADS}",
         f"-Dchessengine.rootParallelLimit={ROOT_PAR_LIMIT}",
         "-Dlogging.level.root=INFO",
     ]
@@ -195,6 +242,7 @@ class _GlobalRateLimiter:
     Token-bucket-ish: ensures a minimum interval between request starts,
     and can be pushed forward (e.g., after Retry-After).
     """
+
     def __init__(self, qps: float):
         self.min_interval = 1.0 / max(qps, 0.01)
         self._lock = threading.Lock()
@@ -386,7 +434,8 @@ def safe_make_move(client: berserk.Client, game_id: str, uci: str) -> bool:
     return False
 
 
-def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id: str, me_id: str) -> chess.engine.SimpleEngine:
+def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id: str,
+              me_id: str) -> chess.engine.SimpleEngine:
     stream = client.bots.stream_game_state(game_id)
 
     my_color_is_white = None
@@ -493,10 +542,12 @@ PERF_FOR_TC = {
     "classical": "classical",
 }
 
+
 def _get_perf_rating(user_json: dict, perf_key: str):
     perfs = user_json.get("perfs", {})
     perf = perfs.get(perf_key) or {}
     return perf.get("rating"), perf.get("prov", False)
+
 
 def classify_tc_from_challenge(chal: dict) -> str:
     """
@@ -512,8 +563,8 @@ def classify_tc_from_challenge(chal: dict) -> str:
         return "correspondence"
 
     # Estimate clock category: base + 40*inc heuristic (minutes)
-    limit = float(tc.get("limit", 0))          # seconds
-    inc = float(tc.get("increment", 0))        # seconds
+    limit = float(tc.get("limit", 0))  # seconds
+    inc = float(tc.get("increment", 0))  # seconds
     est_minutes = (limit + 40.0 * inc) / 60.0
     if est_minutes < 3.0:
         return "bullet"
@@ -522,7 +573,6 @@ def classify_tc_from_challenge(chal: dict) -> str:
     if est_minutes <= 25.0:
         return "rapid"
     return "classical"
-
 
 
 def find_similar_bots(client: berserk.Client,
@@ -579,7 +629,8 @@ def find_similar_bots(client: berserk.Client,
         else:
             ids_needing_lookup.append(uid)
 
-    print(f"[outbound] initial matches (from online list perfs): {len(matches)} ; need lookup for {len(ids_needing_lookup)}")
+    print(
+        f"[outbound] initial matches (from online list perfs): {len(matches)} ; need lookup for {len(ids_needing_lookup)}")
 
     # (4) If still short, ONE bulk lookup for a tiny random subset
     if len(matches) < max_candidates and ids_needing_lookup:
@@ -608,8 +659,6 @@ def find_similar_bots(client: berserk.Client,
     chosen = [u for (u, _) in matches[:max_candidates]]
     print(f"[outbound] chosen targets: {chosen}")
     return chosen
-
-
 
 
 def challenge_user(client: berserk.Client,
@@ -641,6 +690,7 @@ def challenge_user(client: berserk.Client,
 
 class ActiveCounter:
     """Thread-safe counter of active games to keep outbound challenges in check."""
+
     def __init__(self):
         self._n = 0
         self._lock = threading.Lock()
@@ -688,7 +738,7 @@ def outbound_challenge_loop(stop_event: threading.Event,
     client = berserk.Client(session=session)
 
     recently_challenged: Dict[str, float] = {}
-    period = max(300, OUTBOUND_PERIOD_SEC)     # gentle default
+    period = max(300, OUTBOUND_PERIOD_SEC)  # gentle default
     max_per_cycle = max(1, OUTBOUND_MAX_PER_CYCLE)
 
     penalty_until = 0.0
@@ -833,8 +883,8 @@ def run_bot():
             if et == "challenge":
                 chal = event["challenge"]
                 chal_id = chal["id"]
-                variant = chal["variant"]["key"]               # "standard", "chess960", ...
-                tc_bucket = classify_tc_from_challenge(chal)   # bullet|blitz|rapid|classical|correspondence
+                variant = chal["variant"]["key"]  # "standard", "chess960", ...
+                tc_bucket = classify_tc_from_challenge(chal)  # bullet|blitz|rapid|classical|correspondence
                 rated = chal.get("rated", False)
                 challenger = chal.get("challenger", {}).get("name") or chal.get("challenger", {}).get("id", "?")
                 print(f"[event] Challenge from {challenger} | variant={variant} | tc={tc_bucket} | rated={rated}")
@@ -862,11 +912,11 @@ def run_bot():
 
             elif et == "challengeCanceled":
                 chal = event.get("challenge", {})
-                print(f"[event] Challenge canceled: {chal.get('id','?')}")
+                print(f"[event] Challenge canceled: {chal.get('id', '?')}")
 
             elif et == "challengeDeclined":
                 chal = event.get("challenge", {})
-                print(f"[event] Challenge declined (by other side?): {chal.get('id','?')}")
+                print(f"[event] Challenge declined (by other side?): {chal.get('id', '?')}")
 
             elif et == "gameStart":
                 game_id = event["game"]["id"]
@@ -890,7 +940,6 @@ def run_bot():
             thread.join(timeout=3.0)
         except Exception:
             pass
-
 
 
 if __name__ == "__main__":
