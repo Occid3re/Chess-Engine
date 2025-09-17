@@ -4,10 +4,15 @@ import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.GameStateEnum;
+import julius.game.chessengine.evaluation.EvaluationContext;
+import julius.game.chessengine.evaluation.EvaluationModule;
+import julius.game.chessengine.evaluation.EvaluationPipeline;
+import julius.game.chessengine.evaluation.MoveContext;
 import julius.game.chessengine.helper.BishopHelper;
 import julius.game.chessengine.helper.RookHelper;
 import lombok.Data;
 import lombok.extern.log4j.Log4j2;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -103,6 +108,10 @@ public class Score {
 
     private int whiteScore;
     private int blackScore;
+
+    private final EvaluationPipeline evaluationPipeline;
+    private EvaluationContext evaluationContext;
+    private boolean pipelineInitialized;
 
     //initialize number of pieces bonus
     private int whitePawnsAmountScore = 0;
@@ -239,11 +248,17 @@ public class Score {
 
 
     public Score() {
+        this.evaluationPipeline = createPipeline();
+        this.evaluationContext = null;
+        this.pipelineInitialized = false;
         this.whiteScore = 0;
         this.blackScore = 0;
     }
 
     public Score(Score other) {
+        this.evaluationPipeline = createPipeline();
+        this.pipelineInitialized = false;
+        this.evaluationContext = other.evaluationContext != null ? other.evaluationContext.copy() : null;
         this.whiteScore = other.whiteScore;
         this.blackScore = other.blackScore;
 
@@ -315,6 +330,77 @@ public class Score {
 
         this.whiteStateBonus = other.whiteStateBonus;
         this.blackStateBonus = other.blackStateBonus;
+
+        if (other.pipelineInitialized && this.evaluationContext != null) {
+            syncPipeline(this.evaluationContext);
+        }
+    }
+
+
+    private EvaluationPipeline createPipeline() {
+        EvaluationModule module = new LegacyEvaluationModule();
+        return new EvaluationPipeline(List.of(module));
+    }
+
+    private void syncPipeline(EvaluationContext context) {
+        if (context == null) {
+            return;
+        }
+        if (!pipelineInitialized) {
+            evaluationPipeline.initialize(context);
+            pipelineInitialized = true;
+        } else {
+            evaluationPipeline.updateContext(context);
+        }
+    }
+
+    private final class LegacyEvaluationModule implements EvaluationModule {
+
+        private int midgameScoreCache;
+        private int endgameScoreCache;
+        private boolean dirty = true;
+
+        @Override
+        public void initialize(EvaluationContext context) {
+            markDirty();
+        }
+
+        @Override
+        public void evaluate(EvaluationContext context) {
+            midgameScoreCache = calculateTotalWhiteScore() - calculateTotalBlackScore();
+            endgameScoreCache = midgameScoreCache;
+            dirty = false;
+        }
+
+        @Override
+        public void applyMove(MoveContext moveContext) {
+            markDirty();
+        }
+
+        @Override
+        public void undoMove(MoveContext moveContext) {
+            markDirty();
+        }
+
+        @Override
+        public int getMidgameScore() {
+            return midgameScoreCache;
+        }
+
+        @Override
+        public int getEndgameScore() {
+            return endgameScoreCache;
+        }
+
+        @Override
+        public boolean isDirty() {
+            return dirty;
+        }
+
+        @Override
+        public void markDirty() {
+            dirty = true;
+        }
     }
 
 
@@ -414,10 +500,17 @@ public class Score {
 
         calculateTotalWhiteScore();
         calculateTotalBlackScore();
+
+        EvaluationContext context = EvaluationContext.from(bitBoard, null);
+        this.evaluationContext = context;
+        syncPipeline(context);
     }
 
 
     public double getScoreDifference() {
+        if (pipelineInitialized) {
+            return evaluationPipeline.getScoreDifference();
+        }
         return (calculateTotalWhiteScore() - calculateTotalBlackScore()) / 100.0;
     }
 
@@ -1715,6 +1808,13 @@ public class Score {
 
         updateMobilityScores(bitBoard);
         updateKingSafety(bitBoard);
+
+        EvaluationContext previousContext = this.evaluationContext;
+        EvaluationContext updatedContext = EvaluationContext.from(bitBoard, state);
+        this.evaluationContext = updatedContext;
+        syncPipeline(updatedContext);
+        MoveContext moveContext = new MoveContext(move, previousContext, updatedContext);
+        evaluationPipeline.applyMove(moveContext);
     }
 
     public void undoMove(BitBoard bitBoard, int move, GameStateEnum state) {
