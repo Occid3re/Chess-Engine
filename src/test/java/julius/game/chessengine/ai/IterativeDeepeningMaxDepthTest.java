@@ -3,6 +3,7 @@ package julius.game.chessengine.ai;
 import julius.game.chessengine.engine.Engine;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.SplittableRandom;
 import java.util.concurrent.TimeUnit;
