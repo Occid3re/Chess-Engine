@@ -1151,7 +1151,9 @@ public class AI {
         }
 
         // STRICT DEPTH MANAGEMENT:
-        // Do NOT increase 'depth' at node entry. Child must always use < this depth.
+        // Do NOT increase 'depth' at node entry. Child depth is non-increasing and
+        // at most MAX_CHECK_EXTENSIONS_IN_A_ROW extensions may keep it equal to the
+        // parent before we enforce a decrease.
         if (depth <= 0) {
             // Quiescence returns white-oriented score; flip for black-to-move
             double eval = evaluateBoard(simulatorEngine, isWhite, deadline);
@@ -1191,7 +1193,7 @@ public class AI {
             int reduction = computeNullMoveReduction(bitBoard, depth, isWhite, mobility);
             int savedEp = simulatorEngine.doNullMoveForSearch();
             nullMoveCount++;
-            double nullScore = alphaBeta(simulatorEngine, depth - 1 - reduction, alpha, beta, !isWhite, deadline, -1, plyFromRoot + 1, extStreak);
+            double nullScore = alphaBeta(simulatorEngine, depth - 1 - reduction, alpha, beta, !isWhite, deadline, -1, plyFromRoot + 1, 0);
             simulatorEngine.undoNullMoveForSearch(savedEp);
 
             if (nullScore == EXIT_FLAG) return EXIT_FLAG;
@@ -1206,7 +1208,7 @@ public class AI {
                         || swing >= swingThreshold;
 
                 if (requiresVerification) {
-                    double verificationScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, isWhite, deadline, prevMove, plyFromRoot, extStreak);
+                    double verificationScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, isWhite, deadline, prevMove, plyFromRoot, 0);
                     if (verificationScore == EXIT_FLAG) return EXIT_FLAG;
                     if (Math.abs(verificationScore) < mateThreshold) {
                         nullFailHigh = isWhite ? verificationScore >= beta : verificationScore <= alpha;
