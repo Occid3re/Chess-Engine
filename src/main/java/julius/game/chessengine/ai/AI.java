@@ -1420,10 +1420,10 @@ public class AI {
                 boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, isWhite);
                 boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
 
-                // STRICT DECREASE: child depth must be < depth
+                // STRICT DECREASE: child depth starts at parent-1; extensions may restore full depth
                 int nextDepth = depth - 1;
-                // (optional check extension) — but clamp to ensure nextDepth < depth
-                if (givesCheck || attacksQueen) nextDepth = Math.min(nextDepth + 1, depth - 1);
+                // allow a +1 extension for checks / queen attacks, but never exceed parent depth
+                if (givesCheck || attacksQueen) nextDepth = Math.min(depth, nextDepth + 1);
 
                 boolean canReduce = !inCheckAtNode
                         && !isTactical
@@ -1434,6 +1434,10 @@ public class AI {
                         && !seeWinsMaterial
                         && nextDepth >= 2
                         && index >= 3;
+
+                if (plyFromRoot <= 1) {
+                    canReduce = false;
+                }
 
                 boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
                 double pAlpha = alpha;
@@ -1593,9 +1597,10 @@ public class AI {
                 boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, isWhite);
                 boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
 
-                // STRICT DECREASE: child depth must be < depth
+                // STRICT DECREASE: child depth starts at parent-1; extensions may restore full depth
                 int nextDepth = depth - 1;
-                if (givesCheck || attacksQueen) nextDepth = Math.min(nextDepth + 1, depth - 1);
+                // allow a +1 extension for checks / queen attacks, but never exceed parent depth
+                if (givesCheck || attacksQueen) nextDepth = Math.min(depth, nextDepth + 1);
 
                 boolean canReduce = !inCheckAtNode
                         && !isTactical
@@ -1606,6 +1611,10 @@ public class AI {
                         && !seeWinsMaterial
                         && nextDepth >= 2
                         && index >= 3;
+
+                if (plyFromRoot <= 1) {
+                    canReduce = false;
+                }
 
                 boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
                 double pAlpha = usePvs ? (beta - 1) : alpha;
