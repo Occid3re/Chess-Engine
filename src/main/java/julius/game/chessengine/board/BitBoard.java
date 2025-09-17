@@ -87,6 +87,10 @@ public class BitBoard {
     private boolean blackKingHasCastled = false;
 
     private void xorPiece(Color color, PieceType type, int square) {
+        if (type == null || color == null) {
+            log.warn("Attempted to xor Zobrist key with null piece information at square {}", square);
+            return;
+        }
         zKey ^= ZobristTable.getPieceSquareHash(getPieceIndex(type, color), square);
     }
 
