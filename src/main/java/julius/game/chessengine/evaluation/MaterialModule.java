@@ -12,10 +12,10 @@ import julius.game.chessengine.figures.PieceType;
 public final class MaterialModule implements EvaluationModule {
 
     public static final int PAWN_VALUE = 100;
-    public static final int KNIGHT_VALUE = 320;  // was 300
-    public static final int BISHOP_VALUE = 330;  // ok
-    public static final int ROOK_VALUE = 500;    // ok
-    public static final int QUEEN_VALUE = 900;   // ok
+    public static final int KNIGHT_VALUE = 320;
+    public static final int BISHOP_VALUE = 330;
+    public static final int ROOK_VALUE = 500;
+    public static final int QUEEN_VALUE = 900;
     public static final int BISHOP_PAIR_BONUS = 40;
 
     public interface PawnChangeListener {
