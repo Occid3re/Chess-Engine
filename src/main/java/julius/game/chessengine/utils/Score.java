@@ -73,6 +73,21 @@ public class Score {
         evaluationPipeline.initialize(context);
     }
 
+    public void refresh(BitBoard bitBoard, GameStateEnum state) {
+        Objects.requireNonNull(bitBoard, "bitBoard");
+        EvaluationContext updated = EvaluationContext.from(bitBoard, state);
+        this.evaluationContext = updated;
+
+        if (!evaluationPipeline.isInitialized()) {
+            evaluationPipeline.initialize(updated);
+        } else {
+            evaluationPipeline.updateContext(updated);
+        }
+
+        // Prime the aggregate totals so subsequent lookups observe the refreshed context immediately.
+        evaluationPipeline.getBlendedScore();
+    }
+
     public void applyMove(BitBoard bitBoard, int move, GameStateEnum state) {
         Objects.requireNonNull(bitBoard, "bitBoard");
         EvaluationContext previous = this.evaluationContext;
