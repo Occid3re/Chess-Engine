@@ -10,21 +10,15 @@ import julius.game.chessengine.evaluation.EvaluationPipeline;
 import julius.game.chessengine.evaluation.MoveContext;
 import julius.game.chessengine.evaluation.MaterialModule;
 import julius.game.chessengine.evaluation.PawnStructureModule;
+import julius.game.chessengine.evaluation.PieceSquareModule;
 import julius.game.chessengine.helper.BishopHelper;
 import julius.game.chessengine.helper.RookHelper;
 import lombok.Data;
 import lombok.extern.log4j.Log4j2;
 import java.util.List;
 
-import static julius.game.chessengine.helper.BishopHelper.BISHOP_ENDGAME_POSITIONAL_VALUES;
-import static julius.game.chessengine.helper.BishopHelper.BISHOP_MIDGAME_POSITIONAL_VALUES;
 import static julius.game.chessengine.helper.KingHelper.*;
-import static julius.game.chessengine.helper.KnightHelper.KNIGHT_ENDGAME_POSITIONAL_VALUES;
-import static julius.game.chessengine.helper.KnightHelper.KNIGHT_MIDGAME_POSITIONAL_VALUES;
 import static julius.game.chessengine.helper.KnightHelper.knightMoveTable;
-import static julius.game.chessengine.helper.QueenHelper.QUEEN_ENDGAME_POSITIONAL_VALUES;
-import static julius.game.chessengine.helper.QueenHelper.QUEEN_MIDGAME_POSITIONAL_VALUES;
-import static julius.game.chessengine.helper.RookHelper.*;
 import static julius.game.chessengine.helper.PawnMoveTables.PAWN_ATTACKS;
 import static julius.game.chessengine.helper.BitHelper.FileMasks;
 import static julius.game.chessengine.helper.BitHelper.RankMasks;
@@ -52,15 +46,7 @@ public class Score {
 
     // Other bonuses and penalties
     private static final int NOT_CASTLED_AND_ROOK_MOVE_PENALTY = -10; // further reduced
-    private static final int START_POSITION_PENALTY            = -40; // was -50
     private static final int CASTLING_BONUS                    = 20;  // further reduced
-
-    // Development tuning constants
-    private static final int DEVELOPMENT_PHASE_THRESHOLD              = 64;
-    private static final int QUEEN_DEVELOPMENT_PHASE_THRESHOLD        = 80;
-    private static final int UNDEVELOPED_MINOR_PENALTY                = -20;
-    private static final int EARLY_QUEEN_DEVELOPMENT_PENALTY_PER_MINOR = -15;
-    private static final int MIN_UNDEVELOPED_MINORS_FOR_QUEEN_PENALTY  = 2;
 
     private static final int ROOK_HALF_OPEN_FILE_BONUS = 15; // was 25
     private static final int ROOK_OPEN_FILE_BONUS      = 25; // was 35
@@ -97,6 +83,7 @@ public class Score {
 
     private final MaterialModule materialModule = new MaterialModule();
     private final PawnStructureModule pawnStructureModule = new PawnStructureModule();
+    private final PieceSquareModule pieceSquareModule = new PieceSquareModule();
     private final EvaluationPipeline evaluationPipeline;
     private EvaluationContext evaluationContext;
     private boolean pipelineInitialized;
@@ -145,25 +132,8 @@ public class Score {
     private static final ThreadLocal<int[]> MOBILITY_BUFFER = ThreadLocal.withInitial(() -> new int[2]);
 
     // Initialize positional values
-    private int whitePawnsPosition = 0;
-    private int blackPawnsPosition = 0;
-    private int whiteKnightsPosition = 0;
-    private int blackKnightsPosition = 0;
-    private int whiteBishopsPosition = 0;
-    private int blackBishopsPosition = 0;
-    private int whiteRooksPosition = 0;
-    private int blackRooksPosition = 0;
-    private int whiteQueensPosition = 0;
-    private int blackQueensPosition = 0;
-    private int whiteKingsPosition = 0;
-    private int blackKingsPosition = 0;
-
-    private int whiteStartingSquarePenalty = 0;
-    private int blackStartingSquarePenalty = 0;
-    private int whiteMinorDevelopmentPenalty = 0;
-    private int blackMinorDevelopmentPenalty = 0;
-    private int whiteQueenDevelopmentPenalty = 0;
-    private int blackQueenDevelopmentPenalty = 0;
+    private int whiteKingCastlingAdjustment = 0;
+    private int blackKingCastlingAdjustment = 0;
 
     // State bonuses
     private int whiteStateBonus = 0;
@@ -171,16 +141,6 @@ public class Score {
 
     private static final long NOT_A_FILE = ~FileMasks[0];
     private static final long NOT_H_FILE = ~FileMasks[7];
-
-    // Constants for the initial positions of each piece type
-    private static final long INITIAL_WHITE_KNIGHT_POSITION = 0x0000000000000042L; // Knights on b1 and g1
-    private static final long INITIAL_BLACK_KNIGHT_POSITION = 0x4200000000000000L; // Knights on b8 and g8
-    private static final long INITIAL_WHITE_BISHOP_POSITION = 0x0000000000000024L; // Bishops on c1 and f1
-    private static final long INITIAL_BLACK_BISHOP_POSITION = 0x2400000000000000L; // Bishops on c8 and f8
-    private static final long INITIAL_WHITE_ROOK_POSITION = 0x0000000000000081L; // Rooks on a1 and h1
-    private static final long INITIAL_BLACK_ROOK_POSITION = 0x8100000000000000L; // Rooks on a8 and h8
-    private static final long INITIAL_WHITE_QUEEN_POSITION = 1L << bitIndex('d', 1);
-    private static final long INITIAL_BLACK_QUEEN_POSITION = 1L << bitIndex('d', 8);
 
     public Score() {
         materialModule.setPawnChangeListener(pawnStructureModule);
@@ -234,24 +194,8 @@ public class Score {
         this.whiteKnightOutpostBonus = other.whiteKnightOutpostBonus;
         this.blackKnightOutpostBonus = other.blackKnightOutpostBonus;
 
-        this.whitePawnsPosition = other.whitePawnsPosition;
-        this.blackPawnsPosition = other.blackPawnsPosition;
-        this.whiteKnightsPosition = other.whiteKnightsPosition;
-        this.blackKnightsPosition = other.blackKnightsPosition;
-        this.whiteBishopsPosition = other.whiteBishopsPosition;
-        this.blackBishopsPosition = other.blackBishopsPosition;
-        this.whiteRooksPosition = other.whiteRooksPosition;
-        this.blackRooksPosition = other.blackRooksPosition;
-        this.whiteQueensPosition = other.whiteQueensPosition;
-        this.blackQueensPosition = other.blackQueensPosition;
-        this.whiteKingsPosition = other.whiteKingsPosition;
-        this.blackKingsPosition = other.blackKingsPosition;
-        this.whiteStartingSquarePenalty = other.whiteStartingSquarePenalty;
-        this.blackStartingSquarePenalty = other.blackStartingSquarePenalty;
-        this.whiteMinorDevelopmentPenalty = other.whiteMinorDevelopmentPenalty;
-        this.blackMinorDevelopmentPenalty = other.blackMinorDevelopmentPenalty;
-        this.whiteQueenDevelopmentPenalty = other.whiteQueenDevelopmentPenalty;
-        this.blackQueenDevelopmentPenalty = other.blackQueenDevelopmentPenalty;
+        this.whiteKingCastlingAdjustment = other.whiteKingCastlingAdjustment;
+        this.blackKingCastlingAdjustment = other.blackKingCastlingAdjustment;
 
         this.whiteStateBonus = other.whiteStateBonus;
         this.blackStateBonus = other.blackStateBonus;
@@ -264,7 +208,7 @@ public class Score {
 
     private EvaluationPipeline createPipeline() {
         EvaluationModule module = new LegacyEvaluationModule();
-        return new EvaluationPipeline(List.of(materialModule, pawnStructureModule, module));
+        return new EvaluationPipeline(List.of(materialModule, pawnStructureModule, pieceSquareModule, module));
     }
 
     private void syncPipeline(EvaluationContext context) {
@@ -407,21 +351,6 @@ public class Score {
         updateKnightOutpostBonusBlack(blackKnights, blackPawns, whitePawns);
 
         // Apply positional values to the pawns
-        updatePawnsPositionBonusWhite(whitePawns, phase);
-        updatePawnsPositionBonusBlack(blackPawns, phase);
-
-        updateKnightsPositionBonusWhite(whiteKnights, phase);
-        updateKnightsPositionBonusBlack(blackKnights, phase);
-
-        updateBishopsPositionBonusWhite(whiteBishops, phase);
-        updateBishopsPositionBonusBlack(blackBishops, phase);
-
-        updateRooksPositionBonusWhite(whiteRooks, phase);
-        updateRooksPositionBonusBlack(blackRooks, phase);
-
-        updateQueensPositionBonusWhite(whiteQueens, phase);
-        updateQueensPositionBonusBlack(blackQueens, phase);
-
         int materialBalance = computeMaterialBalance(bitBoard);
         updateWhiteKingsPositionBonus(whiteKing, whitePawns, blackPawns, bitBoard.isWhiteKingHasCastled(),
                 bitBoard.isWhiteKingMoved(), bitBoard.isWhiteRookA1Moved(), bitBoard.isWhiteRookH1Moved(), phase,
@@ -429,13 +358,6 @@ public class Score {
         updateBlackKingsPositionBonus(blackKing, blackPawns, whitePawns, bitBoard.isBlackKingHasCastled(),
                 bitBoard.isBlackKingMoved(), bitBoard.isBlackRookA8Moved(), bitBoard.isBlackRookH8Moved(), phase,
                 materialBalance);
-
-        updateStartingSquarePenaltyWhite(whiteKnights, whiteBishops, whiteRooks);
-        updateStartingSquarePenaltyBlack(blackKnights, blackBishops, blackRooks);
-        updateMinorDevelopmentPenaltyWhite(whiteKnights, whiteBishops, phase);
-        updateMinorDevelopmentPenaltyBlack(blackKnights, blackBishops, phase);
-        updateQueenDevelopmentPenaltyWhite(whiteQueens, whiteKnights, whiteBishops, phase);
-        updateQueenDevelopmentPenaltyBlack(blackQueens, blackKnights, blackBishops, phase);
 
         // Mobility and king safety
         updateMobilityScores(bitBoard);
@@ -474,15 +396,7 @@ public class Score {
         totalWhiteScore += whiteRooksOpenFileBonus;
         totalWhiteScore += whiteKnightOutpostBonus;
 
-        totalWhiteScore += whitePawnsPosition;
-        totalWhiteScore += whiteKnightsPosition;
-        totalWhiteScore += whiteBishopsPosition;
-        totalWhiteScore += whiteRooksPosition;
-        totalWhiteScore += whiteQueensPosition;
-        totalWhiteScore += whiteKingsPosition;
-        totalWhiteScore += whiteStartingSquarePenalty;
-        totalWhiteScore += whiteMinorDevelopmentPenalty;
-        totalWhiteScore += whiteQueenDevelopmentPenalty;
+        totalWhiteScore += whiteKingCastlingAdjustment;
 
         totalWhiteScore += whiteMobilityScore;
         totalWhiteScore += whiteKingSafetyScore;
@@ -516,15 +430,7 @@ public class Score {
         totalBlackScore += blackRooksOpenFileBonus;
         totalBlackScore += blackKnightOutpostBonus;
 
-        totalBlackScore += blackPawnsPosition;
-        totalBlackScore += blackKnightsPosition;
-        totalBlackScore += blackBishopsPosition;
-        totalBlackScore += blackRooksPosition;
-        totalBlackScore += blackQueensPosition;
-        totalBlackScore += blackKingsPosition;
-        totalBlackScore += blackStartingSquarePenalty;
-        totalBlackScore += blackMinorDevelopmentPenalty;
-        totalBlackScore += blackQueenDevelopmentPenalty;
+        totalBlackScore += blackKingCastlingAdjustment;
 
         totalBlackScore += blackMobilityScore;
         totalBlackScore += blackKingSafetyScore;
@@ -590,50 +496,6 @@ public class Score {
         return bonus;
     }
 
-    /**
-     * Positional Bonuses
-     */
-
-    public void updatePawnsPositionBonusWhite(long whitePawns, int phase) {
-        whitePawnsPosition = applyPositionalValues(whitePawns, WHITE_PAWN_MIDGAME_POSITIONAL_VALUES, WHITE_PAWN_ENDGAME_POSITIONAL_VALUES, phase);
-    }
-
-    public void updatePawnsPositionBonusBlack(long blackPawns, int phase) {
-        blackPawnsPosition = applyPositionalValues(blackPawns, BLACK_PAWN_MIDGAME_POSITIONAL_VALUES, BLACK_PAWN_ENDGAME_POSITIONAL_VALUES, phase);
-    }
-
-    public void updateKnightsPositionBonusWhite(long whiteKnights, int phase) {
-        whiteKnightsPosition = applyPositionalValues(whiteKnights, KNIGHT_MIDGAME_POSITIONAL_VALUES, KNIGHT_ENDGAME_POSITIONAL_VALUES, phase);
-    }
-
-    public void updateKnightsPositionBonusBlack(long blackKnights, int phase) {
-        blackKnightsPosition = applyPositionalValues(blackKnights, KNIGHT_MIDGAME_POSITIONAL_VALUES, KNIGHT_ENDGAME_POSITIONAL_VALUES, phase);
-    }
-
-    public void updateBishopsPositionBonusWhite(long whiteBishops, int phase) {
-        whiteBishopsPosition = applyPositionalValues(whiteBishops, BISHOP_MIDGAME_POSITIONAL_VALUES, BISHOP_ENDGAME_POSITIONAL_VALUES, phase);
-    }
-
-    public void updateBishopsPositionBonusBlack(long blackBishops, int phase) {
-        blackBishopsPosition = applyPositionalValues(blackBishops, BISHOP_MIDGAME_POSITIONAL_VALUES, BISHOP_ENDGAME_POSITIONAL_VALUES, phase);
-    }
-
-    public void updateRooksPositionBonusWhite(long whiteRooks, int phase) {
-        whiteRooksPosition = applyPositionalValues(whiteRooks, WHITE_ROOK_MIDGAME_POSITIONAL_VALUES, WHITE_ROOK_ENDGAME_POSITIONAL_VALUES, phase);
-    }
-
-    public void updateRooksPositionBonusBlack(long blackRooks, int phase) {
-        blackRooksPosition = applyPositionalValues(blackRooks, BLACK_ROOK_MIDGAME_POSITIONAL_VALUES, BLACK_ROOK_ENDGAME_POSITIONAL_VALUES, phase);
-    }
-
-    public void updateQueensPositionBonusWhite(long whiteQueens, int phase) {
-        whiteQueensPosition = applyPositionalValues(whiteQueens, QUEEN_MIDGAME_POSITIONAL_VALUES, QUEEN_ENDGAME_POSITIONAL_VALUES, phase);
-    }
-
-    public void updateQueensPositionBonusBlack(long blackQueens, int phase) {
-        blackQueensPosition = applyPositionalValues(blackQueens, QUEEN_MIDGAME_POSITIONAL_VALUES, QUEEN_ENDGAME_POSITIONAL_VALUES, phase);
-    }
-
     private static int computeMaterialBalance(BitBoard bitBoard) {
         int whiteMaterial = Long.bitCount(bitBoard.getWhitePawns()) * PAWN_VALUE
                 + Long.bitCount(bitBoard.getWhiteKnights()) * KNIGHT_VALUE
@@ -652,9 +514,7 @@ public class Score {
                                               boolean isCastled, boolean isWhiteKingMoved,
                                               boolean rookA1Moved, boolean rookH1Moved, int phase,
                                               int materialBalance) {
-        whiteKingsPosition = applyPositionalValues(whiteKing, WHITE_KING_POSITIONAL_VALUES,
-                KING_ENDGAME_POSITIONAL_VALUES, phase);
-
+        whiteKingCastlingAdjustment = 0;
         int castlingBonus = CASTLING_BONUS * (256 - phase) / 256;
         int rookMovePenalty = NOT_CASTLED_AND_ROOK_MOVE_PENALTY * (256 - phase) / 256;
         if (materialBalance < 0) {
@@ -678,16 +538,16 @@ public class Score {
         }
 
         if (isCastled) {
-            whiteKingsPosition += castlingBonus;
+            whiteKingCastlingAdjustment += castlingBonus;
         } else if (applyPenalty) {
             if (rookA1Moved) {
-                whiteKingsPosition += rookMovePenalty;
+                whiteKingCastlingAdjustment += rookMovePenalty;
             }
             if (rookH1Moved) {
-                whiteKingsPosition += rookMovePenalty;
+                whiteKingCastlingAdjustment += rookMovePenalty;
             }
             if (isWhiteKingMoved) {
-                whiteKingsPosition += rookMovePenalty * 2;
+                whiteKingCastlingAdjustment += rookMovePenalty * 2;
             }
         }
     }
@@ -696,9 +556,7 @@ public class Score {
                                               boolean isCastled, boolean isBlackKingMoved,
                                               boolean rookA8Moved, boolean rookH8Moved, int phase,
                                               int materialBalance) {
-        blackKingsPosition = applyPositionalValues(blackKing, BLACK_KING_POSITIONAL_VALUES,
-                KING_ENDGAME_POSITIONAL_VALUES, phase);
-
+        blackKingCastlingAdjustment = 0;
         int castlingBonus = CASTLING_BONUS * (256 - phase) / 256;
         int rookMovePenalty = NOT_CASTLED_AND_ROOK_MOVE_PENALTY * (256 - phase) / 256;
         if (materialBalance > 0) {
@@ -722,85 +580,20 @@ public class Score {
         }
 
         if (isCastled) {
-            blackKingsPosition += castlingBonus;
+            blackKingCastlingAdjustment += castlingBonus;
         } else if (applyPenalty) {
             if (rookA8Moved) {
-                blackKingsPosition += rookMovePenalty;
+                blackKingCastlingAdjustment += rookMovePenalty;
             }
             if (rookH8Moved) {
-                blackKingsPosition += rookMovePenalty;
+                blackKingCastlingAdjustment += rookMovePenalty;
             }
             if (isBlackKingMoved) {
-                blackKingsPosition += rookMovePenalty * 2;
+                blackKingCastlingAdjustment += rookMovePenalty * 2;
             }
         }
     }
 
-    public void updateStartingSquarePenaltyWhite(long whiteKnights, long whiteBishops, long whiteRooks) {
-        // Check if white pieces are all on starting squares
-        if (areAllPiecesOnStartingSquares(whiteKnights, whiteBishops, whiteRooks, true)) {
-            whiteStartingSquarePenalty = START_POSITION_PENALTY;
-        } else {
-            whiteStartingSquarePenalty = 0;
-        }
-    }
-
-    public void updateStartingSquarePenaltyBlack(long blackKnights, long blackBishops, long blackRooks) {
-        // Check if white pieces are all on starting squares
-        if (areAllPiecesOnStartingSquares(blackKnights, blackBishops, blackRooks, false)) {
-            blackStartingSquarePenalty = START_POSITION_PENALTY;
-        } else {
-            blackStartingSquarePenalty = 0;
-        }
-    }
-
-    private void updateMinorDevelopmentPenaltyWhite(long whiteKnights, long whiteBishops, int phase) {
-        if (phase >= DEVELOPMENT_PHASE_THRESHOLD) {
-            int undeveloped = Long.bitCount(whiteKnights & INITIAL_WHITE_KNIGHT_POSITION)
-                    + Long.bitCount(whiteBishops & INITIAL_WHITE_BISHOP_POSITION);
-            whiteMinorDevelopmentPenalty = undeveloped * UNDEVELOPED_MINOR_PENALTY;
-        } else {
-            whiteMinorDevelopmentPenalty = 0;
-        }
-    }
-
-    private void updateMinorDevelopmentPenaltyBlack(long blackKnights, long blackBishops, int phase) {
-        if (phase >= DEVELOPMENT_PHASE_THRESHOLD) {
-            int undeveloped = Long.bitCount(blackKnights & INITIAL_BLACK_KNIGHT_POSITION)
-                    + Long.bitCount(blackBishops & INITIAL_BLACK_BISHOP_POSITION);
-            blackMinorDevelopmentPenalty = undeveloped * UNDEVELOPED_MINOR_PENALTY;
-        } else {
-            blackMinorDevelopmentPenalty = 0;
-        }
-    }
-
-    private void updateQueenDevelopmentPenaltyWhite(long whiteQueens, long whiteKnights, long whiteBishops, int phase) {
-        if (phase <= QUEEN_DEVELOPMENT_PHASE_THRESHOLD
-                && Long.bitCount(whiteQueens) > 0
-                && (whiteQueens & INITIAL_WHITE_QUEEN_POSITION) == 0) {
-            int undevelopedMinors = Long.bitCount(whiteKnights & INITIAL_WHITE_KNIGHT_POSITION)
-                    + Long.bitCount(whiteBishops & INITIAL_WHITE_BISHOP_POSITION);
-            if (undevelopedMinors >= MIN_UNDEVELOPED_MINORS_FOR_QUEEN_PENALTY) {
-                whiteQueenDevelopmentPenalty = undevelopedMinors * EARLY_QUEEN_DEVELOPMENT_PENALTY_PER_MINOR;
-                return;
-            }
-        }
-        whiteQueenDevelopmentPenalty = 0;
-    }
-
-    private void updateQueenDevelopmentPenaltyBlack(long blackQueens, long blackKnights, long blackBishops, int phase) {
-        if (phase <= QUEEN_DEVELOPMENT_PHASE_THRESHOLD
-                && Long.bitCount(blackQueens) > 0
-                && (blackQueens & INITIAL_BLACK_QUEEN_POSITION) == 0) {
-            int undevelopedMinors = Long.bitCount(blackKnights & INITIAL_BLACK_KNIGHT_POSITION)
-                    + Long.bitCount(blackBishops & INITIAL_BLACK_BISHOP_POSITION);
-            if (undevelopedMinors >= MIN_UNDEVELOPED_MINORS_FOR_QUEEN_PENALTY) {
-                blackQueenDevelopmentPenalty = undevelopedMinors * EARLY_QUEEN_DEVELOPMENT_PENALTY_PER_MINOR;
-                return;
-            }
-        }
-        blackQueenDevelopmentPenalty = 0;
-    }
 
     public void updateMobilityScores(int whiteScore, int blackScore) {
         whiteMobilityScore = whiteScore;
@@ -1294,34 +1087,8 @@ public class Score {
         return total;
     }
 
-    private int applyPositionalValues(long bitboard, int[] midgameValues, int[] endgameValues, int phase) {
-        int score = 0;
-        while (bitboard != 0) {
-            long sq = bitboard & -bitboard;
-            int index = Long.numberOfTrailingZeros(sq);
-            int mg = midgameValues[index];
-            int eg = endgameValues[index];
-            score += ((mg * (256 - phase)) + (eg * phase)) / 256;
-            bitboard ^= sq;
-        }
-        return score;
-    }
-
-    private boolean areAllPiecesOnStartingSquares(long knights, long bishops, long rooks, boolean isWhite) {
-        if (isWhite) {
-            return (knights == INITIAL_WHITE_KNIGHT_POSITION &&
-                    bishops == INITIAL_WHITE_BISHOP_POSITION &&
-                    rooks == INITIAL_WHITE_ROOK_POSITION);
-        } else {
-            return (knights == INITIAL_BLACK_KNIGHT_POSITION &&
-                    bishops == INITIAL_BLACK_BISHOP_POSITION &&
-                    rooks == INITIAL_BLACK_ROOK_POSITION);
-        }
-    }
-
     public void updateWhitePawnValues(BitBoard bitBoard) {
         applyPawnStructure(bitBoard);
-        updatePawnsPositionBonusWhite(bitBoard.getWhitePawns(), bitBoard.getPhase());
         updateBlackRookValues(bitBoard);
         updateWhiteRookValues(bitBoard);
         updateWhiteKnightValues(bitBoard);
@@ -1330,7 +1097,6 @@ public class Score {
 
     public void updateBlackPawnValues(BitBoard bitBoard) {
         applyPawnStructure(bitBoard);
-        updatePawnsPositionBonusBlack(bitBoard.getBlackPawns(), bitBoard.getPhase());
         updateBlackRookValues(bitBoard);
         updateWhiteRookValues(bitBoard);
         updateWhiteKnightValues(bitBoard);
@@ -1344,12 +1110,7 @@ public class Score {
         long whiteQueens = bitBoard.getWhiteQueens();
         long whitePawns = bitBoard.getWhitePawns();
         long blackPawns = bitBoard.getBlackPawns();
-        int phase = bitBoard.getPhase();
-        updateKnightsPositionBonusWhite(whiteKnights, phase);
         updateKnightOutpostBonusWhite(whiteKnights, whitePawns, blackPawns);
-        updateStartingSquarePenaltyWhite(whiteKnights, whiteBishops, whiteRooks);
-        updateMinorDevelopmentPenaltyWhite(whiteKnights, whiteBishops, phase);
-        updateQueenDevelopmentPenaltyWhite(whiteQueens, whiteKnights, whiteBishops, phase);
     }
 
     public void updateBlackKnightValues(BitBoard bitBoard) {
@@ -1359,112 +1120,19 @@ public class Score {
         long blackQueens = bitBoard.getBlackQueens();
         long blackPawns = bitBoard.getBlackPawns();
         long whitePawns = bitBoard.getWhitePawns();
-        int phase = bitBoard.getPhase();
-        updateKnightsPositionBonusBlack(blackKnights, phase);
         updateKnightOutpostBonusBlack(blackKnights, blackPawns, whitePawns);
-        updateStartingSquarePenaltyBlack(blackKnights, blackBishops, blackRooks);
-        updateMinorDevelopmentPenaltyBlack(blackKnights, blackBishops, phase);
-        updateQueenDevelopmentPenaltyBlack(blackQueens, blackKnights, blackBishops, phase);
-    }
-
-    public void updateWhiteBishopValues(BitBoard bitBoard) {
-        long whiteBishops = bitBoard.getWhiteBishops();
-        long whiteKnights = bitBoard.getWhiteKnights();
-        long whiteRooks = bitBoard.getWhiteRooks();
-        long whiteQueens = bitBoard.getWhiteQueens();
-        int phase = bitBoard.getPhase();
-        updateBishopsPositionBonusWhite(whiteBishops, phase);
-        updateStartingSquarePenaltyWhite(whiteKnights, whiteBishops, whiteRooks);
-        updateMinorDevelopmentPenaltyWhite(whiteKnights, whiteBishops, phase);
-        updateQueenDevelopmentPenaltyWhite(whiteQueens, whiteKnights, whiteBishops, phase);
-    }
-
-    public void updateBlackBishopValues(BitBoard bitBoard) {
-        long blackBishops = bitBoard.getBlackBishops();
-        long blackKnights = bitBoard.getBlackKnights();
-        long blackRooks = bitBoard.getBlackRooks();
-        long blackQueens = bitBoard.getBlackQueens();
-        int phase = bitBoard.getPhase();
-        updateBishopsPositionBonusBlack(blackBishops, phase);
-        updateStartingSquarePenaltyBlack(blackKnights, blackBishops, blackRooks);
-        updateMinorDevelopmentPenaltyBlack(blackKnights, blackBishops, phase);
-        updateQueenDevelopmentPenaltyBlack(blackQueens, blackKnights, blackBishops, phase);
     }
 
     public void updateWhiteRookValues(BitBoard bitBoard) {
-
-        long whitePawns = bitBoard.getWhitePawns();
-        long blackPawns = bitBoard.getBlackPawns();
-        long whiteKing = bitBoard.getWhiteKing();
-
-        long whiteKnights = bitBoard.getWhiteKnights();
-        long whiteBishops = bitBoard.getWhiteBishops();
-        long whiteRooks = bitBoard.getWhiteRooks();
-        long whiteQueens = bitBoard.getWhiteQueens();
-
-        boolean isCastled = bitBoard.isWhiteKingHasCastled();
-        boolean isWhiteKingHasMoved = bitBoard.isWhiteKingMoved();
-        boolean rookA1Moved = bitBoard.isWhiteRookA1Moved();
-        boolean rookH1Moved = bitBoard.isWhiteRookH1Moved();
-        int phase = bitBoard.getPhase();
-
-
-        updateRooksPositionBonusWhite(whiteRooks, phase);
-
         updateRookHalfOpenFileBonusWhite(bitBoard);
         updateRookOpenFileBonusWhite(bitBoard);
-
-        updateStartingSquarePenaltyWhite(whiteKnights, whiteBishops, whiteRooks);
         updateKingValuesWhite(bitBoard);
-        updateMinorDevelopmentPenaltyWhite(whiteKnights, whiteBishops, phase);
-        updateQueenDevelopmentPenaltyWhite(whiteQueens, whiteKnights, whiteBishops, phase);
     }
 
     public void updateBlackRookValues(BitBoard bitBoard) {
-        long blackPawns = bitBoard.getBlackPawns();
-        long whitePawns = bitBoard.getWhitePawns();
-        long blackKing = bitBoard.getBlackKing();
-
-        long blackKnights = bitBoard.getBlackKnights();
-        long blackBishops = bitBoard.getBlackBishops();
-        long blackRooks = bitBoard.getBlackRooks();
-        long blackQueens = bitBoard.getBlackQueens();
-
-        boolean isCastled = bitBoard.isBlackKingHasCastled();
-        boolean isBlackKingMoved = bitBoard.isBlackKingMoved();
-        boolean rookA8Moved = bitBoard.isBlackRookA8Moved();
-        boolean rookH8Moved = bitBoard.isBlackRookH8Moved();
-        int phase = bitBoard.getPhase();
-
-        updateRooksPositionBonusBlack(blackRooks, phase);
-
         updateRookHalfOpenFileBonusBlack(bitBoard);
         updateRookOpenFileBonusBlack(bitBoard);
-
-        updateStartingSquarePenaltyBlack(blackKnights, blackBishops, blackRooks);
         updateKingValuesBlack(bitBoard);
-        updateMinorDevelopmentPenaltyBlack(blackKnights, blackBishops, phase);
-        updateQueenDevelopmentPenaltyBlack(blackQueens, blackKnights, blackBishops, phase);
-    }
-
-    public void updateWhiteQueenValues(BitBoard bitBoard) {
-        long whiteQueens = bitBoard.getWhiteQueens();
-        long whiteKnights = bitBoard.getWhiteKnights();
-        long whiteBishops = bitBoard.getWhiteBishops();
-        int phase = bitBoard.getPhase();
-        updateQueensPositionBonusWhite(whiteQueens, phase);
-        updateQueenDevelopmentPenaltyWhite(whiteQueens, whiteKnights, whiteBishops, phase);
-        updateMinorDevelopmentPenaltyWhite(whiteKnights, whiteBishops, phase);
-    }
-
-    public void updateBlackQueenValues(BitBoard bitBoard) {
-        long blackQueens = bitBoard.getBlackQueens();
-        long blackKnights = bitBoard.getBlackKnights();
-        long blackBishops = bitBoard.getBlackBishops();
-        int phase = bitBoard.getPhase();
-        updateQueensPositionBonusBlack(blackQueens, phase);
-        updateQueenDevelopmentPenaltyBlack(blackQueens, blackKnights, blackBishops, phase);
-        updateMinorDevelopmentPenaltyBlack(blackKnights, blackBishops, phase);
     }
 
     public void applyMove(BitBoard bitBoard, int move, GameStateEnum state) {
@@ -1509,13 +1177,10 @@ public class Score {
     }
 
     private void updateValuesForWhite(int pieceTypeBits, BitBoard bitBoard) {
-        int phase = bitBoard.getPhase();
         switch (pieceTypeBits) {
             case 1 -> updateWhitePawnValues(bitBoard);
             case 2 -> updateWhiteKnightValues(bitBoard);
-            case 3 -> updateWhiteBishopValues(bitBoard);
             case 4 -> updateWhiteRookValues(bitBoard);
-            case 5 -> updateWhiteQueenValues(bitBoard);
             case 6 -> updateKingValuesWhite(bitBoard);
             default -> {
             }
@@ -1523,13 +1188,10 @@ public class Score {
     }
 
     private void updateValuesForBlack(int pieceTypeBits, BitBoard bitBoard) {
-        int phase = bitBoard.getPhase();
         switch (pieceTypeBits) {
             case 1 -> updateBlackPawnValues(bitBoard);
             case 2 -> updateBlackKnightValues(bitBoard);
-            case 3 -> updateBlackBishopValues(bitBoard);
             case 4 -> updateBlackRookValues(bitBoard);
-            case 5 -> updateBlackQueenValues(bitBoard);
             case 6 -> updateKingValuesBlack(bitBoard);
             default -> {
             }
@@ -1565,11 +1227,11 @@ public class Score {
     }
 
     public int getWhiteKingsPosition() {
-        return whiteKingsPosition;
+        return whiteKingCastlingAdjustment;
     }
 
     public int getBlackKingsPosition() {
-        return blackKingsPosition;
+        return blackKingCastlingAdjustment;
     }
 
     public void updateStateValuesWhite(GameStateEnum state) {
