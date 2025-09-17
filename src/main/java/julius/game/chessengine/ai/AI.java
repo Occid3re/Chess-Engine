@@ -35,7 +35,8 @@ public class AI {
      * Number of threads used for searching. Defaults to single-threaded search but
      * can be adjusted at runtime via the UCI "Threads" option.
      */
-    @Getter @Setter
+    @Getter
+    @Setter
     private int searchThreads = Integer.getInteger("chessengine.searchThreads", 1);
 
     // number of Lazy SMP workers (≥1)
@@ -403,8 +404,11 @@ public class AI {
                     task = activeSearch.get();
                     if (task != null && task.getId() != lastTaskId) break;
                     task = null;
-                    try { calculationLock.wait(); } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt(); return;
+                    try {
+                        calculationLock.wait();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
                     }
                 }
                 if (!keepCalculating || Thread.currentThread().isInterrupted()) return;
@@ -422,7 +426,8 @@ public class AI {
             simulator = mainEngine.createSimulation();
         } catch (RuntimeException e) {
             log.error("Failed to create simulation for worker {}", workerIndex, e);
-            task.workerDone(); return;
+            task.workerDone();
+            return;
         }
 
         SplittableRandom rng = lazySmpThreads > 1
@@ -463,14 +468,28 @@ public class AI {
                 double window = 50.0;
                 if (rng != null) window = Math.max(10.0, window + rng.nextDouble(-10.0, 10.0));
                 alpha = lastIterScore - window;
-                beta  = lastIterScore + window;
+                beta = lastIterScore + window;
 
                 int retries = 0;
                 while (!shouldStopCalculating(task.getDeadline())) {
                     ms = searchRootMoves(simulatorEngine, task, currentDepth, alpha, beta, rng);
                     if (ms == null) break;
-                    if (ms.score <= alpha) { window *= 2.0; alpha = ms.score - window; if (++retries > 3) { alpha = Double.NEGATIVE_INFINITY; beta = Double.POSITIVE_INFINITY; } else continue; }
-                    if (ms.score >= beta ) { window *= 2.0; beta  = ms.score + window; if (++retries > 3) { alpha = Double.NEGATIVE_INFINITY; beta = Double.POSITIVE_INFINITY; } else continue; }
+                    if (ms.score <= alpha) {
+                        window *= 2.0;
+                        alpha = ms.score - window;
+                        if (++retries > 3) {
+                            alpha = Double.NEGATIVE_INFINITY;
+                            beta = Double.POSITIVE_INFINITY;
+                        } else continue;
+                    }
+                    if (ms.score >= beta) {
+                        window *= 2.0;
+                        beta = ms.score + window;
+                        if (++retries > 3) {
+                            alpha = Double.NEGATIVE_INFINITY;
+                            beta = Double.POSITIVE_INFINITY;
+                        } else continue;
+                    }
                     break;
                 }
             }
@@ -530,16 +549,22 @@ public class AI {
         if (calculationThreads != null) {
             for (Thread worker : calculationThreads) {
                 if (worker == null) continue;
-                try { worker.join(); } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt(); log.error("Thread interruption error", e);
+                try {
+                    worker.join();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    log.error("Thread interruption error", e);
                 }
             }
             calculationThreads = null;
         }
 
         if (calculationCoordinator != null) {
-            try { calculationCoordinator.join(); } catch (InterruptedException e) {
-                Thread.currentThread().interrupt(); log.error("Thread interruption error", e);
+            try {
+                calculationCoordinator.join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.error("Thread interruption error", e);
             }
             calculationCoordinator = null;
         }
@@ -626,8 +651,11 @@ public class AI {
                 while (keepCalculating && !Thread.currentThread().isInterrupted()) {
                     targetHash = currentBoardState;
                     if (targetHash != lastObservedHash) break;
-                    try { calculationLock.wait(); } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt(); return;
+                    try {
+                        calculationLock.wait();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
                     }
                 }
                 if (!keepCalculating || Thread.currentThread().isInterrupted()) return;
@@ -827,7 +855,8 @@ public class AI {
         } else {
             firstScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, firstMove, 1);
             if (firstScore == EXIT_FLAG || abortRequested(deadline)) {
-                simulatorEngine.undoLastMove(); return null;
+                simulatorEngine.undoLastMove();
+                return null;
             }
         }
         simulatorEngine.undoLastMove();
@@ -835,7 +864,8 @@ public class AI {
         bestMove = firstMove;
         bestScore = firstScore;
 
-        if (isWhitesTurn) alpha = Math.max(alpha, firstScore); else beta = Math.min(beta, firstScore);
+        if (isWhitesTurn) alpha = Math.max(alpha, firstScore);
+        else beta = Math.min(beta, firstScore);
         if (alpha >= beta) return new MoveAndScore(bestMove, bestScore);
 
         final int fanout = Math.min(ROOT_PARALLEL_LIMIT, orderedMoves.size() - 1);
@@ -845,7 +875,7 @@ public class AI {
         final List<Future<MoveAndScore>> futures = new ArrayList<>(fanout);
 
         final AtomicReference<Double> alphaRef = new AtomicReference<>(alpha);
-        final AtomicReference<Double> betaRef  = new AtomicReference<>(beta);
+        final AtomicReference<Double> betaRef = new AtomicReference<>(beta);
         final java.util.concurrent.atomic.AtomicInteger bestMoveRef = new java.util.concurrent.atomic.AtomicInteger(bestMove);
         final AtomicReference<Double> bestScoreRef = new AtomicReference<>(bestScore);
         final AtomicBoolean stopRef = new AtomicBoolean(false);
@@ -860,10 +890,15 @@ public class AI {
                 e.performMove(moveInt);
 
                 double currentAlpha = alphaRef.get();
-                double currentBeta  = betaRef.get();
+                double currentBeta = betaRef.get();
                 double pAlpha, pBeta;
-                if (isWhitesTurn) { pAlpha = currentAlpha; pBeta = currentAlpha + 1; }
-                else { pAlpha = currentBeta - 1; pBeta = currentBeta; }
+                if (isWhitesTurn) {
+                    pAlpha = currentAlpha;
+                    pBeta = currentAlpha + 1;
+                } else {
+                    pAlpha = currentBeta - 1;
+                    pBeta = currentBeta;
+                }
 
                 double probe;
                 if (e.getGameState().isInStateCheckMate()) {
@@ -889,11 +924,15 @@ public class AI {
                             double full = alphaBeta(e, depth - 1, aNow, bNow, !isWhitesTurn, deadline, moveInt, 1);
                             if (full != EXIT_FLAG) {
                                 finalScore = full;
-                                if (isWhitesTurn) { if (full > aNow) alphaRef.set(full); }
-                                else              { if (full < bNow) betaRef.set(full); }
+                                if (isWhitesTurn) {
+                                    if (full > aNow) alphaRef.set(full);
+                                } else {
+                                    if (full < bNow) betaRef.set(full);
+                                }
                                 Double curBest = bestScoreRef.get();
                                 if (isBetterScore(isWhitesTurn, full, curBest)) {
-                                    bestScoreRef.set(full); bestMoveRef.set(moveInt);
+                                    bestScoreRef.set(full);
+                                    bestMoveRef.set(moveInt);
                                 }
                                 if (alphaRef.get() >= betaRef.get()) stopRef.set(true);
                             }
@@ -904,7 +943,8 @@ public class AI {
                 } else {
                     Double curBest = bestScoreRef.get();
                     if (isBetterScore(isWhitesTurn, finalScore, curBest)) {
-                        bestScoreRef.set(finalScore); bestMoveRef.set(moveInt);
+                        bestScoreRef.set(finalScore);
+                        bestMoveRef.set(moveInt);
                         if (isWhitesTurn && finalScore > alphaRef.get()) alphaRef.set(finalScore);
                         if (!isWhitesTurn && finalScore < betaRef.get()) betaRef.set(finalScore);
                         if (alphaRef.get() >= betaRef.get()) stopRef.set(true);
@@ -919,14 +959,20 @@ public class AI {
         try {
             while (completed < fanout) {
                 if (stopRef.get() || abortRequested(deadline)) break;
-                Future<MoveAndScore> f = ecs.take(); completed++;
+                Future<MoveAndScore> f = ecs.take();
+                completed++;
                 MoveAndScore res = f.get();
                 if (res == null) continue;
 
-                alpha = alphaRef.get(); beta = betaRef.get();
-                bestMove = bestMoveRef.get(); bestScore = bestScoreRef.get();
+                alpha = alphaRef.get();
+                beta = betaRef.get();
+                bestMove = bestMoveRef.get();
+                bestScore = bestScoreRef.get();
 
-                if (alpha >= beta) { stopRef.set(true); break; }
+                if (alpha >= beta) {
+                    stopRef.set(true);
+                    break;
+                }
             }
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
@@ -1052,13 +1098,18 @@ public class AI {
             } else {
                 score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1);
                 if (score == EXIT_FLAG || abortRequested(deadline)) {
-                    simulatorEngine.undoLastMove(); break;
+                    simulatorEngine.undoLastMove();
+                    break;
                 }
             }
             simulatorEngine.undoLastMove();
 
-            if (isBetterScore(isWhitesTurn, score, bestScore)) { bestScore = score; bestMove = moveInt; }
-            if (isWhitesTurn) alpha = Math.max(alpha, score); else beta = Math.min(beta, score);
+            if (isBetterScore(isWhitesTurn, score, bestScore)) {
+                bestScore = score;
+                bestMove = moveInt;
+            }
+            if (isWhitesTurn) alpha = Math.max(alpha, score);
+            else beta = Math.min(beta, score);
             if (alpha >= beta) break;
         }
         return bestMove != -1 ? new MoveAndScore(bestMove, bestScore) : null;
@@ -1300,12 +1351,14 @@ public class AI {
         final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
         for (int index = 0; index < orderedMoves.size(); index++) {
-            if (abortRequested(deadline)) { return EXIT_FLAG; }
+            if (abortRequested(deadline)) {
+                return EXIT_FLAG;
+            }
             int move = orderedMoves.getMove(index);
 
             int from = MoveHelper.deriveFromIndex(move);
-            int to   = MoveHelper.deriveToIndex(move);
-            int movingPieceBits   = MoveHelper.derivePieceTypeBits(move);
+            int to = MoveHelper.deriveToIndex(move);
+            int movingPieceBits = MoveHelper.derivePieceTypeBits(move);
             int capturedPieceBits = MoveHelper.deriveCapturedPieceTypeBits(move);
             boolean isCapture = MoveHelper.isCapture(move);
             boolean isPromotion = MoveHelper.isPawnPromotionMove(move);
@@ -1384,7 +1437,7 @@ public class AI {
 
                 boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
                 double pAlpha = alpha;
-                double pBeta  = usePvs ? (alpha + 1) : beta;
+                double pBeta = usePvs ? (alpha + 1) : beta;
 
                 int reduction = 0;
                 if (canReduce) {
@@ -1395,20 +1448,32 @@ public class AI {
                 if (canReduce) {
                     int reduced = Math.max(1, nextDepth - reduction);
                     eval = alphaBeta(simulatorEngine, reduced, pAlpha, pBeta, !isWhite, deadline, move, plyFromRoot + 1);
-                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                    if (eval == EXIT_FLAG || positionChanged()) {
+                        simulatorEngine.undoLastMove();
+                        return EXIT_FLAG;
+                    }
 
                     boolean promising = eval > alpha;
                     if (promising) {
                         eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, usePvs ? beta : pBeta,
                                 !isWhite, deadline, move, plyFromRoot + 1);
-                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                        if (eval == EXIT_FLAG || positionChanged()) {
+                            simulatorEngine.undoLastMove();
+                            return EXIT_FLAG;
+                        }
                     }
                 } else {
                     eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline, move, plyFromRoot + 1);
-                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                    if (eval == EXIT_FLAG || positionChanged()) {
+                        simulatorEngine.undoLastMove();
+                        return EXIT_FLAG;
+                    }
                     if (usePvs && eval > alpha && eval < beta) {
                         eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline, move, plyFromRoot + 1);
-                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                        if (eval == EXIT_FLAG || positionChanged()) {
+                            simulatorEngine.undoLastMove();
+                            return EXIT_FLAG;
+                        }
                     }
                 }
             }
@@ -1453,7 +1518,6 @@ public class AI {
     }
 
 
-
     private double minimizer(Engine simulatorEngine, int depth, double alpha, double beta,
                              boolean isWhite, long boardHash, double betaOriginal,
                              MoveList moves, long deadline, int prevMove, int plyFromRoot) {
@@ -1475,8 +1539,8 @@ public class AI {
             int move = orderedMoves.getMove(index);
 
             int from = MoveHelper.deriveFromIndex(move);
-            int to   = MoveHelper.deriveToIndex(move);
-            int movingPieceBits   = MoveHelper.derivePieceTypeBits(move);
+            int to = MoveHelper.deriveToIndex(move);
+            int movingPieceBits = MoveHelper.derivePieceTypeBits(move);
             int capturedPieceBits = MoveHelper.deriveCapturedPieceTypeBits(move);
             boolean isCapture = MoveHelper.isCapture(move);
             boolean isPromotion = MoveHelper.isPawnPromotionMove(move);
@@ -1545,7 +1609,7 @@ public class AI {
 
                 boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
                 double pAlpha = usePvs ? (beta - 1) : alpha;
-                double pBeta  = beta;
+                double pBeta = beta;
 
                 int reduction = 0;
                 if (canReduce) {
@@ -1556,21 +1620,33 @@ public class AI {
                 if (canReduce) {
                     int reduced = Math.max(1, nextDepth - reduction);
                     eval = alphaBeta(simulatorEngine, reduced, pAlpha, pBeta, !isWhite, deadline, move, plyFromRoot + 1);
-                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                    if (eval == EXIT_FLAG || positionChanged()) {
+                        simulatorEngine.undoLastMove();
+                        return EXIT_FLAG;
+                    }
 
                     boolean promising = eval < beta;
                     if (promising) {
                         eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, usePvs ? beta : pBeta,
                                 !isWhite, deadline, move, plyFromRoot + 1);
-                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                        if (eval == EXIT_FLAG || positionChanged()) {
+                            simulatorEngine.undoLastMove();
+                            return EXIT_FLAG;
+                        }
                     }
                 } else {
                     eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, pBeta, !isWhite, deadline, move, plyFromRoot + 1);
-                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                    if (eval == EXIT_FLAG || positionChanged()) {
+                        simulatorEngine.undoLastMove();
+                        return EXIT_FLAG;
+                    }
 
                     if (usePvs && eval > alpha && eval < beta) {
                         eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, !isWhite, deadline, move, plyFromRoot + 1);
-                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                        if (eval == EXIT_FLAG || positionChanged()) {
+                            simulatorEngine.undoLastMove();
+                            return EXIT_FLAG;
+                        }
                     }
                 }
             }
@@ -1613,7 +1689,6 @@ public class AI {
 
         return minEval;
     }
-
 
 
     /**
