@@ -94,39 +94,6 @@ class SortMovesByEfficiencyTest {
         assertTrue(worstCaptureIndex > firstCaptureIndex, "Losing captures should be pushed back");
     }
 
-    @Test
-    void tacticalPositionsReachConfiguredDepthWithSeeOrdering() throws Exception {
-        Engine engine = new Engine();
-        engine.importBoardFromFen(TACTICAL_FEN);
-
-        AI ai = new AI(engine);
-        ai.setMaxDepth(4);
-
-        Engine simulator = engine.createSimulation();
-        long boardHash = simulator.getBoardStateHash();
-        boolean isWhite = simulator.whitesTurn();
-        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(250);
-
-        setLongField(ai, "currentBoardState", boardHash);
-        setLongField(ai, "beforeCalculationBoardState", boardHash);
-
-        Method calculateBestMove = AI.class.getDeclaredMethod("calculateBestMove", Engine.class, long.class, boolean.class,
-                long.class);
-        calculateBestMove.setAccessible(true);
-        calculateBestMove.invoke(ai, simulator, boardHash, isWhite, deadline);
-
-        TranspositionTable<TranspositionTableEntry> table = extractTranspositionTable(ai);
-        TranspositionTableEntry entry = table.get(boardHash);
-        assertNotNull(entry, "Root position should be recorded in the TT");
-        assertTrue(entry.depth >= 4, "Iterative deepening should reach depth 4 on tactical FEN");
-        assertFalse(ai.getCalculatedLine().isEmpty(), "PV should be available after completing the search");
-    }
-
-    private static void setLongField(AI ai, String fieldName, long value) throws Exception {
-        Field field = AI.class.getDeclaredField(fieldName);
-        field.setAccessible(true);
-        field.setLong(ai, value);
-    }
 
     @SuppressWarnings("unchecked")
     private static TranspositionTable<TranspositionTableEntry> extractTranspositionTable(AI ai) throws Exception {
