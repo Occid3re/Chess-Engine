@@ -34,12 +34,10 @@ $(document).ready(function () {
     const updateGameDetails = (data) => {
         let details = '<p>Game State: ' + data.gameState.state + '</p>';
         details += '<p>Score: ' + data.score + '</p>';
-        details += '<p>White Score: ' + data.gameState.score.whiteScore + '</p>';
-        details += '<p>Black Score: ' + data.gameState.score.blackScore + '</p>';
-        details += '<p>White Pawns: ' + data.gameState.score.whitePawns + '</p>';
-        details += '<p>Black Pawns: ' + data.gameState.score.blackPawns + '</p>';
-        // ... Add more details as per the structure
-        details += '<p>Score Difference: ' + data.gameState.score.scoreDifference + '</p>';
+        details += '<p>Midgame Score (cp): ' + data.gameState.score.midgameScore + '</p>';
+        details += '<p>Endgame Score (cp): ' + data.gameState.score.endgameScore + '</p>';
+        details += '<p>Blended Score (cp): ' + data.gameState.score.blendedScore + '</p>';
+        details += '<p>Score Difference (pawns): ' + data.gameState.score.scoreDifference + '</p>';
         details += '<p>Game Over: ' + data.gameState.gameOver + '</p>';
         details += '<p>In State Check: ' + data.gameState.inStateCheck + '</p>';
         details += '<p>In State CheckMate: ' + data.gameState.inStateCheckMate + '</p>';

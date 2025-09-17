@@ -93,49 +93,10 @@ const updateGameDetails = (data) => {
     details += '<table class="details-table">';
     details += '<tr><td>Game State</td><td>' + data.gameState.state + '</td></tr>';
     details += '<tr><td>Overall Score</td><td>' + data.score + '</td></tr>';
-    details += '<tr><td>White Score</td><td>' + data.gameState.score.whiteScore + '</td></tr>';
-    details += '<tr><td>Black Score</td><td>' + data.gameState.score.blackScore + '</td></tr>';
-
-    // Piece Scores
-    details += '<tr><td>White Pawns</td><td>' + data.gameState.score.whitePawns + '</td></tr>';
-    details += '<tr><td>Black Pawns</td><td>' + data.gameState.score.blackPawns + '</td></tr>';
-    details += '<tr><td>White Knights</td><td>' + data.gameState.score.whiteKnights + '</td></tr>';
-    details += '<tr><td>Black Knights</td><td>' + data.gameState.score.blackKnights + '</td></tr>';
-    details += '<tr><td>White Bishops</td><td>' + data.gameState.score.whiteBishops + '</td></tr>';
-    details += '<tr><td>Black Bishops</td><td>' + data.gameState.score.blackBishops + '</td></tr>';
-    details += '<tr><td>White Rooks</td><td>' + data.gameState.score.whiteRooks + '</td></tr>';
-    details += '<tr><td>Black Rooks</td><td>' + data.gameState.score.blackRooks + '</td></tr>';
-    details += '<tr><td>White Queens</td><td>' + data.gameState.score.whiteQueens + '</td></tr>';
-    details += '<tr><td>Black Queens</td><td>' + data.gameState.score.blackQueens + '</td></tr>';
-
-    // Position and Penalty Scores
-    details += '<tr><td>White Center Pawn Bonus</td><td>' + data.gameState.score.whiteCenterPawnBonus + '</td></tr>';
-    details += '<tr><td>Black Center Pawn Bonus</td><td>' + data.gameState.score.blackCenterPawnBonus + '</td></tr>';
-    details += '<tr><td>White Doubled Pawn Penalty</td><td>' + data.gameState.score.whiteDoubledPawnPenalty + '</td></tr>';
-    details += '<tr><td>Black Doubled Pawn Penalty</td><td>' + data.gameState.score.blackDoubledPawnPenalty + '</td></tr>';
-    details += '<tr><td>White Isolated Pawn Penalty</td><td>' + data.gameState.score.whiteIsolatedPawnPenalty + '</td></tr>';
-    details += '<tr><td>Black Isolated Pawn Penalty</td><td>' + data.gameState.score.blackIsolatedPawnPenalty + '</td></tr>';
-
-    details += '<tr><td>White Pawns Position</td><td>' + data.gameState.score.whitePawnsPosition + '</td></tr>';
-    details += '<tr><td>Black Pawns Position</td><td>' + data.gameState.score.blackPawnsPosition + '</td></tr>';
-    details += '<tr><td>White Knights Position</td><td>' + data.gameState.score.whiteKnightsPosition + '</td></tr>';
-    details += '<tr><td>Black Knights Position</td><td>' + data.gameState.score.blackKnightsPosition + '</td></tr>';
-    details += '<tr><td>White Bishops Position</td><td>' + data.gameState.score.whiteBishopsPosition + '</td></tr>';
-    details += '<tr><td>Black Bishops Position</td><td>' + data.gameState.score.blackBishopsPosition + '</td></tr>';
-    details += '<tr><td>White Queens Position</td><td>' + data.gameState.score.whiteQueensPosition + '</td></tr>';
-    details += '<tr><td>Black Queens Position</td><td>' + data.gameState.score.blackQueensPosition + '</td></tr>';
-
-    details += '<tr><td>White King Position</td><td>' + data.gameState.score.whiteKingsPosition + '</td></tr>';
-    details += '<tr><td>Black King Position</td><td>' + data.gameState.score.blackKingsPosition + '</td></tr>';
-
-    details += '<tr><td>White Starting Square Penalty</td><td>' + data.gameState.score.whiteStartingSquarePenalty + '</td></tr>';
-    details += '<tr><td>Black Starting Square Penalty</td><td>' + data.gameState.score.blackStartingSquarePenalty + '</td></tr>';
-
-
-    // Misc Details
-    details += '<tr><td>Agility White</td><td>' + data.gameState.score.agilityWhite + '</td></tr>';
-    details += '<tr><td>Agility Black</td><td>' + data.gameState.score.agilityBlack + '</td></tr>';
-    details += '<tr><td>Score Difference</td><td>' + data.gameState.score.scoreDifference + '</td></tr>';
+    details += '<tr><td>Midgame Score (cp)</td><td>' + data.gameState.score.midgameScore + '</td></tr>';
+    details += '<tr><td>Endgame Score (cp)</td><td>' + data.gameState.score.endgameScore + '</td></tr>';
+    details += '<tr><td>Blended Score (cp)</td><td>' + data.gameState.score.blendedScore + '</td></tr>';
+    details += '<tr><td>Score Difference (pawns)</td><td>' + data.gameState.score.scoreDifference + '</td></tr>';
     details += '<tr><td>Game Over</td><td>' + data.gameState.gameOver + '</td></tr>';
     details += '<tr><td>In State Check</td><td>' + data.gameState.inStateCheck + '</td></tr>';
     details += '<tr><td>In State CheckMate</td><td>' + data.gameState.inStateCheckMate + '</td></tr>';
