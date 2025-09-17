@@ -441,24 +441,79 @@ public class BitBoard {
 
             long fromBB = 0L;
             int  attBits = 0;
+            int attFrom = -1;
+            long attMask = 0L;
 
-            if      (attPawns != 0)   { fromBB = attPawns;   attBits = 1; }
-            else if (attKnights != 0) { fromBB = attKnights; attBits = 2; }
-            else if (attBishops != 0) { fromBB = attBishops; attBits = 3; }
-            else if (attRooks != 0)   { fromBB = attRooks;   attBits = 4; }
-            else if (attQueens != 0)  { fromBB = attQueens;  attBits = 5; }
-            else if (attKing != 0) {
-                int kingFrom = Long.numberOfTrailingZeros(attKing);
-                if (!isKingCaptureLegal(sideWhite, kingFrom, to, W, B, occ, toPieceWhite, toPieceBits)) {
+            while (true) {
+                if (attPawns != 0) {
+                    int candidate = selectLegalAttacker(attPawns, 1, sideWhite, W, B, occ, to, toPieceWhite, toPieceBits);
+                    if (candidate != -1) {
+                        fromBB = 1L << candidate;
+                        attBits = 1;
+                        attFrom = candidate;
+                        attMask = fromBB;
+                        break;
+                    }
+                    attPawns = 0;
+                } else if (attKnights != 0) {
+                    int candidate = selectLegalAttacker(attKnights, 2, sideWhite, W, B, occ, to, toPieceWhite, toPieceBits);
+                    if (candidate != -1) {
+                        fromBB = 1L << candidate;
+                        attBits = 2;
+                        attFrom = candidate;
+                        attMask = fromBB;
+                        break;
+                    }
+                    attKnights = 0;
+                } else if (attBishops != 0) {
+                    int candidate = selectLegalAttacker(attBishops, 3, sideWhite, W, B, occ, to, toPieceWhite, toPieceBits);
+                    if (candidate != -1) {
+                        fromBB = 1L << candidate;
+                        attBits = 3;
+                        attFrom = candidate;
+                        attMask = fromBB;
+                        break;
+                    }
+                    attBishops = 0;
+                } else if (attRooks != 0) {
+                    int candidate = selectLegalAttacker(attRooks, 4, sideWhite, W, B, occ, to, toPieceWhite, toPieceBits);
+                    if (candidate != -1) {
+                        fromBB = 1L << candidate;
+                        attBits = 4;
+                        attFrom = candidate;
+                        attMask = fromBB;
+                        break;
+                    }
+                    attRooks = 0;
+                } else if (attQueens != 0) {
+                    int candidate = selectLegalAttacker(attQueens, 5, sideWhite, W, B, occ, to, toPieceWhite, toPieceBits);
+                    if (candidate != -1) {
+                        fromBB = 1L << candidate;
+                        attBits = 5;
+                        attFrom = candidate;
+                        attMask = fromBB;
+                        break;
+                    }
+                    attQueens = 0;
+                } else if (attKing != 0) {
+                    int kingFrom = Long.numberOfTrailingZeros(attKing);
+                    if (!isKingCaptureLegal(sideWhite, kingFrom, to, W, B, occ, toPieceWhite, toPieceBits)) {
+                        attKing = 0;
+                        continue;
+                    }
+                    fromBB = 1L << kingFrom;
+                    attBits = 6;
+                    attFrom = kingFrom;
+                    attMask = fromBB;
+                    break;
+                } else {
                     break;
                 }
-                fromBB = 1L << kingFrom;
-                attBits = 6;
             }
-            else break; // no more recaptures
 
-            int attFrom = Long.numberOfTrailingZeros(fromBB);
-            long attMask = 1L << attFrom;
+            if (attFrom == -1) {
+                break; // no more recaptures
+            }
 
             // Remove previous occupant of 'to' (it is being captured now)
             if (toPieceWhite) W[toPieceBits] &= ~toMask;
@@ -553,6 +608,58 @@ public class BitBoard {
         occCopy |= toMask;
 
         return !isSquareAttackedInSee(target, !kingIsWhite, wCopy, bCopy, occCopy);
+    }
+
+    private int selectLegalAttacker(long attackers, int attBits, boolean sideWhite,
+                                    long[] whiteByType, long[] blackByType, long occ, int target,
+                                    boolean toPieceWhite, int toPieceBits) {
+        while (attackers != 0) {
+            int from = Long.numberOfTrailingZeros(attackers);
+            if (attBits == 6 || isNonKingCaptureLegal(sideWhite, from, target, attBits, whiteByType, blackByType, occ,
+                                                     toPieceWhite, toPieceBits)) {
+                return from;
+            }
+            attackers &= attackers - 1;
+        }
+        return -1;
+    }
+
+    private boolean isNonKingCaptureLegal(boolean attackerWhite, int attackerFrom, int target, int attackerBits,
+                                          long[] whiteByType, long[] blackByType, long occ,
+                                          boolean toPieceWhite, int toPieceBits) {
+        long[] wCopy = whiteByType.clone();
+        long[] bCopy = blackByType.clone();
+        long occCopy = occ;
+
+        long toMask = 1L << target;
+        long fromMask = 1L << attackerFrom;
+
+        if (toPieceBits >= 1 && toPieceBits <= 6) {
+            if (toPieceWhite) {
+                wCopy[toPieceBits] &= ~toMask;
+            } else {
+                bCopy[toPieceBits] &= ~toMask;
+            }
+            occCopy &= ~toMask;
+        }
+
+        if (attackerWhite) {
+            wCopy[attackerBits] &= ~fromMask;
+            wCopy[attackerBits] |= toMask;
+        } else {
+            bCopy[attackerBits] &= ~fromMask;
+            bCopy[attackerBits] |= toMask;
+        }
+
+        occCopy &= ~fromMask;
+        occCopy |= toMask;
+
+        long kingBB = attackerWhite ? wCopy[6] : bCopy[6];
+        if (kingBB == 0) {
+            return false;
+        }
+        int kingSquare = Long.numberOfTrailingZeros(kingBB);
+        return !isSquareAttackedInSee(kingSquare, !attackerWhite, wCopy, bCopy, occCopy);
     }
 
     private boolean isSquareAttackedInSee(int square, boolean attackerWhite,
