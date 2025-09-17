@@ -2,13 +2,13 @@ package julius.game.chessengine.utils;
 
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.engine.GameStateEnum;
+import julius.game.chessengine.utils.eval.PawnStructureModule;
 import lombok.Data;
 import lombok.extern.log4j.Log4j2;
 
 import static julius.game.chessengine.helper.BishopHelper.BISHOP_POSITIONAL_VALUES;
 import static julius.game.chessengine.helper.KingHelper.*;
 import static julius.game.chessengine.helper.KnightHelper.KNIGHT_POSITIONAL_VALUES;
-import static julius.game.chessengine.helper.PawnHelper.*;
 import static julius.game.chessengine.helper.QueenHelper.QUEEN_POSITIONAL_VALUES;
 import static julius.game.chessengine.helper.RookHelper.*;
 
@@ -27,6 +27,8 @@ public class Score {
     private int whiteScore;
     private int blackScore;
 
+    private final PawnStructureModule pawnStructureModule;
+
     //initialize number of pieces bonus
     private int whitePawnsAmountScore = 0;
     private int blackPawnsAmountScore = 0;
@@ -43,21 +45,7 @@ public class Score {
     private int agilityWhite = 0;
     private int agilityBlack = 0;
 
-    // Initialize bonuses and penalties
-    private int whiteCenterPawnBonus = 0;
-    private int blackCenterPawnBonus = 0;
-    private int whiteDoubledPawnPenalty = 0;
-    private int blackDoubledPawnPenalty = 0;
-    private int whiteIsolatedPawnPenalty = 0;
-    private int blackIsolatedPawnPenalty = 0;
-    private int whiteRooksHalfOpenFileBonus = 0;
-    private int blackRooksHalfOpenFileBonus = 0;
-    private int whiteRooksOpenFileBonus = 0;
-    private int blackRooksOpenFileBonus = 0;
-
     // Initialize positional values
-    private int whitePawnsPosition = 0;
-    private int blackPawnsPosition = 0;
     private int whiteKnightsPosition = 0;
     private int blackKnightsPosition = 0;
     private int whiteBishopsPosition = 0;
@@ -83,18 +71,10 @@ public class Score {
     public static final int ROOK_VALUE = 5000;   // Rooks are worth 5 points
     public static final int QUEEN_VALUE = 9000;  // Queens are worth 9 points
 
-    // Pawn bonuses and penalties
-    private static final int DOUBLED_PAWN_PENALTY = -20; // Example penalty value for doubled pawns
-    private static final int ISOLATED_PAWN_PENALTY = -10; // Penalty for isolated pawns
-    private static final int PASSED_PAWN_BONUS = 60;     // Bonus for passed pawns
-
     // Other bonuses and penalties
     private static final int NOT_CASTLED_AND_ROOK_MOVE_PENALTY = -50;
     private static final int START_POSITION_PENALTY = -50; // Define the penalty value for starting position
     private static final int CASTLING_BONUS = 75;
-
-    private static final int ROOK_HALF_OPEN_FILE_BONUS = 25;
-    private static final int ROOK_OPEN_FILE_BONUS = 12;
 
     // Constants for the initial positions of each piece type
     private static final long INITIAL_WHITE_KNIGHT_POSITION = 0x0000000000000042L; // Knights on b1 and g1
@@ -108,11 +88,13 @@ public class Score {
     public Score() {
         this.whiteScore = 0;
         this.blackScore = 0;
+        this.pawnStructureModule = new PawnStructureModule();
     }
 
     public Score(Score other) {
         this.whiteScore = other.whiteScore;
         this.blackScore = other.blackScore;
+        this.pawnStructureModule = new PawnStructureModule(other.pawnStructureModule);
 
         this.whitePawnsAmountScore = other.whitePawnsAmountScore;
         this.blackPawnsAmountScore = other.blackPawnsAmountScore;
@@ -127,20 +109,6 @@ public class Score {
 
         this.agilityWhite = other.agilityWhite;
         this.agilityBlack = other.agilityBlack;
-
-        this.whiteCenterPawnBonus = other.whiteCenterPawnBonus;
-        this.blackCenterPawnBonus = other.blackCenterPawnBonus;
-        this.whiteDoubledPawnPenalty = other.whiteDoubledPawnPenalty;
-        this.blackDoubledPawnPenalty = other.blackDoubledPawnPenalty;
-        this.whiteIsolatedPawnPenalty = other.whiteIsolatedPawnPenalty;
-        this.blackIsolatedPawnPenalty = other.blackIsolatedPawnPenalty;
-        this.whiteRooksHalfOpenFileBonus = other.whiteRooksHalfOpenFileBonus;
-        this.blackRooksHalfOpenFileBonus = other.blackRooksHalfOpenFileBonus;
-        this.whiteRooksOpenFileBonus = other.whiteRooksOpenFileBonus;
-        this.blackRooksOpenFileBonus = other.blackRooksOpenFileBonus;
-
-        this.whitePawnsPosition = other.whitePawnsPosition;
-        this.blackPawnsPosition = other.blackPawnsPosition;
         this.whiteKnightsPosition = other.whiteKnightsPosition;
         this.blackKnightsPosition = other.blackKnightsPosition;
         this.whiteBishopsPosition = other.whiteBishopsPosition;
@@ -170,7 +138,6 @@ public class Score {
 
         long whitePawns = bitBoard.getWhitePawns();
         long blackPawns = bitBoard.getBlackPawns();
-        long allPawns = whitePawns | blackPawns;
         long whiteKnights = bitBoard.getWhiteKnights();
         long blackKnights = bitBoard.getBlackKnights();
         long whiteBishops = bitBoard.getWhiteBishops();
@@ -187,20 +154,6 @@ public class Score {
         initializeBishopScore(whiteBishops, blackBishops);
         initializeRookScore(whiteRooks, blackRooks);
         initializeQueenScore(whiteQueens, blackQueens);
-
-        updateDoubledPawnPenaltyWhite(whitePawns);
-        updateDoubledPawnPenaltyBlack(blackPawns);
-        updateIsolatedPawnPenaltyWhite(whitePawns);
-        updateIsolatedPawnPenaltyBlack(blackPawns);
-
-        updateRookHalfOpenFileBonusWhite(whiteRooks, whitePawns, blackPawns);
-        updateRookHalfOpenFileBonusBlack(blackRooks, blackPawns, whitePawns);
-        updateRookOpenFileBonusWhite(whiteRooks, allPawns);
-        updateRookOpenFileBonusBlack(blackRooks, allPawns);
-
-        // Apply positional values to the pawns
-        updatePawnsPositionBonusWhite(whitePawns);
-        updatePawnsPositionBonusBlack(blackPawns);
 
         updateKnightsPositionBonusWhite(whiteKnights);
         updateKnightsPositionBonusBlack(blackKnights);
@@ -244,14 +197,8 @@ public class Score {
         totalWhiteScore += whiteRooksAmountScore;
         totalWhiteScore += whiteQueensAmountScore;
 
-        totalWhiteScore += whiteCenterPawnBonus;
-        totalWhiteScore += whiteDoubledPawnPenalty;
-        totalWhiteScore += whiteIsolatedPawnPenalty;
+        totalWhiteScore += pawnStructureModule.getMidgameContribution(Color.WHITE);
 
-        totalWhiteScore += whiteRooksHalfOpenFileBonus;
-        totalWhiteScore += whiteRooksOpenFileBonus;
-
-        totalWhiteScore += whitePawnsPosition;
         totalWhiteScore += whiteKnightsPosition;
         totalWhiteScore += whiteBishopsPosition;
         totalWhiteScore += whiteRooksPosition;
@@ -278,14 +225,8 @@ public class Score {
         totalBlackScore += blackRooksAmountScore;
         totalBlackScore += blackQueensAmountScore;
 
-        totalBlackScore += blackCenterPawnBonus;
-        totalBlackScore += blackDoubledPawnPenalty;
-        totalBlackScore += blackIsolatedPawnPenalty;
+        totalBlackScore += pawnStructureModule.getMidgameContribution(Color.BLACK);
 
-        totalBlackScore += blackRooksHalfOpenFileBonus;
-        totalBlackScore += blackRooksOpenFileBonus;
-
-        totalBlackScore += blackPawnsPosition;
         totalBlackScore += blackKnightsPosition;
         totalBlackScore += blackBishopsPosition;
         totalBlackScore += blackRooksPosition;
@@ -325,56 +266,6 @@ public class Score {
     public void initializePawnScore(long whitePawns, long blackPawns) {
         this.whitePawnsAmountScore = Long.bitCount(whitePawns) * PAWN_VALUE;
         this.blackPawnsAmountScore = Long.bitCount(blackPawns) * PAWN_VALUE;
-    }
-
-    /**
-     * Bonuses and Penalties
-     */
-
-    // Method to add penalty for doubled pawns
-    public void updateDoubledPawnPenaltyWhite(long whitePawns) {
-        whiteDoubledPawnPenalty = countDoubledPawns(whitePawns) * DOUBLED_PAWN_PENALTY;
-    }
-
-    public void updateDoubledPawnPenaltyBlack(long blackPawns) {
-        blackDoubledPawnPenalty = countDoubledPawns(blackPawns) * DOUBLED_PAWN_PENALTY;
-    }
-
-    // Method to add penalty for isolated pawns
-    public void updateIsolatedPawnPenaltyWhite(long whitePawns) {
-        whiteIsolatedPawnPenalty = countIsolatedPawns(whitePawns) * ISOLATED_PAWN_PENALTY;
-    }
-
-    public void updateIsolatedPawnPenaltyBlack(long blackPawns) {
-        blackIsolatedPawnPenalty = countIsolatedPawns(blackPawns) * ISOLATED_PAWN_PENALTY;
-    }
-
-    public void updateRookHalfOpenFileBonusWhite(long whiteRooks, long whitePawns, long blackPawns) {
-        whiteRooksHalfOpenFileBonus = countRooksOnHalfOpenFiles(whiteRooks, whitePawns, blackPawns) * ROOK_HALF_OPEN_FILE_BONUS;
-    }
-
-    public void updateRookHalfOpenFileBonusBlack(long blackRooks, long blackPawns, long whitePawns) {
-        blackRooksHalfOpenFileBonus = countRooksOnHalfOpenFiles(blackRooks, blackPawns, whitePawns) * ROOK_HALF_OPEN_FILE_BONUS;
-    }
-
-    public void updateRookOpenFileBonusWhite(long whiteRooks, long allPawns) {
-        whiteRooksOpenFileBonus = countRooksOnOpenFiles(whiteRooks, allPawns) * ROOK_OPEN_FILE_BONUS;
-    }
-
-    public void updateRookOpenFileBonusBlack(long blackRooks, long allPawns) {
-        blackRooksOpenFileBonus = countRooksOnOpenFiles(blackRooks, allPawns) * ROOK_OPEN_FILE_BONUS;
-    }
-
-    /**
-     * Positional Bonuses
-     */
-
-    public void updatePawnsPositionBonusWhite(long whitePawns) {
-        whitePawnsPosition = applyPositionalValues(whitePawns, WHITE_PAWN_POSITIONAL_VALUES);
-    }
-
-    public void updatePawnsPositionBonusBlack(long blackPawns) {
-        blackPawnsPosition = applyPositionalValues(blackPawns, BLACK_PAWN_POSITIONAL_VALUES);
     }
 
     public void updateKnightsPositionBonusWhite(long whiteKnights) {
@@ -500,26 +391,12 @@ public class Score {
         long whitePawns = bitBoard.getWhitePawns();
 
         this.whitePawnsAmountScore = Long.bitCount(whitePawns) * PAWN_VALUE;
-        updateIsolatedPawnPenaltyWhite(whitePawns);
-        updateDoubledPawnPenaltyWhite(whitePawns);
-        updatePawnsPositionBonusWhite(whitePawns);
-
-        //check if Rook is now on an HalfOpen/Open File
-        updateBlackRookValues(bitBoard);
-        updateWhiteRookValues(bitBoard);
     }
 
     public void updateBlackPawnValues(BitBoard bitBoard) {
         long blackPawns = bitBoard.getBlackPawns();
 
         this.blackPawnsAmountScore = Long.bitCount(blackPawns) * PAWN_VALUE;
-        updateIsolatedPawnPenaltyBlack(blackPawns);
-        updateDoubledPawnPenaltyBlack(blackPawns);
-        updatePawnsPositionBonusBlack(blackPawns);
-
-        //check if Rook is now on an HalfOpen/Open File
-        updateBlackRookValues(bitBoard);
-        updateWhiteRookValues(bitBoard);
     }
 
     public void updateWhiteKnightValues(long whiteKnights, long whiteBishops, long whiteRooks) {
@@ -547,9 +424,6 @@ public class Score {
     }
 
     public void updateWhiteRookValues(BitBoard bitBoard) {
-
-        long whitePawns = bitBoard.getWhitePawns();
-        long blackPawns = bitBoard.getBlackPawns();
         long whiteKing = bitBoard.getWhiteKing();
 
         long whiteKnights = bitBoard.getWhiteKnights();
@@ -562,21 +436,15 @@ public class Score {
         boolean rookH1Moved = bitBoard.isWhiteRookH1Moved();
         boolean isEndgame = bitBoard.isEndgame();
 
-
         this.whiteRooksAmountScore = Long.bitCount(whiteRooks) * ROOK_VALUE;
 
         updateRooksPositionBonusWhite(whiteRooks);
-
-        updateRookHalfOpenFileBonusWhite(whiteRooks, whitePawns, blackPawns);
-        updateRookOpenFileBonusWhite(whiteRooks, whitePawns | blackPawns);
 
         updateStartingSquarePenaltyWhite(whiteKnights, whiteBishops, whiteRooks);
         updateKingValuesWhite(whiteKing, isCastled, isWhiteKingHasMoved, rookA1Moved, rookH1Moved, isEndgame);
     }
 
     public void updateBlackRookValues(BitBoard bitBoard) {
-        long blackPawns = bitBoard.getBlackPawns();
-        long whitePawns = bitBoard.getWhitePawns();
         long blackKing = bitBoard.getBlackKing();
 
         long blackKnights = bitBoard.getBlackKnights();
@@ -592,9 +460,6 @@ public class Score {
         this.blackRooksAmountScore = Long.bitCount(blackRooks) * ROOK_VALUE;
 
         updateRooksPositionBonusBlack(blackRooks);
-
-        updateRookHalfOpenFileBonusBlack(blackRooks, blackPawns, whitePawns);
-        updateRookOpenFileBonusBlack(blackRooks, whitePawns | blackPawns);
 
         updateStartingSquarePenaltyBlack(blackKnights, blackBishops, blackRooks);
         updateKingValuesBlack(blackKing, isCastled, isBlackKingMoved, rookA8Moved, rookH8Moved, isEndgame);

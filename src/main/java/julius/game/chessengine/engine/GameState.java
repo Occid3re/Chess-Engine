@@ -35,6 +35,7 @@ public class GameState {
 
     private void initializeScore(BitBoard bitBoard) {
         score.initializeScore(bitBoard);
+        score.getPawnStructureModule().initialize(bitBoard);
     }
 
     public void update(BitBoard bitBoard, MoveList legalMoves, int move, boolean isOpeningMove) {
@@ -83,6 +84,8 @@ public class GameState {
         if (promotionPieceTypeBits != 0) {
             updatePromotionPieceValues(isWhite, promotionPieceTypeBits, bitBoard);
         }
+
+        score.getPawnStructureModule().refresh(bitBoard);
 
         log.debug("Piecetype: {}, CapturedType: {}, ScoreWhite: {}, ScoreBlack: {}",
                 pieceTypeBits, capturedPieceTypeBits, score.calculateTotalWhiteScore(), score.calculateTotalBlackScore());
