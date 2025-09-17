@@ -77,6 +77,12 @@ public class Score {
         EvaluationContext previous = this.evaluationContext;
         EvaluationContext updated = EvaluationContext.from(bitBoard, state);
         this.evaluationContext = updated;
+
+        if (previous == null || !evaluationPipeline.isInitialized()) {
+            evaluationPipeline.initialize(updated);
+            return;
+        }
+
         synchronizePipeline(updated);
         MoveContext moveContext = new MoveContext(move, previous, updated);
         evaluationPipeline.applyMove(moveContext);
@@ -87,6 +93,12 @@ public class Score {
         EvaluationContext previous = this.evaluationContext;
         EvaluationContext updated = EvaluationContext.from(bitBoard, state);
         this.evaluationContext = updated;
+
+        if (previous == null || !evaluationPipeline.isInitialized()) {
+            evaluationPipeline.initialize(updated);
+            return;
+        }
+
         synchronizePipeline(updated);
         MoveContext moveContext = new MoveContext(move, previous, updated);
         evaluationPipeline.undoMove(moveContext);
