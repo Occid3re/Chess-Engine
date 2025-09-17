@@ -440,6 +440,13 @@ public class AI {
         for (int currentDepth = 1; currentDepth <= maxDepth; currentDepth++) {
             if (shouldStopCalculating(task.getDeadline())) break;
 
+            if (transpositionTable != null) {
+                transpositionTable.advanceAge();
+            }
+            if (captureTranspositionTable != null) {
+                captureTranspositionTable.advanceAge();
+            }
+
             /**
              * Ply hint for distance-to-mate normalization (set per ID iteration).
              */
@@ -1369,11 +1376,11 @@ public class AI {
         boolean shouldUpdate = existingEntry == null || existingEntry.depth < depth;
 
         if (maxEval <= alphaOriginal && shouldUpdate) {
-            transpositionTable.put(boardHash, new TranspositionTableEntry(maxEval, depth, NodeType.UPPERBOUND, bestMoveAtThisNode));
+            transpositionTable.put(boardHash, new TranspositionTableEntry(maxEval, depth, NodeType.UPPERBOUND, bestMoveAtThisNode), depth);
         } else if (maxEval >= beta && shouldUpdate) {
-            transpositionTable.put(boardHash, new TranspositionTableEntry(maxEval, depth, NodeType.LOWERBOUND, bestMoveAtThisNode));
+            transpositionTable.put(boardHash, new TranspositionTableEntry(maxEval, depth, NodeType.LOWERBOUND, bestMoveAtThisNode), depth);
         } else if (shouldUpdate) {
-            transpositionTable.put(boardHash, new TranspositionTableEntry(maxEval, depth, NodeType.EXACT, bestMoveAtThisNode));
+            transpositionTable.put(boardHash, new TranspositionTableEntry(maxEval, depth, NodeType.EXACT, bestMoveAtThisNode), depth);
         }
 
         return maxEval;
@@ -1531,11 +1538,11 @@ public class AI {
         boolean shouldUpdate = existingEntry == null || existingEntry.depth < depth;
 
         if (minEval >= betaOriginal && shouldUpdate) {
-            transpositionTable.put(boardHash, new TranspositionTableEntry(minEval, depth, NodeType.LOWERBOUND, bestMoveAtThisNode));
+            transpositionTable.put(boardHash, new TranspositionTableEntry(minEval, depth, NodeType.LOWERBOUND, bestMoveAtThisNode), depth);
         } else if (minEval <= alpha && shouldUpdate) {
-            transpositionTable.put(boardHash, new TranspositionTableEntry(minEval, depth, NodeType.UPPERBOUND, bestMoveAtThisNode));
+            transpositionTable.put(boardHash, new TranspositionTableEntry(minEval, depth, NodeType.UPPERBOUND, bestMoveAtThisNode), depth);
         } else if (shouldUpdate) {
-            transpositionTable.put(boardHash, new TranspositionTableEntry(minEval, depth, NodeType.EXACT, bestMoveAtThisNode));
+            transpositionTable.put(boardHash, new TranspositionTableEntry(minEval, depth, NodeType.EXACT, bestMoveAtThisNode), depth);
         }
 
         return minEval;
@@ -1739,7 +1746,7 @@ public class AI {
 
         // don't cache timeouts in the capture TT (qsearch TT)
         if (score != EXIT_FLAG) {
-            captureTranspositionTable.put(boardStateHash, new CaptureTranspositionTableEntry(score, isWhitesTurn));
+            captureTranspositionTable.put(boardStateHash, new CaptureTranspositionTableEntry(score, isWhitesTurn), 0);
         }
 
         return score;
