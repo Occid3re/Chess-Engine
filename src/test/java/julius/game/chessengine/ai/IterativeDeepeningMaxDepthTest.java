@@ -3,7 +3,6 @@ package julius.game.chessengine.ai;
 import julius.game.chessengine.engine.Engine;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.SplittableRandom;
 import java.util.concurrent.TimeUnit;
@@ -50,10 +49,8 @@ class IterativeDeepeningMaxDepthTest {
                 "iterative deepening should reach the configured depth");
     }
 
-    private static int[][] extractKillerMoves(AI ai) throws Exception {
-        Field field = AI.class.getDeclaredField("killerMoves");
-        field.setAccessible(true);
-        return (int[][]) field.get(ai);
+    private static int[][] extractKillerMoves(AI ai) {
+        return ai.snapshotKillerMoves();
     }
 
     private static void setLongField(AI ai, String fieldName, long value) throws Exception {
