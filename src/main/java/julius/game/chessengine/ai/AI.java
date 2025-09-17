@@ -178,6 +178,9 @@ public class AI {
     private volatile long beforeCalculationBoardState = -2;
 
     private volatile int currentBestMove = -1;
+    private volatile int previousBestMove = -1;
+    private volatile long previousBestMoveHash = -1;
+    private volatile boolean searchResultReady = false;
 
     private volatile long bestMoveForHash = -1;
 
@@ -354,6 +357,9 @@ public class AI {
 
 
     public Integer getCurrentBestMoveInt() {
+        if (!searchResultReady) {
+            return -1;
+        }
         int move = currentBestMove;
         if (move == -1) {
             return -1;
@@ -492,6 +498,9 @@ public class AI {
         stopCalculation();
         currentBestMove = -1;
         bestMoveForHash = -1;
+        previousBestMove = -1;
+        previousBestMoveHash = -1;
+        searchResultReady = false;
         currentBoardState = -1;
         beforeCalculationBoardState = -2;
         calculatedLine = Collections.synchronizedList(new ArrayList<>());
@@ -537,6 +546,11 @@ public class AI {
 
         activeSearch.set(null);
         calculatedLine = Collections.synchronizedList(new ArrayList<>());
+        currentBestMove = -1;
+        bestMoveForHash = -1;
+        previousBestMove = -1;
+        previousBestMoveHash = -1;
+        searchResultReady = false;
     }
 
 
@@ -556,7 +570,8 @@ public class AI {
                 return;
             }
             if ((aiIsWhite && mainEngine.whitesTurn()) || (aiIsBlack && !mainEngine.whitesTurn())) {
-                if (currentBestMove != -1 && bestMoveForHash == mainEngine.getBoardStateHash()) {
+                if (searchResultReady && currentBestMove != -1 &&
+                        bestMoveForHash == mainEngine.getBoardStateHash()) {
                     performMove();
                 }
             }
@@ -570,6 +585,10 @@ public class AI {
         if (now != bestMoveForHash) {
             log.info("Stale best move for hash {}, current {}", bestMoveForHash, now);
             currentBestMove = -1;                           // <-- stop re-trying the stale move
+            bestMoveForHash = -1;
+            previousBestMove = -1;
+            previousBestMoveHash = -1;
+            searchResultReady = false;
             synchronized (calculationLock) {
                 calculationLock.notifyAll();
             } // <-- wake recalculation
@@ -579,6 +598,10 @@ public class AI {
         if (MoveHelper.isWhitesMove(currentBestMove) != mainEngine.whitesTurn()) {
             log.info("Best move {} not for side to move", Move.convertIntToMove(currentBestMove));
             currentBestMove = -1;                           // (optional) also drop here
+            bestMoveForHash = -1;
+            previousBestMove = -1;
+            previousBestMoveHash = -1;
+            searchResultReady = false;
             return;
         }
 
@@ -588,6 +611,10 @@ public class AI {
             calculationLock.notifyAll();
         }
         currentBestMove = -1; // don’t re-play it
+        bestMoveForHash = -1;
+        previousBestMove = -1;
+        previousBestMoveHash = -1;
+        searchResultReady = false;
     }
 
 
@@ -632,14 +659,25 @@ public class AI {
             if (bookMove != -1) {
                 currentBestMove = bookMove;
                 bestMoveForHash = boardStateHash;
+                previousBestMove = bookMove;
+                previousBestMoveHash = boardStateHash;
+                searchResultReady = true;
                 this.calculatedLine = List.of(new MoveAndScore(bookMove, 0.0));
                 return;
             }
 
             SearchTask task = new SearchTask(searchIdGenerator.incrementAndGet(), boardStateHash, isWhite, deadline, lazySmpThreads);
             activeSearch.set(task);
+            if (bestMoveForHash == boardStateHash && currentBestMove != -1) {
+                previousBestMove = currentBestMove;
+                previousBestMoveHash = bestMoveForHash;
+            } else {
+                previousBestMove = -1;
+                previousBestMoveHash = -1;
+            }
             currentBestMove = -1;
             bestMoveForHash = -1;
+            searchResultReady = false;
             this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
 
             synchronized (calculationLock) {
@@ -652,8 +690,17 @@ public class AI {
 
         } catch (IllegalStateException e) {
             log.warn("Illegal board state during search: {}", e.getMessage());
-            MoveList legalMoves = mainEngine.getAllLegalMoves();
-            currentBestMove = (legalMoves.size() > 0) ? legalMoves.getMove(0) : -1;
+            if (bestMoveForHash == mainEngine.getBoardStateHash() && currentBestMove != -1) {
+                previousBestMove = currentBestMove;
+                previousBestMoveHash = bestMoveForHash;
+                searchResultReady = true;
+            } else {
+                currentBestMove = -1;
+                bestMoveForHash = -1;
+                previousBestMove = -1;
+                previousBestMoveHash = -1;
+                searchResultReady = false;
+            }
         } catch (Exception e) {
             log.error("Unexpected error during calculation", e);
         } finally {
@@ -661,30 +708,49 @@ public class AI {
         }
     }
 
-    private void completeSearchTask(SearchTask task, Engine simulatorEngine) {
+    void completeSearchTask(SearchTask task, Engine simulatorEngine) {
         if (task == null) return;
         if (currentBoardState != task.getBoardHash()) return;
 
         BestMoveDepth best = task.getBest();
         int move = best.move;
 
-        if (move == -1) {
-            MoveList legalMoves = simulatorEngine.getAllLegalMoves();
-            if (legalMoves.size() > 0) {
-                move = legalMoves.getMove(0);
-                currentBestMove = move;
-                bestMoveForHash = task.getBoardHash();
-            } else {
-                currentBestMove = -1;
-                this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
-                return;
-            }
-        } else {
+        if (move != -1) {
             currentBestMove = move;
             bestMoveForHash = task.getBoardHash();
+            previousBestMove = move;
+            previousBestMoveHash = task.getBoardHash();
+            searchResultReady = true;
+            fillCalculatedLine(simulatorEngine);
+            return;
         }
 
-        fillCalculatedLine(simulatorEngine);
+        if (previousBestMove != -1 && previousBestMoveHash == task.getBoardHash() &&
+                isMoveStillLegal(simulatorEngine, previousBestMove)) {
+            currentBestMove = previousBestMove;
+            bestMoveForHash = task.getBoardHash();
+            previousBestMoveHash = task.getBoardHash();
+            searchResultReady = true;
+            fillCalculatedLine(simulatorEngine);
+            return;
+        }
+
+        currentBestMove = -1;
+        bestMoveForHash = -1;
+        previousBestMove = -1;
+        previousBestMoveHash = -1;
+        searchResultReady = false;
+        this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
+    }
+
+    private boolean isMoveStillLegal(Engine simulatorEngine, int move) {
+        MoveList legalMoves = simulatorEngine.getAllLegalMoves();
+        for (int i = 0; i < legalMoves.size(); i++) {
+            if (legalMoves.getMove(i) == move) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void maybeRotateRootMoves(MoveList moves, SplittableRandom rng) {
