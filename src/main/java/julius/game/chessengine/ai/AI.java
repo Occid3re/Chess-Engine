@@ -112,6 +112,42 @@ public class AI {
     private final ThreadLocal<Map<Integer, Integer>> seeCacheThreadLocal =
             ThreadLocal.withInitial(() -> new HashMap<>(64));
 
+    private static final int LMR_MAX_DEPTH = 64;
+    private static final int LMR_MAX_MOVES = MAX_MOVE_LIST_SIZE;
+    private static final int HISTORY_BUCKETS = 5;
+    private static final double[] HISTORY_BUCKET_NORMALIZED = new double[HISTORY_BUCKETS];
+    private static final int[][][] LMR_REDUCTION_TABLE =
+            new int[LMR_MAX_DEPTH + 1][LMR_MAX_MOVES][HISTORY_BUCKETS];
+
+    static {
+        if (HISTORY_BUCKETS < 1) {
+            throw new IllegalStateException("History bucket count must be positive");
+        }
+        for (int bucket = 0; bucket < HISTORY_BUCKETS; bucket++) {
+            HISTORY_BUCKET_NORMALIZED[bucket] = HISTORY_BUCKETS == 1
+                    ? 0.0
+                    : bucket / (double) (HISTORY_BUCKETS - 1);
+        }
+        for (int depth = 0; depth <= LMR_MAX_DEPTH; depth++) {
+            for (int moveIndex = 0; moveIndex < LMR_MAX_MOVES; moveIndex++) {
+                for (int bucket = 0; bucket < HISTORY_BUCKETS; bucket++) {
+                    double base = Math.log(1 + depth) * Math.log(2 + moveIndex);
+                    double historyWeight = 1.0 - 0.5 * HISTORY_BUCKET_NORMALIZED[bucket];
+                    double scaled = base * historyWeight / 1.5;
+                    int reduction = (int) Math.floor(scaled);
+                    int maxReduction = Math.max(0, depth - 1);
+                    if (reduction < 0) {
+                        reduction = 0;
+                    }
+                    if (reduction > maxReduction) {
+                        reduction = maxReduction;
+                    }
+                    LMR_REDUCTION_TABLE[depth][moveIndex][bucket] = reduction;
+                }
+            }
+        }
+    }
+
     private ScheduledExecutorService scheduler;
 
     private final Object calculationLock = new Object();
@@ -1032,19 +1068,38 @@ public class AI {
     private static final int HISTORY_REDUCTION_MAX = 4000;
 
     private int lmrReduction(int depth, int moveIndex, int historyScore) {
-        double base = Math.log(1 + depth) * Math.log(2 + moveIndex);
-        int history = Math.max(0, historyScore);
-        double normalized = Math.min(1.0, history / (double) HISTORY_REDUCTION_MAX);
-        double historyWeight = 1.0 - 0.5 * normalized; // strong history shrinks reductions
-        double scaled = base * historyWeight / 1.5;
-        int r = (int) Math.floor(scaled);
-        if (r < 0) {
-            r = 0;
+        if (depth <= 1) {
+            return 0;
         }
-        if (r > depth - 1) {
-            r = depth - 1;
+
+        int clampedDepth = Math.max(1, Math.min(depth, LMR_MAX_DEPTH));
+        int clampedMoveIndex = Math.max(0, Math.min(moveIndex, LMR_MAX_MOVES - 1));
+
+        int history = Math.max(0, Math.min(historyScore, HISTORY_REDUCTION_MAX));
+        double normalized = HISTORY_REDUCTION_MAX == 0
+                ? 0.0
+                : history / (double) HISTORY_REDUCTION_MAX;
+        double bucketPosition = normalized * (HISTORY_BUCKETS - 1);
+        int lowerBucket = (int) Math.floor(bucketPosition);
+        int upperBucket = Math.min(HISTORY_BUCKETS - 1, lowerBucket + 1);
+        double fraction = bucketPosition - lowerBucket;
+
+        int lowerValue = LMR_REDUCTION_TABLE[clampedDepth][clampedMoveIndex][lowerBucket];
+        if (upperBucket == lowerBucket) {
+            return Math.min(lowerValue, depth - 1);
         }
-        return r;
+
+        int upperValue = LMR_REDUCTION_TABLE[clampedDepth][clampedMoveIndex][upperBucket];
+        double interpolated = lowerValue + fraction * (upperValue - lowerValue);
+        int reduction = (int) Math.floor(interpolated + 1e-9);
+        int maxReduction = Math.max(0, depth - 1);
+        if (reduction < 0) {
+            reduction = 0;
+        }
+        if (reduction > maxReduction) {
+            reduction = maxReduction;
+        }
+        return reduction;
     }
 
     private double maximizer(Engine simulatorEngine, int depth, double alpha, double beta,
