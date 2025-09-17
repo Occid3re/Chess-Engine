@@ -1,5 +1,8 @@
 package julius.game.chessengine.evaluation;
 
+import julius.game.chessengine.engine.GameStateEnum;
+import julius.game.chessengine.utils.Score;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -129,6 +132,9 @@ public final class EvaluationPipeline {
             midgame += state.midgameCache;
             endgame += state.endgameCache;
         }
+        int checkAdjustment = computeCheckAdjustment();
+        midgame += checkAdjustment;
+        endgame += checkAdjustment;
         midgameTotal = midgame;
         endgameTotal = endgame;
         aggregateDirty = false;
@@ -155,5 +161,20 @@ public final class EvaluationPipeline {
             return BLEND_SCALE;
         }
         return phase;
+    }
+
+    private int computeCheckAdjustment() {
+        if (context == null) {
+            return 0;
+        }
+        GameStateEnum state = context.getGameState();
+        if (state == null) {
+            return 0;
+        }
+        return switch (state) {
+            case BLACK_IN_CHECK -> Score.CHECK;
+            case WHITE_IN_CHECK -> -Score.CHECK;
+            default -> 0;
+        };
     }
 }
