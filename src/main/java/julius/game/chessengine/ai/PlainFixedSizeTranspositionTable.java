@@ -1,83 +1,123 @@
 package julius.game.chessengine.ai;
 
-import java.lang.reflect.Array;
-import java.util.Arrays;
-
 /**
  * Fixed-size transposition table implementation for single-threaded search.
- * It uses plain arrays and does not perform any atomic operations.
+ * Each hashed index owns a small cluster of entries so the search can keep
+ * several candidates per bucket and make informed replacement decisions.
  *
  * @param <V> value type stored in the table
  */
 public class PlainFixedSizeTranspositionTable<V> implements TranspositionTable<V> {
 
-    private final long[] keys;
-    private final V[] values;
-    private final int mask; // table.length - 1 (power of two size)
+    private static final int CLUSTER_SIZE = 4;
+
+    private static final class Entry<V> {
+        final long key;
+        final V value;
+        final int depth;
+        final int age;
+
+        Entry(long key, V value, int depth, int age) {
+            this.key = key;
+            this.value = value;
+            this.depth = depth;
+            this.age = age;
+        }
+    }
+
+    private final Entry<V>[] table;
+    private final int clusterMask; // number of clusters - 1
     private int size;
+    private int currentAge;
 
     @SuppressWarnings("unchecked")
     public PlainFixedSizeTranspositionTable(int capacity, Class<V> valueClass) {
-        int n = 1;
-        while (n < capacity) {
-            n <<= 1;
+        int clusters = 1;
+        int minClusters = Math.max(1, (capacity + CLUSTER_SIZE - 1) / CLUSTER_SIZE);
+        while (clusters < minClusters) {
+            clusters <<= 1;
         }
-        this.keys = new long[n];
-        this.values = (V[]) Array.newInstance(valueClass, n);
-        this.mask = n - 1;
+        this.table = (Entry<V>[]) new Entry[clusters * CLUSTER_SIZE];
+        this.clusterMask = clusters - 1;
     }
 
     private int index(long key) {
-        return (int) key & mask;
+        return (int) key & clusterMask;
     }
 
     @Override
     public V get(long key) {
-        int idx = index(key);
-        for (int i = 0; i < values.length; i++) {
-            V v = values[idx];
-            if (v == null) {
+        int cluster = index(key);
+        int base = cluster * CLUSTER_SIZE;
+        for (int i = 0; i < CLUSTER_SIZE; i++) {
+            Entry<V> entry = table[base + i];
+            if (entry == null) {
                 return null;
             }
-            if (keys[idx] == key) {
-                return v;
+            if (entry.key == key) {
+                return entry.value;
             }
-            idx = (idx + 1) & mask;
         }
         return null;
     }
 
     @Override
-    public void put(long key, V value) {
-        int idx = index(key);
-        for (int i = 0; i < values.length; i++) {
-            V v = values[idx];
-            if (v == null) {
-                keys[idx] = key;
-                values[idx] = value;
+    public void put(long key, V value, int depth) {
+        int cluster = index(key);
+        int base = cluster * CLUSTER_SIZE;
+        Entry<V> shallowEntry = null;
+        int shallowSlot = -1;
+        Entry<V> oldestEntry = null;
+        int oldestSlot = -1;
+
+        for (int i = 0; i < CLUSTER_SIZE; i++) {
+            int slot = base + i;
+            Entry<V> current = table[slot];
+            if (current == null) {
+                table[slot] = new Entry<>(key, value, depth, currentAge);
                 size++;
                 return;
-            } else if (keys[idx] == key) {
-                values[idx] = value;
+            }
+            if (current.key == key) {
+                table[slot] = new Entry<>(key, value, depth, currentAge);
                 return;
-            } else {
-                idx = (idx + 1) & mask;
+            }
+            if (shallowEntry == null || current.depth < shallowEntry.depth) {
+                shallowEntry = current;
+                shallowSlot = slot;
+            }
+            if (oldestEntry == null || current.age < oldestEntry.age) {
+                oldestEntry = current;
+                oldestSlot = slot;
             }
         }
-        // table full, overwrite the initial slot
-        keys[idx] = key;
-        values[idx] = value;
+
+        if (shallowEntry != null && shallowEntry.depth < depth) {
+            table[shallowSlot] = new Entry<>(key, value, depth, currentAge);
+            return;
+        }
+
+        if (oldestSlot != -1) {
+            table[oldestSlot] = new Entry<>(key, value, depth, currentAge);
+        }
     }
 
     @Override
     public void clear() {
-        Arrays.fill(values, null);
-        Arrays.fill(keys, 0L);
+        for (int i = 0; i < table.length; i++) {
+            table[i] = null;
+        }
         size = 0;
+        currentAge = 0;
     }
 
     @Override
     public int size() {
         return size;
+    }
+
+    @Override
+    public void advanceAge() {
+        currentAge++;
     }
 }

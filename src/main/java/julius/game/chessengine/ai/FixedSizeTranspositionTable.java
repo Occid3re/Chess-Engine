@@ -4,81 +4,125 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
 /**
- * Simple fixed-size hash table with open addressing. The table uses linear
- * probing and overwrites old entries when the table is full. The implementation
- * is thread-safe using atomic operations which makes it usable in concurrent
- * search scenarios without additional locking. Keys are {@code long} hashes
- * representing board states.
+ * Fixed-size hash table that stores a small cluster of entries for each hashed
+ * index. Clusters improve replacement decisions under contention by allowing
+ * the search to keep multiple candidates per bucket. The implementation relies
+ * on atomic operations and is therefore safe to use from concurrent search
+ * threads without additional locking.
  *
  * @param <V> type of value stored in the table
  */
 public class FixedSizeTranspositionTable<V> implements TranspositionTable<V> {
 
+    private static final int CLUSTER_SIZE = 4;
+
     private static final class Entry<V> {
         final long key;
         final V value;
+        final int depth;
+        final int age;
 
-        Entry(long key, V value) {
+        Entry(long key, V value, int depth, int age) {
             this.key = key;
             this.value = value;
+            this.depth = depth;
+            this.age = age;
         }
     }
 
     private final AtomicReferenceArray<Entry<V>> table;
-    private final int mask; // table.length - 1 (power of two size)
+    private final int clusterMask;
     private final AtomicInteger size = new AtomicInteger();
+    private final AtomicInteger currentAge = new AtomicInteger();
 
     public FixedSizeTranspositionTable(int capacity) {
-        int n = 1;
-        while (n < capacity) {
-            n <<= 1;
+        int clusters = 1;
+        int minClusters = Math.max(1, (capacity + CLUSTER_SIZE - 1) / CLUSTER_SIZE);
+        while (clusters < minClusters) {
+            clusters <<= 1;
         }
-        this.table = new AtomicReferenceArray<>(n);
-        this.mask = n - 1;
+        this.table = new AtomicReferenceArray<>(clusters * CLUSTER_SIZE);
+        this.clusterMask = clusters - 1;
     }
 
-    private int index(long key) {
-        return (int) (key) & mask;
+    private int clusterIndex(long key) {
+        return (int) key & clusterMask;
     }
 
     @Override
     public V get(long key) {
-        int idx = index(key);
-        for (int i = 0; i < table.length(); i++) {
-            Entry<V> e = table.get(idx);
-            if (e == null) {
+        int cluster = clusterIndex(key);
+        int base = cluster * CLUSTER_SIZE;
+        for (int i = 0; i < CLUSTER_SIZE; i++) {
+            Entry<V> entry = table.get(base + i);
+            if (entry == null) {
                 return null;
             }
-            if (e.key == key) {
-                return e.value;
+            if (entry.key == key) {
+                return entry.value;
             }
-            idx = (idx + 1) & mask;
         }
         return null;
     }
 
     @Override
-    public void put(long key, V value) {
-        int idx = index(key);
-        Entry<V> newEntry = new Entry<>(key, value);
-        for (int i = 0; i < table.length(); i++) {
-            Entry<V> cur = table.get(idx);
-            if (cur == null) {
-                if (table.compareAndSet(idx, null, newEntry)) {
-                    size.incrementAndGet();
-                    return;
-                } else {
-                    continue; // CAS failed, retry same slot
+    public void put(long key, V value, int depth) {
+        retry:
+        while (true) {
+            int cluster = clusterIndex(key);
+            int base = cluster * CLUSTER_SIZE;
+            Entry<V> shallowEntry = null;
+            int shallowSlot = -1;
+            Entry<V> oldestEntry = null;
+            int oldestSlot = -1;
+
+            for (int i = 0; i < CLUSTER_SIZE; i++) {
+                int slot = base + i;
+                Entry<V> current = table.get(slot);
+                if (current == null) {
+                    Entry<V> newEntry = new Entry<>(key, value, depth, currentAge.get());
+                    if (table.compareAndSet(slot, null, newEntry)) {
+                        size.incrementAndGet();
+                        return;
+                    } else {
+                        // slot filled concurrently, restart
+                        continue retry;
+                    }
                 }
-            } else if (cur.key == key) {
-                table.set(idx, newEntry);
-                return;
-            } else {
-                idx = (idx + 1) & mask;
+                if (current.key == key) {
+                    Entry<V> newEntry = new Entry<>(key, value, depth, currentAge.get());
+                    if (table.compareAndSet(slot, current, newEntry)) {
+                        return;
+                    } else {
+                        continue retry; // retry whole cluster
+                    }
+                }
+                if (shallowEntry == null || current.depth < shallowEntry.depth) {
+                    shallowEntry = current;
+                    shallowSlot = slot;
+                }
+                if (oldestEntry == null || current.age < oldestEntry.age) {
+                    oldestEntry = current;
+                    oldestSlot = slot;
+                }
+            }
+
+            if (shallowEntry != null && shallowEntry.depth < depth) {
+                Entry<V> newEntry = new Entry<>(key, value, depth, currentAge.get());
+                if (table.compareAndSet(shallowSlot, shallowEntry, newEntry)) {
+                    return;
+                }
+                continue retry;
+            }
+
+            if (oldestEntry != null) {
+                Entry<V> newEntry = new Entry<>(key, value, depth, currentAge.get());
+                if (table.compareAndSet(oldestSlot, oldestEntry, newEntry)) {
+                    return;
+                }
+                continue retry;
             }
         }
-        // table full, overwrite the initial slot
-        table.set(idx, newEntry);
     }
 
     @Override
@@ -87,10 +131,16 @@ public class FixedSizeTranspositionTable<V> implements TranspositionTable<V> {
             table.set(i, null);
         }
         size.set(0);
+        currentAge.set(0);
     }
 
     @Override
     public int size() {
         return size.get();
+    }
+
+    @Override
+    public void advanceAge() {
+        currentAge.incrementAndGet();
     }
 }
