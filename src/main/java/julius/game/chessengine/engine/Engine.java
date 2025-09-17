@@ -440,6 +440,8 @@ public class Engine {
             // Mark move list stale so the next search ply regenerates for the new side.
             legalMovesNeedUpdate = true;
 
+            gameState.refreshScore(bitBoard);
+
             return previousDoubleStep;
         }
     }
@@ -455,6 +457,8 @@ public class Engine {
 
             // Mark stale again so we rebuild for the restored side.
             legalMovesNeedUpdate = true;
+
+            gameState.refreshScore(bitBoard);
         }
     }
 

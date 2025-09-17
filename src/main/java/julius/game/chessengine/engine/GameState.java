@@ -52,6 +52,10 @@ public class GameState {
         this.halfmoveStack.addAll(other.halfmoveStack);
         this.fullmoveStack.addAll(other.fullmoveStack);
     }
+
+    public void refreshScore(BitBoard bitBoard) {
+        score.refresh(bitBoard, state);
+    }
     public void update(BitBoard bitBoard, MoveList legalMoves, int move, boolean isOpeningMove) {
         updateState(bitBoard, legalMoves, isOpeningMove);
 
