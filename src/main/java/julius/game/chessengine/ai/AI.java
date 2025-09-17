@@ -54,8 +54,33 @@ public class AI {
      * tracked so that future improvements can honour it.
      */
     @Getter
-    @Setter
     private int hashSizeMb = 16;
+
+    /**
+     * Estimated footprint per stored entry in the main and capture transposition tables.
+     * The estimate accounts for the entry object itself as well as the surrounding table
+     * structure (key arrays/atomic wrappers). Values are rounded up generously so the
+     * engine never allocates more memory than requested.
+     */
+    private static final int MAIN_TT_ENTRY_BYTES = 48;
+    private static final int CAPTURE_TT_ENTRY_BYTES = 32;
+
+    /**
+     * Entry limits enforced for each table. They are powers of two because the
+     * underlying implementation rounds the capacity up to the next power of two.
+     * Keeping the min/max explicit makes the Hash option predictable for UCI
+     * front-ends.
+     */
+    private static final int MIN_MAIN_TT_ENTRIES = 1 << 12;      // 4k entries ≈ 192 KB
+    private static final int MAX_MAIN_TT_ENTRIES = 1 << 26;      // 67,108,864 entries
+    private static final int MIN_CAPTURE_TT_ENTRIES = 1 << 11;   // 2k entries ≈ 64 KB
+    private static final int MAX_CAPTURE_TT_ENTRIES = 1 << 25;   // 33,554,432 entries
+
+    private static final double MAIN_TT_WEIGHT = 2.0;
+    private static final double CAPTURE_TT_WEIGHT = 1.0;
+
+    public static final int MIN_HASH_SIZE_MB = 1;
+    public static final int MAX_HASH_SIZE_MB = 4096;
 
     /**
      * Thread pool for root-split parallel search (created only if searchThreads > 1).
@@ -71,26 +96,21 @@ public class AI {
     public static final double EXIT_FLAG = Double.MAX_VALUE;
 
     /**
-     * Maximum number of entries kept in the main transposition table.
-     * This prevents unbounded memory growth during long search sessions.
-     */
-    private static final int TRANSPOSITION_TABLE_MAX_ENTRIES = 1_000_000;
-
-    /**
-     * Maximum number of entries kept in the capture transposition table.
-     */
-    private static final int CAPTURE_TRANSPOSITION_TABLE_MAX_ENTRIES = 500_000;
-
-    /**
      * Fixed-size transposition table. Uses a non-atomic implementation when running
      * with a single search thread to avoid the overhead of atomic operations.
      */
-    private final TranspositionTable<TranspositionTableEntry> transpositionTable;
+    private TranspositionTable<TranspositionTableEntry> transpositionTable;
+
+    @Getter
+    private int transpositionTableCapacity;
 
     /**
      * Separate table for capture searches using the same fixed-size structure.
      */
-    private final TranspositionTable<CaptureTranspositionTableEntry> captureTranspositionTable;
+    private TranspositionTable<CaptureTranspositionTableEntry> captureTranspositionTable;
+
+    @Getter
+    private int captureTranspositionTableCapacity;
 
     private static final int NUM_KILLER_MOVES = 2;
     private volatile int[][] killerMoves; // 2D array for killer moves, initialized in the constructor
@@ -193,13 +213,7 @@ public class AI {
         this.counterMove = new int[64][64];
         for (int f = 0; f < 64; f++) Arrays.fill(counterMove[f], -1);
 
-        int ttConcurrency = Math.max(searchThreads, lazySmpThreads);
-        this.transpositionTable = ttConcurrency == 1
-                ? new PlainFixedSizeTranspositionTable<>(TRANSPOSITION_TABLE_MAX_ENTRIES, TranspositionTableEntry.class)
-                : new FixedSizeTranspositionTable<>(TRANSPOSITION_TABLE_MAX_ENTRIES);
-        this.captureTranspositionTable = ttConcurrency == 1
-                ? new PlainFixedSizeTranspositionTable<>(CAPTURE_TRANSPOSITION_TABLE_MAX_ENTRIES, CaptureTranspositionTableEntry.class)
-                : new FixedSizeTranspositionTable<>(CAPTURE_TRANSPOSITION_TABLE_MAX_ENTRIES);
+        rebuildTranspositionTables();
 
         this.searchPool = searchThreads > 1
                 ? Executors.newFixedThreadPool(searchThreads, r -> {
@@ -210,6 +224,103 @@ public class AI {
                 : null;
 
         this.mainEngine.setOnPositionChanged(h -> updateBoardStateHash());
+    }
+
+    private void rebuildTranspositionTables() {
+        boolean concurrent = Math.max(searchThreads, lazySmpThreads) > 1;
+        long totalBytes = Math.max(1L, (long) hashSizeMb * 1024L * 1024L);
+
+        double totalWeight = MAIN_TT_WEIGHT + CAPTURE_TT_WEIGHT;
+        long mainBudget = Math.max(1L, (long) (totalBytes * (MAIN_TT_WEIGHT / totalWeight)));
+        long captureBudget = Math.max(1L, totalBytes - mainBudget);
+        if (captureBudget <= 0) {
+            captureBudget = 1L;
+            mainBudget = Math.max(1L, totalBytes - captureBudget);
+        }
+
+        int mainCapacity = computeTableCapacity(mainBudget, MAIN_TT_ENTRY_BYTES,
+                MIN_MAIN_TT_ENTRIES, MAX_MAIN_TT_ENTRIES);
+        int captureCapacity = computeTableCapacity(captureBudget, CAPTURE_TT_ENTRY_BYTES,
+                MIN_CAPTURE_TT_ENTRIES, MAX_CAPTURE_TT_ENTRIES);
+
+        this.transpositionTableCapacity = mainCapacity;
+        this.captureTranspositionTableCapacity = captureCapacity;
+
+        this.transpositionTable = concurrent
+                ? new FixedSizeTranspositionTable<>(mainCapacity)
+                : new PlainFixedSizeTranspositionTable<>(mainCapacity, TranspositionTableEntry.class);
+
+        this.captureTranspositionTable = concurrent
+                ? new FixedSizeTranspositionTable<>(captureCapacity)
+                : new PlainFixedSizeTranspositionTable<>(captureCapacity, CaptureTranspositionTableEntry.class);
+    }
+
+    private static int computeTableCapacity(long budgetBytes, int entryBytes, int minEntries, int maxEntries) {
+        if (entryBytes <= 0) {
+            throw new IllegalArgumentException("Entry byte estimate must be positive");
+        }
+
+        long estimatedEntries = Math.max(1L, budgetBytes / entryBytes);
+        if (estimatedEntries > Integer.MAX_VALUE) {
+            estimatedEntries = Integer.MAX_VALUE;
+        }
+
+        int candidate = (int) estimatedEntries;
+        if (candidate < minEntries) {
+            candidate = minEntries;
+        } else if (candidate > maxEntries) {
+            candidate = maxEntries;
+        }
+
+        int rounded = roundUpToPowerOfTwo(candidate);
+        if (rounded < minEntries) {
+            rounded = minEntries;
+        }
+        while (rounded > maxEntries && rounded > 1) {
+            rounded >>= 1;
+        }
+        return rounded;
+    }
+
+    private static int roundUpToPowerOfTwo(int value) {
+        if (value <= 1) {
+            return 1;
+        }
+        int highest = Integer.highestOneBit(value);
+        if (highest == value) {
+            return value;
+        }
+        if (highest > (1 << 30)) {
+            return 1 << 30;
+        }
+        return highest << 1;
+    }
+
+    /**
+     * Adjust the requested hash size (in megabytes) and rebuild the transposition tables.
+     * Values outside the supported range are clamped between {@value MIN_HASH_SIZE_MB} MB
+     * and {@value MAX_HASH_SIZE_MB} MB. The resulting table capacities are also limited
+     * to {@value MIN_MAIN_TT_ENTRIES}/{@value MAX_MAIN_TT_ENTRIES} for the main table and
+     * {@value MIN_CAPTURE_TT_ENTRIES}/{@value MAX_CAPTURE_TT_ENTRIES} for the capture table.
+     */
+    public synchronized void setHashSizeMb(int hashSizeMb) {
+        int clamped = Math.max(MIN_HASH_SIZE_MB, Math.min(hashSizeMb, MAX_HASH_SIZE_MB));
+        if (clamped == this.hashSizeMb) {
+            return;
+        }
+
+        if (transpositionTable != null) {
+            transpositionTable.clear();
+        }
+        if (captureTranspositionTable != null) {
+            captureTranspositionTable.clear();
+        }
+
+        this.hashSizeMb = clamped;
+        rebuildTranspositionTables();
+
+        log.info("Hash size set to {} MB (main TT capacity: {}, capture TT capacity: {})",
+                this.hashSizeMb, transpositionTableCapacity, captureTranspositionTableCapacity);
     }
 
     /**
@@ -498,7 +609,7 @@ public class AI {
 
 
     private void performCalculation() {
-        log.debug(" --- TranspositionTable[{}] --- ", transpositionTable.size());
+        log.debug(" --- TranspositionTable[{}/{}] --- ", transpositionTable.size(), transpositionTableCapacity);
         decayHistoryTable();
 
         try {
