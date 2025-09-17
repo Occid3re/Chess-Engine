@@ -72,7 +72,8 @@ public class UciHandler {
     private void registerOptions() {
         options.put("Threads", new UciOption("Threads", "spin", "1", 1, 128,
                 v -> ai.setSearchThreads(Integer.parseInt(v))));
-        options.put("Hash", new UciOption("Hash", "spin", "16", 1, 4096,
+        options.put("Hash", new UciOption("Hash", "spin", "16",
+                AI.MIN_HASH_SIZE_MB, AI.MAX_HASH_SIZE_MB,
                 v -> ai.setHashSizeMb(Integer.parseInt(v))));
         options.put("Move Overhead", new UciOption("Move Overhead", "spin", "0", 0, 5000,
                 v -> moveOverheadMs = Integer.parseInt(v)));
