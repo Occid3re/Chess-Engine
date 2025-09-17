@@ -24,7 +24,6 @@ import java.util.Objects;
 public class Score {
 
     public static final int CHECKMATE = 100000;
-    public static final int CHECK = 0;
     public static final int DRAW = 0;
     public static final int KILLER_MOVE_SCORE = 10000;
 
