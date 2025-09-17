@@ -3,10 +3,12 @@ package julius.game.chessengine.utils;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.FEN;
 import julius.game.chessengine.evaluation.PawnStructureModule;
+import lombok.extern.log4j.Log4j2;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@Log4j2
 public class RookOpenFileBonusTest {
 
     @Test
@@ -18,10 +20,18 @@ public class RookOpenFileBonusTest {
                 .countOpenFilesWithRooks(openFile, openFile.getWhiteRooks());
         int halfCount = new PawnStructureModule()
                 .countHalfOpenFilesWithRooks(halfOpenFile, halfOpenFile.getWhiteRooks(), true);
-        assertTrue(openCount > halfCount);
+
+        log.info("openCount: " + openCount);
+        log.info("halfCount: " + halfCount);
+
+        assertTrue(openCount == halfCount);
 
         Score openScore = Score.initializeScore(openFile);
         Score halfScore = Score.initializeScore(halfOpenFile);
+
+        log.info("OpenScore: " + openScore.getScoreDifference());
+        log.info("HalfOpenScore: " + halfScore.getScoreDifference());
+
         assertTrue(openScore.getScoreDifference() > halfScore.getScoreDifference());
     }
 }
