@@ -13,6 +13,11 @@ import julius.game.chessengine.utils.Score;
  */
 public final class MaterialModule implements EvaluationModule {
 
+    public interface PawnChangeListener {
+        void onPawnAdded(boolean isWhite, int squareIndex);
+        void onPawnRemoved(boolean isWhite, int squareIndex);
+    }
+
     private static final int WHITE = 0;
     private static final int BLACK = 1;
 
@@ -44,6 +49,7 @@ public final class MaterialModule implements EvaluationModule {
     private final int[] endgameMaterial = new int[2];
     private final int[] bishopCounts = new int[2];
 
+    private PawnChangeListener pawnChangeListener;
     private boolean dirty = true;
     private int midgameScoreCache;
     private int endgameScoreCache;
@@ -71,6 +77,10 @@ public final class MaterialModule implements EvaluationModule {
     public void undoMove(MoveContext moveContext) {
         boolean forward = isForwardMove(moveContext);
         updateMaterial(moveContext.getMove(), forward);
+    }
+
+    public void setPawnChangeListener(PawnChangeListener listener) {
+        this.pawnChangeListener = listener;
     }
 
     @Override
@@ -107,12 +117,20 @@ public final class MaterialModule implements EvaluationModule {
         int promotion = MoveHelper.derivePromotionPieceTypeBits(move);
         int captured = MoveHelper.deriveCapturedPieceTypeBits(move);
         int movedPiece = MoveHelper.derivePieceTypeBits(move);
+        boolean moverIsWhite = mover == WHITE;
+        boolean opponentIsWhite = !moverIsWhite;
 
         if (!undo) {
             if (captured != 0) {
+                if (pawnChangeListener != null && captured == PAWN) {
+                    pawnChangeListener.onPawnRemoved(opponentIsWhite, captureSquare(move));
+                }
                 removePiece(mover ^ 1, captured);
             }
             if (promotion != 0) {
+                if (pawnChangeListener != null && movedPiece == PAWN) {
+                    pawnChangeListener.onPawnRemoved(moverIsWhite, MoveHelper.deriveFromIndex(move));
+                }
                 removePiece(mover, movedPiece);
                 addPiece(mover, promotion);
             }
@@ -120,9 +138,15 @@ public final class MaterialModule implements EvaluationModule {
             if (promotion != 0) {
                 removePiece(mover, promotion);
                 addPiece(mover, movedPiece);
+                if (pawnChangeListener != null && movedPiece == PAWN) {
+                    pawnChangeListener.onPawnAdded(moverIsWhite, MoveHelper.deriveFromIndex(move));
+                }
             }
             if (captured != 0) {
                 addPiece(mover ^ 1, captured);
+                if (pawnChangeListener != null && captured == PAWN) {
+                    pawnChangeListener.onPawnAdded(opponentIsWhite, captureSquare(move));
+                }
             }
         }
 
@@ -196,6 +220,14 @@ public final class MaterialModule implements EvaluationModule {
                 endgameMaterial[colorIndex] -= Score.BISHOP_PAIR_BONUS;
             }
         }
+    }
+
+    private int captureSquare(int move) {
+        if (MoveHelper.isEnPassantMove(move)) {
+            int toIndex = MoveHelper.deriveToIndex(move);
+            return MoveHelper.isWhitesMove(move) ? toIndex - 8 : toIndex + 8;
+        }
+        return MoveHelper.deriveToIndex(move);
     }
 
     private void updateScoreCaches() {

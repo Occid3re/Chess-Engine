@@ -9,13 +9,12 @@ import julius.game.chessengine.evaluation.EvaluationModule;
 import julius.game.chessengine.evaluation.EvaluationPipeline;
 import julius.game.chessengine.evaluation.MoveContext;
 import julius.game.chessengine.evaluation.MaterialModule;
+import julius.game.chessengine.evaluation.PawnStructureModule;
 import julius.game.chessengine.helper.BishopHelper;
 import julius.game.chessengine.helper.RookHelper;
 import lombok.Data;
 import lombok.extern.log4j.Log4j2;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 
 import static julius.game.chessengine.helper.BishopHelper.BISHOP_ENDGAME_POSITIONAL_VALUES;
 import static julius.game.chessengine.helper.BishopHelper.BISHOP_MIDGAME_POSITIONAL_VALUES;
@@ -23,12 +22,10 @@ import static julius.game.chessengine.helper.KingHelper.*;
 import static julius.game.chessengine.helper.KnightHelper.KNIGHT_ENDGAME_POSITIONAL_VALUES;
 import static julius.game.chessengine.helper.KnightHelper.KNIGHT_MIDGAME_POSITIONAL_VALUES;
 import static julius.game.chessengine.helper.KnightHelper.knightMoveTable;
-import static julius.game.chessengine.helper.PawnHelper.*;
-import static julius.game.chessengine.helper.PawnMoveTables.PAWN_ATTACKS;
-import static julius.game.chessengine.helper.PawnMoveTables.PAWN_PUSHES;
 import static julius.game.chessengine.helper.QueenHelper.QUEEN_ENDGAME_POSITIONAL_VALUES;
 import static julius.game.chessengine.helper.QueenHelper.QUEEN_MIDGAME_POSITIONAL_VALUES;
 import static julius.game.chessengine.helper.RookHelper.*;
+import static julius.game.chessengine.helper.PawnMoveTables.PAWN_ATTACKS;
 import static julius.game.chessengine.helper.BitHelper.FileMasks;
 import static julius.game.chessengine.helper.BitHelper.RankMasks;
 import static julius.game.chessengine.helper.BitHelper.bitIndex;
@@ -50,20 +47,8 @@ public class Score {
     public static final int ROOK_VALUE   = 500;  // ok
     public static final int QUEEN_VALUE  = 900;  // ok
 
-    // --- Pawn structure (cp). Slightly gentler, less swingy. ---
-    private static final int DOUBLED_PAWN_PENALTY  = -12; // was -20
-    private static final int ISOLATED_PAWN_PENALTY = -10; // ok
-    public  static final int PASSED_PAWN_BONUS     = 60;  // kept
-    public  static final int CENTER_PAWN_BONUS     = 15;  // was 20
-    private static final int ADVANCED_PAWN_BONUS   = 8;   // was 10
-    private static final int BLOCKED_PAWN_PENALTY  = -10; // was -8
-    private static final int BACKWARD_PAWN_PENALTY = -12; // ok
-    private static final int CONNECTED_PAWN_BONUS  = 8;
-    private static final int PAWN_ISLAND_PENALTY   = -5;
-
-    // FIX: steer king away from blocking own passers / reward clear paths
-    private static final int OWN_KING_BLOCKS_PASSED_PAWN_PENALTY = -150; // big to outweigh PST pull
-    private static final int PASSED_PAWN_FREE_PATH_BONUS_PER_RANK = 12;  // small but helps pushing
+    public  static final int PASSED_PAWN_BONUS     = PawnStructureModule.PASSED_PAWN_BONUS;
+    public  static final int CENTER_PAWN_BONUS     = PawnStructureModule.CENTER_PAWN_BONUS;
 
     // Other bonuses and penalties
     private static final int NOT_CASTLED_AND_ROOK_MOVE_PENALTY = -10; // further reduced
@@ -111,6 +96,7 @@ public class Score {
     private int blackScore;
 
     private final MaterialModule materialModule = new MaterialModule();
+    private final PawnStructureModule pawnStructureModule = new PawnStructureModule();
     private final EvaluationPipeline evaluationPipeline;
     private EvaluationContext evaluationContext;
     private boolean pipelineInitialized;
@@ -196,46 +182,8 @@ public class Score {
     private static final long INITIAL_WHITE_QUEEN_POSITION = 1L << bitIndex('d', 1);
     private static final long INITIAL_BLACK_QUEEN_POSITION = 1L << bitIndex('d', 8);
 
-
-    // Cache for pawn structure evaluations to avoid recomputation
-    private static final ConcurrentMap<PawnStructureKey, PawnStructure> pawnStructureCache = new ConcurrentHashMap<>();
-
-    private static record PawnStructureKey(long whitePawns, long blackPawns) {
-    }
-
-    private static final class PawnStructure {
-        private final int whiteCenterPawnBonus;
-        private final int blackCenterPawnBonus;
-        private final int whiteDoubledPawnPenalty;
-        private final int blackDoubledPawnPenalty;
-        private final int whiteIsolatedPawnPenalty;
-        private final int blackIsolatedPawnPenalty;
-        private final int whiteConnectedPawnBonus;
-        private final int blackConnectedPawnBonus;
-        private final int whitePawnIslandPenalty;
-        private final int blackPawnIslandPenalty;
-
-        private PawnStructure(long whitePawns, long blackPawns) {
-            this.whiteCenterPawnBonus = countCenterPawns(whitePawns) * CENTER_PAWN_BONUS;
-            this.blackCenterPawnBonus = countCenterPawns(blackPawns) * CENTER_PAWN_BONUS;
-            this.whiteDoubledPawnPenalty = countDoubledPawns(whitePawns) * DOUBLED_PAWN_PENALTY;
-            this.blackDoubledPawnPenalty = countDoubledPawns(blackPawns) * DOUBLED_PAWN_PENALTY;
-            this.whiteIsolatedPawnPenalty = countIsolatedPawns(whitePawns) * ISOLATED_PAWN_PENALTY;
-            this.blackIsolatedPawnPenalty = countIsolatedPawns(blackPawns) * ISOLATED_PAWN_PENALTY;
-            this.whiteConnectedPawnBonus = countConnectedPawns(whitePawns) * CONNECTED_PAWN_BONUS;
-            this.blackConnectedPawnBonus = countConnectedPawns(blackPawns) * CONNECTED_PAWN_BONUS;
-            this.whitePawnIslandPenalty = Math.max(0, countPawnIslands(whitePawns) - 1) * PAWN_ISLAND_PENALTY;
-            this.blackPawnIslandPenalty = Math.max(0, countPawnIslands(blackPawns) - 1) * PAWN_ISLAND_PENALTY;
-        }
-    }
-
-    private static PawnStructure getPawnStructure(long whitePawns, long blackPawns) {
-        PawnStructureKey key = new PawnStructureKey(whitePawns, blackPawns);
-        return pawnStructureCache.computeIfAbsent(key, k -> new PawnStructure(whitePawns, blackPawns));
-    }
-
-
     public Score() {
+        materialModule.setPawnChangeListener(pawnStructureModule);
         this.evaluationPipeline = createPipeline();
         this.evaluationContext = null;
         this.pipelineInitialized = false;
@@ -244,6 +192,7 @@ public class Score {
     }
 
     public Score(Score other) {
+        materialModule.setPawnChangeListener(pawnStructureModule);
         this.evaluationPipeline = createPipeline();
         this.pipelineInitialized = false;
         this.evaluationContext = other.evaluationContext != null ? other.evaluationContext.copy() : null;
@@ -315,7 +264,7 @@ public class Score {
 
     private EvaluationPipeline createPipeline() {
         EvaluationModule module = new LegacyEvaluationModule();
-        return new EvaluationPipeline(List.of(materialModule, module));
+        return new EvaluationPipeline(List.of(materialModule, pawnStructureModule, module));
     }
 
     private void syncPipeline(EvaluationContext context) {
@@ -328,6 +277,39 @@ public class Score {
         } else {
             evaluationPipeline.updateContext(context);
         }
+    }
+
+    private void applyPawnStructure(BitBoard bitBoard) {
+        PawnStructureModule.PawnStructureView view = pawnStructureModule.getView(bitBoard);
+        int phase = clampPhase(bitBoard.getPhase());
+        whiteCenterPawnBonus = view.whiteCenter().blend(phase);
+        blackCenterPawnBonus = view.blackCenter().blend(phase);
+        whiteDoubledPawnPenalty = view.whiteDoubled().blend(phase);
+        blackDoubledPawnPenalty = view.blackDoubled().blend(phase);
+        whiteIsolatedPawnPenalty = view.whiteIsolated().blend(phase);
+        blackIsolatedPawnPenalty = view.blackIsolated().blend(phase);
+        whiteConnectedPawnBonus = view.whiteConnected().blend(phase);
+        blackConnectedPawnBonus = view.blackConnected().blend(phase);
+        whitePawnIslandPenalty = view.whiteIslands().blend(phase);
+        blackPawnIslandPenalty = view.blackIslands().blend(phase);
+        whitePassedPawnBonus = view.whitePassed().blend(phase);
+        blackPassedPawnBonus = view.blackPassed().blend(phase);
+        whitePawnAdvanceBonus = view.whiteAdvance().blend(phase);
+        blackPawnAdvanceBonus = view.blackAdvance().blend(phase);
+        whiteBlockedPawnPenalty = view.whiteBlocked().blend(phase);
+        blackBlockedPawnPenalty = view.blackBlocked().blend(phase);
+        whiteBackwardPawnPenalty = view.whiteBackward().blend(phase);
+        blackBackwardPawnPenalty = view.blackBackward().blend(phase);
+    }
+
+    private static int clampPhase(int phase) {
+        if (phase < 0) {
+            return 0;
+        }
+        if (phase > 256) {
+            return 256;
+        }
+        return phase;
     }
 
     private final class LegacyEvaluationModule implements EvaluationModule {
@@ -343,7 +325,18 @@ public class Score {
 
         @Override
         public void evaluate(EvaluationContext context) {
-            midgameScoreCache = calculateTotalWhiteScore() - calculateTotalBlackScore();
+            int totalWhite = calculateTotalWhiteScore();
+            int totalBlack = calculateTotalBlackScore();
+            if (context != null) {
+                BitBoard board = context.getBoard();
+                if (board != null) {
+                    PawnStructureModule.PawnStructureView view = pawnStructureModule.getView(board);
+                    int phase = clampPhase(board.getPhase());
+                    totalWhite -= view.blendWhiteTotal(phase);
+                    totalBlack -= view.blendBlackTotal(phase);
+                }
+            }
+            midgameScoreCache = totalWhite - totalBlack;
             endgameScoreCache = midgameScoreCache;
             dirty = false;
         }
@@ -392,7 +385,6 @@ public class Score {
     private void initializeFrom(BitBoard bitBoard) {
         long whitePawns = bitBoard.getWhitePawns();
         long blackPawns = bitBoard.getBlackPawns();
-        long allPawns = whitePawns | blackPawns;
         long whiteKnights = bitBoard.getWhiteKnights();
         long blackKnights = bitBoard.getBlackKnights();
         long whiteBishops = bitBoard.getWhiteBishops();
@@ -403,41 +395,14 @@ public class Score {
         long blackQueens = bitBoard.getBlackQueens();
         long whiteKing = bitBoard.getWhiteKing();
         long blackKing = bitBoard.getBlackKing();
-        long allPieces = bitBoard.getAllPieces();
-        long whiteAttacks = bitBoard.getAttackBitboard(true);
-        long blackAttacks = bitBoard.getAttackBitboard(false);
         int phase = bitBoard.getPhase();
 
-        updateCenterPawnBonusWhite(whitePawns);
-        updateCenterPawnBonusBlack(blackPawns);
+        applyPawnStructure(bitBoard);
 
-        initializePawnScore(whitePawns, blackPawns);
-        initializeKnightScore(whiteKnights, blackKnights);
-        updatePawnIslandPenaltyWhite(whitePawns);
-        updatePawnIslandPenaltyBlack(blackPawns);
-        updateConnectedPawnBonusWhite(whitePawns);
-        updateConnectedPawnBonusBlack(blackPawns);
-
-        updateDoubledPawnPenaltyWhite(whitePawns);
-        updateDoubledPawnPenaltyBlack(blackPawns);
-        updateIsolatedPawnPenaltyWhite(whitePawns);
-        updateIsolatedPawnPenaltyBlack(blackPawns);
-
-        // FIX: passed-pawn bonus considers self-blockers / clear paths
-        updatePassedPawnBonusWhite(whitePawns, blackPawns, allPieces, whiteKing);
-        updatePassedPawnBonusBlack(blackPawns, whitePawns, allPieces, blackKing);
-
-        whitePawnAdvanceBonus = calculatePawnAdvanceBonus(whitePawns, allPieces, blackAttacks, true, phase);
-        blackPawnAdvanceBonus = calculatePawnAdvanceBonus(blackPawns, allPieces, whiteAttacks, false, phase);
-        whiteBlockedPawnPenalty = calculateBlockedPawnPenalty(whitePawns, allPieces, true, phase);
-        blackBlockedPawnPenalty = calculateBlockedPawnPenalty(blackPawns, allPieces, false, phase);
-        whiteBackwardPawnPenalty = calculateBackwardPawnPenalty(whitePawns, blackPawns, allPieces, true, phase);
-        blackBackwardPawnPenalty = calculateBackwardPawnPenalty(blackPawns, whitePawns, allPieces, false, phase);
-
-        updateRookHalfOpenFileBonusWhite(whiteRooks, whitePawns, blackPawns);
-        updateRookHalfOpenFileBonusBlack(blackRooks, blackPawns, whitePawns);
-        updateRookOpenFileBonusWhite(whiteRooks, allPawns);
-        updateRookOpenFileBonusBlack(blackRooks, allPawns);
+        updateRookHalfOpenFileBonusWhite(bitBoard);
+        updateRookHalfOpenFileBonusBlack(bitBoard);
+        updateRookOpenFileBonusWhite(bitBoard);
+        updateRookOpenFileBonusBlack(bitBoard);
         updateKnightOutpostBonusWhite(whiteKnights, whitePawns, blackPawns);
         updateKnightOutpostBonusBlack(blackKnights, blackPawns, whitePawns);
 
@@ -573,187 +538,28 @@ public class Score {
         return totalBlackScore;
     }
 
-    // Methods to incrementally update scores for specific pieces or actions
-
-    /**
-     * Bonuses and Penalties
-     */
-
-    // Method to add penalty for doubled pawns
-    public void updateDoubledPawnPenaltyWhite(long whitePawns) {
-        whiteDoubledPawnPenalty = countDoubledPawns(whitePawns) * DOUBLED_PAWN_PENALTY;
+    public void updateRookHalfOpenFileBonusWhite(BitBoard bitBoard) {
+        long whiteRooks = bitBoard.getWhiteRooks();
+        int count = pawnStructureModule.countHalfOpenFilesWithRooks(bitBoard, whiteRooks, true);
+        whiteRooksHalfOpenFileBonus = count * ROOK_HALF_OPEN_FILE_BONUS;
     }
 
-    public void updateDoubledPawnPenaltyBlack(long blackPawns) {
-        blackDoubledPawnPenalty = countDoubledPawns(blackPawns) * DOUBLED_PAWN_PENALTY;
+    public void updateRookHalfOpenFileBonusBlack(BitBoard bitBoard) {
+        long blackRooks = bitBoard.getBlackRooks();
+        int count = pawnStructureModule.countHalfOpenFilesWithRooks(bitBoard, blackRooks, false);
+        blackRooksHalfOpenFileBonus = count * ROOK_HALF_OPEN_FILE_BONUS;
     }
 
-    // Method to add penalty for isolated pawns
-    public void updateIsolatedPawnPenaltyWhite(long whitePawns) {
-        whiteIsolatedPawnPenalty = countIsolatedPawns(whitePawns) * ISOLATED_PAWN_PENALTY;
+    public void updateRookOpenFileBonusWhite(BitBoard bitBoard) {
+        long whiteRooks = bitBoard.getWhiteRooks();
+        int count = pawnStructureModule.countOpenFilesWithRooks(bitBoard, whiteRooks);
+        whiteRooksOpenFileBonus = count * ROOK_OPEN_FILE_BONUS;
     }
 
-    public void updateIsolatedPawnPenaltyBlack(long blackPawns) {
-        blackIsolatedPawnPenalty = countIsolatedPawns(blackPawns) * ISOLATED_PAWN_PENALTY;
-    }
-
-    public void updatePawnIslandPenaltyWhite(long whitePawns) {
-        int islands = countPawnIslands(whitePawns);
-        whitePawnIslandPenalty = Math.max(0, islands - 1) * PAWN_ISLAND_PENALTY;
-    }
-
-    public void updatePawnIslandPenaltyBlack(long blackPawns) {
-        int islands = countPawnIslands(blackPawns);
-        blackPawnIslandPenalty = Math.max(0, islands - 1) * PAWN_ISLAND_PENALTY;
-    }
-
-    public void updateConnectedPawnBonusWhite(long whitePawns) {
-        whiteConnectedPawnBonus = countConnectedPawns(whitePawns) * CONNECTED_PAWN_BONUS;
-    }
-
-    public void updateConnectedPawnBonusBlack(long blackPawns) {
-        blackConnectedPawnBonus = countConnectedPawns(blackPawns) * CONNECTED_PAWN_BONUS;
-    }
-
-    // FIX: new signatures accept allPieces and own king to avoid rewarding self-blocked passers
-    public void updatePassedPawnBonusWhite(long whitePawns, long blackPawns, long allPieces, long whiteKing) {
-        whitePassedPawnBonus = calculatePassedPawnBonus(whitePawns, blackPawns, allPieces, whiteKing, true);
-    }
-
-    public void updatePassedPawnBonusBlack(long blackPawns, long whitePawns, long allPieces, long blackKing) {
-        blackPassedPawnBonus = calculatePassedPawnBonus(blackPawns, whitePawns, allPieces, blackKing, false);
-    }
-
-    public void updateCenterPawnBonusWhite(long whitePawns) {
-        whiteCenterPawnBonus = countCenterPawns(whitePawns) * CENTER_PAWN_BONUS;
-    }
-
-    public void updateCenterPawnBonusBlack(long blackPawns) {
-        blackCenterPawnBonus = countCenterPawns(blackPawns) * CENTER_PAWN_BONUS;
-    }
-
-    private int calculatePawnAdvanceBonus(long pawns, long allPieces, long enemyAttacks, boolean isWhite, int phase) {
-        int bonus = 0;
-        long advancedRanks = isWhite
-                ? (RankMasks[3] | RankMasks[4] | RankMasks[5] | RankMasks[6])
-                : (RankMasks[4] | RankMasks[3] | RankMasks[2] | RankMasks[1]);
-        long advancedPawns = pawns & advancedRanks;
-        while (advancedPawns != 0) {
-            int square = Long.numberOfTrailingZeros(advancedPawns);
-            long forward = PAWN_PUSHES[isWhite ? 0 : 1][square];
-            if ((forward & (allPieces | enemyAttacks)) == 0) {
-                int rank = square / 8 + 1;
-                int rankBonus = isWhite ? (rank - 3) : (6 - rank);
-                bonus += ADVANCED_PAWN_BONUS * rankBonus;
-            }
-            advancedPawns &= advancedPawns - 1;
-        }
-        return bonus * (256 + phase) / 256;
-    }
-
-    private int calculateBlockedPawnPenalty(long pawns, long allPieces, boolean isWhite, int phase) {
-        int penalty = 0;
-        long remaining = pawns;
-        while (remaining != 0) {
-            int square = Long.numberOfTrailingZeros(remaining);
-            long forward = PAWN_PUSHES[isWhite ? 0 : 1][square];
-            if ((forward & allPieces) != 0) {
-                penalty += BLOCKED_PAWN_PENALTY;
-            }
-            remaining &= remaining - 1;
-        }
-        return penalty * (256 + phase) / 256;
-    }
-
-    private int calculateBackwardPawnPenalty(long pawns, long enemyPawns, long allPieces, boolean isWhite, int phase) {
-        int penalty = 0;
-        long remaining = pawns;
-        while (remaining != 0) {
-            int square = Long.numberOfTrailingZeros(remaining);
-            long forward = PAWN_PUSHES[isWhite ? 0 : 1][square];
-            if ((forward & allPieces) == 0) {
-                int forwardIndex = Long.numberOfTrailingZeros(forward);
-                long enemyAttack = PAWN_ATTACKS[isWhite ? 1 : 0][forwardIndex] & enemyPawns;
-                if (enemyAttack != 0) {
-                    penalty += BACKWARD_PAWN_PENALTY;
-                }
-            }
-            remaining &= remaining - 1;
-        }
-        return penalty * (256 + phase) / 256;
-    }
-
-    // FIX: new version considers own king blocking the file, and rewards a clear file to promotion
-    private int calculatePassedPawnBonus(long pawns, long opponentPawns, long allPieces, long ownKing, boolean isWhite) {
-        int bonus = 0;
-        long remaining = pawns;
-
-        while (remaining != 0) {
-            long pawn = remaining & -remaining;
-            remaining ^= pawn;
-
-            int square = Long.numberOfTrailingZeros(pawn);
-            int file = square % 8;
-            int rank = square / 8 + 1;
-
-            long fileMask = FileMasks[file];
-            long adjFilesMask = fileMask;
-            if (file > 0)  adjFilesMask |= FileMasks[file - 1];
-            if (file < 7)  adjFilesMask |= FileMasks[file + 1];
-
-            // Ranks forward (all squares ahead)
-            long forwardRanksMask = 0L;
-            if (isWhite) {
-                for (int r = rank + 1; r <= 8; r++) forwardRanksMask |= RankMasks[r - 1];
-            } else {
-                for (int r = rank - 1; r >= 1; r--) forwardRanksMask |= RankMasks[r - 1];
-            }
-
-            // Passed definition: no enemy pawn ahead on same or adjacent files
-            boolean isPassed = (opponentPawns & (adjFilesMask & forwardRanksMask)) == 0;
-            if (!isPassed) continue;
-
-            // Base bonus grows with advancement (kept from your logic)
-            int base = PASSED_PAWN_BONUS * (isWhite ? (rank - 1) : (8 - rank));
-
-            // Path squares on the same file ahead
-            long filePathAhead = fileMask & forwardRanksMask;
-
-            // One-step forward square (for immediate self-block check)
-            long oneStep = isWhite ? (pawn << 8) : (pawn >>> 8);
-
-            // If own king sits directly in front, penalize hard (this is the common issue you observed)
-            if ((oneStep & ownKing) != 0L) {
-                base += OWN_KING_BLOCKS_PASSED_PAWN_PENALTY; // strong nudge to move the king off the file
-            }
-
-            // If the entire file to promotion is clear (no pieces at all), add a small "free runway" bonus
-            // This slightly prefers stepping aside or clearing the path to start pushing.
-            if ((filePathAhead & allPieces) == 0L) {
-                int distToPromo = isWhite ? (8 - rank) : (rank - 1);
-                base += PASSED_PAWN_FREE_PATH_BONUS_PER_RANK * distToPromo;
-            }
-
-            bonus += base;
-        }
-
-        return bonus;
-    }
-
-    public void updateRookHalfOpenFileBonusWhite(long whiteRooks, long whitePawns, long blackPawns) {
-        whiteRooksHalfOpenFileBonus = countRooksOnHalfOpenFiles(whiteRooks, whitePawns, blackPawns) * ROOK_HALF_OPEN_FILE_BONUS;
-    }
-
-    public void updateRookHalfOpenFileBonusBlack(long blackRooks, long blackPawns, long whitePawns) {
-        blackRooksHalfOpenFileBonus = countRooksOnHalfOpenFiles(blackRooks, blackPawns, whitePawns) * ROOK_HALF_OPEN_FILE_BONUS;
-    }
-
-    public void updateRookOpenFileBonusWhite(long whiteRooks, long allPawns) {
-        whiteRooksOpenFileBonus = countRooksOnOpenFiles(whiteRooks, allPawns) * ROOK_OPEN_FILE_BONUS;
-    }
-
-    public void updateRookOpenFileBonusBlack(long blackRooks, long allPawns) {
-        blackRooksOpenFileBonus = countRooksOnOpenFiles(blackRooks, allPawns) * ROOK_OPEN_FILE_BONUS;
+    public void updateRookOpenFileBonusBlack(BitBoard bitBoard) {
+        long blackRooks = bitBoard.getBlackRooks();
+        int count = pawnStructureModule.countOpenFilesWithRooks(bitBoard, blackRooks);
+        blackRooksOpenFileBonus = count * ROOK_OPEN_FILE_BONUS;
     }
 
     public void updateKnightOutpostBonusWhite(long whiteKnights, long whitePawns, long blackPawns) {
@@ -1514,35 +1320,8 @@ public class Score {
     }
 
     public void updateWhitePawnValues(BitBoard bitBoard) {
-        long whitePawns = bitBoard.getWhitePawns();
-        long blackPawns = bitBoard.getBlackPawns();
-        long allPieces = bitBoard.getAllPieces();
-        long blackAttacks = bitBoard.getAttackBitboard(false);
-        long whiteKing = bitBoard.getWhiteKing();
-        int phase = bitBoard.getPhase();
-
-        PawnStructure ps = getPawnStructure(whitePawns, blackPawns);
-        whiteCenterPawnBonus = ps.whiteCenterPawnBonus;
-        blackCenterPawnBonus = ps.blackCenterPawnBonus;
-        whiteDoubledPawnPenalty = ps.whiteDoubledPawnPenalty;
-        blackDoubledPawnPenalty = ps.blackDoubledPawnPenalty;
-        whiteIsolatedPawnPenalty = ps.whiteIsolatedPawnPenalty;
-        blackIsolatedPawnPenalty = ps.blackIsolatedPawnPenalty;
-        whiteConnectedPawnBonus = ps.whiteConnectedPawnBonus;
-        blackConnectedPawnBonus = ps.blackConnectedPawnBonus;
-        whitePawnIslandPenalty = ps.whitePawnIslandPenalty;
-        blackPawnIslandPenalty = ps.blackPawnIslandPenalty;
-
-        updatePawnsPositionBonusWhite(whitePawns, phase);
-
-        // FIX: pass allPieces + own king
-        updatePassedPawnBonusWhite(whitePawns, blackPawns, allPieces, whiteKing);
-
-        whitePawnAdvanceBonus = calculatePawnAdvanceBonus(whitePawns, allPieces, blackAttacks, true, phase);
-        whiteBlockedPawnPenalty = calculateBlockedPawnPenalty(whitePawns, allPieces, true, phase);
-        whiteBackwardPawnPenalty = calculateBackwardPawnPenalty(whitePawns, blackPawns, allPieces, true, phase);
-
-        //check if Rook is now on an HalfOpen/Open File
+        applyPawnStructure(bitBoard);
+        updatePawnsPositionBonusWhite(bitBoard.getWhitePawns(), bitBoard.getPhase());
         updateBlackRookValues(bitBoard);
         updateWhiteRookValues(bitBoard);
         updateWhiteKnightValues(bitBoard);
@@ -1550,35 +1329,8 @@ public class Score {
     }
 
     public void updateBlackPawnValues(BitBoard bitBoard) {
-        long blackPawns = bitBoard.getBlackPawns();
-        long whitePawns = bitBoard.getWhitePawns();
-        long allPieces = bitBoard.getAllPieces();
-        long whiteAttacks = bitBoard.getAttackBitboard(true);
-        long blackKing = bitBoard.getBlackKing();
-        int phase = bitBoard.getPhase();
-
-        PawnStructure ps = getPawnStructure(whitePawns, blackPawns);
-        whiteCenterPawnBonus = ps.whiteCenterPawnBonus;
-        blackCenterPawnBonus = ps.blackCenterPawnBonus;
-        whiteDoubledPawnPenalty = ps.whiteDoubledPawnPenalty;
-        blackDoubledPawnPenalty = ps.blackDoubledPawnPenalty;
-        whiteIsolatedPawnPenalty = ps.whiteIsolatedPawnPenalty;
-        blackIsolatedPawnPenalty = ps.blackIsolatedPawnPenalty;
-        whiteConnectedPawnBonus = ps.whiteConnectedPawnBonus;
-        blackConnectedPawnBonus = ps.blackConnectedPawnBonus;
-        whitePawnIslandPenalty = ps.whitePawnIslandPenalty;
-        blackPawnIslandPenalty = ps.blackPawnIslandPenalty;
-
-        updatePawnsPositionBonusBlack(blackPawns, phase);
-
-        // FIX: pass allPieces + own king
-        updatePassedPawnBonusBlack(blackPawns, whitePawns, allPieces, blackKing);
-
-        blackPawnAdvanceBonus = calculatePawnAdvanceBonus(blackPawns, allPieces, whiteAttacks, false, phase);
-        blackBlockedPawnPenalty = calculateBlockedPawnPenalty(blackPawns, allPieces, false, phase);
-        blackBackwardPawnPenalty = calculateBackwardPawnPenalty(blackPawns, whitePawns, allPieces, false, phase);
-
-        //check if Rook is now on an HalfOpen/Open File
+        applyPawnStructure(bitBoard);
+        updatePawnsPositionBonusBlack(bitBoard.getBlackPawns(), bitBoard.getPhase());
         updateBlackRookValues(bitBoard);
         updateWhiteRookValues(bitBoard);
         updateWhiteKnightValues(bitBoard);
@@ -1659,8 +1411,8 @@ public class Score {
 
         updateRooksPositionBonusWhite(whiteRooks, phase);
 
-        updateRookHalfOpenFileBonusWhite(whiteRooks, whitePawns, blackPawns);
-        updateRookOpenFileBonusWhite(whiteRooks, whitePawns | blackPawns);
+        updateRookHalfOpenFileBonusWhite(bitBoard);
+        updateRookOpenFileBonusWhite(bitBoard);
 
         updateStartingSquarePenaltyWhite(whiteKnights, whiteBishops, whiteRooks);
         updateKingValuesWhite(bitBoard);
@@ -1686,8 +1438,8 @@ public class Score {
 
         updateRooksPositionBonusBlack(blackRooks, phase);
 
-        updateRookHalfOpenFileBonusBlack(blackRooks, blackPawns, whitePawns);
-        updateRookOpenFileBonusBlack(blackRooks, whitePawns | blackPawns);
+        updateRookHalfOpenFileBonusBlack(bitBoard);
+        updateRookOpenFileBonusBlack(bitBoard);
 
         updateStartingSquarePenaltyBlack(blackKnights, blackBishops, blackRooks);
         updateKingValuesBlack(bitBoard);
