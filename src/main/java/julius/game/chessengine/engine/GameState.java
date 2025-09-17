@@ -194,8 +194,9 @@ public class GameState {
     public String toString() {
         return "GameState {" +
                 "\n  State: " + state +
-                "\n  White Score: " + score.calculateTotalWhiteScore() +
-                "\n  Black Score: " + score.calculateTotalBlackScore() +
+                "\n  Midgame Score: " + score.getMidgameScore() +
+                "\n  Endgame Score: " + score.getEndgameScore() +
+                "\n  Blended Score: " + score.getBlendedScore() +
                 "\n  Score Difference: " + score.getScoreDifference() +
                 "\n  Repetition Count: " + repetition +
                 "\n}";

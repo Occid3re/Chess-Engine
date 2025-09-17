@@ -184,6 +184,10 @@ public final class PieceSquareModule implements EvaluationModule {
         return endgameTotal;
     }
 
+    public int getDevelopmentContribution() {
+        return developmentContribution;
+    }
+
     @Override
     public boolean isDirty() {
         return dirty;
