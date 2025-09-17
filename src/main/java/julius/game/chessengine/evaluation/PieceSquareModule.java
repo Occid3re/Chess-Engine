@@ -365,7 +365,11 @@ public final class PieceSquareModule implements EvaluationModule {
     }
 
     private void adjustDevelopmentOnEnter(int square, int color, int pieceType) {
-        switch (pieceType) {
+        if (pieceType <= 0) {
+            return;
+        }
+        PieceType type = MoveHelper.intToPieceType(pieceType);
+        switch (type) {
             case KNIGHT -> {
                 if (KNIGHT_HOME_SQUARE[color][square]) {
                     minorPiecesAtHome[color]++;
@@ -397,7 +401,11 @@ public final class PieceSquareModule implements EvaluationModule {
     }
 
     private void adjustDevelopmentOnLeave(int square, int color, int pieceType) {
-        switch (pieceType) {
+        if (pieceType <= 0) {
+            return;
+        }
+        PieceType type = MoveHelper.intToPieceType(pieceType);
+        switch (type) {
             case KNIGHT -> {
                 if (KNIGHT_HOME_SQUARE[color][square]) {
                     minorPiecesAtHome[color]--;

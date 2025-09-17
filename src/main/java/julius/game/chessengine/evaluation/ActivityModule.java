@@ -369,7 +369,11 @@ public final class ActivityModule implements EvaluationModule {
     }
 
     private long sliderRayMask(int pieceType, int square) {
-        return switch (pieceType) {
+        if (pieceType <= 0) {
+            return 0L;
+        }
+        PieceType type = MoveHelper.intToPieceType(pieceType);
+        return switch (type) {
             case BISHOP -> DIRECTION_RAYS[NORTH_EAST][square]
                     | DIRECTION_RAYS[NORTH_WEST][square]
                     | DIRECTION_RAYS[SOUTH_EAST][square]
@@ -521,7 +525,17 @@ public final class ActivityModule implements EvaluationModule {
         }
 
         long attacks = 0L;
-        switch (pieceType) {
+        if (pieceType <= 0) {
+            activity.mobilityCount = 0;
+            activity.centerCount = 0;
+            activity.midgameScore = 0;
+            activity.endgameScore = 0;
+            activity.attackMask = 0L;
+            return;
+        }
+
+        PieceType type = MoveHelper.intToPieceType(pieceType);
+        switch (type) {
             case KNIGHT -> attacks = KnightHelper.knightMoveTable[square];
             case BISHOP -> attacks = BISHOP_HELPER.calculateBishopMoves(square, allPieces);
             case ROOK -> attacks = ROOK_HELPER.calculateRookMoves(square, allPieces);
