@@ -962,8 +962,14 @@ def safe_accept_challenge(client: berserk.Client, chal_id: str) -> bool:
         return True
     except (berserk.exceptions.ResponseError, berserk.exceptions.ApiError) as e:
         status = getattr(getattr(e, "response", None), "status_code", None)
-        if status in (400, 404, 410):
+        if status == 400:
             print(f"[warn] Challenge {chal_id} vanished before accept (HTTP {status}).")
+            return False
+        if status in (404, 410):
+            print(
+                f"[info] Challenge {chal_id} no longer available before accept (HTTP {status})."
+                " Likely already converted to a game."
+            )
             return False
         print(f"[-] Accept failed for {chal_id}: {e}")
         return False
