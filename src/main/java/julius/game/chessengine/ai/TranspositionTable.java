@@ -6,7 +6,8 @@ package julius.game.chessengine.ai;
  */
 public interface TranspositionTable<V> {
     V get(long key);
-    void put(long key, V value);
+    void put(long key, V value, int depth);
     void clear();
     int size();
+    void advanceAge();
 }
