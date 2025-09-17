@@ -1113,6 +1113,8 @@ public class AI {
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, isWhite);
 
         MoveList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
+        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
+        seeCache.clear();
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (abortRequested(deadline)) { return EXIT_FLAG; }
             int move = orderedMoves.getMove(index);
@@ -1121,21 +1123,32 @@ public class AI {
             int to   = MoveHelper.deriveToIndex(move);
             int movingPieceBits   = MoveHelper.derivePieceTypeBits(move);
             int capturedPieceBits = MoveHelper.deriveCapturedPieceTypeBits(move);
-            int historyScore = historyTable[from][to];
-            int seeGain = simulatorEngine.see(move);
-            boolean seeWinsMaterial = seeGain > 0;
-
             boolean isCapture = MoveHelper.isCapture(move);
             boolean isPromotion = MoveHelper.isPawnPromotionMove(move);
             boolean isQuiet = !isCapture && !isPromotion;
+            int historyScore = historyTable[from][to];
+
+            int seeGain = 0;
+            boolean seeEvaluated = false;
+            boolean seeWinsMaterial = false;
 
             // SEE pruning for losing captures/quiets (keep checks/promotions)
             boolean seePruneCandidate = (!inCheckAtNode && isCapture && !isPromotion) || isQuiet;
-            if (seePruneCandidate && seeGain < 0) {
-                simulatorEngine.performMove(move);
-                boolean givesCheckTmp = isSideInCheck(simulatorEngine, !isWhite);
-                simulatorEngine.undoLastMove();
-                if (!givesCheckTmp) continue;
+            if (seePruneCandidate) {
+                seeGain = seeCache.computeIfAbsent(move, simulatorEngine::see);
+                seeEvaluated = true;
+                if (seeGain < 0) {
+                    simulatorEngine.performMove(move);
+                    boolean givesCheckTmp = isSideInCheck(simulatorEngine, !isWhite);
+                    simulatorEngine.undoLastMove();
+                    if (!givesCheckTmp) {
+                        continue;
+                    }
+                }
+            }
+
+            if (seeEvaluated) {
+                seeWinsMaterial = seeGain > 0;
             }
 
             BitBoard boardBefore = simulatorEngine.getBitBoard();
@@ -1268,6 +1281,8 @@ public class AI {
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, isWhite);
 
         MoveList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
+        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
+        seeCache.clear();
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
                 return EXIT_FLAG;
@@ -1279,20 +1294,31 @@ public class AI {
             int to   = MoveHelper.deriveToIndex(move);
             int movingPieceBits   = MoveHelper.derivePieceTypeBits(move);
             int capturedPieceBits = MoveHelper.deriveCapturedPieceTypeBits(move);
-            int historyScore = historyTable[from][to];
-            int seeGain = simulatorEngine.see(move);
-            boolean seeWinsMaterial = seeGain > 0;
-
             boolean isCapture = MoveHelper.isCapture(move);
             boolean isPromotion = MoveHelper.isPawnPromotionMove(move);
             boolean isQuiet = !isCapture && !isPromotion;
+            int historyScore = historyTable[from][to];
+
+            int seeGain = 0;
+            boolean seeEvaluated = false;
+            boolean seeWinsMaterial = false;
 
             boolean seePruneCandidate = (!inCheckAtNode && isCapture && !isPromotion) || isQuiet;
-            if (seePruneCandidate && seeGain < 0) {
-                simulatorEngine.performMove(move);
-                boolean givesCheckTmp = isSideInCheck(simulatorEngine, !isWhite);
-                simulatorEngine.undoLastMove();
-                if (!givesCheckTmp) continue;
+            if (seePruneCandidate) {
+                seeGain = seeCache.computeIfAbsent(move, simulatorEngine::see);
+                seeEvaluated = true;
+                if (seeGain < 0) {
+                    simulatorEngine.performMove(move);
+                    boolean givesCheckTmp = isSideInCheck(simulatorEngine, !isWhite);
+                    simulatorEngine.undoLastMove();
+                    if (!givesCheckTmp) {
+                        continue;
+                    }
+                }
+            }
+
+            if (seeEvaluated) {
+                seeWinsMaterial = seeGain > 0;
             }
 
             BitBoard boardBefore = simulatorEngine.getBitBoard();
