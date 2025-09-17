@@ -485,7 +485,7 @@ public class BitBoard {
                 }
             }
             occ &= ~attMask; // from-square cleared
-            // place on 'to'
+            // place on 'to' (keep occupancy accurate for slider lookups)
             if (sideWhite) {
                 switch (attBits) {
                     case 1 -> W[1] |= toMask;
@@ -505,7 +505,7 @@ public class BitBoard {
                     case 6 -> B[6] |= toMask;
                 }
             }
-            // 'to' stays occupied in occ
+            occ |= toMask; // ensure destination remains occupied for future attack discovery
 
             // Push gain and toggle
             d++;
@@ -550,6 +550,7 @@ public class BitBoard {
         }
 
         occCopy &= ~fromMask;
+        occCopy |= toMask;
 
         return !isSquareAttackedInSee(target, !kingIsWhite, wCopy, bCopy, occCopy);
     }
