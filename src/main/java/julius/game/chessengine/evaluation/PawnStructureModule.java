@@ -33,6 +33,8 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
     public static final int BACKWARD_PAWN_PENALTY = -12;
     public static final int OWN_KING_BLOCKS_PASSED_PAWN_PENALTY = -150;
     public static final int PASSED_PAWN_FREE_PATH_BONUS_PER_RANK = 12;
+    public static final int ROOK_HALF_OPEN_FILE_BONUS = 15;
+    public static final int ROOK_OPEN_FILE_BONUS = 25;
 
     private static final int WHITE = 0;
     private static final int BLACK = 1;
@@ -85,6 +87,8 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         long whitePawns = board.getWhitePawns();
         long blackPawns = board.getBlackPawns();
         long allPieces = board.getAllPieces();
+        long whiteRooks = board.getWhiteRooks();
+        long blackRooks = board.getBlackRooks();
         long whiteAttacks = board.getAttackBitboard(true);
         long blackAttacks = board.getAttackBitboard(false);
         long whiteKing = board.getWhiteKing();
@@ -102,6 +106,16 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         PhaseScore blackConnected = PhaseScore.constant(structure.blackConnectedPawnBonus);
         PhaseScore whiteIslands = PhaseScore.constant(structure.whitePawnIslandPenalty);
         PhaseScore blackIslands = PhaseScore.constant(structure.blackPawnIslandPenalty);
+
+        PhaseScore whiteRookHalfOpen = PhaseScore.constant(
+                countHalfOpenFilesWithRooks(board, whiteRooks, true) * ROOK_HALF_OPEN_FILE_BONUS);
+        PhaseScore blackRookHalfOpen = PhaseScore.constant(
+                countHalfOpenFilesWithRooks(board, blackRooks, false) * ROOK_HALF_OPEN_FILE_BONUS);
+
+        PhaseScore whiteRookOpen = PhaseScore.constant(
+                countOpenFilesWithRooks(board, whiteRooks) * ROOK_OPEN_FILE_BONUS);
+        PhaseScore blackRookOpen = PhaseScore.constant(
+                countOpenFilesWithRooks(board, blackRooks) * ROOK_OPEN_FILE_BONUS);
 
         PhaseScore whitePassed = PhaseScore.constant(
                 calculatePassedPawnBonus(whitePawns, blackPawns, allPieces, whiteKing, true));
@@ -138,6 +152,10 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
                 blackIsolated,
                 whiteConnected,
                 blackConnected,
+                whiteRookHalfOpen,
+                blackRookHalfOpen,
+                whiteRookOpen,
+                blackRookOpen,
                 whiteIslands,
                 blackIslands,
                 whitePassed,
@@ -507,6 +525,10 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         private final PhaseScore blackIsolated;
         private final PhaseScore whiteConnected;
         private final PhaseScore blackConnected;
+        private final PhaseScore whiteRookHalfOpen;
+        private final PhaseScore blackRookHalfOpen;
+        private final PhaseScore whiteRookOpen;
+        private final PhaseScore blackRookOpen;
         private final PhaseScore whiteIslands;
         private final PhaseScore blackIslands;
         private final PhaseScore whitePassed;
@@ -532,6 +554,10 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
                 PhaseScore blackIsolated,
                 PhaseScore whiteConnected,
                 PhaseScore blackConnected,
+                PhaseScore whiteRookHalfOpen,
+                PhaseScore blackRookHalfOpen,
+                PhaseScore whiteRookOpen,
+                PhaseScore blackRookOpen,
                 PhaseScore whiteIslands,
                 PhaseScore blackIslands,
                 PhaseScore whitePassed,
@@ -550,6 +576,10 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
             this.blackIsolated = blackIsolated;
             this.whiteConnected = whiteConnected;
             this.blackConnected = blackConnected;
+            this.whiteRookHalfOpen = whiteRookHalfOpen;
+            this.blackRookHalfOpen = blackRookHalfOpen;
+            this.whiteRookOpen = whiteRookOpen;
+            this.blackRookOpen = blackRookOpen;
             this.whiteIslands = whiteIslands;
             this.blackIslands = blackIslands;
             this.whitePassed = whitePassed;
@@ -562,23 +592,27 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
             this.blackBackward = blackBackward;
 
             this.whiteMidgameTotal = whiteCenter.midgame + whiteDoubled.midgame + whiteIsolated.midgame
-                    + whiteConnected.midgame + whiteIslands.midgame + whitePassed.midgame
+                    + whiteConnected.midgame + whiteRookHalfOpen.midgame + whiteRookOpen.midgame
+                    + whiteIslands.midgame + whitePassed.midgame
                     + whiteAdvance.midgame + whiteBlocked.midgame + whiteBackward.midgame;
             this.whiteEndgameTotal = whiteCenter.endgame + whiteDoubled.endgame + whiteIsolated.endgame
-                    + whiteConnected.endgame + whiteIslands.endgame + whitePassed.endgame
+                    + whiteConnected.endgame + whiteRookHalfOpen.endgame + whiteRookOpen.endgame
+                    + whiteIslands.endgame + whitePassed.endgame
                     + whiteAdvance.endgame + whiteBlocked.endgame + whiteBackward.endgame;
             this.blackMidgameTotal = blackCenter.midgame + blackDoubled.midgame + blackIsolated.midgame
-                    + blackConnected.midgame + blackIslands.midgame + blackPassed.midgame
+                    + blackConnected.midgame + blackRookHalfOpen.midgame + blackRookOpen.midgame
+                    + blackIslands.midgame + blackPassed.midgame
                     + blackAdvance.midgame + blackBlocked.midgame + blackBackward.midgame;
             this.blackEndgameTotal = blackCenter.endgame + blackDoubled.endgame + blackIsolated.endgame
-                    + blackConnected.endgame + blackIslands.endgame + blackPassed.endgame
+                    + blackConnected.endgame + blackRookHalfOpen.endgame + blackRookOpen.endgame
+                    + blackIslands.endgame + blackPassed.endgame
                     + blackAdvance.endgame + blackBlocked.endgame + blackBackward.endgame;
         }
 
         public static PawnStructureView empty() {
             PhaseScore zero = PhaseScore.constant(0);
-            return new PawnStructureView(zero, zero, zero, zero, zero, zero, zero, zero, zero, zero,
-                    zero, zero, zero, zero, zero, zero, zero, zero);
+            return new PawnStructureView(zero, zero, zero, zero, zero, zero, zero, zero,
+                    zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero);
         }
 
         public PhaseScore whiteCenter() {
@@ -611,6 +645,22 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
 
         public PhaseScore blackConnected() {
             return blackConnected;
+        }
+
+        public PhaseScore whiteRookHalfOpen() {
+            return whiteRookHalfOpen;
+        }
+
+        public PhaseScore blackRookHalfOpen() {
+            return blackRookHalfOpen;
+        }
+
+        public PhaseScore whiteRookOpen() {
+            return whiteRookOpen;
+        }
+
+        public PhaseScore blackRookOpen() {
+            return blackRookOpen;
         }
 
         public PhaseScore whiteIslands() {

@@ -65,6 +65,26 @@ public class ScoreEvaluationTest {
     }
 
     @Test
+    void passedPawnImprovesScore() {
+        BitBoard passed = FEN.translateFENtoBitBoard("4k3/8/8/4P3/8/8/8/4K3 w - - 0 1");
+        BitBoard blocked = FEN.translateFENtoBitBoard("4k3/4p3/8/4P3/8/8/8/4K3 w - - 0 1");
+
+        Score passedScore = Score.initializeScore(passed);
+        Score blockedScore = Score.initializeScore(blocked);
+        assertTrue(passedScore.getScoreDifference() > blockedScore.getScoreDifference());
+    }
+
+    @Test
+    void doubledPawnsReduceScore() {
+        BitBoard healthy = FEN.translateFENtoBitBoard("4k3/8/8/8/3P4/8/4P3/4K3 w - - 0 1");
+        BitBoard doubled = FEN.translateFENtoBitBoard("4k3/8/8/8/3P4/8/3P4/4K3 w - - 0 1");
+
+        Score healthyScore = Score.initializeScore(healthy);
+        Score doubledScore = Score.initializeScore(doubled);
+        assertTrue(healthyScore.getScoreDifference() > doubledScore.getScoreDifference());
+    }
+
+    @Test
     void undoRestoresCapturedMaterial() {
         BitBoard board = FEN.translateFENtoBitBoard("8/8/8/3p4/3P4/8/8/8 w - - 0 1");
         Score score = Score.initializeScore(board);
