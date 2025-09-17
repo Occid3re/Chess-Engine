@@ -1721,8 +1721,8 @@ public class AI {
 
         if (simulatorEngine.getGameState().isInStateDraw()) {
             double scoreDiff = simulatorEngine.getGameState().getScore().getScoreDifference();
-            // stronger bias than ±1 to steer away from draws when ahead
-            final double DRAW_BIAS = 20.0;
+            // stronger bias than ±0.01 to steer away from draws when ahead
+            final double DRAW_BIAS = 0.20;
             if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
                 return DRAW - DRAW_BIAS; // discourage draws when ahead
             } else if ((isWhitesTurn && scoreDiff < 0) || (!isWhitesTurn && scoreDiff > 0)) {
@@ -1830,8 +1830,8 @@ public class AI {
                 log.debug("DRAW");
             }
             double scoreDiff = gameState.getScore().getScoreDifference();
-            // stronger bias than ±1 to steer decisively
-            final double DRAW_BIAS = 20.0;
+            // stronger bias than ±0.01 to steer decisively
+            final double DRAW_BIAS = 0.20;
             if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
                 return DRAW - DRAW_BIAS; // avoid draws when ahead
             } else if ((isWhitesTurn && scoreDiff < 0) || (!isWhitesTurn && scoreDiff > 0)) {
