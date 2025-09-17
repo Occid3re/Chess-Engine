@@ -81,7 +81,7 @@ public final class MaterialModule implements EvaluationModule {
     @Override
     public void undoMove(MoveContext moveContext) {
         boolean forward = isForwardMove(moveContext);
-        updateMaterial(moveContext.getMove(), forward);
+        updateMaterial(moveContext.getMove(), !forward);
     }
 
     public void setPawnChangeListener(PawnChangeListener listener) {
