@@ -5,13 +5,18 @@ import java.util.Arrays;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.figures.PieceType;
-import julius.game.chessengine.utils.Score;
-
 /**
  * Tracks per-side material using incremental updates so the evaluation pipeline can
  * access midgame and endgame material totals without rescanning the board.
  */
 public final class MaterialModule implements EvaluationModule {
+
+    public static final int PAWN_VALUE = 100;
+    public static final int KNIGHT_VALUE = 320;  // was 300
+    public static final int BISHOP_VALUE = 330;  // ok
+    public static final int ROOK_VALUE = 500;    // ok
+    public static final int QUEEN_VALUE = 900;   // ok
+    public static final int BISHOP_PAIR_BONUS = 40;
 
     public interface PawnChangeListener {
         void onPawnAdded(boolean isWhite, int squareIndex);
@@ -32,17 +37,17 @@ public final class MaterialModule implements EvaluationModule {
     private static final int[] ENDGAME_VALUES = new int[7];
 
     static {
-        MIDGAME_VALUES[PAWN] = Score.PAWN_VALUE;
-        MIDGAME_VALUES[KNIGHT] = Score.KNIGHT_VALUE;
-        MIDGAME_VALUES[BISHOP] = Score.BISHOP_VALUE;
-        MIDGAME_VALUES[ROOK] = Score.ROOK_VALUE;
-        MIDGAME_VALUES[QUEEN] = Score.QUEEN_VALUE;
+        MIDGAME_VALUES[PAWN] = PAWN_VALUE;
+        MIDGAME_VALUES[KNIGHT] = KNIGHT_VALUE;
+        MIDGAME_VALUES[BISHOP] = BISHOP_VALUE;
+        MIDGAME_VALUES[ROOK] = ROOK_VALUE;
+        MIDGAME_VALUES[QUEEN] = QUEEN_VALUE;
 
-        ENDGAME_VALUES[PAWN] = Score.PAWN_VALUE;
-        ENDGAME_VALUES[KNIGHT] = Score.KNIGHT_VALUE;
-        ENDGAME_VALUES[BISHOP] = Score.BISHOP_VALUE;
-        ENDGAME_VALUES[ROOK] = Score.ROOK_VALUE;
-        ENDGAME_VALUES[QUEEN] = Score.QUEEN_VALUE;
+        ENDGAME_VALUES[PAWN] = PAWN_VALUE;
+        ENDGAME_VALUES[KNIGHT] = KNIGHT_VALUE;
+        ENDGAME_VALUES[BISHOP] = BISHOP_VALUE;
+        ENDGAME_VALUES[ROOK] = ROOK_VALUE;
+        ENDGAME_VALUES[QUEEN] = QUEEN_VALUE;
     }
 
     private final int[] midgameMaterial = new int[2];
@@ -184,8 +189,8 @@ public final class MaterialModule implements EvaluationModule {
             int previous = bishopCounts[colorIndex];
             bishopCounts[colorIndex] = previous + count;
             if (previous < 2 && bishopCounts[colorIndex] >= 2) {
-                midgameMaterial[colorIndex] += Score.BISHOP_PAIR_BONUS;
-                endgameMaterial[colorIndex] += Score.BISHOP_PAIR_BONUS;
+                midgameMaterial[colorIndex] += BISHOP_PAIR_BONUS;
+                endgameMaterial[colorIndex] += BISHOP_PAIR_BONUS;
             }
         }
     }
@@ -200,8 +205,8 @@ public final class MaterialModule implements EvaluationModule {
             int previous = bishopCounts[colorIndex];
             bishopCounts[colorIndex] = previous + 1;
             if (previous == 1) {
-                midgameMaterial[colorIndex] += Score.BISHOP_PAIR_BONUS;
-                endgameMaterial[colorIndex] += Score.BISHOP_PAIR_BONUS;
+                midgameMaterial[colorIndex] += BISHOP_PAIR_BONUS;
+                endgameMaterial[colorIndex] += BISHOP_PAIR_BONUS;
             }
         }
     }
@@ -216,8 +221,8 @@ public final class MaterialModule implements EvaluationModule {
             int previous = bishopCounts[colorIndex];
             bishopCounts[colorIndex] = previous - 1;
             if (previous == 2) {
-                midgameMaterial[colorIndex] -= Score.BISHOP_PAIR_BONUS;
-                endgameMaterial[colorIndex] -= Score.BISHOP_PAIR_BONUS;
+                midgameMaterial[colorIndex] -= BISHOP_PAIR_BONUS;
+                endgameMaterial[colorIndex] -= BISHOP_PAIR_BONUS;
             }
         }
     }
