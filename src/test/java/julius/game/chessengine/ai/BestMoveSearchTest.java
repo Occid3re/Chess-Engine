@@ -1,13 +1,18 @@
 package julius.game.chessengine.ai;
 
 import julius.game.chessengine.board.Move;
+import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.Engine;
+import julius.game.chessengine.utils.Score;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
@@ -99,7 +104,123 @@ public class BestMoveSearchTest {
 
         Assertions.assertNotEquals(-1, lastMove, "Engine failed to make a move for FEN: " + fen);
         String moveString = Move.convertIntToMove(lastMove).toString();
+        String statistics = compileMoveStatistics(fen, moveString, ai, expectedMoves);
+        System.out.println(statistics);
         Assertions.assertTrue(expectedMoves.contains(moveString),
-                "Expected one of " + expectedMoves + " but got " + moveString + " for FEN: " + fen);
+                "Expected one of " + expectedMoves + " but got " + moveString + " for FEN: " + fen
+                        + statistics);
+    }
+
+    private String compileMoveStatistics(String fen, String chosenMove, AI ai, List<String> expectedMoves) {
+        Engine analysisEngine = new Engine();
+        analysisEngine.importBoardFromFen(fen);
+
+        boolean whiteToMove = fen.split(" ")[1].equals("w");
+        double baselineForMover = orientScoreForMover(whiteToMove,
+                analysisEngine.getGameState().getScore().getScoreDifference());
+
+        MoveList legalMovesSnapshot = analysisEngine.getAllLegalMoves();
+        List<Integer> legalMoves = new ArrayList<>(legalMovesSnapshot.size());
+        for (int i = 0; i < legalMovesSnapshot.size(); i++) {
+            legalMoves.add(legalMovesSnapshot.getMove(i));
+        }
+
+        List<MoveEvaluation> evaluations = new ArrayList<>(legalMoves.size());
+        for (int moveInt : legalMoves) {
+            analysisEngine.performMove(moveInt);
+            double scoreDiff = analysisEngine.getGameState().getScore().getScoreDifference();
+            double moverScore = orientScoreForMover(whiteToMove, scoreDiff);
+            analysisEngine.undoLastMove();
+            evaluations.add(new MoveEvaluation(Move.convertIntToMove(moveInt).toString(), moverScore));
+        }
+
+        Comparator<MoveEvaluation> comparator = whiteToMove
+                ? Comparator.comparingDouble(MoveEvaluation::score).reversed()
+                : Comparator.comparingDouble(MoveEvaluation::score);
+        evaluations.sort(comparator);
+
+        MoveEvaluation chosenEval = evaluations.stream()
+                .filter(ev -> ev.move().equals(chosenMove))
+                .findFirst()
+                .orElse(null);
+
+        String pvString = renderPrincipalVariation(whiteToMove, ai.getCalculatedLine());
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(System.lineSeparator());
+        sb.append("=== Engine decision statistics ===").append(System.lineSeparator());
+        sb.append("FEN: ").append(fen).append(System.lineSeparator());
+        sb.append("Side to move: ").append(whiteToMove ? "White" : "Black").append(System.lineSeparator());
+        sb.append("Expected best moves: ").append(expectedMoves).append(System.lineSeparator());
+        sb.append("Baseline evaluation: ").append(formatCentipawns(baselineForMover)).append(" pawns")
+                .append(System.lineSeparator());
+
+        if (chosenEval != null) {
+            double delta = chosenEval.score() - baselineForMover;
+            sb.append("Chosen move: ").append(chosenMove)
+                    .append(" -> ").append(formatCentipawns(chosenEval.score())).append(" pawns")
+                    .append(" (Δ vs baseline: ").append(formatCentipawns(delta)).append(")")
+                    .append(System.lineSeparator());
+        } else {
+            sb.append("Chosen move: ").append(chosenMove)
+                    .append(" (not present in legal move snapshot)")
+                    .append(System.lineSeparator());
+        }
+
+        sb.append("Top candidates by evaluation:").append(System.lineSeparator());
+        for (int i = 0; i < Math.min(5, evaluations.size()); i++) {
+            MoveEvaluation ev = evaluations.get(i);
+            sb.append("  ").append(i + 1).append(". ").append(ev.move())
+                    .append(" -> ").append(formatCentipawns(ev.score())).append(" pawns");
+            if (chosenEval != null) {
+                double delta = ev.score() - chosenEval.score();
+                if (Math.abs(delta) < 0.5) {
+                    sb.append(" (matches chosen)");
+                } else {
+                    sb.append(" (Δ vs chosen: ").append(formatCentipawns(delta)).append(")");
+                }
+            }
+            sb.append(System.lineSeparator());
+        }
+
+        sb.append("Principal variation: ").append(pvString).append(System.lineSeparator());
+        sb.append("==================================").append(System.lineSeparator());
+
+        return sb.toString();
+    }
+
+    private String renderPrincipalVariation(boolean whiteToMove, List<MoveAndScore> pv) {
+        if (pv == null || pv.isEmpty()) {
+            return "<unavailable>";
+        }
+
+        List<String> segments = new ArrayList<>(pv.size());
+        boolean moverIsWhite = whiteToMove;
+        for (MoveAndScore moveAndScore : pv) {
+            String notation = Move.convertIntToMove(moveAndScore.getMove()).toString();
+            double orientedScore = moverIsWhite ? moveAndScore.getScore() : -moveAndScore.getScore();
+            segments.add(notation + " (" + formatCentipawns(orientedScore) + " pawns)");
+            moverIsWhite = !moverIsWhite;
+        }
+        return String.join(" -> ", segments);
+    }
+
+    private static double orientScoreForMover(boolean whiteToMove, double scoreDifference) {
+        return whiteToMove ? scoreDifference : -scoreDifference;
+    }
+
+    private static String formatCentipawns(double centipawns) {
+        if (!Double.isFinite(centipawns)) {
+            return "n/a";
+        }
+        if (Math.abs(centipawns) >= Score.CHECKMATE - 1000) {
+            double mateDistance = Score.CHECKMATE - Math.abs(centipawns);
+            long plies = Math.max(0, Math.round(mateDistance));
+            return (centipawns > 0 ? "#+" : "#-") + (plies > 0 ? plies : "");
+        }
+        return String.format(Locale.US, "%+.2f", centipawns / 100.0);
+    }
+
+    private record MoveEvaluation(String move, double score) {
     }
 }
