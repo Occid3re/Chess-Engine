@@ -1025,10 +1025,9 @@ public class AI {
         // STRICT DEPTH MANAGEMENT:
         // Do NOT increase 'depth' at node entry. Child must always use < this depth.
         if (depth <= 0) {
-            // Quiescence returns white-oriented score; flip for black-to-move
+            // Quiescence evaluation is already returned from the side-to-move perspective
             double eval = evaluateBoard(simulatorEngine, isWhite, deadline);
             if (eval == EXIT_FLAG) return EXIT_FLAG;
-            if (!isWhite) eval = -eval;
             return eval;
         }
 
