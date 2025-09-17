@@ -5,6 +5,7 @@ import julius.game.chessengine.engine.Engine;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static julius.game.chessengine.utils.Score.CHECKMATE;
@@ -21,6 +22,7 @@ public final class SearchTask {
     private final CountDownLatch completion;
     private final AtomicBoolean stop = new AtomicBoolean(false);
     private final AtomicReference<BestMoveDepth> best;
+    private final AtomicInteger iterationDepth = new AtomicInteger(0);
 
     SearchTask(long id, long boardHash, boolean whiteToMove, long deadline, int threadCount) {
         this.id = id;
@@ -41,6 +43,18 @@ public final class SearchTask {
     void workerDone() { completion.countDown(); }
     void requestStop() { stop.set(true); }
     boolean isStopRequested() { return stop.get(); }
+
+    boolean beginIteration(int depth) {
+        while (true) {
+            int current = iterationDepth.get();
+            if (current >= depth) {
+                return false;
+            }
+            if (iterationDepth.compareAndSet(current, depth)) {
+                return true;
+            }
+        }
+    }
 
     void awaitCompletion() {
         try {
