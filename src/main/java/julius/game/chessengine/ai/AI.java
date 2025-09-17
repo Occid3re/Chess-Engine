@@ -892,12 +892,10 @@ public class AI {
         // -------- Safer Null-move pruning (same as before, but use depthHere) --------
         MoveList moves = simulatorEngine.getAllLegalMoves();
         int mobility = moves.size();
+        BitBoard bitBoard = simulatorEngine.getBitBoard();
         boolean allowNullMove = useNullMovePruning
-                && depth >= 4
                 && !inCheck
-                && !simulatorEngine.isEndgame()
-                && prevMove != -1
-                && mobility >= 8;
+                && !simulatorEngine.isEndgame();
 
         if (allowNullMove) {
             double mateThreatScore = CHECKMATE - (plyFromRoot + 1);
@@ -907,21 +905,31 @@ public class AI {
         }
 
         if (allowNullMove) {
+            int reduction = computeNullMoveReduction(bitBoard, depth, isWhite, mobility);
             int savedEp = simulatorEngine.doNullMoveForSearch();
             nullMoveCount++;
-            double nullScore = alphaBeta(simulatorEngine, depth - 1 - 2, alpha, beta, !isWhite, deadline, -1, plyFromRoot + 1);
+            double nullScore = alphaBeta(simulatorEngine, depth - 1 - reduction, alpha, beta, !isWhite, deadline, -1, plyFromRoot + 1);
             simulatorEngine.undoNullMoveForSearch(savedEp);
 
             if (nullScore == EXIT_FLAG) return EXIT_FLAG;
 
             boolean nullFailHigh = isWhite ? nullScore >= beta : nullScore <= alpha;
             if (nullFailHigh) {
-                double verificationScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, isWhite, deadline, prevMove, plyFromRoot);
-                if (verificationScore == EXIT_FLAG) return EXIT_FLAG;
-                if (Math.abs(verificationScore) < CHECKMATE - (plyFromRoot + 1)) {
-                    nullFailHigh = isWhite ? verificationScore >= beta : verificationScore <= alpha;
-                } else {
-                    nullFailHigh = false;
+                double mateThreshold = CHECKMATE - (plyFromRoot + 1);
+                double windowEdge = isWhite ? beta : alpha;
+                double swingThreshold = Math.max(600, mateThreshold / 64.0);
+                double swing = Double.isFinite(windowEdge) ? Math.abs(nullScore - windowEdge) : Math.abs(nullScore);
+                boolean requiresVerification = Math.abs(nullScore) >= mateThreshold
+                        || swing >= swingThreshold;
+
+                if (requiresVerification) {
+                    double verificationScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, isWhite, deadline, prevMove, plyFromRoot);
+                    if (verificationScore == EXIT_FLAG) return EXIT_FLAG;
+                    if (Math.abs(verificationScore) < mateThreshold) {
+                        nullFailHigh = isWhite ? verificationScore >= beta : verificationScore <= alpha;
+                    } else {
+                        nullFailHigh = false;
+                    }
                 }
             }
 
@@ -965,6 +973,39 @@ public class AI {
         long kingZone = KING_ATTACKS[kingIndex];
         long myAttacks = bb.getAttackBitboard(moverIsWhite);
         return (myAttacks & kingZone) != 0L;
+    }
+
+    private int computeNullMoveReduction(BitBoard board, int depth, boolean isWhite, int mobility) {
+        int maxReduction = depth - 2;
+        if (maxReduction <= 0) {
+            return 0;
+        }
+
+        long pieces = isWhite ? board.getWhitePieces() : board.getBlackPieces();
+        long pawns = isWhite ? board.getWhitePawns() : board.getBlackPawns();
+        int nonPawnMaterial = Long.bitCount(pieces) - Long.bitCount(pawns);
+        if (nonPawnMaterial < 0) {
+            nonPawnMaterial = 0;
+        }
+
+        double depthFactor = Math.min(depth, 10) / 10.0;
+        double materialFactor = Math.min(nonPawnMaterial, 12) / 12.0;
+        double mobilityFactor = Math.min(Math.max(mobility, 0), 30) / 30.0;
+
+        double reductionEstimate = 1.25
+                + (depthFactor * 1.5)
+                + (materialFactor * 0.75)
+                + (mobilityFactor * 0.5);
+
+        if (nonPawnMaterial <= 2 || mobility <= 4) {
+            reductionEstimate -= 0.75;
+        }
+        if (mobility <= 2) {
+            reductionEstimate -= 0.5;
+        }
+
+        int reduction = (int) Math.floor(Math.max(0.0, reductionEstimate));
+        return Math.min(reduction, maxReduction);
     }
 
     private int countPawnsOnFile(BitBoard board, long fileMask) {
