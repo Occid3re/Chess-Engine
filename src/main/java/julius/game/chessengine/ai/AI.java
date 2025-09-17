@@ -1424,22 +1424,26 @@ public class AI {
             simulatorEngine.performMove(move);
             long newBoardHash = simulatorEngine.getBoardStateHash();
 
+            boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
+            boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, isWhite);
+            boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, isWhite);
+            boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
+
+            int nextDepth = depth - 1;
+            boolean forcing = givesCheck || attacksQueen;
+            boolean allowExtend = forcing && extStreak < MAX_CHECK_EXTENSIONS_IN_A_ROW;
+            if (allowExtend) nextDepth++;
+            int nextExtStreak = allowExtend ? extStreak + 1 : 0;
+
             double eval;
             TranspositionTableEntry entry = transpositionTable.get(newBoardHash);
-            if (entry != null && entry.depth >= depth) {
+            boolean ttExactHit = entry != null
+                    && entry.nodeType == NodeType.EXACT
+                    && entry.depth >= nextDepth;
+
+            if (ttExactHit) {
                 eval = entry.score;
             } else {
-                boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
-                boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, isWhite);
-                boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, isWhite);
-                boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
-
-                int nextDepth = depth - 1;
-                boolean forcing = givesCheck || attacksQueen;
-                boolean allowExtend = forcing && extStreak < MAX_CHECK_EXTENSIONS_IN_A_ROW;
-                if (allowExtend) nextDepth++;
-                int nextExtStreak = allowExtend ? extStreak + 1 : 0;
-
                 boolean canReduce = !inCheckAtNode
                         && !isTactical
                         && !givesCheck
@@ -1603,22 +1607,26 @@ public class AI {
             simulatorEngine.performMove(move);
             long newBoardHash = simulatorEngine.getBoardStateHash();
 
+            boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
+            boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, isWhite);
+            boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, isWhite);
+            boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
+
+            int nextDepth = depth - 1;
+            boolean forcing = givesCheck || attacksQueen;
+            boolean allowExtend = forcing && extStreak < MAX_CHECK_EXTENSIONS_IN_A_ROW;
+            if (allowExtend) nextDepth++;
+            int nextExtStreak = allowExtend ? extStreak + 1 : 0;
+
             double eval;
             TranspositionTableEntry entry = transpositionTable.get(newBoardHash);
-            if (entry != null && entry.depth >= depth) {
+            boolean ttExactHit = entry != null
+                    && entry.nodeType == NodeType.EXACT
+                    && entry.depth >= nextDepth;
+
+            if (ttExactHit) {
                 eval = entry.score;
             } else {
-                boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
-                boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, isWhite);
-                boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, isWhite);
-                boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
-
-                int nextDepth = depth - 1;
-                boolean forcing = givesCheck || attacksQueen;
-                boolean allowExtend = forcing && extStreak < MAX_CHECK_EXTENSIONS_IN_A_ROW;
-                if (allowExtend) nextDepth++;
-                int nextExtStreak = allowExtend ? extStreak + 1 : 0;
-
                 boolean canReduce = !inCheckAtNode
                         && !isTactical
                         && !givesCheck
