@@ -3,12 +3,15 @@ package julius.game.chessengine.utils;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.FEN;
 import julius.game.chessengine.board.MoveHelper;
+import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.evaluation.ActivityModule;
 import julius.game.chessengine.evaluation.EvaluationContext;
 import julius.game.chessengine.evaluation.EvaluationModule;
 import julius.game.chessengine.evaluation.EvaluationPipeline;
 import julius.game.chessengine.evaluation.KingSafetyModule;
+import julius.game.chessengine.evaluation.MaterialModule;
 import julius.game.chessengine.evaluation.PawnStructureModule;
+import julius.game.chessengine.evaluation.PieceSquareModule;
 import julius.game.chessengine.evaluation.KingSafetyModule.KingSafetyView;
 import julius.game.chessengine.evaluation.PawnStructureModule.PawnStructureView;
 import julius.game.chessengine.figures.PieceType;
@@ -16,6 +19,8 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.List;
 
 public class ScoreEvaluationTest {
 
@@ -85,6 +90,30 @@ public class ScoreEvaluationTest {
     }
 
     @Test
+    void deliveringCheckAddsBonusForAttacker() {
+        BitBoard board = FEN.translateFENtoBitBoard("4k3/4Q3/8/8/8/8/8/4K3 b - - 0 1");
+
+        ScoreSnapshot neutral = evaluate(board, GameStateEnum.PLAY);
+        ScoreSnapshot checked = evaluate(board, GameStateEnum.BLACK_IN_CHECK);
+
+        assertEquals(Score.CHECK, checked.midgame() - neutral.midgame());
+        assertEquals(Score.CHECK, checked.endgame() - neutral.endgame());
+        assertEquals(Score.CHECK, checked.blended() - neutral.blended());
+    }
+
+    @Test
+    void beingInCheckSubtractsBonus() {
+        BitBoard board = FEN.translateFENtoBitBoard("4k3/8/8/8/8/8/4q3/4K3 w - - 0 1");
+
+        ScoreSnapshot neutral = evaluate(board, GameStateEnum.PLAY);
+        ScoreSnapshot checked = evaluate(board, GameStateEnum.WHITE_IN_CHECK);
+
+        assertEquals(-Score.CHECK, checked.midgame() - neutral.midgame());
+        assertEquals(-Score.CHECK, checked.endgame() - neutral.endgame());
+        assertEquals(-Score.CHECK, checked.blended() - neutral.blended());
+    }
+
+    @Test
     void undoRestoresCapturedMaterial() {
         BitBoard board = FEN.translateFENtoBitBoard("8/8/8/3p4/3P4/8/8/8 w - - 0 1");
         Score score = Score.initializeScore(board);
@@ -124,5 +153,30 @@ public class ScoreEvaluationTest {
     private static PawnStructureView pawnStructure(BitBoard board) {
         PawnStructureModule module = new PawnStructureModule();
         return module.getView(board);
+    }
+
+    private static ScoreSnapshot evaluate(BitBoard board, GameStateEnum state) {
+        MaterialModule material = new MaterialModule();
+        PawnStructureModule pawns = new PawnStructureModule();
+        PieceSquareModule pieceSquares = new PieceSquareModule();
+        ActivityModule activity = new ActivityModule();
+        KingSafetyModule kingSafety = new KingSafetyModule();
+        material.setPawnChangeListener(pawns);
+        EvaluationPipeline pipeline = new EvaluationPipeline(List.of(
+                material,
+                pawns,
+                pieceSquares,
+                activity,
+                kingSafety
+        ));
+        pipeline.initialize(EvaluationContext.from(board, state));
+        return new ScoreSnapshot(
+                pipeline.getMidgameScore(),
+                pipeline.getEndgameScore(),
+                pipeline.getBlendedScore()
+        );
+    }
+
+    private record ScoreSnapshot(int midgame, int endgame, int blended) {
     }
 }
