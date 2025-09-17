@@ -546,8 +546,11 @@ def safe_make_move(client: berserk.Client, game_id: str, uci: str) -> bool:
     return False
 
 
-def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id: str,
-              me_id: str) -> chess.engine.SimpleEngine:
+def play_game(client: berserk.Client,
+              engine: chess.engine.SimpleEngine,
+              game_id: str,
+              me_id: str,
+              active_counter: "ActiveCounter") -> chess.engine.SimpleEngine:
     stream = client.bots.stream_game_state(game_id)
 
     my_color_is_white = None
@@ -656,7 +659,9 @@ def play_game(client: berserk.Client, engine: chess.engine.SimpleEngine, game_id
 
         elif t == "gameFinish":
             print(f"[*] Game finished: {game_id}")
+            active_counter.dec()   # <- ensure counter decreases here
             break
+
 
     return engine
 
@@ -1040,7 +1045,7 @@ def run_bot():
                 game_id = event["game"]["id"]
                 print(f"[event] Game start: {game_id}")
                 active_counter.inc()
-                engine = play_game(client, engine, game_id, me_id)
+                engine = play_game(client, engine, game_id, me_id, active_counter)
 
             elif et == "gameFinish":
                 # Top-level finish notices; keep the counter accurate
