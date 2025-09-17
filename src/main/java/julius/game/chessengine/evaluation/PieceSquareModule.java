@@ -6,8 +6,14 @@ import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.figures.PieceType;
 
+import static julius.game.chessengine.evaluation.MaterialModule.BISHOP_VALUE;
+import static julius.game.chessengine.evaluation.MaterialModule.KNIGHT_VALUE;
+import static julius.game.chessengine.evaluation.MaterialModule.PAWN_VALUE;
+import static julius.game.chessengine.evaluation.MaterialModule.QUEEN_VALUE;
+import static julius.game.chessengine.evaluation.MaterialModule.ROOK_VALUE;
 import static julius.game.chessengine.helper.BishopHelper.BISHOP_ENDGAME_POSITIONAL_VALUES;
 import static julius.game.chessengine.helper.BishopHelper.BISHOP_MIDGAME_POSITIONAL_VALUES;
+import static julius.game.chessengine.helper.BitHelper.FileMasks;
 import static julius.game.chessengine.helper.KingHelper.BLACK_KING_POSITIONAL_VALUES;
 import static julius.game.chessengine.helper.KingHelper.KING_ENDGAME_POSITIONAL_VALUES;
 import static julius.game.chessengine.helper.KingHelper.WHITE_KING_POSITIONAL_VALUES;
@@ -46,6 +52,12 @@ public final class PieceSquareModule implements EvaluationModule {
     private static final int EARLY_QUEEN_DEVELOPMENT_PENALTY_PER_MINOR = -15;
     private static final int MIN_UNDEVELOPED_MINORS_FOR_QUEEN_PENALTY = 2;
     private static final int START_POSITION_PENALTY = -40;
+    private static final int BLEND_SCALE = 256;
+    private static final int CASTLING_BONUS = 20;
+    private static final int NOT_CASTLED_AND_ROOK_MOVE_PENALTY = -10;
+
+    private static final long NOT_A_FILE = ~FileMasks[0];
+    private static final long NOT_H_FILE = ~FileMasks[7];
 
     private static final int[][][] MIDGAME_TABLES = new int[2][7][];
     private static final int[][][] ENDGAME_TABLES = new int[2][7][];
@@ -120,10 +132,12 @@ public final class PieceSquareModule implements EvaluationModule {
     private int midgameTotal;
     private int endgameTotal;
     private int developmentContribution;
+    private int castlingContribution;
     private int currentPhase;
     private boolean initialized;
     private boolean dirty = true;
     private boolean developmentDirty;
+    private boolean castlingDirty = true;
 
     public PieceSquareModule() {
         Arrays.fill(occupantColor, -1);
@@ -134,6 +148,7 @@ public final class PieceSquareModule implements EvaluationModule {
         rebuildFromBoard(context.getBoard());
         currentPhase = clampPhase(context.getPhase());
         recalculateDevelopmentContribution();
+        recalculateCastlingContribution(context.getBoard(), currentPhase);
         dirty = false;
         initialized = true;
     }
@@ -146,6 +161,7 @@ public final class PieceSquareModule implements EvaluationModule {
         rebuildFromBoard(context.getBoard());
         currentPhase = clampPhase(context.getPhase());
         recalculateDevelopmentContribution();
+        recalculateCastlingContribution(context.getBoard(), currentPhase);
         dirty = false;
     }
 
@@ -155,6 +171,7 @@ public final class PieceSquareModule implements EvaluationModule {
             return;
         }
         boolean forward = isForwardMove(moveContext);
+        castlingDirty = true;
         if (!updateForMove(moveContext.getMove(), forward)) {
             rebuildFromBoard(moveContext.getCurrentContext().getBoard());
         }
@@ -165,6 +182,9 @@ public final class PieceSquareModule implements EvaluationModule {
         }
         if (developmentDirty) {
             recalculateDevelopmentContribution();
+        }
+        if (castlingDirty) {
+            recalculateCastlingContribution(moveContext.getCurrentContext().getBoard(), currentPhase);
         }
         dirty = false;
     }
@@ -196,6 +216,7 @@ public final class PieceSquareModule implements EvaluationModule {
     @Override
     public void markDirty() {
         dirty = true;
+        castlingDirty = true;
     }
 
     private boolean ensureInitialized(MoveContext moveContext) {
@@ -473,6 +494,135 @@ public final class PieceSquareModule implements EvaluationModule {
         developmentDirty = false;
     }
 
+    private void recalculateCastlingContribution(BitBoard board, int phase) {
+        if (!castlingDirty) {
+            return;
+        }
+        if (board == null) {
+            castlingContribution = 0;
+            castlingDirty = false;
+            return;
+        }
+        int contribution = computeCastlingContribution(board, phase);
+        int delta = contribution - castlingContribution;
+        if (delta != 0) {
+            midgameTotal += delta;
+            endgameTotal += delta;
+            castlingContribution = contribution;
+        }
+        castlingDirty = false;
+    }
+
+    private int computeCastlingContribution(BitBoard board, int phase) {
+        int materialBalance = computeMaterialBalance(board);
+        int whiteAdjustment = computeCastlingAdjustment(
+                board.getWhiteKing(),
+                board.getWhitePawns(),
+                board.isWhiteKingHasCastled(),
+                board.isWhiteKingMoved(),
+                board.isWhiteRookA1Moved(),
+                board.isWhiteRookH1Moved(),
+                true,
+                phase,
+                materialBalance
+        );
+        int blackAdjustment = computeCastlingAdjustment(
+                board.getBlackKing(),
+                board.getBlackPawns(),
+                board.isBlackKingHasCastled(),
+                board.isBlackKingMoved(),
+                board.isBlackRookA8Moved(),
+                board.isBlackRookH8Moved(),
+                false,
+                phase,
+                materialBalance
+        );
+        return whiteAdjustment - blackAdjustment;
+    }
+
+    private int computeCastlingAdjustment(long king,
+                                          long pawns,
+                                          boolean hasCastled,
+                                          boolean kingMoved,
+                                          boolean rookAFileMoved,
+                                          boolean rookHFileMoved,
+                                          boolean white,
+                                          int phase,
+                                          int materialBalance) {
+        if (king == 0L) {
+            return 0;
+        }
+        int castlingBonus = CASTLING_BONUS * (BLEND_SCALE - phase) / BLEND_SCALE;
+        int rookMovePenalty = NOT_CASTLED_AND_ROOK_MOVE_PENALTY * (BLEND_SCALE - phase) / BLEND_SCALE;
+        if (white) {
+            if (materialBalance < 0) {
+                rookMovePenalty /= 2;
+            }
+        } else {
+            if (materialBalance > 0) {
+                rookMovePenalty /= 2;
+            }
+        }
+
+        boolean applyPenalty = false;
+        if (!hasCastled) {
+            int kingIndex = Long.numberOfTrailingZeros(king);
+            long forwardMask;
+            if (white) {
+                forwardMask = king << 8;
+                if ((king & NOT_A_FILE) != 0) {
+                    forwardMask |= (king << 7);
+                }
+                if ((king & NOT_H_FILE) != 0) {
+                    forwardMask |= (king << 9);
+                }
+            } else {
+                forwardMask = king >>> 8;
+                if ((king & NOT_A_FILE) != 0) {
+                    forwardMask |= (king >>> 9);
+                }
+                if ((king & NOT_H_FILE) != 0) {
+                    forwardMask |= (king >>> 7);
+                }
+            }
+            boolean missingShield = Long.bitCount(pawns & forwardMask) < 3;
+            int fileIndex = kingIndex & 7;
+            long fileMask = FileMasks[fileIndex];
+            boolean openOrHalfOpen = (pawns & fileMask) == 0;
+            applyPenalty = missingShield || openOrHalfOpen;
+        }
+
+        int adjustment = 0;
+        if (hasCastled) {
+            adjustment += castlingBonus;
+        } else if (applyPenalty) {
+            if (rookAFileMoved) {
+                adjustment += rookMovePenalty;
+            }
+            if (rookHFileMoved) {
+                adjustment += rookMovePenalty;
+            }
+            if (kingMoved) {
+                adjustment += rookMovePenalty * 2;
+            }
+        }
+        return adjustment;
+    }
+
+    private static int computeMaterialBalance(BitBoard board) {
+        int whiteMaterial = Long.bitCount(board.getWhitePawns()) * PAWN_VALUE
+                + Long.bitCount(board.getWhiteKnights()) * KNIGHT_VALUE
+                + Long.bitCount(board.getWhiteBishops()) * BISHOP_VALUE
+                + Long.bitCount(board.getWhiteRooks()) * ROOK_VALUE
+                + Long.bitCount(board.getWhiteQueens()) * QUEEN_VALUE;
+        int blackMaterial = Long.bitCount(board.getBlackPawns()) * PAWN_VALUE
+                + Long.bitCount(board.getBlackKnights()) * KNIGHT_VALUE
+                + Long.bitCount(board.getBlackBishops()) * BISHOP_VALUE
+                + Long.bitCount(board.getBlackRooks()) * ROOK_VALUE
+                + Long.bitCount(board.getBlackQueens()) * QUEEN_VALUE;
+        return whiteMaterial - blackMaterial;
+    }
+
     private void rebuildFromBoard(BitBoard board) {
         Arrays.fill(occupantColor, -1);
         Arrays.fill(occupantPiece, 0);
@@ -485,6 +635,7 @@ public final class PieceSquareModule implements EvaluationModule {
         midgameTotal = 0;
         endgameTotal = 0;
         developmentContribution = 0;
+        castlingContribution = 0;
 
         fillPieces(board.getWhitePawns(), WHITE, PAWN);
         fillPieces(board.getWhiteKnights(), WHITE, KNIGHT);
@@ -501,6 +652,7 @@ public final class PieceSquareModule implements EvaluationModule {
         fillPieces(board.getBlackKing(), BLACK, KING);
 
         developmentDirty = true;
+        castlingDirty = true;
         initialized = true;
     }
 
