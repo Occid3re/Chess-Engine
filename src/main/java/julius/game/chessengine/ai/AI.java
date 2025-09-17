@@ -495,18 +495,22 @@ public class AI {
                         return scoreCache.get(moveInt);
                     }
 
-                    // If not a killer move, proceed with existing scoring method
-                    Long boardStateHash = simulatorEngine.getBoardStateHashAfterMove(moveInt);
-                    TranspositionTableEntry entry = transpositionTable.get(boardStateHash);
-                    if (entry != null && entry.depth >= currentDepth) {
-                        return isWhite ? entry.score : -entry.score;
-                    } else {
-                        simulatorEngine.performMove(moveInt);
-                        double score = evaluateBoard(simulatorEngine, isWhite, startTime, timeLimit);
+                    double score;
+                    simulatorEngine.performMove(moveInt);
+                    try {
+                        long boardStateHash = simulatorEngine.getBoardStateHash();
+                        TranspositionTableEntry entry = transpositionTable.get(boardStateHash);
+                        if (entry != null && entry.depth >= currentDepth) {
+                            score = isWhite ? entry.score : -entry.score;
+                        } else {
+                            score = evaluateBoard(simulatorEngine, isWhite, startTime, timeLimit);
+                        }
+                    } finally {
                         simulatorEngine.undoLastMove();
-                        scoreCache.put(moveInt, score);
-                        return score;
                     }
+
+                    scoreCache.put(moveInt, score);
+                    return score;
                 }).reversed()
         );
 

@@ -280,17 +280,6 @@ public class Engine {
         return FEN.translateBoardToFEN(bitBoard);
     }
 
-    public Long getBoardStateHashAfterMove(int move) {
-        // Step 1: Create a deep copy of the current board state
-        BitBoard boardCopy = new BitBoard(this.bitBoard);
-
-        // Step 2: Simulate the move on the copied board
-        boardCopy.performMove(move); // Assuming 'false' means no need to update the score
-
-        // Step 3: Return the computed hash
-        return boardCopy.getBoardStateHash();
-    }
-
     public boolean isEndgame() {
         return bitBoard.isEndgame();
     }
