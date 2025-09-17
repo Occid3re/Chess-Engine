@@ -59,12 +59,16 @@ public class BestMoveSearchTest {
                         List.of("Nc3")
                 },
                 new Object[]{
-                "3r2k1/pp3p2/3B1b2/3p1p1p/8/2P5/PP3PPP/3R2K1 w - - 2 27",
+                        "3r2k1/pp3p2/3B1b2/3p1p1p/8/2P5/PP3PPP/3R2K1 w - - 2 27",
                         List.of("Bc5")
                 },
                 new Object[]{
-                "r5k1/pb1p2pp/2pP1r2/4Qp2/2p5/q1B2P2/P1P2PPP/1R1R2K1 b - - 7 21",
+                        "r5k1/pb1p2pp/2pP1r2/4Qp2/2p5/q1B2P2/P1P2PPP/1R1R2K1 b - - 7 21",
                         List.of("Ba6", "Rb8")
+                },
+                new Object[]{
+                        "rnb1k2r/2bp3p/3qpp1n/P5p1/Q1P3P1/PN6/4BPNP/R4RK1 w - - 1 24",
+                        List.of("f4")
                 }
 
         );
@@ -75,6 +79,7 @@ public class BestMoveSearchTest {
     void testBestMove(String fen, List<String> expectedMoves) throws InterruptedException {
         Engine engine = new Engine();
         engine.importBoardFromFen(fen);
+
 
         AI ai = new AI(engine);
         ai.setTimeLimit(10000L); // milliseconds
