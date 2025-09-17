@@ -2,6 +2,7 @@ package julius.game.chessengine.utils;
 
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.FEN;
+import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.evaluation.ActivityModule;
 import julius.game.chessengine.evaluation.EvaluationContext;
 import julius.game.chessengine.evaluation.EvaluationModule;
@@ -10,6 +11,7 @@ import julius.game.chessengine.evaluation.KingSafetyModule;
 import julius.game.chessengine.evaluation.PawnStructureModule;
 import julius.game.chessengine.evaluation.KingSafetyModule.KingSafetyView;
 import julius.game.chessengine.evaluation.PawnStructureModule.PawnStructureView;
+import julius.game.chessengine.figures.PieceType;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -60,6 +62,32 @@ public class ScoreEvaluationTest {
         PawnStructureView view = pawnStructure(board);
         assertEquals(PawnStructureModule.CENTER_PAWN_BONUS, view.blackCenter().blend(board.getPhase()));
         assertEquals(0, view.whiteCenter().blend(board.getPhase()));
+    }
+
+    @Test
+    void undoRestoresCapturedMaterial() {
+        BitBoard board = FEN.translateFENtoBitBoard("8/8/8/3p4/3P4/8/8/8 w - - 0 1");
+        Score score = Score.initializeScore(board);
+
+        int initialMidgame = score.getMidgameScore();
+        int initialEndgame = score.getEndgameScore();
+
+        int from = MoveHelper.convertStringToIndex("d4");
+        int to = MoveHelper.convertStringToIndex("d5");
+        int move = MoveHelper.createMoveInt(from, to, PieceType.PAWN, true, true,
+                false, false, null, PieceType.PAWN, false, false, board.getLastMoveDoubleStepPawnIndex());
+
+        board.performMove(move);
+        score.applyMove(board, move, null);
+
+        assertTrue(score.getMidgameScore() > initialMidgame);
+        assertTrue(score.getEndgameScore() > initialEndgame);
+
+        board.undoMove(move);
+        score.undoMove(board, move, null);
+
+        assertEquals(initialMidgame, score.getMidgameScore());
+        assertEquals(initialEndgame, score.getEndgameScore());
     }
 
     private static int blendedModuleScore(EvaluationModule module, BitBoard board) {
