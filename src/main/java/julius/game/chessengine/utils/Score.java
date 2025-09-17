@@ -9,6 +9,7 @@ import julius.game.chessengine.evaluation.EvaluationContext;
 import julius.game.chessengine.evaluation.EvaluationModule;
 import julius.game.chessengine.evaluation.EvaluationPipeline;
 import julius.game.chessengine.evaluation.MoveContext;
+import julius.game.chessengine.evaluation.KingSafetyModule;
 import julius.game.chessengine.evaluation.MaterialModule;
 import julius.game.chessengine.evaluation.PawnStructureModule;
 import julius.game.chessengine.evaluation.PieceSquareModule;
@@ -86,6 +87,7 @@ public class Score {
     private final PawnStructureModule pawnStructureModule = new PawnStructureModule();
     private final PieceSquareModule pieceSquareModule = new PieceSquareModule();
     private final ActivityModule activityModule = new ActivityModule();
+    private final KingSafetyModule kingSafetyModule = new KingSafetyModule();
     private final EvaluationPipeline evaluationPipeline;
     private EvaluationContext evaluationContext;
     private boolean pipelineInitialized;
@@ -210,7 +212,13 @@ public class Score {
 
     private EvaluationPipeline createPipeline() {
         EvaluationModule module = new LegacyEvaluationModule();
-        return new EvaluationPipeline(List.of(materialModule, pawnStructureModule, pieceSquareModule, activityModule, module));
+        return new EvaluationPipeline(List.of(
+                materialModule,
+                pawnStructureModule,
+                pieceSquareModule,
+                activityModule,
+                kingSafetyModule,
+                module));
     }
 
     private void syncPipeline(EvaluationContext context) {
@@ -678,12 +686,6 @@ public class Score {
         return true;
     }
 
-    private int evaluateQueenSafety(long queenBits, long enemyAttacks) {
-        if (queenBits == 0) return 0;
-        int qSq = Long.numberOfTrailingZeros(queenBits);
-        return ((enemyAttacks & (1L << qSq)) != 0) ? QUEEN_ATTACKED_PENALTY : 0;
-    }
-
     private int evaluateMinorPieceSafety(
             long knights,
             long bishops,
@@ -860,7 +862,6 @@ public class Score {
     }
 
     public void updateKingSafety(BitBoard bitBoard) {
-        boolean isEndgame = bitBoard.isEndgame();
         long whiteKing = bitBoard.getWhiteKing();
         long blackKing = bitBoard.getBlackKing();
         long whitePawns = bitBoard.getWhitePawns();
@@ -878,45 +879,12 @@ public class Score {
         long blackRooks = bitBoard.getBlackRooks();
         long blackQueens = bitBoard.getBlackQueens();
 
-        long whiteKingZone = whiteKing != 0 ? KING_ATTACKS[Long.numberOfTrailingZeros(whiteKing)] : 0L;
-        long blackKingZone = blackKing != 0 ? KING_ATTACKS[Long.numberOfTrailingZeros(blackKing)] : 0L;
-
-        int whiteKingPawnAttacks = countPawnAttacksInZone(blackPawns, false, whiteKingZone);
-        int whiteKingKnightAttacks = countKnightAttacksInZone(blackKnights, whiteKingZone);
-        int whiteKingBishopAttacks = countBishopAttacksInZone(blackBishops, allPieces, whiteKingZone);
-        int whiteKingRookAttacks = countRookAttacksInZone(blackRooks, allPieces, whiteKingZone);
-        int whiteKingQueenAttacks = countQueenAttacksInZone(blackQueens, allPieces, whiteKingZone);
-
-        int blackKingPawnAttacks = countPawnAttacksInZone(whitePawns, true, blackKingZone);
-        int blackKingKnightAttacks = countKnightAttacksInZone(whiteKnights, blackKingZone);
-        int blackKingBishopAttacks = countBishopAttacksInZone(whiteBishops, allPieces, blackKingZone);
-        int blackKingRookAttacks = countRookAttacksInZone(whiteRooks, allPieces, blackKingZone);
-        int blackKingQueenAttacks = countQueenAttacksInZone(whiteQueens, allPieces, blackKingZone);
-
-        whiteKingSafetyScore = evaluateKingSafety(
-                whiteKing,
-                whitePawns,
-                blackPawns,
-                whiteKingPawnAttacks,
-                whiteKingKnightAttacks,
-                whiteKingBishopAttacks,
-                whiteKingRookAttacks,
-                whiteKingQueenAttacks,
-                whiteAttacks,
-                true,
-                isEndgame);
-        blackKingSafetyScore = evaluateKingSafety(
-                blackKing,
-                blackPawns,
-                whitePawns,
-                blackKingPawnAttacks,
-                blackKingKnightAttacks,
-                blackKingBishopAttacks,
-                blackKingRookAttacks,
-                blackKingQueenAttacks,
-                blackAttacks,
-                false,
-                isEndgame);
+        KingSafetyModule.KingSafetyView safetyView = kingSafetyModule.evaluate(bitBoard);
+        int phase = clampPhase(bitBoard.getPhase());
+        whiteKingSafetyScore = safetyView.whiteKing().blend(phase);
+        blackKingSafetyScore = safetyView.blackKing().blend(phase);
+        whiteQueenSafetyScore = safetyView.whiteQueen().blend(phase);
+        blackQueenSafetyScore = safetyView.blackQueen().blend(phase);
 
         whiteMinorPieceSafetyScore = evaluateMinorPieceSafety(
                 whiteKnights,
@@ -952,141 +920,6 @@ public class Score {
                 whiteAttacks,
                 false);
 
-        // --- NEW: queen safety (simple "queen is attacked" penalty) ---
-        whiteQueenSafetyScore = evaluateQueenSafety(whiteQueens, blackAttacks);
-        blackQueenSafetyScore = evaluateQueenSafety(blackQueens, whiteAttacks);
-    }
-
-    private int countPawnAttacksInZone(long pawns, boolean isWhite, long zone) {
-        if (pawns == 0 || zone == 0) {
-            return 0;
-        }
-        int colorIndex = isWhite ? 0 : 1;
-        int count = 0;
-        long remaining = pawns;
-        while (remaining != 0) {
-            long sq = remaining & -remaining;
-            int index = Long.numberOfTrailingZeros(sq);
-            count += Long.bitCount(PAWN_ATTACKS[colorIndex][index] & zone);
-            remaining ^= sq;
-        }
-        return count;
-    }
-
-    private int countKnightAttacksInZone(long knights, long zone) {
-        if (knights == 0 || zone == 0) {
-            return 0;
-        }
-        int count = 0;
-        long remaining = knights;
-        while (remaining != 0) {
-            long sq = remaining & -remaining;
-            int index = Long.numberOfTrailingZeros(sq);
-            count += Long.bitCount(knightMoveTable[index] & zone);
-            remaining ^= sq;
-        }
-        return count;
-    }
-
-    private int countBishopAttacksInZone(long bishops, long occupancy, long zone) {
-        if (bishops == 0 || zone == 0) {
-            return 0;
-        }
-        int count = 0;
-        long remaining = bishops;
-        while (remaining != 0) {
-            long sq = remaining & -remaining;
-            int index = Long.numberOfTrailingZeros(sq);
-            long mask = BISHOP_HELPER.bishopMasks[index];
-            long attacks = BISHOP_HELPER.calculateMovesUsingBishopMagic(index, occupancy & mask);
-            count += Long.bitCount(attacks & zone);
-            remaining ^= sq;
-        }
-        return count;
-    }
-
-    private int countRookAttacksInZone(long rooks, long occupancy, long zone) {
-        if (rooks == 0 || zone == 0) {
-            return 0;
-        }
-        int count = 0;
-        long remaining = rooks;
-        while (remaining != 0) {
-            long sq = remaining & -remaining;
-            int index = Long.numberOfTrailingZeros(sq);
-            long mask = ROOK_HELPER.rookMasks[index];
-            long attacks = ROOK_HELPER.calculateMovesUsingRookMagic(index, occupancy & mask);
-            count += Long.bitCount(attacks & zone);
-            remaining ^= sq;
-        }
-        return count;
-    }
-
-    private int countQueenAttacksInZone(long queens, long occupancy, long zone) {
-        if (queens == 0 || zone == 0) {
-            return 0;
-        }
-        int count = 0;
-        long remaining = queens;
-        while (remaining != 0) {
-            long sq = remaining & -remaining;
-            int index = Long.numberOfTrailingZeros(sq);
-            long bishopMask = BISHOP_HELPER.bishopMasks[index];
-            long rookMask = ROOK_HELPER.rookMasks[index];
-            long diagonal = BISHOP_HELPER.calculateMovesUsingBishopMagic(index, occupancy & bishopMask);
-            long straight = ROOK_HELPER.calculateMovesUsingRookMagic(index, occupancy & rookMask);
-            count += Long.bitCount((diagonal | straight) & zone);
-            remaining ^= sq;
-        }
-        return count;
-    }
-
-    private int evaluateKingSafety(long king, long friendlyPawns, long enemyPawns,
-                                   int pawnAttackCount, int knightAttackCount,
-                                   int bishopAttackCount, int rookAttackCount, int queenAttackCount,
-                                   long friendlyAttacks,
-                                   boolean isWhite, boolean isEndgame) {
-        if (king == 0) {
-            return 0;
-        }
-        int kingIndex = Long.numberOfTrailingZeros(king);
-        long forwardMask = 0L;
-        if (isWhite) {
-            forwardMask |= (king << 8);
-            if ((king & NOT_A_FILE) != 0) forwardMask |= (king << 7);
-            if ((king & NOT_H_FILE) != 0) forwardMask |= (king << 9);
-        } else {
-            forwardMask |= (king >>> 8);
-            if ((king & NOT_A_FILE) != 0) forwardMask |= (king >>> 9);
-            if ((king & NOT_H_FILE) != 0) forwardMask |= (king >>> 7);
-        }
-
-        int missing = 3 - Long.bitCount(friendlyPawns & forwardMask);
-        int shieldPenalty = missing * MISSING_PAWN_SHIELD_PENALTY;
-
-        int fileIndex = kingIndex % 8;
-        long fileMask = FileMasks[fileIndex];
-        int filePenalty = 0;
-        if ((friendlyPawns & fileMask) == 0) {
-            filePenalty = (enemyPawns & fileMask) != 0 ? HALF_OPEN_FILE_PENALTY : OPEN_FILE_PENALTY;
-        }
-
-        long kingZone = KING_ATTACKS[kingIndex];
-
-        int attackPenalty = pawnAttackCount * PAWN_ATTACK_PENALTY
-                + knightAttackCount * KNIGHT_ATTACK_PENALTY
-                + bishopAttackCount * BISHOP_ATTACK_PENALTY
-                + rookAttackCount * ROOK_ATTACK_PENALTY
-                + queenAttackCount * QUEEN_ATTACK_PENALTY;
-
-        int defenders = Long.bitCount(friendlyAttacks & kingZone);
-        int defenderBonus = defenders * DEFENDER_BONUS;
-
-        int total = shieldPenalty + filePenalty + attackPenalty + defenderBonus;
-        if (isEndgame) {
-            total /= 2;
-        }
-        return total;
     }
 
     public void updateWhitePawnValues(BitBoard bitBoard) {
