@@ -895,7 +895,8 @@ public class AI {
         BitBoard bitBoard = simulatorEngine.getBitBoard();
         boolean allowNullMove = useNullMovePruning
                 && !inCheck
-                && !simulatorEngine.isEndgame();
+                && !simulatorEngine.isEndgame()
+                && prevMove != -1;
 
         if (allowNullMove) {
             double mateThreatScore = CHECKMATE - (plyFromRoot + 1);
