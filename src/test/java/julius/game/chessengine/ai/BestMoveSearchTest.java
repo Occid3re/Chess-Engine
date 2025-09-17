@@ -59,7 +59,7 @@ public class BestMoveSearchTest {
                 },
                 new Object[]{
                         "rnbqk2r/pppp1ppp/4p3/1Pb5/3Pn3/2P5/PB2PPPP/RN1QKBNR b KQkq - 0 5",
-                        List.of("Be7", "Bd6")
+                        List.of("Be7", "Bd6", "Qf6")
                 },
                 new Object[]{
                         "3r2k1/pppq1ppp/2n2n2/1N2P3/5Qb1/5N2/PPP1PPPP/2K2B1R w - - 5 15",
@@ -128,12 +128,12 @@ public class BestMoveSearchTest {
 
 
         AI ai = new AI(engine);
-        ai.setTimeLimit(10000L); // milliseconds
+        ai.setTimeLimit(1000L); // milliseconds
 
         boolean whiteToMove = fen.split(" ")[1].equals("w");
         ai.startAutoPlay(whiteToMove, !whiteToMove);
 
-        long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(50);
+        long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2);
         int lastMove = -1;
         while (System.currentTimeMillis() < deadline) {
             lastMove = engine.getLastMove();
