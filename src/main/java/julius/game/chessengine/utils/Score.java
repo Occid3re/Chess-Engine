@@ -4,6 +4,7 @@ import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.GameStateEnum;
+import julius.game.chessengine.evaluation.ActivityModule;
 import julius.game.chessengine.evaluation.EvaluationContext;
 import julius.game.chessengine.evaluation.EvaluationModule;
 import julius.game.chessengine.evaluation.EvaluationPipeline;
@@ -84,6 +85,7 @@ public class Score {
     private final MaterialModule materialModule = new MaterialModule();
     private final PawnStructureModule pawnStructureModule = new PawnStructureModule();
     private final PieceSquareModule pieceSquareModule = new PieceSquareModule();
+    private final ActivityModule activityModule = new ActivityModule();
     private final EvaluationPipeline evaluationPipeline;
     private EvaluationContext evaluationContext;
     private boolean pipelineInitialized;
@@ -208,7 +210,7 @@ public class Score {
 
     private EvaluationPipeline createPipeline() {
         EvaluationModule module = new LegacyEvaluationModule();
-        return new EvaluationPipeline(List.of(materialModule, pawnStructureModule, pieceSquareModule, module));
+        return new EvaluationPipeline(List.of(materialModule, pawnStructureModule, pieceSquareModule, activityModule, module));
     }
 
     private void syncPipeline(EvaluationContext context) {
