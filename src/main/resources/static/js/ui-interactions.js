@@ -1,43 +1,57 @@
-$(document).ready(function () {
-    let computerColor = 'black'; // Default computer color
+(function ($, app) {
+    'use strict';
 
-    // Function to set board orientation based on color choice
-    const setBoardOrientation = (color) => {
-        board.orientation(color); // Set board orientation to chosen color
+    const promptFen = () => {
+        const fen = prompt('Please enter FEN:');
+        if (fen) {
+            app.importFen(fen);
+        }
     };
 
-    const chooseColorAndAutoPlay = (color) => {
-        setBoardOrientation(color); // Set orientation based on user choice
-        computerColor = (color === 'white') ? 'black' : 'white'; // Computer plays opposite color
-        autoPlayColor(computerColor); // Call autoPlayColor with updated color
-    };
+    $(document).ready(() => {
+        if (!app) {
+            console.error('Chess app not available');
+            return;
+        }
 
-    // Event listeners for UI interactions
-    const initEventListeners = () => {
-        $('#playWhite').on('click', () => chooseColorAndAutoPlay('white'));
-        $('#playBlack').on('click', () => chooseColorAndAutoPlay('black'));
-        $('#resetBoard').on('click', () => {
-            makeRequest('PUT', '/chess/reset', reloadBoard); // Assuming makeRequest and reloadBoard are defined in chess-data-fetching.js
+        $('#playWhite').on('click', (event) => {
+            event.preventDefault();
+            app.setPlayerColor('white');
         });
-        $('#undoMove').on('click', () => {
-            makeRequest('GET', '/chess/undo', reloadBoard); // Assuming makeRequest and reloadBoard are defined in chess-data-fetching.js
-        });
-        $('#redoMove').on('click', () => {
-            makeRequest('GET', '/chess/redo', reloadBoard);
-        });
-        $('#autoPlay').on('click', () => {
-            makeRequest('GET', '/chess/autoplay', reloadBoard); // Assuming makeRequest and reloadBoard are defined in chess-data-fetching.js
-        });
-        $('#importFEN').on('click', function () {
-            var fenString = prompt("Please enter FEN:");
-            if (fenString) {
-                importFEN(fenString); // Assuming importFEN is defined in chess-data-fetching.js
-            }
-        });
-    };
 
-    // Initialize event listeners
-    initEventListeners();
-    // Additional setup if required (e.g., setupModal)
-    setupModal(); // Uncomment if setupModal is a function that needs to be called
-});
+        $('#playBlack').on('click', (event) => {
+            event.preventDefault();
+            app.setPlayerColor('black');
+        });
+
+        $('#resetBoard').on('click', (event) => {
+            event.preventDefault();
+            app.resetGame();
+        });
+
+        $('#computerMove').on('click', (event) => {
+            event.preventDefault();
+            app.computerMove();
+        });
+
+        $('#importFEN').on('click', (event) => {
+            event.preventDefault();
+            promptFen();
+        });
+
+        $('#autoPlay').on('click', (event) => {
+            event.preventDefault();
+            app.toggleAutoplay();
+        });
+
+        $('#undoMove').on('click', (event) => {
+            event.preventDefault();
+            app.undoMove();
+        });
+
+        $('#redoMove').on('click', (event) => {
+            event.preventDefault();
+            app.redoMove();
+        });
+    });
+}(window.jQuery, window.chessApp));
