@@ -90,6 +90,15 @@
             this._processQueue();
         }
 
+        cancelPendingSearch() {
+            if (!this.awaitingBestmove) {
+                return;
+            }
+            this.awaitingBestmove = false;
+            this.queue.unshift({ command: 'stop', options: {} });
+            this._processQueue();
+        }
+
         _sendRaw(command) {
             if (this.ws.readyState === WebSocket.OPEN) {
                 this.ws.send(command);
