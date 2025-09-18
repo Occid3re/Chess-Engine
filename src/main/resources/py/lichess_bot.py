@@ -565,130 +565,152 @@ def play_game(client: berserk.Client,
     current_move_count = 0
     abort_requested = False
 
-    for event in stream:
-        t = event.get("type")
+    abort_timer = None
+    abort_lock = threading.Lock()
 
-        if t == "gameFull":
-            white_id = event["white"]["id"]
-            black_id = event["black"]["id"]
-            my_color_is_white = (white_id == me_id)
-            state = event.get("state", {})
-            clock = event.get("clock") or {}
-            if "initial" in clock:
-                clock_initial = clock.get("initial")
-            if "increment" in clock:
-                clock_increment = clock.get("increment")
-            tc_bucket = _estimate_tc_bucket(clock_initial, clock_increment)
-            moves = state.get("moves", "")
-            board = chess.Board()
-            if moves:
-                for mv in moves.split():
-                    board.push_uci(mv)
-            current_move_count = len(moves.split()) if moves else 0
+    def _cancel_abort_timer():
+        nonlocal abort_timer
+        if abort_timer is not None:
+            abort_timer.cancel()
+            abort_timer = None
 
-            if is_my_turn(board, my_color_is_white) and not board.is_game_over():
-                think_time = calc_move_time(state, my_color_is_white, clock_initial, clock_increment)
-                slack = 0.1 if tc_bucket == "bullet" else 0.15
-                try:
-                    result = engine.play(board, chess.engine.Limit(time=max(0.05, think_time - slack)))
-                    move_sent = safe_make_move(client, game_id, result.move.uci())
-                    if not move_sent:
-                        print("[warn] Move send failed, retrying once")
-                        safe_make_move(client, game_id, result.move.uci())
-                except (asyncio.TimeoutError,
-                        chess.engine.EngineError,
-                        chess.engine.EngineTerminatedError) as e:
-                    print(f"[error] engine.play failed: {repr(e)}")
-                    shutdown_engine(engine)
+    def _abort_inactive_game():
+        nonlocal abort_requested, abort_timer
+        with abort_lock:
+            if abort_requested or current_move_count > 0:
+                abort_timer = None
+                return
+            abort_requested = True
+        elapsed = time.time() - game_start_time
+        try:
+            client.bots.abort_game(game_id)
+            print(
+                f"[info] Aborted inactive game {game_id} after waiting "
+                f"{int(elapsed)}s for the first move"
+            )
+        except (berserk.exceptions.ResponseError, berserk.exceptions.ApiError) as e:
+            print(f"[warn] Failed to abort inactive game {game_id}: {e}")
+        except Exception as e:
+            print(f"[warn] Unexpected error aborting game {game_id}: {e}")
+        finally:
+            abort_timer = None
+
+    if ABORT_NO_MOVE_AFTER > 0:
+        abort_timer = threading.Timer(ABORT_NO_MOVE_AFTER, _abort_inactive_game)
+        abort_timer.daemon = True
+        abort_timer.start()
+
+    try:
+        for event in stream:
+            t = event.get("type")
+
+            if t == "gameFull":
+                white_id = event["white"]["id"]
+                black_id = event["black"]["id"]
+                my_color_is_white = (white_id == me_id)
+                state = event.get("state", {})
+                clock = event.get("clock") or {}
+                if "initial" in clock:
+                    clock_initial = clock.get("initial")
+                if "increment" in clock:
+                    clock_increment = clock.get("increment")
+                tc_bucket = _estimate_tc_bucket(clock_initial, clock_increment)
+                moves = state.get("moves", "")
+                board = chess.Board()
+                if moves:
+                    for mv in moves.split():
+                        board.push_uci(mv)
+                current_move_count = len(moves.split()) if moves else 0
+                if current_move_count > 0:
+                    _cancel_abort_timer()
+
+                if is_my_turn(board, my_color_is_white) and not board.is_game_over():
+                    think_time = calc_move_time(state, my_color_is_white, clock_initial, clock_increment)
+                    slack = 0.1 if tc_bucket == "bullet" else 0.15
                     try:
-                        engine = start_engine()
-                    except Exception as ex:
-                        print(f"[error] could not restart engine: {ex}")
-                    moves_list = list(board.legal_moves)
-                    if moves_list:
-                        fallback = random.choice(moves_list)
-                        move_sent = safe_make_move(client, game_id, fallback.uci())
+                        result = engine.play(board, chess.engine.Limit(time=max(0.05, think_time - slack)))
+                        move_sent = safe_make_move(client, game_id, result.move.uci())
                         if not move_sent:
-                            print("[warn] Fallback move send failed, retrying once")
-                            safe_make_move(client, game_id, fallback.uci())
-
-        elif t == "gameState":
-            state = event
-            moves = state.get("moves", "")
-            board = chess.Board()
-            if moves:
-                for mv in moves.split():
-                    board.push_uci(mv)
-            current_move_count = len(moves.split()) if moves else 0
-
-            if board.is_game_over() or my_color_is_white is None:
-                continue
-
-            if is_my_turn(board, my_color_is_white):
-                think_time = calc_move_time(state, my_color_is_white, clock_initial, clock_increment)
-                if tc_bucket is None and clock_initial is None:
-                    key_time = "wtime" if my_color_is_white else "btime"
-                    time_val = state.get(key_time)
-                    if isinstance(time_val, datetime.timedelta):
-                        clock_initial = time_val.total_seconds()
-                    elif time_val is not None:
+                            print("[warn] Move send failed, retrying once")
+                            safe_make_move(client, game_id, result.move.uci())
+                    except (asyncio.TimeoutError,
+                            chess.engine.EngineError,
+                            chess.engine.EngineTerminatedError) as e:
+                        print(f"[error] engine.play failed: {repr(e)}")
+                        shutdown_engine(engine)
                         try:
-                            clock_initial = float(time_val) / 1000.0
-                        except (TypeError, ValueError):
-                            clock_initial = None
-                    if tc_bucket is None:
-                        tc_bucket = _estimate_tc_bucket(clock_initial, clock_increment)
-                slack = 0.1 if tc_bucket == "bullet" else 0.15
-                try:
-                    result = engine.play(board, chess.engine.Limit(time=max(0.05, think_time - slack)))
-                    move_sent = safe_make_move(client, game_id, result.move.uci())
-                    if not move_sent:
-                        print("[warn] Move send failed, retrying once")
-                        safe_make_move(client, game_id, result.move.uci())
-                except (asyncio.TimeoutError,
-                        chess.engine.EngineError,
-                        chess.engine.EngineTerminatedError) as e:
-                    print(f"[error] engine.play failed: {repr(e)}")
-                    shutdown_engine(engine)
+                            engine = start_engine()
+                        except Exception as ex:
+                            print(f"[error] could not restart engine: {ex}")
+                        moves_list = list(board.legal_moves)
+                        if moves_list:
+                            fallback = random.choice(moves_list)
+                            move_sent = safe_make_move(client, game_id, fallback.uci())
+                            if not move_sent:
+                                print("[warn] Fallback move send failed, retrying once")
+                                safe_make_move(client, game_id, fallback.uci())
+
+            elif t == "gameState":
+                state = event
+                moves = state.get("moves", "")
+                board = chess.Board()
+                if moves:
+                    for mv in moves.split():
+                        board.push_uci(mv)
+                current_move_count = len(moves.split()) if moves else 0
+                if current_move_count > 0:
+                    _cancel_abort_timer()
+
+                if board.is_game_over() or my_color_is_white is None:
+                    continue
+
+                if is_my_turn(board, my_color_is_white):
+                    think_time = calc_move_time(state, my_color_is_white, clock_initial, clock_increment)
+                    if tc_bucket is None and clock_initial is None:
+                        key_time = "wtime" if my_color_is_white else "btime"
+                        time_val = state.get(key_time)
+                        if isinstance(time_val, datetime.timedelta):
+                            clock_initial = time_val.total_seconds()
+                        elif time_val is not None:
+                            try:
+                                clock_initial = float(time_val) / 1000.0
+                            except (TypeError, ValueError):
+                                clock_initial = None
+                        if tc_bucket is None:
+                            tc_bucket = _estimate_tc_bucket(clock_initial, clock_increment)
+                    slack = 0.1 if tc_bucket == "bullet" else 0.15
                     try:
-                        engine = start_engine()
-                    except Exception as ex:
-                        print(f"[error] could not restart engine: {ex}")
-                    moves_list = list(board.legal_moves)
-                    if moves_list:
-                        fallback = random.choice(moves_list)
-                        move_sent = safe_make_move(client, game_id, fallback.uci())
+                        result = engine.play(board, chess.engine.Limit(time=max(0.05, think_time - slack)))
+                        move_sent = safe_make_move(client, game_id, result.move.uci())
                         if not move_sent:
-                            print("[warn] Fallback move send failed, retrying once")
-                            safe_make_move(client, game_id, fallback.uci())
+                            print("[warn] Move send failed, retrying once")
+                            safe_make_move(client, game_id, result.move.uci())
+                    except (asyncio.TimeoutError,
+                            chess.engine.EngineError,
+                            chess.engine.EngineTerminatedError) as e:
+                        print(f"[error] engine.play failed: {repr(e)}")
+                        shutdown_engine(engine)
+                        try:
+                            engine = start_engine()
+                        except Exception as ex:
+                            print(f"[error] could not restart engine: {ex}")
+                        moves_list = list(board.legal_moves)
+                        if moves_list:
+                            fallback = random.choice(moves_list)
+                            move_sent = safe_make_move(client, game_id, fallback.uci())
+                            if not move_sent:
+                                print("[warn] Fallback move send failed, retrying once")
+                                safe_make_move(client, game_id, fallback.uci())
 
-        elif t == "chatLine":
-            print(f"[chat] {event.get('username')}: {event.get('text')}")
+            elif t == "chatLine":
+                print(f"[chat] {event.get('username')}: {event.get('text')}")
 
-        elif t == "gameFinish":
-            print(f"[*] Game finished: {game_id}")
-            active_counter.dec()   # <- ensure counter decreases here
-            break
-
-        if (not abort_requested
-                and ABORT_NO_MOVE_AFTER > 0
-                and current_move_count == 0):
-            elapsed = time.time() - game_start_time
-            if elapsed >= ABORT_NO_MOVE_AFTER:
-                try:
-                    client.bots.abort_game(game_id)
-                    abort_requested = True
-                    print(
-                        f"[info] Aborted inactive game {game_id} after waiting "
-                        f"{int(elapsed)}s for the first move"
-                    )
-                except (berserk.exceptions.ResponseError, berserk.exceptions.ApiError) as e:
-                    abort_requested = True
-                    print(f"[warn] Failed to abort inactive game {game_id}: {e}")
-                except Exception as e:
-                    abort_requested = True
-                    print(f"[warn] Unexpected error aborting game {game_id}: {e}")
-
+            elif t == "gameFinish":
+                print(f"[*] Game finished: {game_id}")
+                active_counter.dec()   # <- ensure counter decreases here
+                break
+    finally:
+        _cancel_abort_timer()
 
     return engine
 
