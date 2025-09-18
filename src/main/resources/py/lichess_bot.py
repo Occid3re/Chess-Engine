@@ -44,6 +44,9 @@ BULLET_MOVE_TIME = float(os.environ.get("BOT_BULLET_MOVE_TIME", "0.4"))
 # Estimated full moves to help time management
 ESTIMATED_GAME_MOVES = int(os.environ.get("BOT_GAME_MOVES", "40"))
 
+# Auto-abort if nobody has played a move after this many seconds (0 disables)
+ABORT_NO_MOVE_AFTER = float(os.environ.get("BOT_ABORT_NO_MOVE_AFTER", "45"))
+
 # Accept/decline policy
 ACCEPT_VARIANTS = {"standard"}  # e.g. {"standard","chess960"}
 ALLOW_RATED = True  # accept rated games?
@@ -558,6 +561,9 @@ def play_game(client: berserk.Client,
     clock_initial = None
     clock_increment = None
     tc_bucket = None
+    game_start_time = time.time()
+    current_move_count = 0
+    abort_requested = False
 
     for event in stream:
         t = event.get("type")
@@ -578,6 +584,7 @@ def play_game(client: berserk.Client,
             if moves:
                 for mv in moves.split():
                     board.push_uci(mv)
+            current_move_count = len(moves.split()) if moves else 0
 
             if is_my_turn(board, my_color_is_white) and not board.is_game_over():
                 think_time = calc_move_time(state, my_color_is_white, clock_initial, clock_increment)
@@ -612,6 +619,7 @@ def play_game(client: berserk.Client,
             if moves:
                 for mv in moves.split():
                     board.push_uci(mv)
+            current_move_count = len(moves.split()) if moves else 0
 
             if board.is_game_over() or my_color_is_white is None:
                 continue
@@ -661,6 +669,25 @@ def play_game(client: berserk.Client,
             print(f"[*] Game finished: {game_id}")
             active_counter.dec()   # <- ensure counter decreases here
             break
+
+        if (not abort_requested
+                and ABORT_NO_MOVE_AFTER > 0
+                and current_move_count == 0):
+            elapsed = time.time() - game_start_time
+            if elapsed >= ABORT_NO_MOVE_AFTER:
+                try:
+                    client.bots.abort_game(game_id)
+                    abort_requested = True
+                    print(
+                        f"[info] Aborted inactive game {game_id} after waiting "
+                        f"{int(elapsed)}s for the first move"
+                    )
+                except (berserk.exceptions.ResponseError, berserk.exceptions.ApiError) as e:
+                    abort_requested = True
+                    print(f"[warn] Failed to abort inactive game {game_id}: {e}")
+                except Exception as e:
+                    abort_requested = True
+                    print(f"[warn] Unexpected error aborting game {game_id}: {e}")
 
 
     return engine
