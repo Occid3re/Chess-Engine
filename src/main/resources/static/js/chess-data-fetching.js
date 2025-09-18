@@ -495,6 +495,7 @@
             this.updateEvaluationDisplay();
             this.updateGameStatus();
             if (this.uciClient) {
+                this.uciClient.cancelPendingSearch();
                 this.uciClient.send('ucinewgame', { awaitReady: true });
                 this.syncEnginePosition({ awaitReady: true });
             }
@@ -521,6 +522,7 @@
             this.syncBoardPosition();
             this.updateGameStatus();
             if (this.uciClient) {
+                this.uciClient.cancelPendingSearch();
                 this.uciClient.send('ucinewgame', { awaitReady: true });
                 this.syncEnginePosition({ awaitReady: true });
             }
@@ -539,6 +541,9 @@
             this.waitingForEngine = false;
             this.syncBoardPosition();
             this.updateGameStatus();
+            if (this.uciClient) {
+                this.uciClient.cancelPendingSearch();
+            }
             this.syncEnginePosition({ awaitReady: true });
             if (this.autoplay || this.isComputerTurn()) {
                 this.requestEngineMove();
@@ -552,6 +557,9 @@
             const move = this.redoStack.pop();
             const result = this.applyMoveFromUci(move, { clearRedo: false });
             if (result) {
+                if (this.uciClient) {
+                    this.uciClient.cancelPendingSearch();
+                }
                 this.syncEnginePosition({ awaitReady: true });
                 this.updateGameStatus();
                 if (this.autoplay || this.isComputerTurn()) {
