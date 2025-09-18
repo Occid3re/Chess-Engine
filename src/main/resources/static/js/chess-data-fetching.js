@@ -1,318 +1,573 @@
-let latestGameData = null;
-let latestStateData = null;
+(function (global, $) {
+    'use strict';
 
-// Object to store highlighted square changes
-let highlightedSquares = {};
-let lastHoveredSquare = null;
-let lastPossibleMoves = [];
+    const WS_PROTOCOL = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const WS_URL = `${WS_PROTOCOL}://${window.location.host}/ws/uci`;
 
-let previousPiecesData = null;
+    const squareColorClass = (square) => ($(`#board .square-${square}`).hasClass('black-3c85d') ? 'lightskyblue' : 'blue');
 
-// Function to make API requests
-const apiBaseUrl = window.location.origin;
-const makeRequest = async (method, url, callback) => {
-    try {
-        const response = await fetch(`${apiBaseUrl}${url}`, { method });
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        const data = await response.json();
-        if (callback) callback(data);
-    } catch (error) {
-        console.error('Request failed:', error);
-    }
-};
+    const createHighlightMap = () => ({ squares: {}, active: false });
 
-// Load version and thread information for the info bar
-const loadInfoBar = () => {
-    fetch(`${apiBaseUrl}/chess/info`)
-        .then(r => r.json())
-        .then(data => {
-            const infoBar = document.getElementById('infoBar');
-            if (infoBar) {
-                infoBar.textContent = `Version: v${data.version} | Threads: ${data.threads}`;
-            }
-        })
-        .catch(err => console.error('Failed to load app info', err));
-};
-
-// Update the calculated line and game details
-const updateCalculatedLine = () => {
-    makeRequest('GET', '/chess/state', (data) => {
-        latestStateData = data;
-        const lineText = data.move || "No moves yet";
-        const gameState = data.gameState.state;
-        const score = data.score;
-
-        document.getElementById('calculatedLine').innerText = `Calculated Line: ${lineText}`;
-        document.getElementById('score').textContent = `SCORE: ${score}`;
-
-        checkState(gameState);
-        updateKingGlow(gameState); // Update the king glow based on game state
-        updateGameDetails(data);
-    });
-
-    makeRequest('GET', '/chess/search/status', (status) => {
-        const side = status.sideToMove.charAt(0) + status.sideToMove.slice(1).toLowerCase();
-        document.getElementById('turnIndicator').textContent = `Turn: ${side}`;
-    });
-};
-
-// Add an event listener to the "View Details" button
-document.getElementById('PGN').addEventListener('click', async function(event) {
-    event.preventDefault();
-    try {
-        const response = await fetch(`${apiBaseUrl}/chess/pgn`, { method: 'GET' });
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        const pgnData = await response.json();
-
-        // Open a new window and display the PGN
-        const pgnWindow = window.open("", "PGNWindow", "width=600,height=400");
-        pgnWindow.document.write("<pre>" + pgnData.pgn + "</pre>");
-    } catch (error) {
-        console.error('Failed to fetch PGN:', error);
-    }
-});
-
-const updateSliderValue = (value) => {
-    $('#sliderValue').text(value);
-};
-
-const handleSliderChange = () => {
-    const sliderValue = $('#autoplaySlider').val();
-    updateSliderValue(sliderValue);
-    makeRequest('PATCH', `/chess/autoplay/timelimit/${sliderValue}`, reloadBoard);
-};
-
-// Initialize slider event listener
-$('#autoplaySlider').on('input change', handleSliderChange);
-
-
-// Update the details in the modal
-const updateGameDetails = (data) => {
-    let details = '<div class="game-details-container">';
-
-    details += '<table class="details-table">';
-    details += '<tr><td>Game State</td><td>' + data.gameState.state + '</td></tr>';
-    details += '<tr><td>Overall Score</td><td>' + data.score + '</td></tr>';
-    details += '<tr><td>Midgame Score (cp)</td><td>' + data.gameState.score.midgameScore + '</td></tr>';
-    details += '<tr><td>Endgame Score (cp)</td><td>' + data.gameState.score.endgameScore + '</td></tr>';
-    details += '<tr><td>Blended Score (cp)</td><td>' + data.gameState.score.blendedScore + '</td></tr>';
-    details += '<tr><td>Score Difference (pawns)</td><td>' + data.gameState.score.scoreDifference + '</td></tr>';
-    details += '<tr><td>Game Over</td><td>' + data.gameState.gameOver + '</td></tr>';
-    details += '<tr><td>In State Check</td><td>' + data.gameState.inStateCheck + '</td></tr>';
-    details += '<tr><td>In State CheckMate</td><td>' + data.gameState.inStateCheckMate + '</td></tr>';
-    details += '<tr><td>In State Draw</td><td>' + data.gameState.inStateDraw + '</td></tr>';
-
-    // Repetition Counter
-    details += '<tr><td colspan="2"><strong>Repetition Counter</strong></td></tr>';
-    for (const hash in data.gameState.repetitionCounter) {
-        details += `<tr><td colspan="2">${hash}: ${data.gameState.repetitionCounter[hash]}</td></tr>`;
-    }
-
-    details += '</table>';
-    details += '</div>';
-
-    document.getElementById('gameDetails').innerHTML = details;
-};
-
-
-
-// Modal handling code
-const setupModal = () => {
-    const viewDetails = document.getElementById("viewDetails");
-    const modal = document.getElementById("detailsModal");
-    const closeModal = document.querySelector('.close');
-
-    if (viewDetails && modal && closeModal) {
-        viewDetails.onclick = function () {
-            modal.style.display = "block";
-            updateGameDetails(latestGameData); // Update the modal with the latest game data
+    const formatScore = (score) => {
+        if (!score) {
+            return '--';
         }
-
-        closeModal.onclick = function () {
-            modal.style.display = "none";
+        if (score.type === 'cp' && typeof score.value === 'number' && !Number.isNaN(score.value)) {
+            return (score.value / 100).toFixed(2);
         }
-
-        window.onclick = function (event) {
-            if (event.target == modal) {
-                modal.style.display = "none";
-            }
+        if (score.type === 'mate' && typeof score.value === 'number') {
+            return `Mate in ${score.value}`;
         }
-    } else {
-        console.error('Modal or associated elements not found in the document.');
-    }
-};
-
-// Function to update the king glow
-function updateKingGlow(gameState) {
-    const whiteKingElement = document.querySelector('[data-piece="wK"]');
-    const blackKingElement = document.querySelector('[data-piece="bK"]');
-
-    // Remove existing glow classes
-    whiteKingElement.classList.remove('glow-red', 'glow-blue');
-    blackKingElement.classList.remove('glow-red', 'glow-blue');
-
-    // Apply glow based on the game state
-    switch (gameState) {
-        case 'WHITE_IN_CHECK':
-            whiteKingElement.classList.add('glow-blue');
-            break;
-        case 'BLACK_IN_CHECK':
-            blackKingElement.classList.add('glow-red');
-            break;
-        case 'WHITE_WON':
-            blackKingElement.classList.add('glow-blue'); // Blue glow to indicate loss
-            break;
-        case 'BLACK_WON':
-            whiteKingElement.classList.add('glow-red'); // Blue glow to indicate loss
-            break;
-        // No glow applied for PLAY and DRAW states
-    }
-}
-
-let originalHeaderText = "ALIEKNEK";
-
-const checkState = (state) => {
-    if (state === "PLAY") {
-        // Reset to the original header text when the state is "PLAY"
-        document.getElementById("header").textContent = originalHeaderText;
-    } else {
-        // Change the header text to the current state if it's not "PLAY"
-        document.getElementById("header").textContent = state;
-    }
-};
-
-// Function to import FEN
-function importFEN(fenString) {
-    var encodedFenString = encodeURIComponent(fenString);
-    makeRequest('PATCH', `/chess/fen?fen=${encodedFenString}`, () => {
-        reloadBoard();
-    });
-}
-
-// Function to make a move
-const autoPlayColor = (color) => {
-    makeRequest('PATCH', `/chess/autoplay/${color}`, (data) => {
-        checkState(data.state);
-        reloadBoard();
-    });
-};
-// Function for onDrop event
-const onDrop = (source, target) => {
-    const saveToOpeningBook = document.getElementById('recordOpeningMove').checked;
-    const url = `/chess/figure/move/${source}/${target}?saveToOpeningBook=${saveToOpeningBook}`;
-    makeRequest('PATCH', url, reloadBoard);
-};
-
-const onMouseoverSquare = (square) => {
-    makeRequest('GET', `/chess/figure/move/possible/${square}`, (moves) => {
-        if (moves.length === 0) return;
-        highlightSquare(square, true);
-        moves.forEach(move => highlightSquare(move.x + move.y, true));
-
-        // Store the last hovered square and its possible moves
-        lastHoveredSquare = square;
-        lastPossibleMoves = moves;
-    });
-};
-
-const onMouseoutSquare = () => {
-    // Iterate over all highlighted squares and remove the highlight
-    Object.keys(highlightedSquares).forEach(square => {
-        const $square = $(`#board .square-${square}`);
-        $square.css('background', '');
-    });
-
-    // Clear the highlightedSquares object
-    highlightedSquares = {};
-};
-
-const highlightSquare = (square, highlight) => {
-    const $square = $(`#board .square-${square}`);
-    const background = $square.hasClass('black-3c85d') ? 'lightskyblue' : 'blue';
-
-    if (highlight) {
-        $square.css('background', background);
-        highlightedSquares[square] = background; // Store the change
-    } else {
-        $square.css('background', '');
-        delete highlightedSquares[square]; // Remove the entry from the object
-    }
-};
-
-
-let board; // Declare the board object at a scope accessible by all functions
-
-const initBoard = () => {
-    const boardConfig = {
-        draggable: true,
-        position: 'start',
-        orientation: 'white', // Default orientation
-        onDrop: onDrop, // Ensure this function is defined in chess-data-fetching.js or imported from another script
-        onMouseoverSquare: onMouseoverSquare, // Ensure this function is defined in chess-data-fetching.js or imported from another script
-        onMouseoutSquare: onMouseoutSquare // Ensure this function is defined in chess-data-fetching.js or imported from another script
+        return score.value || '--';
     };
 
-    board = Chessboard('board', boardConfig); // Initialize the board
-};
-
-const reloadBoard = () => {
-    makeRequest('GET', '/chess/figure/frontend', (newData) => {
-        if (board) {
-            // Compare new data with previous data
-
-
-            board.position(newData.renderBoard);
-            updateCalculatedLine(); // Update the calculated line
-
-            // Update latestGameData with the new data
-            latestGameData = newData;
-
-            // Check if the game state is PLAY_OPENING
-            if (latestStateData && latestStateData.gameState.state === 'PLAY_OPENING') {
-                highlightOpeningSquare(latestStateData.lastMove);
-            }
-
-            if (JSON.stringify(newData) !== JSON.stringify(previousPiecesData)) {
-                $('#board .square-55d63').css('background', '');
-                previousPiecesData = newData; // Update the previousData with the new data
-            }
-        } else {
-            console.error('Board not initialized');
+    const parseMoveToObject = (uci) => {
+        if (!uci || uci.length < 4) {
+            return null;
         }
+        const move = {
+            from: uci.substring(0, 2),
+            to: uci.substring(2, 4),
+        };
+        if (uci.length > 4) {
+            move.promotion = uci.substring(4);
+        }
+        return move;
+    };
+
+    const convertPvToSan = (fen, pvMoves, ChessConstructor) => {
+        if (!pvMoves || pvMoves.length === 0) {
+            return '';
+        }
+        const sandbox = new ChessConstructor(fen);
+        const sanMoves = [];
+        pvMoves.forEach((uci) => {
+            const move = parseMoveToObject(uci);
+            if (!move) {
+                return;
+            }
+            const result = sandbox.move(move);
+            if (result) {
+                sanMoves.push(result.san);
+            }
+        });
+        return sanMoves.join(' ');
+    };
+
+    const chessApp = {
+        uciClient: null,
+        board: null,
+        game: new global.Chess(),
+        highlightState: createHighlightMap(),
+        desiredMoveTime: 50,
+        autoplay: false,
+        waitingForEngine: false,
+        playerColor: 'white',
+        computerColor: 'black',
+        basePosition: { type: 'startpos' },
+        moveHistory: [],
+        redoStack: [],
+        engineInfo: {},
+        engineOptions: {},
+        lastScore: null,
+        autoplayButton: null,
+
+        initialize() {
+            this.desiredMoveTime = parseInt($('#autoplaySlider').val(), 10) || 50;
+            $('#sliderValue').text(this.desiredMoveTime);
+            this.autoplayButton = document.getElementById('autoPlay');
+            if (this.autoplayButton) {
+                this.autoplayButton.textContent = 'Autoplay (Off)';
+            }
+
+            this.setupBoard();
+            this.setupSlider();
+            this.setupModal();
+            this.setupUciClient();
+            this.updateInfoBar();
+            this.updateEvaluationDisplay();
+            this.updateGameStatus();
+        },
+
+        setupBoard() {
+            const config = {
+                draggable: true,
+                position: 'start',
+                orientation: this.playerColor,
+                onDragStart: (source, piece) => this.onDragStart(source, piece),
+                onDrop: (source, target) => this.onDrop(source, target),
+                onMouseoverSquare: (square) => this.onMouseoverSquare(square),
+                onMouseoutSquare: () => this.onMouseoutSquare(),
+                onSnapEnd: () => this.syncBoardPosition(),
+            };
+            this.board = global.Chessboard('board', config);
+        },
+
+        setupSlider() {
+            $('#autoplaySlider').on('input change', (event) => {
+                const value = parseInt(event.target.value, 10) || 0;
+                this.desiredMoveTime = value;
+                $('#sliderValue').text(value);
+            });
+        },
+
+        setupModal() {
+            const viewDetails = document.getElementById('viewDetails');
+            const modal = document.getElementById('detailsModal');
+            const closeModal = document.querySelector('.close');
+
+            if (!viewDetails || !modal || !closeModal) {
+                return;
+            }
+
+            viewDetails.onclick = () => {
+                modal.style.display = 'block';
+                this.updateGameDetails();
+            };
+
+            closeModal.onclick = () => {
+                modal.style.display = 'none';
+            };
+
+            window.onclick = (event) => {
+                if (event.target === modal) {
+                    modal.style.display = 'none';
+                }
+            };
+        },
+
+        setupUciClient() {
+            this.uciClient = new global.UciClient(WS_URL);
+
+            this.uciClient.on('open', () => {
+                this.updateInfoBar('Connecting to engine...');
+            });
+
+            this.uciClient.on('uciok', () => {
+                this.updateInfoBar();
+                this.uciClient.send('ucinewgame', { awaitReady: true });
+                this.syncEnginePosition({ awaitReady: false });
+            });
+
+            this.uciClient.on('readyok', () => {
+                this.updateInfoBar();
+                if (this.autoplay || this.isComputerTurn()) {
+                    this.requestEngineMove();
+                }
+            });
+
+            this.uciClient.on('id', (data) => {
+                if (!data) {
+                    return;
+                }
+                this.engineInfo[data.type] = data.value;
+                this.updateInfoBar();
+            });
+
+            this.uciClient.on('option', (option) => {
+                if (!option || !option.name) {
+                    return;
+                }
+                this.engineOptions[option.name] = option;
+                this.updateInfoBar();
+            });
+
+            this.uciClient.on('info', (info) => {
+                if (!info) {
+                    return;
+                }
+                if (info.score) {
+                    this.lastScore = info.score;
+                }
+                this.updateEvaluationDisplay(info);
+            });
+
+            this.uciClient.on('bestmove', (payload) => {
+                this.waitingForEngine = false;
+                if (!payload || !payload.move || payload.move === '(none)') {
+                    this.updateGameStatus();
+                    return;
+                }
+                this.applyMoveFromUci(payload.move, { clearRedo: true });
+                this.updateGameStatus();
+                if (this.autoplay || this.isComputerTurn()) {
+                    this.requestEngineMove();
+                }
+            });
+        },
+
+        updateInfoBar(message) {
+            const infoBar = document.getElementById('infoBar');
+            if (!infoBar) {
+                return;
+            }
+
+            if (message) {
+                infoBar.textContent = message;
+                return;
+            }
+
+            const name = this.engineInfo.name || this.engineInfo.id || 'Unknown Engine';
+            const author = this.engineInfo.author ? ` by ${this.engineInfo.author}` : '';
+            const threads = this.engineOptions.Threads && this.engineOptions.Threads.default
+                ? ` | Threads: ${this.engineOptions.Threads.default}`
+                : '';
+            const ready = this.uciClient && this.uciClient.isReady ? ' | Ready' : ' | Initializing';
+            infoBar.textContent = `Engine: ${name}${author}${threads}${ready}`;
+        },
+
+        updateEvaluationDisplay(info) {
+            const scoreElement = document.getElementById('score');
+            const lineElement = document.querySelector('#calculatedLine span');
+
+            if (scoreElement) {
+                scoreElement.textContent = `Score: ${formatScore(this.lastScore)}`;
+            }
+
+            if (!lineElement) {
+                return;
+            }
+
+            if (!info || !info.pv) {
+                lineElement.textContent = '--';
+                return;
+            }
+
+            const fen = this.game.fen();
+            const pvSan = convertPvToSan(fen, info.pv, global.Chess);
+            lineElement.textContent = pvSan || '--';
+        },
+
+        updateGameStatus() {
+            const header = document.getElementById('header');
+            if (!header) {
+                return;
+            }
+
+            if (this.game.in_checkmate()) {
+                const winner = this.game.turn() === 'w' ? 'Black' : 'White';
+                header.textContent = `Checkmate - ${winner} wins`;
+            } else if (this.game.in_draw()) {
+                header.textContent = 'Draw';
+            } else if (this.game.in_stalemate()) {
+                header.textContent = 'Stalemate';
+            } else if (this.game.in_threefold_repetition()) {
+                header.textContent = 'Threefold repetition';
+            } else {
+                header.textContent = 'ALIEKNEK';
+            }
+
+            this.updateTurnIndicator();
+            this.updateKingGlow();
+            this.updateGameDetails();
+        },
+
+        updateTurnIndicator() {
+            const indicator = document.getElementById('turnIndicator');
+            if (!indicator) {
+                return;
+            }
+            const turn = this.game.turn() === 'w' ? 'White' : 'Black';
+            indicator.textContent = `Turn: ${turn}`;
+        },
+
+        updateKingGlow() {
+            const whiteKing = document.querySelector('[data-piece="wK"]');
+            const blackKing = document.querySelector('[data-piece="bK"]');
+            if (!whiteKing || !blackKing) {
+                return;
+            }
+            whiteKing.classList.remove('glow-red', 'glow-blue');
+            blackKing.classList.remove('glow-red', 'glow-blue');
+
+            if (this.game.in_check()) {
+                if (this.game.turn() === 'w') {
+                    whiteKing.classList.add('glow-blue');
+                } else {
+                    blackKing.classList.add('glow-red');
+                }
+            }
+        },
+
+        updateGameDetails() {
+            const container = document.getElementById('gameDetails');
+            if (!container) {
+                return;
+            }
+
+            const historySan = this.game.history();
+            const details = [`<div class="game-details-container">`,
+                '<table class="details-table">',
+                `<tr><td>FEN</td><td>${this.game.fen()}</td></tr>`,
+                `<tr><td>Move count</td><td>${historySan.length}</td></tr>`,
+                `<tr><td>Autoplay</td><td>${this.autoplay ? 'Enabled' : 'Disabled'}</td></tr>`,
+                `<tr><td>Score</td><td>${formatScore(this.lastScore)}</td></tr>`,
+                `<tr><td>History</td><td>${historySan.join(' ') || '--'}</td></tr>`,
+                '</table>',
+                '</div>'];
+            container.innerHTML = details.join('');
+        },
+
+        onDragStart(source, piece) {
+            if (this.game.game_over()) {
+                return false;
+            }
+            if (this.waitingForEngine && !this.autoplay) {
+                return false;
+            }
+            if ((this.game.turn() === 'w' && piece[0] !== 'w') || (this.game.turn() === 'b' && piece[0] !== 'b')) {
+                return false;
+            }
+            if (this.computerColor && piece[0] === this.computerColor.charAt(0) && !this.autoplay) {
+                return false;
+            }
+            return true;
+        },
+
+        onDrop(source, target) {
+            const move = this.tryMove(source, target, { clearRedo: true });
+            if (!move) {
+                return 'snapback';
+            }
+            this.syncBoardPosition();
+            this.syncEnginePosition();
+            this.updateGameStatus();
+            if (this.autoplay || this.isComputerTurn()) {
+                this.requestEngineMove();
+            }
+            return undefined;
+        },
+
+        onMouseoverSquare(square) {
+            const moves = this.game.moves({ square, verbose: true });
+            if (!moves.length) {
+                return;
+            }
+            this.highlightState.active = true;
+            this.highlightSquare(square, true);
+            moves.forEach((move) => this.highlightSquare(move.to, true));
+        },
+
+        onMouseoutSquare() {
+            if (!this.highlightState.active) {
+                return;
+            }
+            Object.keys(this.highlightState.squares).forEach((sq) => {
+                const $square = $(`#board .square-${sq}`);
+                $square.css('background', '');
+            });
+            this.highlightState = createHighlightMap();
+        },
+
+        highlightSquare(square, highlight) {
+            const $square = $(`#board .square-${square}`);
+            if (!$square.length) {
+                return;
+            }
+            if (highlight) {
+                const background = squareColorClass(square);
+                $square.css('background', background);
+                this.highlightState.squares[square] = background;
+            } else {
+                $square.css('background', '');
+                delete this.highlightState.squares[square];
+            }
+        },
+
+        syncBoardPosition() {
+            if (this.board) {
+                this.board.position(this.game.fen());
+            }
+        },
+
+        syncEnginePosition(options = { awaitReady: true }) {
+            if (!this.uciClient) {
+                return;
+            }
+            const command = this.buildPositionCommand();
+            this.uciClient.send(command, options);
+        },
+
+        buildPositionCommand() {
+            let command = this.basePosition.type === 'fen'
+                ? `position fen ${this.basePosition.value}`
+                : 'position startpos';
+            if (this.moveHistory.length) {
+                command += ` moves ${this.moveHistory.join(' ')}`;
+            }
+            return command;
+        },
+
+        tryMove(from, to, { clearRedo }) {
+            const piece = this.game.get(from);
+            if (!piece) {
+                return null;
+            }
+            const isPromotion = piece.type === 'p' && (to[1] === '8' || to[1] === '1');
+            const move = this.game.move({
+                from,
+                to,
+                promotion: isPromotion ? 'q' : undefined,
+            });
+            if (!move) {
+                return null;
+            }
+            const uci = `${from}${to}${move.promotion ? move.promotion : ''}`;
+            this.moveHistory.push(uci);
+            if (clearRedo) {
+                this.redoStack = [];
+            }
+            this.syncBoardPosition();
+            return move;
+        },
+
+        applyMoveFromUci(uci, { clearRedo }) {
+            const moveObj = parseMoveToObject(uci);
+            if (!moveObj) {
+                return null;
+            }
+            const result = this.game.move(moveObj);
+            if (!result) {
+                console.warn('Failed to apply engine move', uci);
+                return null;
+            }
+            this.moveHistory.push(uci);
+            if (clearRedo) {
+                this.redoStack = [];
+            }
+            this.syncBoardPosition();
+            return result;
+        },
+
+        isComputerTurn() {
+            if (this.autoplay) {
+                return true;
+            }
+            if (!this.computerColor) {
+                return false;
+            }
+            return this.game.turn() === this.computerColor.charAt(0);
+        },
+
+        requestEngineMove() {
+            if (!this.uciClient || this.waitingForEngine || this.game.game_over()) {
+                return;
+            }
+            this.waitingForEngine = true;
+            this.syncEnginePosition({ awaitReady: true });
+            const goCommand = `go movetime ${this.desiredMoveTime}`;
+            this.uciClient.send(goCommand, { awaitBestmove: true });
+        },
+
+        setAutoplay(enabled) {
+            this.autoplay = enabled;
+            if (this.autoplayButton) {
+                this.autoplayButton.textContent = enabled ? 'Autoplay (On)' : 'Autoplay (Off)';
+            }
+            if (enabled) {
+                this.requestEngineMove();
+            }
+        },
+
+        toggleAutoplay() {
+            this.setAutoplay(!this.autoplay);
+        },
+
+        setPlayerColor(color) {
+            this.playerColor = color;
+            this.computerColor = color === 'white' ? 'black' : 'white';
+            if (this.board) {
+                this.board.orientation(color);
+            }
+            if (this.autoplay || this.isComputerTurn()) {
+                this.requestEngineMove();
+            }
+        },
+
+        resetGame() {
+            this.game.reset();
+            this.basePosition = { type: 'startpos' };
+            this.moveHistory = [];
+            this.redoStack = [];
+            this.waitingForEngine = false;
+            this.lastScore = null;
+            this.syncBoardPosition();
+            this.updateEvaluationDisplay();
+            this.updateGameStatus();
+            if (this.uciClient) {
+                this.uciClient.send('ucinewgame', { awaitReady: true });
+                this.syncEnginePosition({ awaitReady: true });
+            }
+            if (this.autoplay || this.isComputerTurn()) {
+                this.requestEngineMove();
+            }
+        },
+
+        importFen(fen) {
+            if (!fen) {
+                return;
+            }
+            const validator = new global.Chess();
+            const validation = validator.validate_fen(fen);
+            if (!validation.valid) {
+                alert(`Invalid FEN: ${validation.error}`);
+                return;
+            }
+            this.game.load(fen);
+            this.basePosition = { type: 'fen', value: fen };
+            this.moveHistory = [];
+            this.redoStack = [];
+            this.waitingForEngine = false;
+            this.syncBoardPosition();
+            this.updateGameStatus();
+            if (this.uciClient) {
+                this.uciClient.send('ucinewgame', { awaitReady: true });
+                this.syncEnginePosition({ awaitReady: true });
+            }
+            if (this.autoplay || this.isComputerTurn()) {
+                this.requestEngineMove();
+            }
+        },
+
+        undoMove() {
+            if (!this.moveHistory.length) {
+                return;
+            }
+            const last = this.moveHistory.pop();
+            this.redoStack.push(last);
+            this.game.undo();
+            this.waitingForEngine = false;
+            this.syncBoardPosition();
+            this.updateGameStatus();
+            this.syncEnginePosition({ awaitReady: true });
+            if (this.autoplay || this.isComputerTurn()) {
+                this.requestEngineMove();
+            }
+        },
+
+        redoMove() {
+            if (!this.redoStack.length) {
+                return;
+            }
+            const move = this.redoStack.pop();
+            const result = this.applyMoveFromUci(move, { clearRedo: false });
+            if (result) {
+                this.syncEnginePosition({ awaitReady: true });
+                this.updateGameStatus();
+                if (this.autoplay || this.isComputerTurn()) {
+                    this.requestEngineMove();
+                }
+            }
+        },
+
+        computerMove() {
+            this.requestEngineMove();
+        },
+    };
+
+    global.chessApp = chessApp;
+
+    $(document).ready(() => {
+        chessApp.initialize();
     });
-};
-
-// Function to highlight the opening square
-const highlightOpeningSquare = (square) => {
-    console.log(`Highlighting opening square: ${square}`); // Debugging log
-
-    if (!square) {
-        console.log("No square provided for highlighting.");
-        return;
-    }
-
-    const $square = $(`#board .square-${square}`);
-    const highlightColor = 'yellow'; // Choose a distinct color for highlighting
-
-    if ($square.length === 0) {
-        console.log(`Square element not found: ${square}`);
-        return;
-    }
-
-    $square.css('background', highlightColor);
-};
-
-
-
-// Function to start the auto-refresh interval
-const startAutoRefresh = (intervalMs) => {
-    setInterval(() => {
-        reloadBoard();
-    }, intervalMs);
-};
-
-$(document).ready(function () {
-    initBoard(); // Initialize the board when the document is ready
-    startAutoRefresh(300); // Start auto-refresh
-    loadInfoBar();
-});
+}(window, window.jQuery));
