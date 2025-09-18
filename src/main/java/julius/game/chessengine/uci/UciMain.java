@@ -13,7 +13,7 @@ public final class UciMain {
     }
 
     public static void main(String[] args) throws IOException {
-        UciHandler handler = new UciHandler();
+        UciHandler handler = new UciHandler(System.out::println, () -> true);
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
         String line;
         while ((line = reader.readLine()) != null) {
