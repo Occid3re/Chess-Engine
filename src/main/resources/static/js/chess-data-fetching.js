@@ -1,8 +1,14 @@
 (function (global, $) {
     'use strict';
 
-    const WS_PROTOCOL = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const WS_URL = `${WS_PROTOCOL}://${window.location.host}/ws/uci`;
+    const determineWebSocketUrl = () => {
+        const protocol = window.location.protocol;
+        const wsProtocol = protocol === 'https:' ? 'wss' : 'ws';
+        const host = window.location.host || 'localhost:8080';
+        return `${wsProtocol}://${host}/ws/uci`;
+    };
+
+    const WS_URL = determineWebSocketUrl();
 
     const squareColorClass = (square) => ($(`#board .square-${square}`).hasClass('black-3c85d') ? 'lightskyblue' : 'blue');
 
