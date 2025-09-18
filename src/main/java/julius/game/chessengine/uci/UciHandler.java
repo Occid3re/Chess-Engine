@@ -1,14 +1,23 @@
 package julius.game.chessengine.uci;
 
 import julius.game.chessengine.ai.AI;
+import julius.game.chessengine.ai.MoveAndScore;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.Engine;
+import julius.game.chessengine.engine.GameState;
+import julius.game.chessengine.utils.Score;
 import julius.game.chessengine.utils.VersionInfo;
 
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * Very small UCI protocol handler used for interacting with the engine
@@ -16,15 +25,26 @@ import java.util.function.Consumer;
  */
 public class UciHandler {
 
+    private static final long INFO_INTERVAL_NANOS = Duration.ofMillis(200).toNanos();
+
     private final Engine engine;
     private final AI ai;
+    private final Consumer<String> output;
+    private final Supplier<Boolean> running;
     private Thread searchThread;
     private final Map<String, UciOption> options = new LinkedHashMap<>();
     private int moveOverheadMs = 0;
+    private final AtomicLong lastInfoNanos = new AtomicLong(0L);
 
     public UciHandler() {
+        this(System.out::println, () -> true);
+    }
+
+    public UciHandler(Consumer<String> output, Supplier<Boolean> running) {
         this.engine = new Engine();
         this.ai = new AI(engine);
+        this.output = Objects.requireNonNull(output, "output");
+        this.running = Objects.requireNonNull(running, "running");
         registerOptions();
     }
 
@@ -42,7 +62,7 @@ public class UciHandler {
             case "uci" -> sendId();
             case "isready" -> {
                 stop();
-                System.out.println("readyok");
+                output.accept("readyok");
             }
             case "ucinewgame" -> newGame();
             case "position" -> setPosition(tokens);
@@ -50,6 +70,7 @@ public class UciHandler {
             case "stop" -> stop();
             case "setoption" -> setOption(tokens);
             case "quit" -> {
+                stop();
                 return false;
             }
             default -> {
@@ -60,13 +81,13 @@ public class UciHandler {
     }
 
     private void sendId() {
-        System.out.println("id name Alieknek " + VersionInfo.getVersion());
-        System.out.println("id author Julius");
+        output.accept("id name Alieknek " + VersionInfo.getVersion());
+        output.accept("id author Julius");
         for (UciOption opt : options.values()) {
-            System.out.printf("option name %s type %s default %s min %d max %d%n",
-                    opt.name, opt.type, opt.defaultValue, opt.min, opt.max);
+            output.accept(String.format("option name %s type %s default %s min %d max %d",
+                    opt.name, opt.type, opt.defaultValue, opt.min, opt.max));
         }
-        System.out.println("uciok");
+        output.accept("uciok");
     }
 
     private void registerOptions() {
@@ -284,10 +305,20 @@ public class UciHandler {
         long limit = computeTimeLimit(timeLeft, inc, movetime, movestogo, moveOverheadMs);
         ai.setTimeLimit(limit);
 
+        lastInfoNanos.set(0L);
         searchThread = new Thread(() -> {
             ai.startAutoPlay(false, false); // start calculation without auto-move
             try {
+                long nextInfo = System.nanoTime();
                 while (!Thread.currentThread().isInterrupted()) {
+                    if (!Boolean.TRUE.equals(running.get())) {
+                        break;
+                    }
+                    long now = System.nanoTime();
+                    if (now >= nextInfo) {
+                        publishSearchInfo();
+                        nextInfo = now + INFO_INTERVAL_NANOS;
+                    }
                     Integer bm = ai.getCurrentBestMoveInt();
                     if (bm != null && bm != -1) {
                         break;
@@ -297,18 +328,19 @@ public class UciHandler {
             } catch (InterruptedException ignored) {
                 // interrupted by stop()
             } finally {
+                publishSearchInfo();
                 Integer bm = ai.getCurrentBestMoveInt();
                 if (bm != null && bm != -1) {
                     engine.performMove(bm);
-                    System.out.println("bestmove " + toUci(bm));
+                    output.accept("bestmove " + toUci(bm));
                 } else {
                     MoveList legal = engine.getAllLegalMoves();
                     if (legal.size() > 0) {
                         int move = legal.getMove(0);
                         engine.performMove(move);
-                        System.out.println("bestmove " + toUci(move));
+                        output.accept("bestmove " + toUci(move));
                     } else {
-                        System.out.println("bestmove (none)");
+                        output.accept("bestmove (none)");
                     }
                 }
                 ai.stopCalculation();
@@ -318,17 +350,86 @@ public class UciHandler {
         searchThread.start();
     }
 
-    private void stop() {
+    public void stop() {
         ai.stopCalculation();
-        if (searchThread != null && searchThread.isAlive()) {
-            searchThread.interrupt();
-            try {
-                searchThread.join();
-            } catch (InterruptedException ignored) {
-                Thread.currentThread().interrupt();
+        Thread runningThread = searchThread;
+        if (runningThread != null) {
+            if (runningThread != Thread.currentThread()) {
+                if (runningThread.isAlive()) {
+                    runningThread.interrupt();
+                    try {
+                        runningThread.join();
+                    } catch (InterruptedException ignored) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+            } else {
+                runningThread.interrupt();
             }
-            searchThread = null;
+            if (!runningThread.isAlive() || runningThread == Thread.currentThread()) {
+                searchThread = null;
+            }
         }
+    }
+
+    private void publishSearchInfo() {
+        if (!Boolean.TRUE.equals(running.get())) {
+            return;
+        }
+        long now = System.nanoTime();
+        long previous = lastInfoNanos.get();
+        if (previous != 0 && now - previous < INFO_INTERVAL_NANOS / 2) {
+            return;
+        }
+        lastInfoNanos.set(now);
+
+        List<MoveAndScore> line = new ArrayList<>(ai.getCalculatedLine());
+        long nodes = ai.getNodesVisited();
+        StringBuilder builder = new StringBuilder("info");
+        if (!line.isEmpty()) {
+            builder.append(" depth ").append(Math.max(1, line.size()));
+            builder.append(' ').append(formatScore(line.get(0).getScore()));
+            builder.append(" nodes ").append(nodes);
+            String pv = buildPv(line);
+            if (!pv.isEmpty()) {
+                builder.append(" pv ").append(pv);
+            }
+        } else {
+            builder.append(" nodes ").append(nodes);
+        }
+        output.accept(builder.toString());
+
+        GameState gameState = ai.getMainEngine().getGameState();
+        if (gameState != null && gameState.getState() != null) {
+            output.accept("info string gamestate " + gameState.getState());
+        }
+    }
+
+    private String formatScore(double score) {
+        double abs = Math.abs(score);
+        if (abs >= Score.CHECKMATE - 1000) {
+            int mate = (int) Math.max(1, Math.round((Score.CHECKMATE - abs) / 100.0));
+            if (score < 0) {
+                mate = -mate;
+            }
+            return "score mate " + mate;
+        }
+        int cp = (int) Math.round(score * 100.0);
+        return "score cp " + cp;
+    }
+
+    private String buildPv(List<MoveAndScore> line) {
+        StringBuilder pv = new StringBuilder();
+        for (MoveAndScore moveAndScore : line) {
+            if (moveAndScore == null) {
+                continue;
+            }
+            if (pv.length() > 0) {
+                pv.append(' ');
+            }
+            pv.append(toUci(moveAndScore.getMove()));
+        }
+        return pv.toString();
     }
 }
 
