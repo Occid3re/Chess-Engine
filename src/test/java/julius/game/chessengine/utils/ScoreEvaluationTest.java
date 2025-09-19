@@ -80,6 +80,51 @@ public class ScoreEvaluationTest {
     }
 
     @Test
+    void advancedPawnImprovesScore() {
+        BitBoard advanced = FEN.translateFENtoBitBoard("4k3/4p3/8/4P3/8/8/8/4K3 w - - 0 1");
+        BitBoard base = FEN.translateFENtoBitBoard("4k3/4p3/8/8/8/4P3/8/4K3 w - - 0 1");
+
+        PawnStructureView advancedView = pawnStructure(advanced);
+        PawnStructureView baseView = pawnStructure(base);
+
+        assertTrue(advancedView.whiteAdvance().midgame() > baseView.whiteAdvance().midgame());
+
+        Score advancedScore = Score.initializeScore(advanced);
+        Score baseScore = Score.initializeScore(base);
+        assertTrue(advancedScore.getScoreDifference() > baseScore.getScoreDifference());
+    }
+
+    @Test
+    void blockedPawnIsPenalized() {
+        BitBoard blocked = FEN.translateFENtoBitBoard("4k3/8/8/8/4p3/4P3/8/4K3 w - - 0 1");
+        BitBoard free = FEN.translateFENtoBitBoard("4k3/8/8/4p3/8/4P3/8/4K3 w - - 0 1");
+
+        PawnStructureView blockedView = pawnStructure(blocked);
+        PawnStructureView freeView = pawnStructure(free);
+
+        assertTrue(blockedView.whiteBlocked().midgame() < freeView.whiteBlocked().midgame());
+
+        Score blockedScore = Score.initializeScore(blocked);
+        Score freeScore = Score.initializeScore(free);
+        assertTrue(blockedScore.getScoreDifference() < freeScore.getScoreDifference());
+    }
+
+    @Test
+    void backwardPawnIsPenalized() {
+        BitBoard backward = FEN.translateFENtoBitBoard("4k3/8/8/3p4/8/4P3/8/4K3 w - - 0 1");
+        BitBoard supported = FEN.translateFENtoBitBoard("4k3/8/3p4/8/8/4P3/8/4K3 w - - 0 1");
+
+        PawnStructureView backwardView = pawnStructure(backward);
+        PawnStructureView supportedView = pawnStructure(supported);
+
+        assertTrue(backwardView.whiteBackward().midgame() < supportedView.whiteBackward().midgame());
+
+        Score backwardScore = Score.initializeScore(backward);
+        Score supportedScore = Score.initializeScore(supported);
+        assertTrue(backwardScore.getScoreDifference() < supportedScore.getScoreDifference());
+    }
+
+    @Test
     void doubledPawnsReduceScore() {
         BitBoard healthy = FEN.translateFENtoBitBoard("4k3/8/8/8/3P4/8/4P3/4K3 w - - 0 1");
         BitBoard doubled = FEN.translateFENtoBitBoard("4k3/8/8/8/3P4/8/3P4/4K3 w - - 0 1");
