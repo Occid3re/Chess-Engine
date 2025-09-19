@@ -78,6 +78,7 @@
         lastScore: null,
         autoplayButton: null,
         searchTimeoutId: null,
+        engineResponsive: true,
 
         initialize() {
             this.desiredMoveTime = parseInt($('#autoplaySlider').val(), 10) || 50;
@@ -157,10 +158,19 @@
             });
 
             this.uciClient.on('readyok', () => {
+                this.engineResponsive = true;
                 this.updateInfoBar();
                 if (this.autoplay || this.isComputerTurn()) {
                     this.requestEngineMove();
                 }
+            });
+
+            this.uciClient.on('close', () => {
+                this.handleEngineUnresponsive('Engine connection closed. Manual play enabled.');
+            });
+
+            this.uciClient.on('error', () => {
+                this.handleEngineUnresponsive('Engine error detected. Manual play enabled.');
             });
 
             this.uciClient.on('id', (data) => {
@@ -191,7 +201,11 @@
 
             this.uciClient.on('bestmove', (payload) => {
                 this.clearSearchTimeout();
+                const shouldApplyMove = this.waitingForEngine && this.engineResponsive;
                 this.waitingForEngine = false;
+                if (!shouldApplyMove) {
+                    return;
+                }
                 if (!payload || !payload.move || payload.move === '(none)') {
                     this.updateGameStatus();
                     return;
@@ -326,7 +340,7 @@
             if ((this.game.turn() === 'w' && piece[0] !== 'w') || (this.game.turn() === 'b' && piece[0] !== 'b')) {
                 return false;
             }
-            if (this.computerColor && piece[0] === this.computerColor.charAt(0) && !this.autoplay) {
+            if (this.engineResponsive && this.computerColor && piece[0] === this.computerColor.charAt(0) && !this.autoplay) {
                 return false;
             }
             return true;
@@ -451,7 +465,7 @@
             if (this.autoplay) {
                 return true;
             }
-            if (!this.computerColor) {
+            if (!this.engineResponsive || !this.computerColor) {
                 return false;
             }
             return this.game.turn() === this.computerColor.charAt(0);
@@ -461,6 +475,20 @@
             if (this.searchTimeoutId !== null) {
                 window.clearTimeout(this.searchTimeoutId);
                 this.searchTimeoutId = null;
+            }
+        },
+
+        handleEngineUnresponsive(message) {
+            this.engineResponsive = false;
+            if (this.waitingForEngine) {
+                this.waitingForEngine = false;
+            }
+            this.clearSearchTimeout();
+            if (this.autoplay) {
+                this.setAutoplay(false);
+            }
+            if (message) {
+                this.updateInfoBar(message);
             }
         },
 
@@ -474,6 +502,7 @@
                 }
                 console.warn('Engine search exceeded expected time; sending stop command.');
                 this.uciClient.cancelPendingSearch();
+                this.handleEngineUnresponsive('Engine search timed out. Manual play enabled; press "Computer Move" to retry.');
             }, timeoutMs);
         },
 
@@ -481,6 +510,7 @@
             if (!this.uciClient || this.waitingForEngine || this.game.game_over()) {
                 return;
             }
+            this.engineResponsive = true;
             this.waitingForEngine = true;
             this.syncEnginePosition({ awaitReady: true });
             const goCommand = `go movetime ${this.desiredMoveTime}`;
