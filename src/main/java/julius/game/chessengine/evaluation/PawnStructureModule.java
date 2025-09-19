@@ -665,7 +665,7 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         public static PawnStructureView empty() {
             PhaseScore zero = PhaseScore.constant(0);
             return new PawnStructureView(zero, zero, zero, zero, zero, zero, zero, zero,
-                    zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero,
+            zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero,
                     0, 0, 0, 0);
         }
 
