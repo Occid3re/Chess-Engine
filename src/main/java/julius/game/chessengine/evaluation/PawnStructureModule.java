@@ -143,6 +143,38 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
                 calculateBackwardPawnPenalty(blackPawns, whitePawns, allPieces, false, 0),
                 calculateBackwardPawnPenalty(blackPawns, whitePawns, allPieces, false, 256));
 
+        PhaseScore[] whiteComponents = new PhaseScore[]{
+                whiteCenter,
+                whiteDoubled,
+                whiteIsolated,
+                whiteConnected,
+                whiteRookHalfOpen,
+                whiteRookOpen,
+                whiteIslands,
+                whitePassed,
+                whiteAdvance,
+                whiteBlocked,
+                whiteBackward
+        };
+        PhaseScore[] blackComponents = new PhaseScore[]{
+                blackCenter,
+                blackDoubled,
+                blackIsolated,
+                blackConnected,
+                blackRookHalfOpen,
+                blackRookOpen,
+                blackIslands,
+                blackPassed,
+                blackAdvance,
+                blackBlocked,
+                blackBackward
+        };
+
+        int whiteMidgameTotal = sumMidgame(whiteComponents);
+        int whiteEndgameTotal = sumEndgame(whiteComponents);
+        int blackMidgameTotal = sumMidgame(blackComponents);
+        int blackEndgameTotal = sumEndgame(blackComponents);
+
         currentView = new PawnStructureView(
                 whiteCenter,
                 blackCenter,
@@ -165,11 +197,15 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
                 whiteBlocked,
                 blackBlocked,
                 whiteBackward,
-                blackBackward
+                blackBackward,
+                whiteMidgameTotal,
+                whiteEndgameTotal,
+                blackMidgameTotal,
+                blackEndgameTotal
         );
 
-        midgameScoreCache = currentView.whiteMidgameTotal - currentView.blackMidgameTotal;
-        endgameScoreCache = currentView.whiteEndgameTotal - currentView.blackEndgameTotal;
+        midgameScoreCache = whiteMidgameTotal - blackMidgameTotal;
+        endgameScoreCache = whiteEndgameTotal - blackEndgameTotal;
         dirty = false;
         return currentView;
     }
@@ -382,7 +418,7 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
             long forward = PAWN_PUSHES[isWhite ? WHITE : BLACK][square];
             if ((forward & allPieces) == 0) {
                 int forwardIndex = Long.numberOfTrailingZeros(forward);
-                long enemyAttack = PAWN_ATTACKS[isWhite ? BLACK : WHITE][forwardIndex] & enemyPawns;
+                long enemyAttack = PAWN_ATTACKS[isWhite ? WHITE : BLACK][forwardIndex] & enemyPawns;
                 if (enemyAttack != 0) {
                     penalty += BACKWARD_PAWN_PENALTY;
                 }
@@ -390,6 +426,32 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
             remaining &= remaining - 1;
         }
         return scaleByPhase(penalty, phase);
+    }
+
+    private static int sumMidgame(PhaseScore... scores) {
+        int total = 0;
+        if (scores == null) {
+            return total;
+        }
+        for (PhaseScore score : scores) {
+            if (score != null) {
+                total += score.midgame();
+            }
+        }
+        return total;
+    }
+
+    private static int sumEndgame(PhaseScore... scores) {
+        int total = 0;
+        if (scores == null) {
+            return total;
+        }
+        for (PhaseScore score : scores) {
+            if (score != null) {
+                total += score.endgame();
+            }
+        }
+        return total;
     }
 
     private static int calculatePassedPawnBonus(long pawns, long opponentPawns, long allPieces, long ownKing, boolean isWhite) {
@@ -567,7 +629,11 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
                 PhaseScore whiteBlocked,
                 PhaseScore blackBlocked,
                 PhaseScore whiteBackward,
-                PhaseScore blackBackward) {
+                PhaseScore blackBackward,
+                int whiteMidgameTotal,
+                int whiteEndgameTotal,
+                int blackMidgameTotal,
+                int blackEndgameTotal) {
             this.whiteCenter = whiteCenter;
             this.blackCenter = blackCenter;
             this.whiteDoubled = whiteDoubled;
@@ -590,29 +656,17 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
             this.blackBlocked = blackBlocked;
             this.whiteBackward = whiteBackward;
             this.blackBackward = blackBackward;
-
-            this.whiteMidgameTotal = whiteCenter.midgame + whiteDoubled.midgame + whiteIsolated.midgame
-                    + whiteConnected.midgame + whiteRookHalfOpen.midgame + whiteRookOpen.midgame
-                    + whiteIslands.midgame + whitePassed.midgame
-                    + whiteAdvance.midgame + whiteBlocked.midgame + whiteBackward.midgame;
-            this.whiteEndgameTotal = whiteCenter.endgame + whiteDoubled.endgame + whiteIsolated.endgame
-                    + whiteConnected.endgame + whiteRookHalfOpen.endgame + whiteRookOpen.endgame
-                    + whiteIslands.endgame + whitePassed.endgame
-                    + whiteAdvance.endgame + whiteBlocked.endgame + whiteBackward.endgame;
-            this.blackMidgameTotal = blackCenter.midgame + blackDoubled.midgame + blackIsolated.midgame
-                    + blackConnected.midgame + blackRookHalfOpen.midgame + blackRookOpen.midgame
-                    + blackIslands.midgame + blackPassed.midgame
-                    + blackAdvance.midgame + blackBlocked.midgame + blackBackward.midgame;
-            this.blackEndgameTotal = blackCenter.endgame + blackDoubled.endgame + blackIsolated.endgame
-                    + blackConnected.endgame + blackRookHalfOpen.endgame + blackRookOpen.endgame
-                    + blackIslands.endgame + blackPassed.endgame
-                    + blackAdvance.endgame + blackBlocked.endgame + blackBackward.endgame;
+            this.whiteMidgameTotal = whiteMidgameTotal;
+            this.whiteEndgameTotal = whiteEndgameTotal;
+            this.blackMidgameTotal = blackMidgameTotal;
+            this.blackEndgameTotal = blackEndgameTotal;
         }
 
         public static PawnStructureView empty() {
             PhaseScore zero = PhaseScore.constant(0);
             return new PawnStructureView(zero, zero, zero, zero, zero, zero, zero, zero,
-                    zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero,zero,zero);
+                    zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero,
+                    0, 0, 0, 0);
         }
 
         public PhaseScore whiteCenter() {
