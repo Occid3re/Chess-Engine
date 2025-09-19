@@ -77,6 +77,7 @@
         engineOptions: {},
         lastScore: null,
         autoplayButton: null,
+        searchTimeoutId: null,
 
         initialize() {
             this.desiredMoveTime = parseInt($('#autoplaySlider').val(), 10) || 50;
@@ -189,6 +190,7 @@
             });
 
             this.uciClient.on('bestmove', (payload) => {
+                this.clearSearchTimeout();
                 this.waitingForEngine = false;
                 if (!payload || !payload.move || payload.move === '(none)') {
                     this.updateGameStatus();
@@ -455,6 +457,26 @@
             return this.game.turn() === this.computerColor.charAt(0);
         },
 
+        clearSearchTimeout() {
+            if (this.searchTimeoutId !== null) {
+                window.clearTimeout(this.searchTimeoutId);
+                this.searchTimeoutId = null;
+            }
+        },
+
+        scheduleSearchTimeout() {
+            this.clearSearchTimeout();
+            const timeoutMs = Math.max(this.desiredMoveTime + 1000, 1500);
+            this.searchTimeoutId = window.setTimeout(() => {
+                this.searchTimeoutId = null;
+                if (!this.waitingForEngine || !this.uciClient) {
+                    return;
+                }
+                console.warn('Engine search exceeded expected time; sending stop command.');
+                this.uciClient.cancelPendingSearch();
+            }, timeoutMs);
+        },
+
         requestEngineMove() {
             if (!this.uciClient || this.waitingForEngine || this.game.game_over()) {
                 return;
@@ -463,6 +485,7 @@
             this.syncEnginePosition({ awaitReady: true });
             const goCommand = `go movetime ${this.desiredMoveTime}`;
             this.uciClient.send(goCommand, { awaitBestmove: true });
+            this.scheduleSearchTimeout();
         },
 
         setAutoplay(enabled) {
@@ -502,6 +525,7 @@
             this.updateGameStatus();
             if (this.uciClient) {
                 this.uciClient.cancelPendingSearch();
+                this.clearSearchTimeout();
                 this.uciClient.send('ucinewgame', { awaitReady: true });
                 this.syncEnginePosition({ awaitReady: true });
             }
@@ -529,6 +553,7 @@
             this.updateGameStatus();
             if (this.uciClient) {
                 this.uciClient.cancelPendingSearch();
+                this.clearSearchTimeout();
                 this.uciClient.send('ucinewgame', { awaitReady: true });
                 this.syncEnginePosition({ awaitReady: true });
             }
@@ -549,6 +574,7 @@
             this.updateGameStatus();
             if (this.uciClient) {
                 this.uciClient.cancelPendingSearch();
+                this.clearSearchTimeout();
             }
             this.syncEnginePosition({ awaitReady: true });
             if (this.autoplay || this.isComputerTurn()) {
@@ -565,6 +591,7 @@
             if (result) {
                 if (this.uciClient) {
                     this.uciClient.cancelPendingSearch();
+                    this.clearSearchTimeout();
                 }
                 this.syncEnginePosition({ awaitReady: true });
                 this.updateGameStatus();
