@@ -35,9 +35,9 @@ public final class KingSafetyModule implements EvaluationModule {
     private static final int HALF_OPEN_FILE_PENALTY = -15;
     private static final int OPEN_FILE_PENALTY = -25;
     private static final int DEFENDER_BONUS = 5;
-    private static final int QUEEN_ATTACKED_PENALTY = -135;
-    private static final int BACKRANK_WEAKNESS_MIDGAME_PENALTY = -30;
-    private static final int BACKRANK_WEAKNESS_ENDGAME_PENALTY = -15;
+    private static final int QUEEN_ATTACKED_PENALTY = -75;
+    private static final int BACKRANK_WEAKNESS_MIDGAME_PENALTY = -100;
+    private static final int BACKRANK_WEAKNESS_ENDGAME_PENALTY = -50;
 
     private static final int[] ATTACK_WEIGHTS = new int[7];
 
