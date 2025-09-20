@@ -185,6 +185,8 @@ public final class KingSafetyModule implements EvaluationModule {
         }
         long prevEnemyAttacks = side == WHITE ? previous.getBlackAttackMap() : previous.getWhiteAttackMap();
         long currEnemyAttacks = side == WHITE ? current.getBlackAttackMap() : current.getWhiteAttackMap();
+        long prevFriendlyAttacks = side == WHITE ? previous.getWhiteAttackMap() : previous.getBlackAttackMap();
+        long currFriendlyAttacks = side == WHITE ? current.getWhiteAttackMap() : current.getBlackAttackMap();
         long zoneDiff = (prevEnemyAttacks ^ currEnemyAttacks) & state.kingZone;
         if (zoneDiff != 0) {
             return true;
@@ -227,6 +229,9 @@ public final class KingSafetyModule implements EvaluationModule {
             }
             queenMask ^= q;
         }
+        if (state.backrankMask != 0 && ((prevFriendlyAttacks ^ currFriendlyAttacks) & state.backrankMask) != 0) {
+            return true;
+        }
         return false;
     }
 
@@ -241,6 +246,11 @@ public final class KingSafetyModule implements EvaluationModule {
         state.kingZone = KING_ATTACKS[kingSquare];
         state.shieldMask = computeShieldMask(kingBits, isWhite);
         state.fileMask = FileMasks[kingSquare & 7];
+        state.backrankMask = 0L;
+        int rank = kingSquare / 8;
+        if ((isWhite && rank == 0) || (!isWhite && rank == 7)) {
+            state.backrankMask = computeBackrankMask(kingSquare);
+        }
 
         long friendlyPawns = isWhite ? board.getWhitePawns() : board.getBlackPawns();
         long enemyPawns = isWhite ? board.getBlackPawns() : board.getWhitePawns();
@@ -314,7 +324,11 @@ public final class KingSafetyModule implements EvaluationModule {
             return;
         }
 
-        long backrankMask = computeBackrankMask(state.kingSquare);
+        long backrankMask = state.backrankMask;
+        if (backrankMask == 0L) {
+            return;
+        }
+
         if ((friendlyAttacks & backrankMask) != 0) {
             return;
         }
@@ -586,6 +600,7 @@ public final class KingSafetyModule implements EvaluationModule {
         private int backrankWeaknessMidgame;
         private int backrankWeaknessEndgame;
         private final int[] zoneAttackWeights = new int[64];
+        private long backrankMask;
 
         private void reset() {
             kingSquare = -1;
@@ -602,6 +617,7 @@ public final class KingSafetyModule implements EvaluationModule {
             endgameQueenPenalty = 0;
             backrankWeaknessMidgame = 0;
             backrankWeaknessEndgame = 0;
+            backrankMask = 0L;
             Arrays.fill(zoneAttackWeights, 0);
         }
     }
