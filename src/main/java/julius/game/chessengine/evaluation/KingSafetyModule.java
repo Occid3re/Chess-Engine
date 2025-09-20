@@ -284,7 +284,7 @@ public final class KingSafetyModule implements EvaluationModule {
         int shieldPenalty = state.missingShield * MISSING_PAWN_SHIELD_PENALTY;
         int attackPenalty = -state.totalAttackWeight;
         int defenderBonus = state.defenderCount * DEFENDER_BONUS;
-        computeBackrankWeaknessPenalty(state, board, isWhite, friendlyAttacks);
+        computeBackrankWeaknessPenalty(state, board, isWhite);
         int baseMidgame = shieldPenalty + state.filePenalty + attackPenalty + defenderBonus;
         state.midgameKingSafety = baseMidgame + state.backrankWeaknessMidgame;
         state.endgameKingSafety = baseMidgame / 2 + state.backrankWeaknessEndgame;
@@ -305,8 +305,7 @@ public final class KingSafetyModule implements EvaluationModule {
         state.endgameQueenPenalty = queenEnd;
     }
 
-    private void computeBackrankWeaknessPenalty(SideState state, BitBoard board, boolean isWhite,
-                                                long friendlyAttacks) {
+    private void computeBackrankWeaknessPenalty(SideState state, BitBoard board, boolean isWhite) {
         state.backrankWeaknessMidgame = 0;
         state.backrankWeaknessEndgame = 0;
         if (state.kingSquare < 0) {
@@ -329,7 +328,8 @@ public final class KingSafetyModule implements EvaluationModule {
             return;
         }
 
-        if ((friendlyAttacks & backrankMask) != 0) {
+        long friendlyNonKingAttacks = computeFriendlyNonKingAttacks(board, isWhite);
+        if ((friendlyNonKingAttacks & backrankMask) != 0) {
             return;
         }
 
@@ -369,6 +369,65 @@ public final class KingSafetyModule implements EvaluationModule {
             mask |= 1L << (kingSquare + 1);
         }
         return mask;
+    }
+
+    private long computeFriendlyNonKingAttacks(BitBoard board, boolean isWhite) {
+        long attacks = 0L;
+        long occupancy = board.getAllPieces();
+
+        long pawns = isWhite ? board.getWhitePawns() : board.getBlackPawns();
+        int pawnColor = isWhite ? WHITE : BLACK;
+        long remaining = pawns;
+        while (remaining != 0) {
+            long pawn = remaining & -remaining;
+            int index = Long.numberOfTrailingZeros(pawn);
+            attacks |= PAWN_ATTACKS[pawnColor][index];
+            remaining ^= pawn;
+        }
+
+        long knights = isWhite ? board.getWhiteKnights() : board.getBlackKnights();
+        remaining = knights;
+        while (remaining != 0) {
+            long knight = remaining & -remaining;
+            int index = Long.numberOfTrailingZeros(knight);
+            attacks |= knightMoveTable[index];
+            remaining ^= knight;
+        }
+
+        long bishops = isWhite ? board.getWhiteBishops() : board.getBlackBishops();
+        remaining = bishops;
+        while (remaining != 0) {
+            long bishop = remaining & -remaining;
+            int index = Long.numberOfTrailingZeros(bishop);
+            long mask = BISHOP_HELPER.bishopMasks[index];
+            attacks |= BISHOP_HELPER.calculateMovesUsingBishopMagic(index, occupancy & mask);
+            remaining ^= bishop;
+        }
+
+        long rooks = isWhite ? board.getWhiteRooks() : board.getBlackRooks();
+        remaining = rooks;
+        while (remaining != 0) {
+            long rook = remaining & -remaining;
+            int index = Long.numberOfTrailingZeros(rook);
+            long mask = ROOK_HELPER.rookMasks[index];
+            attacks |= ROOK_HELPER.calculateMovesUsingRookMagic(index, occupancy & mask);
+            remaining ^= rook;
+        }
+
+        long queens = isWhite ? board.getWhiteQueens() : board.getBlackQueens();
+        remaining = queens;
+        while (remaining != 0) {
+            long queen = remaining & -remaining;
+            int index = Long.numberOfTrailingZeros(queen);
+            long bishopMask = BISHOP_HELPER.bishopMasks[index];
+            long rookMask = ROOK_HELPER.rookMasks[index];
+            long diagonal = BISHOP_HELPER.calculateMovesUsingBishopMagic(index, occupancy & bishopMask);
+            long straight = ROOK_HELPER.calculateMovesUsingRookMagic(index, occupancy & rookMask);
+            attacks |= diagonal | straight;
+            remaining ^= queen;
+        }
+
+        return attacks;
     }
 
     private void accumulatePawnAttacks(SideState state, long pawns, boolean pawnsAreWhite) {
