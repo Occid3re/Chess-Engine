@@ -11,6 +11,7 @@ import julius.game.chessengine.evaluation.MaterialModule;
 import julius.game.chessengine.evaluation.MoveContext;
 import julius.game.chessengine.evaluation.PawnStructureModule;
 import julius.game.chessengine.evaluation.PieceSquareModule;
+import julius.game.chessengine.evaluation.ThreatModule;
 
 import java.util.List;
 import java.util.Objects;
@@ -33,6 +34,7 @@ public class Score {
     private final PieceSquareModule pieceSquareModule = new PieceSquareModule();
     private final ActivityModule activityModule = new ActivityModule();
     private final KingSafetyModule kingSafetyModule = new KingSafetyModule();
+    private final ThreatModule threatModule = new ThreatModule();
 
     @JsonIgnore
     private final EvaluationPipeline evaluationPipeline;
@@ -46,7 +48,8 @@ public class Score {
                 pawnStructureModule,
                 pieceSquareModule,
                 activityModule,
-                kingSafetyModule
+                kingSafetyModule,
+                threatModule
         ));
     }
 
