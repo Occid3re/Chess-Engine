@@ -36,6 +36,8 @@ public final class KingSafetyModule implements EvaluationModule {
     private static final int OPEN_FILE_PENALTY = -25;
     private static final int DEFENDER_BONUS = 5;
     private static final int QUEEN_ATTACKED_PENALTY = -135;
+    private static final int BACKRANK_WEAKNESS_MIDGAME_PENALTY = -30;
+    private static final int BACKRANK_WEAKNESS_ENDGAME_PENALTY = -15;
 
     private static final int[] ATTACK_WEIGHTS = new int[7];
 
@@ -272,8 +274,10 @@ public final class KingSafetyModule implements EvaluationModule {
         int shieldPenalty = state.missingShield * MISSING_PAWN_SHIELD_PENALTY;
         int attackPenalty = -state.totalAttackWeight;
         int defenderBonus = state.defenderCount * DEFENDER_BONUS;
-        state.midgameKingSafety = shieldPenalty + state.filePenalty + attackPenalty + defenderBonus;
-        state.endgameKingSafety = state.midgameKingSafety / 2;
+        computeBackrankWeaknessPenalty(state, board, isWhite, friendlyAttacks);
+        int baseMidgame = shieldPenalty + state.filePenalty + attackPenalty + defenderBonus;
+        state.midgameKingSafety = baseMidgame + state.backrankWeaknessMidgame;
+        state.endgameKingSafety = baseMidgame / 2 + state.backrankWeaknessEndgame;
 
         long queens = isWhite ? board.getWhiteQueens() : board.getBlackQueens();
         int queenMid = 0;
@@ -289,6 +293,68 @@ public final class KingSafetyModule implements EvaluationModule {
         }
         state.midgameQueenPenalty = queenMid;
         state.endgameQueenPenalty = queenEnd;
+    }
+
+    private void computeBackrankWeaknessPenalty(SideState state, BitBoard board, boolean isWhite,
+                                                long friendlyAttacks) {
+        state.backrankWeaknessMidgame = 0;
+        state.backrankWeaknessEndgame = 0;
+        if (state.kingSquare < 0) {
+            return;
+        }
+        int rank = state.kingSquare / 8;
+        if ((isWhite && rank != 0) || (!isWhite && rank != 7)) {
+            return;
+        }
+
+        long kingMask = 1L << state.kingSquare;
+        long escapeSquares = computeEscapeSquares(kingMask, isWhite);
+        long occupiedEscape = escapeSquares & board.getAllPieces();
+        if ((escapeSquares & ~occupiedEscape) != 0) {
+            return;
+        }
+
+        long backrankMask = computeBackrankMask(state.kingSquare);
+        if ((friendlyAttacks & backrankMask) != 0) {
+            return;
+        }
+
+        state.backrankWeaknessMidgame = BACKRANK_WEAKNESS_MIDGAME_PENALTY;
+        state.backrankWeaknessEndgame = BACKRANK_WEAKNESS_ENDGAME_PENALTY;
+    }
+
+    private static long computeEscapeSquares(long kingMask, boolean isWhite) {
+        long escape = 0L;
+        if (isWhite) {
+            escape |= kingMask << 8;
+            if ((kingMask & NOT_A_FILE) != 0) {
+                escape |= kingMask << 7;
+            }
+            if ((kingMask & NOT_H_FILE) != 0) {
+                escape |= kingMask << 9;
+            }
+        } else {
+            escape |= kingMask >>> 8;
+            if ((kingMask & NOT_A_FILE) != 0) {
+                escape |= kingMask >>> 9;
+            }
+            if ((kingMask & NOT_H_FILE) != 0) {
+                escape |= kingMask >>> 7;
+            }
+        }
+        return escape;
+    }
+
+    private static long computeBackrankMask(int kingSquare) {
+        long mask = 1L << kingSquare;
+        int file = kingSquare & 7;
+        if (file > 0) {
+            mask |= 1L << (kingSquare - 1);
+        }
+        if (file < 7) {
+            mask |= 1L << (kingSquare + 1);
+        }
+        return mask;
     }
 
     private void accumulatePawnAttacks(SideState state, long pawns, boolean pawnsAreWhite) {
@@ -517,6 +583,8 @@ public final class KingSafetyModule implements EvaluationModule {
         private int endgameKingSafety;
         private int midgameQueenPenalty;
         private int endgameQueenPenalty;
+        private int backrankWeaknessMidgame;
+        private int backrankWeaknessEndgame;
         private final int[] zoneAttackWeights = new int[64];
 
         private void reset() {
@@ -532,6 +600,8 @@ public final class KingSafetyModule implements EvaluationModule {
             endgameKingSafety = 0;
             midgameQueenPenalty = 0;
             endgameQueenPenalty = 0;
+            backrankWeaknessMidgame = 0;
+            backrankWeaknessEndgame = 0;
             Arrays.fill(zoneAttackWeights, 0);
         }
     }
