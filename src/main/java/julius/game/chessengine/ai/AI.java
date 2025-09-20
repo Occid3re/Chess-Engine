@@ -202,7 +202,7 @@ public class AI {
     // Game configuration parameters
 
     @Getter
-    private int maxDepth = 18; // Adjust the level of depth according to your requirements
+    private int maxDepth = 32; // Adjust the level of depth according to your requirements
 
     @Getter
     @Setter
