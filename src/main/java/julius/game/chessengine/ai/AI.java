@@ -1206,10 +1206,16 @@ public class AI {
         // Transposition table lookup
         TranspositionTableEntry entry = transpositionTable.get(boardHash);
         if (entry != null && entry.depth >= depth) {
-            if (entry.nodeType == NodeType.EXACT) return entry.score;
+            if (entry.nodeType == NodeType.EXACT) {
+                logPrunedNodeWithScore("Transposition table exact hit", entry.score, depth);
+                return entry.score;
+            }
             if (entry.nodeType == NodeType.LOWERBOUND && entry.score > alpha) alpha = entry.score;
             else if (entry.nodeType == NodeType.UPPERBOUND && entry.score < beta) beta = entry.score;
-            if (alpha >= beta) return entry.score;
+            if (alpha >= beta) {
+                logPrunedNode("Transposition table cutoff", alpha, beta, depth);
+                return entry.score;
+            }
         }
 
         // -------- Safer Null-move pruning (same as before, but use depthHere) --------
@@ -1258,7 +1264,9 @@ public class AI {
             }
 
             if (nullFailHigh) {
-                return isWhite ? beta : alpha;
+                double cutoffScore = isWhite ? beta : alpha;
+                logPrunedNodeWithScore("Null move pruning", cutoffScore, depth);
+                return cutoffScore;
             }
         }
         // ---------------------------------------------------------------------------
@@ -1270,6 +1278,49 @@ public class AI {
             return maximizer(simulatorEngine, depth, alpha, beta, isWhite, boardHash, alphaOriginal, moves, deadline, prevMove, plyFromRoot, extStreak);
         } else {
             return minimizer(simulatorEngine, depth, alpha, beta, isWhite, boardHash, betaOriginal, moves, deadline, prevMove, plyFromRoot, extStreak);
+        }
+    }
+
+
+    private void logPrunedMove(String reason, int move, int depth) {
+        if (log.isInfoEnabled()) {
+            log.info("Pruned move {} at depth {}: {}", formatMove(move), depth, reason);
+        }
+    }
+
+    private void logCutoff(String reason, int move, int depth, double alpha, double beta, double eval, int remainingMoves) {
+        if (log.isInfoEnabled()) {
+            log.info("{} at depth {} after move {} (score {}), alpha={}, beta={}, pruned {} remaining moves",
+                    reason, depth, formatMove(move), eval, alpha, beta, Math.max(remainingMoves, 0));
+        }
+    }
+
+    private void logPrunedNode(String reason, double alpha, double beta, int depth) {
+        if (log.isInfoEnabled()) {
+            log.info("{} at depth {} (alpha={}, beta={})", reason, depth, alpha, beta);
+        }
+    }
+
+    private void logPrunedNodeWithScore(String reason, double score, int depth) {
+        if (log.isInfoEnabled()) {
+            log.info("{} at depth {} with score {}", reason, depth, score);
+        }
+    }
+
+    private void logAnalyzedMove(String phase, int move, int depth, double eval) {
+        if (log.isInfoEnabled()) {
+            log.info("Analyzed move {} at depth {} in {} with score {}", formatMove(move), depth, phase, eval);
+        }
+    }
+
+    private String formatMove(int move) {
+        if (move < 0) {
+            return "<none>";
+        }
+        try {
+            return Move.convertIntToMove(move).toString();
+        } catch (Exception e) {
+            return Integer.toString(move);
         }
     }
 
@@ -1434,6 +1485,7 @@ public class AI {
                     boolean givesCheckTmp = isSideInCheck(simulatorEngine, !isWhite);
                     simulatorEngine.undoLastMove();
                     if (!givesCheckTmp) {
+                        logPrunedMove("SEE pruning", move, depth);
                         continue;
                     }
                 }
@@ -1459,7 +1511,10 @@ public class AI {
                 boolean givesCheckTmp = isSideInCheck(simulatorEngine, !isWhite);
                 boolean attacksQueenTmp = attacksOpponentQueenNow(simulatorEngine, isWhite);
                 simulatorEngine.undoLastMove();
-                if (!givesCheckTmp && !attacksQueenTmp) continue;
+                if (!givesCheckTmp && !attacksQueenTmp) {
+                    logPrunedMove("Late-move pruning", move, depth);
+                    continue;
+                }
             }
 
             simulatorEngine.performMove(move);
@@ -1550,6 +1605,8 @@ public class AI {
 
             simulatorEngine.undoLastMove();
 
+            logAnalyzedMove("maximizer", move, depth, eval);
+
             if (eval > maxEval) {
                 maxEval = eval;
                 bestMoveAtThisNode = move;
@@ -1560,6 +1617,7 @@ public class AI {
                 updateKillerMoves(depth, move);
                 incrementHistory(move, depth);
                 heuristics.recordCounterMove(prevMove, move);
+                logCutoff("Beta cutoff", move, depth, alpha, beta, eval, orderedMoves.size() - index - 1);
                 break;
             }
         }
@@ -1624,6 +1682,7 @@ public class AI {
                     boolean givesCheckTmp = isSideInCheck(simulatorEngine, !isWhite);
                     simulatorEngine.undoLastMove();
                     if (!givesCheckTmp) {
+                        logPrunedMove("SEE pruning", move, depth);
                         continue;
                     }
                 }
@@ -1733,6 +1792,8 @@ public class AI {
 
             simulatorEngine.undoLastMove();
 
+            logAnalyzedMove("minimizer", move, depth, eval);
+
             if (eval < minEval) {
                 minEval = eval;
                 bestMoveAtThisNode = move;
@@ -1743,6 +1804,7 @@ public class AI {
                 updateKillerMoves(depth, move);
                 incrementHistory(move, depth);
                 heuristics.recordCounterMove(prevMove, move);
+                logCutoff("Alpha cutoff", move, depth, alpha, beta, eval, orderedMoves.size() - index - 1);
                 break;
             }
         }
@@ -1982,6 +2044,7 @@ public class AI {
         double standPat = evaluateStaticPosition(simulatorEngine.getGameState(), isWhitesTurn, depth);
         if (!inCheck) {
             if (standPat >= beta) {
+                logPrunedNodeWithScore("Quiescence stand-pat beta cutoff", standPat, depth);
                 return beta; // fail-hard beta
             }
             if (alpha < standPat) {
@@ -1991,6 +2054,7 @@ public class AI {
             // Simple delta/futility-like guard: if even a big swing cannot beat alpha, cut
             final int BIG_DELTA = 1000; // ~queen
             if (standPat + BIG_DELTA < alpha) {
+                logPrunedNodeWithScore("Quiescence delta pruning", standPat, depth);
                 return alpha;
             }
         }
@@ -2015,7 +2079,10 @@ public class AI {
                     simulatorEngine.performMove(m);
                     boolean givesCheck = isSideInCheck(simulatorEngine, !isWhitesTurn);
                     simulatorEngine.undoLastMove();
-                    if (!givesCheck) continue;
+                    if (!givesCheck) {
+                        logPrunedMove("Quiescence SEE pruning", m, depth);
+                        continue;
+                    }
                 }
             }
             simulatorEngine.performMove(m);
@@ -2027,7 +2094,10 @@ public class AI {
 
             double score = -child;
 
+            logAnalyzedMove("quiescence", m, depth, score);
+
             if (score >= beta) {
+                logCutoff("Quiescence beta cutoff", m, depth, alpha, beta, score, ordered.size() - i - 1);
                 return beta;
             }
             if (score > alpha) {
