@@ -54,6 +54,20 @@ public class ScoreEvaluationTest {
     }
 
     @Test
+    void boxedInKingTriggersBackrankPenalty() {
+        BitBoard boxed = FEN.translateFENtoBitBoard("6k1/5ppp/8/8/8/8/8/6K1 w - - 0 1");
+        BitBoard defended = FEN.translateFENtoBitBoard("6k1/4qppp/8/8/8/8/8/6K1 w - - 0 1");
+
+        KingSafetyView boxedView = kingSafetyView(boxed);
+        KingSafetyView defendedView = kingSafetyView(defended);
+
+        int boxedScore = boxedView.blackKing().blend(boxed.getPhase());
+        int defendedScore = defendedView.blackKing().blend(defended.getPhase());
+
+        assertTrue(boxedScore < defendedScore);
+    }
+
+    @Test
     void centerPawnsGrantBonusToWhite() {
         BitBoard board = FEN.translateFENtoBitBoard("4k3/8/8/8/4P3/8/8/4K3 w - - 0 1");
         PawnStructureView view = pawnStructure(board);
