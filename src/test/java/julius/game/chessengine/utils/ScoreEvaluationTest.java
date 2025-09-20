@@ -68,6 +68,20 @@ public class ScoreEvaluationTest {
     }
 
     @Test
+    void defendingBackrankWithKnightRemovesPenalty() {
+        BitBoard vulnerable = FEN.translateFENtoBitBoard("2rr1k2/pp1q1ppp/2np1n2/1N2P3/5Qb1/5N2/PPPB1PPP/2K2B1R w - - 0 1");
+        BitBoard defended = FEN.translateFENtoBitBoard("2rr1k2/pp1q1ppp/2np1n2/4P3/5Qb1/2N2N2/PPPB1PPP/2K2B1R w - - 0 1");
+
+        KingSafetyView vulnerableView = kingSafetyView(vulnerable);
+        KingSafetyView defendedView = kingSafetyView(defended);
+
+        int vulnerableScore = vulnerableView.whiteKing().blend(vulnerable.getPhase());
+        int defendedScore = defendedView.whiteKing().blend(defended.getPhase());
+
+        assertTrue(vulnerableScore < defendedScore);
+    }
+
+    @Test
     void centerPawnsGrantBonusToWhite() {
         BitBoard board = FEN.translateFENtoBitBoard("4k3/8/8/8/4P3/8/8/4K3 w - - 0 1");
         PawnStructureView view = pawnStructure(board);

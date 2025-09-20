@@ -329,7 +329,8 @@ public final class KingSafetyModule implements EvaluationModule {
         }
 
         long friendlyNonKingAttacks = computeFriendlyNonKingAttacks(board, isWhite);
-        if ((friendlyNonKingAttacks & backrankMask) != 0) {
+        long defendedSquares = friendlyNonKingAttacks & (backrankMask & ~kingMask);
+        if (defendedSquares != 0) {
             return;
         }
 
