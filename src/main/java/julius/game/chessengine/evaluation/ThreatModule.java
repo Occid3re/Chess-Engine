@@ -3,10 +3,13 @@ package julius.game.chessengine.evaluation;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.figures.PieceType;
+import julius.game.chessengine.helper.BishopHelper;
+import julius.game.chessengine.helper.RookHelper;
 
 import java.util.Objects;
 
 import static julius.game.chessengine.helper.PawnMoveTables.PAWN_ATTACKS;
+import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
 
 /**
  * Evaluates tactical vulnerabilities such as hanging pieces and pawn attacks on higher valued
@@ -27,6 +30,9 @@ public final class ThreatModule implements EvaluationModule {
 
     private static final int[] HANGING_PENALTIES = new int[7];
     private static final int[] PAWN_THREAT_PENALTIES = new int[7];
+
+    private static final BishopHelper BISHOP_HELPER = BishopHelper.getInstance();
+    private static final RookHelper ROOK_HELPER = RookHelper.getInstance();
 
     static {
         HANGING_PENALTIES[PAWN] = -12;
@@ -131,18 +137,115 @@ public final class ThreatModule implements EvaluationModule {
                 remaining ^= bit;
                 continue;
             }
-            if ((friendlyAttacks & mask) != 0) {
-                remaining ^= bit;
-                continue;
+            boolean defended = (friendlyAttacks & mask) != 0;
+            if (!defended) {
+                penalty += HANGING_PENALTIES[typeBits];
             }
-
-            penalty += HANGING_PENALTIES[typeBits];
             if (typeBits > PAWN && (enemyPawnAttacks & mask) != 0) {
-                penalty += PAWN_THREAT_PENALTIES[typeBits];
+                int defenderValue = defended
+                        ? leastValuableDefenderValue(board, isWhite, square)
+                        : materialValueFor(typeBits);
+                if (defenderValue <= 0) {
+                    defenderValue = materialValueFor(typeBits);
+                }
+                penalty += scalePawnThreatPenalty(typeBits, defenderValue);
             }
             remaining ^= bit;
         }
         return penalty;
+    }
+
+    private static int materialValueFor(int pieceType) {
+        return switch (pieceType) {
+            case PAWN -> MaterialModule.PAWN_VALUE;
+            case KNIGHT -> MaterialModule.KNIGHT_VALUE;
+            case BISHOP -> MaterialModule.BISHOP_VALUE;
+            case ROOK -> MaterialModule.ROOK_VALUE;
+            case QUEEN -> MaterialModule.QUEEN_VALUE;
+            case KING -> MaterialModule.QUEEN_VALUE * 2;
+            default -> 0;
+        };
+    }
+
+    private int scalePawnThreatPenalty(int pieceType, int defenderValue) {
+        int basePenalty = PAWN_THREAT_PENALTIES[pieceType];
+        if (basePenalty == 0) {
+            return 0;
+        }
+        int scaled = (basePenalty * defenderValue) / MaterialModule.PAWN_VALUE;
+        if (basePenalty < 0) {
+            return Math.min(basePenalty, scaled);
+        }
+        return Math.max(basePenalty, scaled);
+    }
+
+    private int leastValuableDefenderValue(BitBoard board, boolean isWhite, int targetSquare) {
+        long mask = 1L << targetSquare;
+        int colorIndex = isWhite ? WHITE : BLACK;
+        int minValue = Integer.MAX_VALUE;
+        long occupancy = board.getAllPieces();
+
+        long pawns = isWhite ? board.getWhitePawns() : board.getBlackPawns();
+        minValue = findCheapestDefender(pawns, MaterialModule.PAWN_VALUE, minValue,
+                square -> (PAWN_ATTACKS[colorIndex][square] & mask) != 0);
+        if (minValue == MaterialModule.PAWN_VALUE) {
+            return minValue;
+        }
+
+        long knights = isWhite ? board.getWhiteKnights() : board.getBlackKnights();
+        minValue = findCheapestDefender(knights, MaterialModule.KNIGHT_VALUE, minValue,
+                square -> (julius.game.chessengine.helper.KnightHelper.knightMoveTable[square] & mask) != 0);
+        if (minValue == MaterialModule.PAWN_VALUE) {
+            return minValue;
+        }
+
+        long bishops = isWhite ? board.getWhiteBishops() : board.getBlackBishops();
+        minValue = findCheapestDefender(bishops, MaterialModule.BISHOP_VALUE, minValue,
+                square -> (BISHOP_HELPER.calculateBishopMoves(square, occupancy) & mask) != 0);
+        if (minValue == MaterialModule.PAWN_VALUE) {
+            return minValue;
+        }
+
+        long rooks = isWhite ? board.getWhiteRooks() : board.getBlackRooks();
+        minValue = findCheapestDefender(rooks, MaterialModule.ROOK_VALUE, minValue,
+                square -> (ROOK_HELPER.calculateRookMoves(square, occupancy) & mask) != 0);
+        if (minValue == MaterialModule.PAWN_VALUE) {
+            return minValue;
+        }
+
+        long queens = isWhite ? board.getWhiteQueens() : board.getBlackQueens();
+        minValue = findCheapestDefender(queens, MaterialModule.QUEEN_VALUE, minValue,
+                square -> ((BISHOP_HELPER.calculateBishopMoves(square, occupancy)
+                        | ROOK_HELPER.calculateRookMoves(square, occupancy)) & mask) != 0);
+        if (minValue == MaterialModule.PAWN_VALUE) {
+            return minValue;
+        }
+
+        long king = isWhite ? board.getWhiteKing() : board.getBlackKing();
+        minValue = findCheapestDefender(king, materialValueFor(KING), minValue,
+                square -> (KING_ATTACKS[square] & mask) != 0);
+
+        if (minValue == Integer.MAX_VALUE) {
+            return 0;
+        }
+        return minValue;
+    }
+
+    private int findCheapestDefender(long pieces, int value, int currentMin,
+                                     java.util.function.IntPredicate attacksSquare) {
+        long remaining = pieces;
+        while (remaining != 0 && currentMin > MaterialModule.PAWN_VALUE) {
+            long bit = remaining & -remaining;
+            int square = Long.numberOfTrailingZeros(bit);
+            if (attacksSquare.test(square)) {
+                currentMin = Math.min(currentMin, value);
+                if (currentMin == MaterialModule.PAWN_VALUE) {
+                    return currentMin;
+                }
+            }
+            remaining ^= bit;
+        }
+        return currentMin;
     }
 
     private static long computePawnAttackMask(long pawns, int pawnColor) {
