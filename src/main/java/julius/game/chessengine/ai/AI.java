@@ -202,7 +202,7 @@ public class AI {
     // Game configuration parameters
 
     @Getter
-    private int maxDepth = 32; // Adjust the level of depth according to your requirements
+    private int maxDepth = 64; // Adjust the level of depth according to your requirements
 
     @Getter
     @Setter
@@ -1079,7 +1079,6 @@ public class AI {
         // If still nothing, no PV can be constructed
         if (seedMove == -1) {
             this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
-            if (log.isDebugEnabled()) log.debug("PV empty: no root move available/legal.");
             return;
         }
 
