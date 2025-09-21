@@ -157,12 +157,12 @@ public final class ThreatModule implements EvaluationModule {
 
     private static int materialValueFor(int pieceType) {
         return switch (pieceType) {
-            case PAWN -> MaterialModule.PAWN_VALUE;
-            case KNIGHT -> MaterialModule.KNIGHT_VALUE;
-            case BISHOP -> MaterialModule.BISHOP_VALUE;
-            case ROOK -> MaterialModule.ROOK_VALUE;
-            case QUEEN -> MaterialModule.QUEEN_VALUE;
-            case KING -> MaterialModule.QUEEN_VALUE * 2;
+            case 1 -> MaterialModule.PAWN_VALUE;
+            case 2 -> MaterialModule.KNIGHT_VALUE;
+            case 3 -> MaterialModule.BISHOP_VALUE;
+            case 4 -> MaterialModule.ROOK_VALUE;
+            case 5 -> MaterialModule.QUEEN_VALUE;
+            case 6 -> MaterialModule.QUEEN_VALUE * 2;
             default -> 0;
         };
     }
