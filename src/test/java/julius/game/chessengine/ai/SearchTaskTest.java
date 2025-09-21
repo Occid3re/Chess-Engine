@@ -55,4 +55,22 @@ class SearchTaskTest {
         assertTrue(blackTask.isStopRequested(),
                 "Winning mate for side to move should stop the search");
     }
+
+    @Test
+    void deeperIterationReplacesWorseScore() {
+        SearchTask task = new SearchTask(5L, 333L, true,
+                System.nanoTime() + 1_000_000_000L, 1);
+
+        MoveAndScore shallowBest = new MoveAndScore(111, 1.0);
+        assertTrue(task.publishBest(shallowBest, 2, null));
+
+        MoveAndScore deeperButWorse = new MoveAndScore(222, 0.5);
+        assertTrue(task.publishBest(deeperButWorse, 3, null));
+
+        BestMoveDepth best = task.getBest();
+        assertEquals(222, best.move);
+        assertEquals(0.5, best.score, 0.0001);
+        assertEquals(3, best.depth);
+        assertFalse(task.isStopRequested());
+    }
 }

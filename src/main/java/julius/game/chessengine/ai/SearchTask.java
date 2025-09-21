@@ -79,8 +79,7 @@ public final class SearchTask {
         while (true) {
             BestMoveDepth cur = best.get();
             boolean betterScore = isBetterScore(whiteToMove, ms.score, cur.score);
-            boolean deeperTie = ms.score == cur.score && depth > cur.depth;
-            if (!betterScore && !deeperTie) return false;
+            if (!betterScore && depth <= cur.depth) return false;
 
             BestMoveDepth next = new BestMoveDepth(ms.move, ms.score, depth);
             if (best.compareAndSet(cur, next)) {
