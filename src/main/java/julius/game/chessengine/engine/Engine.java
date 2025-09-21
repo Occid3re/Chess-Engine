@@ -116,6 +116,29 @@ public class Engine {
 
     private final Object boardLock = new Object();
 
+    private static final class NullMoveSnapshot {
+        final GameStateEnum previousState;
+        final int previousHalfmoveClock;
+        final int previousFullmoveNumber;
+        final long previousLastZobrist;
+        boolean hashRecorded;
+        long recordedHash;
+
+        NullMoveSnapshot(GameState gameState) {
+            this.previousState = gameState.getState();
+            this.previousHalfmoveClock = gameState.getHalfmoveClock();
+            this.previousFullmoveNumber = gameState.getFullmoveNumber();
+            this.previousLastZobrist = gameState.getLastZobrist();
+        }
+
+        void markHashRecorded(long hash) {
+            this.hashRecorded = true;
+            this.recordedHash = hash;
+        }
+    }
+
+    private final Deque<NullMoveSnapshot> nullMoveSnapshots = new ArrayDeque<>();
+
     @Getter
     private OpeningBook openingBook;
 
@@ -155,6 +178,7 @@ public class Engine {
             this.legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
 
             this.openingBook = other.openingBook;
+            this.nullMoveSnapshots.clear();
         }
     }
 
@@ -269,6 +293,7 @@ public class Engine {
             legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
             // Optional: one cleanup to ensure fresh state
             legalMovesCache.cleanup();
+            nullMoveSnapshots.clear();
             notifyPositionChanged();
         }
     }
@@ -427,19 +452,22 @@ public class Engine {
 
     // Engine.java
     public int doNullMoveForSearch() {
-        // Save current en-passant target (0 means none in your codebase)
         synchronized (boardLock) {
+            NullMoveSnapshot snapshot = new NullMoveSnapshot(gameState);
+            nullMoveSnapshots.addLast(snapshot);
+
             int previousDoubleStep = bitBoard.getLastMoveDoubleStepPawnIndex();
 
-            // EP is not valid across a null move: clear it
             bitBoard.setLastMoveDoubleStepPawnIndex(0);
-
-            // Flip side to move
             bitBoard.flipSideToMove();
 
-            // Mark move list stale so the next search ply regenerates for the new side.
-            legalMovesNeedUpdate = true;
+            long newHash = getBoardStateHash();
+            gameState.recordHash(newHash);
+            snapshot.markHashRecorded(newHash);
 
+            legalMovesNeedUpdate = true;
+            generateLegalMoves();
+            gameState.updateState(bitBoard, legalMoves, false);
             gameState.refreshScore(bitBoard);
 
             return previousDoubleStep;
@@ -449,15 +477,29 @@ public class Engine {
     // Engine.java
     public void undoNullMoveForSearch(int previousDoubleStep) {
         synchronized (boardLock) {
-            // Flip side back
-            bitBoard.flipSideToMove();
+            if (nullMoveSnapshots.isEmpty()) {
+                throw new IllegalStateException("Null-move undo called without matching snapshot");
+            }
 
-            // Restore EP target
+            NullMoveSnapshot snapshot = nullMoveSnapshots.removeLast();
+
+            bitBoard.flipSideToMove();
             bitBoard.setLastMoveDoubleStepPawnIndex(previousDoubleStep);
 
-            // Mark stale again so we rebuild for the restored side.
-            legalMovesNeedUpdate = true;
+            if (snapshot.hashRecorded) {
+                gameState.removeHash(snapshot.recordedHash);
+            }
 
+            gameState.setState(snapshot.previousState);
+            gameState.setHalfmoveClock(snapshot.previousHalfmoveClock);
+            gameState.setFullmoveNumber(snapshot.previousFullmoveNumber);
+            gameState.setLastZobrist(snapshot.previousLastZobrist);
+            bitBoard.setHalfmoveClock(snapshot.previousHalfmoveClock);
+            bitBoard.setFullmoveNumber(snapshot.previousFullmoveNumber);
+
+            legalMovesNeedUpdate = true;
+            generateLegalMoves();
+            gameState.updateState(bitBoard, legalMoves, false);
             gameState.refreshScore(bitBoard);
         }
     }
