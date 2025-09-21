@@ -84,7 +84,7 @@ public final class SearchTask {
 
             BestMoveDepth next = new BestMoveDepth(ms.move, ms.score, depth);
             if (best.compareAndSet(cur, next)) {
-                if (isFailHardMate(ms.score)) requestStop();
+                if (isFailHardMateForMover(whiteToMove, ms.score)) requestStop();
                 return true;
             }
         }
@@ -94,7 +94,8 @@ public final class SearchTask {
     private static boolean isBetterScore(boolean whiteToMove, double score, double bestScore) {
         return whiteToMove ? score > bestScore : score < bestScore;
     }
-    private static boolean isFailHardMate(double score) {
-        return Math.abs(score) >= CHECKMATE - 50;
+    private static boolean isFailHardMateForMover(boolean whiteToMove, double score) {
+        double threshold = CHECKMATE - 50;
+        return whiteToMove ? score >= threshold : score <= -threshold;
     }
 }
