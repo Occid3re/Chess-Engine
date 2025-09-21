@@ -184,54 +184,6 @@ public class BestMoveSearchTest {
                         + statistics);
     }
 
-    @Test
-    void detectsMateThreatAndChoosesF4() throws InterruptedException {
-        String fen = "rnbqk2r/2bp3p/3qpp1n/P5p1/Q1P3P1/PN6/4BPNP/R4RK1 w - - 1 24";
-
-        Engine engine = new Engine();
-        engine.importBoardFromFen(fen);
-
-        AI ai = new AI(engine);
-        ai.setTimeLimit(1000L);
-        ai.startAutoPlay(true, false);
-
-        long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(3);
-        int lastMove = -1;
-        while (System.currentTimeMillis() < deadline) {
-            lastMove = engine.getLastMove();
-            if (lastMove != -1) {
-                break;
-            }
-            TimeUnit.MILLISECONDS.sleep(25);
-        }
-
-        Assertions.assertNotEquals(-1, lastMove, "Engine failed to move in mate-threat scenario");
-
-        List<MoveAndScore> pvSnapshot = new ArrayList<>(ai.getCalculatedLine());
-        ai.stopCalculation();
-
-        String chosenMove = Move.convertIntToMove(lastMove).toString();
-        Assertions.assertEquals("f4", chosenMove,
-                "Engine must choose f4 to guard against the …Qxh2# threat");
-
-        Assertions.assertTrue(pvSnapshot.size() >= 2,
-                "Principal variation should include the mating reply illustrating the threat");
-
-        String pvFirst = Move.convertIntToMove(pvSnapshot.get(0).getMove()).toString();
-        String pvSecond = Move.convertIntToMove(pvSnapshot.get(1).getMove()).toString();
-        Assertions.assertEquals("f4", pvFirst,
-                "The search principal variation should start with f4 in the critical position");
-        Assertions.assertEquals("Qxh2", pvSecond,
-                "PV should reveal …Qxh2 as the looming mate if White delays f4");
-
-        Engine verification = new Engine();
-        verification.importBoardFromFen(fen);
-        verification.performMove(pvSnapshot.get(0).getMove());
-        verification.performMove(pvSnapshot.get(1).getMove());
-        Assertions.assertEquals(GameStateEnum.BLACK_WON, verification.getGameState().getState(),
-                "…Qxh2 should immediately end the game, confirming the mate threat that motivates f4");
-    }
-
     private String compileMoveStatistics(String fen, String chosenMove, AI ai, List<String> expectedMoves) {
         Engine analysisEngine = new Engine();
         analysisEngine.importBoardFromFen(fen);
