@@ -462,8 +462,7 @@ public class Engine {
             bitBoard.flipSideToMove();
 
             long newHash = getBoardStateHash();
-            gameState.recordHash(newHash);
-            snapshot.markHashRecorded(newHash);
+            gameState.setLastZobrist(newHash);
 
             legalMovesNeedUpdate = true;
             generateLegalMoves();
