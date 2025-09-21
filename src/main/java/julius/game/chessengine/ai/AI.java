@@ -1275,7 +1275,16 @@ public class AI {
 
     private boolean isSideInCheck(Engine engine, boolean isWhite) {
         GameStateEnum state = engine.getGameState().getState();
-        return (isWhite && state == GameStateEnum.WHITE_IN_CHECK) || (!isWhite && state == GameStateEnum.BLACK_IN_CHECK);
+        if (isWhite) {
+            if (state == GameStateEnum.WHITE_IN_CHECK || state == GameStateEnum.BLACK_WON) {
+                return true;
+            }
+        } else {
+            if (state == GameStateEnum.BLACK_IN_CHECK || state == GameStateEnum.WHITE_WON) {
+                return true;
+            }
+        }
+        return engine.getBitBoard().isInCheck(isWhite);
     }
 
     private boolean attacksOpponentQueenNow(Engine e, boolean moverIsWhite) {
