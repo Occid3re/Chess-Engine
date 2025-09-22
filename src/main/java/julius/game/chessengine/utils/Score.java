@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.evaluation.ActivityModule;
+import julius.game.chessengine.evaluation.BatteryModule;
 import julius.game.chessengine.evaluation.EvaluationContext;
 import julius.game.chessengine.evaluation.EvaluationPipeline;
 import julius.game.chessengine.evaluation.KingSafetyModule;
@@ -33,6 +34,7 @@ public class Score {
     private final PawnStructureModule pawnStructureModule = new PawnStructureModule();
     private final PieceSquareModule pieceSquareModule = new PieceSquareModule();
     private final ActivityModule activityModule = new ActivityModule();
+    private final BatteryModule batteryModule = new BatteryModule();
     private final KingSafetyModule kingSafetyModule = new KingSafetyModule();
     private final ThreatModule threatModule = new ThreatModule();
 
@@ -48,6 +50,7 @@ public class Score {
                 pawnStructureModule,
                 pieceSquareModule,
                 activityModule,
+                batteryModule,
                 kingSafetyModule,
                 threatModule
         ));
