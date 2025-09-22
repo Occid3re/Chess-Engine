@@ -2006,53 +2006,8 @@ public class AI {
             }
         }
 
-        // Generate moves: evasions if in check, else captures/promotions plus forcing quiet checks
-        Set<Integer> quietCheckingMoves = Collections.emptySet();
-        MoveList moves;
-        if (inCheck) {
-            moves = simulatorEngine.getAllLegalMoves();
-        } else {
-            MoveList legalMoves = simulatorEngine.getAllLegalMoves();
-            MoveList capturesAndPromotions = new MoveList();
-            MoveList quietChecks = new MoveList();
-            Set<Integer> quietCheckSet = null;
-            for (int i = 0; i < legalMoves.size(); i++) {
-                int candidate = legalMoves.getMove(i);
-                boolean capture = MoveHelper.isCapture(candidate);
-                boolean promotion = MoveHelper.isPawnPromotionMove(candidate);
-                if (capture || promotion) {
-                    capturesAndPromotions.add(candidate);
-                } else {
-                    simulatorEngine.performMove(candidate);
-                    boolean givesCheck = isSideInCheck(simulatorEngine, !isWhitesTurn);
-                    simulatorEngine.undoLastMove();
-                    if (givesCheck) {
-                        quietChecks.add(candidate);
-                        if (quietCheckSet == null) {
-                            quietCheckSet = new HashSet<>();
-                        }
-                        quietCheckSet.add(candidate);
-                    }
-                }
-            }
-
-            if (quietCheckSet != null) {
-                quietCheckingMoves = quietCheckSet;
-            }
-
-            if (quietChecks.size() > 0) {
-                MoveList combined = new MoveList();
-                for (int i = 0; i < capturesAndPromotions.size(); i++) {
-                    combined.add(capturesAndPromotions.getMove(i));
-                }
-                for (int i = 0; i < quietChecks.size(); i++) {
-                    combined.add(quietChecks.getMove(i));
-                }
-                moves = combined;
-            } else {
-                moves = capturesAndPromotions;
-            }
-        }
+        // Generate moves: evasions if in check, else captures/promotions
+        MoveList moves = inCheck ? simulatorEngine.getAllLegalMoves() : getPossibleCapturesOrPromotions(simulatorEngine);
 
         // Order them (captures first via MVV-LVA/promotion bonus, killers/history still help)
         MoveList ordered = sortMovesByEfficiency(moves, 0, simulatorEngine.getBoardStateHash(), -1,
@@ -2063,10 +2018,9 @@ public class AI {
             boolean isCapture = MoveHelper.isCapture(m);
             boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
             boolean isQuiet = !isCapture && !isPromotion;
-            boolean isForcingQuietCheck = !inCheck && isQuiet && quietCheckingMoves.contains(m);
 
             // --- SEE pruning: drop clearly losing captures or quiet moves (keeps promotions) ---
-            if ((!inCheck && isCapture && !isPromotion) || (isQuiet && !isForcingQuietCheck)) {
+            if ((!inCheck && isCapture && !isPromotion) || isQuiet) {
                 int see = simulatorEngine.see(m);
                 if (see < 0) {
                     simulatorEngine.performMove(m);
@@ -2121,6 +2075,19 @@ public class AI {
                     isWhitesTurn ? "WHITE" : "BLACK");
         }
         return isWhitesTurn ? scoreDifference : -scoreDifference;
+    }
+
+    private MoveList getPossibleCapturesOrPromotions(Engine simulatorEngine) {
+        MoveList allLegalMoves = simulatorEngine.getAllLegalMoves();
+        MoveList capturesAndPromotions = new MoveList();
+        for (int i = 0; i < allLegalMoves.size(); i++) {
+            int m = allLegalMoves.getMove(i);
+            if (MoveHelper.isCapture(m) || MoveHelper.isPawnPromotionMove(m)) {
+                capturesAndPromotions.add(m);
+            }
+        }
+
+        return capturesAndPromotions;
     }
 
     private synchronized boolean positionChanged() {

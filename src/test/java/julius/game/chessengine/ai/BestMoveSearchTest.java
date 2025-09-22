@@ -113,6 +113,26 @@ public class BestMoveSearchTest {
                 new Object[]{
                         "r1bqk2r/ppp2ppp/2p2n2/2b3B1/4P3/3P4/PPP2PPP/RN1QKB1R b KQkq - 2 6",
                         List.of("Nxe4")
+                },
+                new Object[]{
+                        "8/1p6/2k2P1p/P2p4/3p4/2p1n3/2P3P1/6K1 b - - 0 38",
+                        List.of("Kd6")
+                },
+                new Object[]{
+                        "1k1r2r1/ppp2ppp/5n2/P1b1p3/R6P/1P2p1P1/2PBNq2/Q2K3R b - - 1 20",
+                        List.of("Rxd2")
+                },
+                new Object[]{
+                        "1k1r4/ppp2p1p/6p1/P1Pq4/6QP/4p1P1/2PpN3/3K2R1 b - - 0 30",
+                        List.of("Qa2")
+                },
+                new Object[]{
+                        "r3kb1r/2p1pppp/2nq4/p2p1b2/B2P4/2P1BN2/2P2PPP/R2Q1RK1 b kq - 0 12",
+                        List.of("Bd7")
+                },
+                new Object[]{
+                        "r3kb1r/2p1pppp/2n4B/p2p1b2/B2P4/2P2N2/2P2PPP/R2Q1RK1 b kq - 0 13",
+                        List.of("Bd7")
                 }
         );
     }
