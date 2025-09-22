@@ -1054,6 +1054,61 @@ public class AI {
             for (Future<MoveAndScore> f : futures) if (!f.isDone()) f.cancel(true);
         }
 
+        alpha = alphaRef.get();
+        beta = betaRef.get();
+        bestMove = bestMoveRef.get();
+        bestScore = bestScoreRef.get();
+
+        if (!stopRef.get()) {
+            for (int idx = fanout + 1; idx < orderedMoves.size(); idx++) {
+                if (abortRequested(deadline)) {
+                    break;
+                }
+
+                int moveInt = orderedMoves.getMove(idx);
+                instr.recordRootMoveExplored();
+                simulatorEngine.performMove(moveInt);
+
+                double score;
+                if (simulatorEngine.getGameState().isInStateCheckMate()) {
+                    score = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
+                } else if (simulatorEngine.getGameState().isInStateDraw()) {
+                    score = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, depth);
+                    if (isWhitesTurn) {
+                        score = -score;
+                    }
+                } else {
+                    score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1, 0);
+                    if (score == EXIT_FLAG || abortRequested(deadline)) {
+                        simulatorEngine.undoLastMove();
+                        break;
+                    }
+                }
+                simulatorEngine.undoLastMove();
+
+                if (isBetterScore(isWhitesTurn, score, bestScore)) {
+                    bestScore = score;
+                    bestMove = moveInt;
+                    bestScoreRef.set(bestScore);
+                    bestMoveRef.set(bestMove);
+                }
+
+                if (isWhitesTurn) {
+                    alpha = Math.max(alpha, score);
+                    alphaRef.set(alpha);
+                } else {
+                    beta = Math.min(beta, score);
+                    betaRef.set(beta);
+                }
+
+                if (alpha >= beta) {
+                    instr.recordRootBetaCutoff();
+                    stopRef.set(true);
+                    break;
+                }
+            }
+        }
+
         return bestMove != -1 ? new MoveAndScore(bestMove, bestScore) : null;
     }
 
