@@ -1302,6 +1302,16 @@ public class AI {
         return (myAttacks & enemyQueen) != 0L;
     }
 
+    private boolean attacksOpponentRookNow(Engine e, boolean moverIsWhite) {
+        BitBoard bb = e.getBitBoard();
+        long enemyRooks = moverIsWhite ? bb.getBlackRooks() : bb.getWhiteRooks();
+        if (enemyRooks == 0L) {
+            return false;
+        }
+        long myAttacks = bb.getAttackBitboard(moverIsWhite);
+        return (myAttacks & enemyRooks) != 0L;
+    }
+
     private boolean attacksOpponentKingZone(Engine e, boolean moverIsWhite) {
         BitBoard bb = e.getBitBoard();
         long enemyKing = moverIsWhite ? bb.getBlackKing() : bb.getWhiteKing();
@@ -1404,6 +1414,20 @@ public class AI {
         return reduction;
     }
 
+    private double computeStandPatMargin(BitBoard board, int depthRemaining, int nextDepth) {
+        long whiteNonPawns = board.getWhitePieces() & ~board.getWhitePawns();
+        long blackNonPawns = board.getBlackPieces() & ~board.getBlackPawns();
+        int nonPawnCount = Long.bitCount(whiteNonPawns) + Long.bitCount(blackNonPawns);
+
+        double materialFactor = Math.min(1.0, nonPawnCount / 16.0);
+        int depthForMargin = Math.max(1, Math.min(4, Math.max(depthRemaining, nextDepth)));
+
+        double base = 60.0;
+        double depthBonus = depthForMargin * 35.0;
+        double materialBonus = materialFactor * 70.0;
+        return base + depthBonus + materialBonus;
+    }
+
     private double maximizer(Engine simulatorEngine, int depth, double alpha, double beta,
                              boolean isWhite, long boardHash, double alphaOriginal,
                              MoveList moves, long deadline, int prevMove, int plyFromRoot,
@@ -1495,6 +1519,7 @@ public class AI {
 
             boolean givesCheck = lmpPrecomputed ? lmpGivesCheck : isSideInCheck(simulatorEngine, !isWhite);
             boolean attacksQueen = lmpPrecomputed ? lmpAttacksQueen : attacksOpponentQueenNow(simulatorEngine, isWhite);
+            boolean attacksHeavyPiece = attacksQueen || attacksOpponentRookNow(simulatorEngine, isWhite);
             boolean attacksKingZone = lmpPrecomputed ? lmpAttacksKingZone : attacksOpponentKingZone(simulatorEngine, isWhite);
             boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
 
@@ -1503,6 +1528,26 @@ public class AI {
             boolean allowExtend = forcing && extStreak < MAX_CHECK_EXTENSIONS_IN_A_ROW;
             if (allowExtend) nextDepth++;
             int nextExtStreak = allowExtend ? extStreak + 1 : 0;
+
+            boolean allowStandPatPrune = !inCheckAtNode
+                    && isQuiet
+                    && depth <= 2
+                    && nextDepth <= 2
+                    && !givesCheck
+                    && !attacksHeavyPiece
+                    && !seeWinsMaterial;
+
+            if (allowStandPatPrune) {
+                double staticEval = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhite, depth);
+                if (isWhite) {
+                    staticEval = -staticEval;
+                }
+                double margin = computeStandPatMargin(simulatorEngine.getBitBoard(), depth, nextDepth);
+                if (staticEval + margin <= alpha) {
+                    simulatorEngine.undoLastMove();
+                    continue;
+                }
+            }
 
             double eval;
             TranspositionTableEntry entry = transpositionTable.get(newBoardHash);
@@ -1698,6 +1743,7 @@ public class AI {
 
             boolean givesCheck = lmpPrecomputed ? lmpGivesCheck : isSideInCheck(simulatorEngine, !isWhite);
             boolean attacksQueen = lmpPrecomputed ? lmpAttacksQueen : attacksOpponentQueenNow(simulatorEngine, isWhite);
+            boolean attacksHeavyPiece = attacksQueen || attacksOpponentRookNow(simulatorEngine, isWhite);
             boolean attacksKingZone = lmpPrecomputed ? lmpAttacksKingZone : attacksOpponentKingZone(simulatorEngine, isWhite);
             boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
 
@@ -1706,6 +1752,26 @@ public class AI {
             boolean allowExtend = forcing && extStreak < MAX_CHECK_EXTENSIONS_IN_A_ROW;
             if (allowExtend) nextDepth++;
             int nextExtStreak = allowExtend ? extStreak + 1 : 0;
+
+            boolean allowStandPatPrune = !inCheckAtNode
+                    && isQuiet
+                    && depth <= 2
+                    && nextDepth <= 2
+                    && !givesCheck
+                    && !attacksHeavyPiece
+                    && !seeWinsMaterial;
+
+            if (allowStandPatPrune) {
+                double staticEval = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhite, depth);
+                if (isWhite) {
+                    staticEval = -staticEval;
+                }
+                double margin = computeStandPatMargin(simulatorEngine.getBitBoard(), depth, nextDepth);
+                if (staticEval - margin >= beta) {
+                    simulatorEngine.undoLastMove();
+                    continue;
+                }
+            }
 
             double eval;
             TranspositionTableEntry entry = transpositionTable.get(newBoardHash);
