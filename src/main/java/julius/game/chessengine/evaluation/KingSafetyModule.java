@@ -31,13 +31,13 @@ public final class KingSafetyModule implements EvaluationModule {
     private static final int QUEEN = MoveHelper.pieceTypeToInt(PieceType.QUEEN);
     private static final int KING = MoveHelper.pieceTypeToInt(PieceType.KING);
 
-    private static final int MISSING_PAWN_SHIELD_PENALTY = -15;
-    private static final int HALF_OPEN_FILE_PENALTY = -15;
-    private static final int OPEN_FILE_PENALTY = -25;
-    private static final int DEFENDER_BONUS = 5;
-    private static final int QUEEN_ATTACKED_PENALTY = -75;
-    private static final int BACKRANK_WEAKNESS_MIDGAME_PENALTY = -100;
-    private static final int BACKRANK_WEAKNESS_ENDGAME_PENALTY = -50;
+    private static final int MISSING_PAWN_SHIELD_PENALTY = -20;
+    private static final int HALF_OPEN_FILE_PENALTY = -20;
+    private static final int OPEN_FILE_PENALTY = -35;
+    private static final int DEFENDER_BONUS = 6;
+    private static final int QUEEN_ATTACKED_PENALTY = -90;
+    private static final int BACKRANK_WEAKNESS_MIDGAME_PENALTY = -120;
+    private static final int BACKRANK_WEAKNESS_ENDGAME_PENALTY = -60;
 
     private static final int[] ATTACK_WEIGHTS = new int[7];
 
@@ -48,11 +48,11 @@ public final class KingSafetyModule implements EvaluationModule {
     private static final RookHelper ROOK_HELPER = RookHelper.getInstance();
 
     static {
-        ATTACK_WEIGHTS[PAWN] = 5;
-        ATTACK_WEIGHTS[KNIGHT] = 10;
-        ATTACK_WEIGHTS[BISHOP] = 10;
-        ATTACK_WEIGHTS[ROOK] = 15;
-        ATTACK_WEIGHTS[QUEEN] = 20;
+        ATTACK_WEIGHTS[PAWN] = 6;
+        ATTACK_WEIGHTS[KNIGHT] = 12;
+        ATTACK_WEIGHTS[BISHOP] = 12;
+        ATTACK_WEIGHTS[ROOK] = 18;
+        ATTACK_WEIGHTS[QUEEN] = 25;
     }
 
     private final SideState[] sideStates = {new SideState(), new SideState()};
