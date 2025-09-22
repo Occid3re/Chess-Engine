@@ -17,14 +17,20 @@ public final class EvaluationPipeline {
 
     private static final int BLEND_SCALE = 256;
 
+    private static final int WEIGHT_SCALE = 100;
+
     private static final class ModuleState {
         private final EvaluationModule module;
         private int midgameCache;
         private int endgameCache;
+        private final int midgameWeight;
+        private final int endgameWeight;
 
-        private ModuleState(EvaluationModule module) {
+        private ModuleState(EvaluationModule module, int midgameWeight, int endgameWeight) {
             this.module = module;
             this.module.markDirty();
+            this.midgameWeight = midgameWeight;
+            this.endgameWeight = endgameWeight;
         }
     }
 
@@ -41,7 +47,8 @@ public final class EvaluationPipeline {
         }
         List<ModuleState> moduleStates = new ArrayList<>(modules.size());
         for (EvaluationModule module : modules) {
-            moduleStates.add(new ModuleState(module));
+            ModuleWeights weights = determineWeights(module);
+            moduleStates.add(new ModuleState(module, weights.midgameWeight(), weights.endgameWeight()));
         }
         this.modules = Collections.unmodifiableList(moduleStates);
     }
@@ -129,8 +136,8 @@ public final class EvaluationPipeline {
             }
             state.midgameCache = state.module.getMidgameScore();
             state.endgameCache = state.module.getEndgameScore();
-            midgame += state.midgameCache;
-            endgame += state.endgameCache;
+            midgame += scale(state.midgameCache, state.midgameWeight);
+            endgame += scale(state.endgameCache, state.endgameWeight);
         }
         int checkAdjustment = computeCheckAdjustment();
         midgame += checkAdjustment;
@@ -176,5 +183,43 @@ public final class EvaluationPipeline {
             case WHITE_IN_CHECK -> -Score.CHECK;
             default -> 0;
         };
+    }
+
+    private static ModuleWeights determineWeights(EvaluationModule module) {
+        if (module instanceof MaterialModule) {
+            return new ModuleWeights(130, 130);
+        }
+        if (module instanceof PawnStructureModule) {
+            return new ModuleWeights(120, 125);
+        }
+        if (module instanceof PieceSquareModule) {
+            return new ModuleWeights(90, 85);
+        }
+        if (module instanceof ActivityModule) {
+            return new ModuleWeights(70, 65);
+        }
+        if (module instanceof KingSafetyModule) {
+            return new ModuleWeights(115, 120);
+        }
+        if (module instanceof ThreatModule) {
+            return new ModuleWeights(95, 95);
+        }
+        if (module instanceof BatteryModule) {
+            return new ModuleWeights(85, 85);
+        }
+        return ModuleWeights.unity();
+    }
+
+    private static int scale(int score, int weight) {
+        if (score == 0 || weight == WEIGHT_SCALE) {
+            return score;
+        }
+        return (int) ((long) score * weight / WEIGHT_SCALE);
+    }
+
+    private record ModuleWeights(int midgameWeight, int endgameWeight) {
+        private static ModuleWeights unity() {
+            return new ModuleWeights(WEIGHT_SCALE, WEIGHT_SCALE);
+        }
     }
 }
