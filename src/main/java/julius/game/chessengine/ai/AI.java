@@ -36,7 +36,6 @@ public class AI {
      * can be adjusted at runtime via the UCI "Threads" option.
      */
     @Getter
-    @Setter
     private int searchThreads = Integer.getInteger("chessengine.searchThreads", 1);
 
     // number of Lazy SMP workers (≥1)
@@ -89,7 +88,7 @@ public class AI {
     /**
      * Thread pool for root-split parallel search (created only if searchThreads > 1).
      */
-    private final ExecutorService searchPool;
+    private ExecutorService searchPool;
 
     /**
      * Limit how many root moves we fan out in parallel to avoid oversubscription.
@@ -227,15 +226,7 @@ public class AI {
         this.globalHeuristics = new Heuristics(maxDepth);
         this.threadHeuristics = ThreadLocal.withInitial(() -> new Heuristics(maxDepth));
 
-        rebuildTranspositionTables();
-
-        this.searchPool = searchThreads > 1
-                ? Executors.newFixedThreadPool(searchThreads, r -> {
-            Thread t = new Thread(r, "AI-Search-" + System.identityHashCode(r));
-            t.setDaemon(true);
-            return t;
-        })
-                : null;
+        rebuildSearchPool(this.searchThreads);
 
         this.mainEngine.setOnPositionChanged(h -> updateBoardStateHash());
     }
@@ -533,6 +524,48 @@ public class AI {
             heuristics.mergeInto(globalHeuristics);
         }
         heuristics.resetUpdates();
+    }
+
+    private synchronized void rebuildSearchPool(int previousSearchThreads) {
+        ExecutorService oldPool = this.searchPool;
+        if (oldPool != null) {
+            oldPool.shutdownNow();
+        }
+
+        if (searchThreads > 1) {
+            this.searchPool = Executors.newFixedThreadPool(searchThreads, r -> {
+                Thread t = new Thread(r, "AI-Search-" + System.identityHashCode(r));
+                t.setDaemon(true);
+                return t;
+            });
+        } else {
+            this.searchPool = null;
+        }
+
+        boolean previousConcurrent = Math.max(previousSearchThreads, lazySmpThreads) > 1;
+        boolean newConcurrent = Math.max(searchThreads, lazySmpThreads) > 1;
+        if (transpositionTable == null || previousConcurrent != newConcurrent) {
+            rebuildTranspositionTables();
+        }
+    }
+
+    public void setSearchThreads(int requestedThreads) {
+        int clamped = Math.max(1, requestedThreads);
+        int previous;
+        synchronized (this) {
+            if (clamped == this.searchThreads) {
+                return;
+            }
+        }
+
+        stopCalculation();
+
+        synchronized (this) {
+            previous = this.searchThreads;
+            this.searchThreads = clamped;
+        }
+        rebuildSearchPool(previous);
+        log.info("Search thread count updated to {}", clamped);
     }
 
     private Heuristics prepareHelperHeuristics(SearchTask task, int depth) {
