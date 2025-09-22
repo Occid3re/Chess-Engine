@@ -288,6 +288,7 @@ public class BestMoveSearchTest {
             legalMoves.add(legalMovesSnapshot.getMove(i));
         }
 
+        // Static one-ply eval of all legal moves (oriented for mover)
         List<MoveEvaluation> evaluations = new ArrayList<>(legalMoves.size());
         for (int moveInt : legalMoves) {
             analysisEngine.performMove(moveInt);
@@ -353,11 +354,22 @@ public class BestMoveSearchTest {
                 sb.append("Rank among legal: ").append(chosenRank).append("/").append(legalMoveCount)
                         .append(System.lineSeparator());
             }
-            sb.append(renderModuleInfluence(fen, whiteToMove, chosenEval, topCandidate));
         } else {
             sb.append("Chosen move: ").append(chosenMove)
                     .append(" (not present in legal move snapshot)")
                     .append(System.lineSeparator());
+        }
+
+        // ===== Module-level insight for chosen vs baseline (+ optional top alternative) =====
+        topCandidate = evaluations.isEmpty() ? null : evaluations.get(0);
+        if (chosenEval != null) {
+            sb.append(renderModuleInfluence(fen, whiteToMove, chosenEval, topCandidate));
+        }
+
+        // ===== NEW: Explain why the best "expected" move (if different) wasn’t chosen =====
+        MoveEvaluation expectedRef = selectBestExpectedCandidate(expectedMoves, evaluations);
+        if (expectedRef != null && (chosenEval == null || expectedRef.moveInt() != chosenEval.moveInt())) {
+            sb.append(renderWhyNotExpected(fen, whiteToMove, chosenEval, expectedRef));
         }
 
         sb.append("Total legal moves: ").append(legalMoveCount);
@@ -371,12 +383,9 @@ public class BestMoveSearchTest {
             sb.append("  ").append(i + 1).append(". ").append(ev.move())
                     .append(" -> ").append(formatCentipawns(ev.score())).append(" pawns");
             if (chosenEval != null) {
-                double delta = ev.score() - chosenEval.score();
-                if (Math.abs(delta) < 0.5) {
-                    sb.append(" (matches chosen)");
-                } else {
-                    sb.append(" (Δ vs chosen: ").append(formatCentipawns(delta)).append(")");
-                }
+                double d = ev.score() - chosenEval.score();
+                if (Math.abs(d) < 0.5) sb.append(" (matches chosen)");
+                else sb.append(" (Δ vs chosen: ").append(formatCentipawns(d)).append(")");
             }
             sb.append(System.lineSeparator());
         }
@@ -388,6 +397,178 @@ public class BestMoveSearchTest {
 
         return sb.toString();
     }
+
+    /**
+     * Choose, among expected algebraic strings, the best legal candidate by our static 1-ply evaluation.
+     */
+    private MoveEvaluation selectBestExpectedCandidate(List<String> expectedMoves, List<MoveEvaluation> sortedEvals) {
+        if (expectedMoves == null || expectedMoves.isEmpty() || sortedEvals == null) return null;
+        // The list is sorted best->worst for the mover already.
+        for (MoveEvaluation ev : sortedEvals) {
+            if (expectedMoves.contains(ev.move())) {
+                return ev;
+            }
+        }
+        return null; // none legal or none matched
+    }
+
+    /**
+     * Render an explanation why the expected (reference) move lost the head-to-head vs the chosen move.
+     * Uses module deltas and simple tactical tags derived from evaluation state only (no extra engine APIs).
+     */
+    private String renderWhyNotExpected(String fen,
+                                        boolean whiteToMove,
+                                        MoveEvaluation chosen,
+                                        MoveEvaluation expectedRef) {
+        String ls = System.lineSeparator();
+        StringBuilder sb = new StringBuilder();
+        sb.append("Why not expected move ").append(expectedRef.move()).append(":").append(ls);
+
+        // Engines for baseline, chosen, expected
+        Engine base = createEngineForMove(fen, null);
+        Engine engChosen = createEngineForMove(fen, chosen != null ? chosen.moveInt() : null);
+        Engine engExpected = createEngineForMove(fen, expectedRef.moveInt());
+
+        ModuleContributionSummary mBase = collectModuleContributions(base, whiteToMove);
+        ModuleContributionSummary mChosen = chosen != null ? collectModuleContributions(engChosen, whiteToMove) : null;
+        ModuleContributionSummary mExpected = collectModuleContributions(engExpected, whiteToMove);
+
+        int baseTotal = mBase.totalBlended();
+        int chosenTotal = mChosen != null ? mChosen.totalBlended() : baseTotal; // fallback
+        int expectedTotal = mExpected.totalBlended();
+
+        int deltaChosen = chosenTotal - baseTotal;
+        int deltaExpected = expectedTotal - baseTotal;
+        int headToHead = expectedTotal - chosenTotal;
+
+        sb.append(String.format(Locale.US,
+                "  Eval totals (blended): chosen %s vs expected %s (Δ expected - chosen: %s)%n",
+                formatPawns(chosenTotal), formatPawns(expectedTotal), formatPawns(headToHead)));
+
+        // Simple tactical tags from state changes and material swing only
+        String chosenTags = computeTacticalTags(base, engChosen, whiteToMove);
+        String expectedTags = computeTacticalTags(base, engExpected, whiteToMove);
+        if (!chosenTags.isEmpty() || !expectedTags.isEmpty()) {
+            sb.append("  Tactical tags:").append(ls);
+            if (!chosenTags.isEmpty()) sb.append("    chosen:   ").append(chosenTags).append(ls);
+            if (!expectedTags.isEmpty()) sb.append("    expected: ").append(expectedTags).append(ls);
+        }
+
+        // Top-3 module differences baseline->chosen and baseline->expected, then chosen vs expected
+        sb.append(renderTopModuleDiffs("  Biggest improvements (baseline → chosen)", mBase, mChosen, +1));
+        sb.append(renderTopModuleDiffs("  Biggest improvements (baseline → expected)", mBase, mExpected, +1));
+        sb.append(renderHeadToHeadModuleDiffs("  Where chosen beats expected (chosen − expected)", mChosen, mExpected));
+
+        // Heuristic flags: if expected worsens king safety or gives back material vs chosen, call it out
+        int chosenKS = getModule(mChosen, "King safety");
+        int expectedKS = getModule(mExpected, "King safety");
+        int chosenMat = getModule(mChosen, "Material");
+        int expectedMat = getModule(mExpected, "Material");
+
+        if (expectedKS < chosenKS) {
+            sb.append(String.format(Locale.US, "  Note: expected worsens king safety vs chosen by %s.%n",
+                    formatPawns(expectedKS - chosenKS)));
+        }
+        if (expectedMat < chosenMat) {
+            sb.append(String.format(Locale.US, "  Note: expected is worse on material swing vs chosen by %s.%n",
+                    formatPawns(expectedMat - chosenMat)));
+        }
+
+        return sb.toString();
+    }
+
+    /** Build short tags like [check], [capture], [king-unsafe↑/↓] from evaluation-only info. */
+    private String computeTacticalTags(Engine before, Engine after, boolean moverWasWhite) {
+        List<String> tags = new ArrayList<>();
+
+        // Check tag: after-move state indicates opponent in check
+        GameStateEnum st = after.getGameState().getState();
+        boolean opponentInCheck = (moverWasWhite && st == GameStateEnum.BLACK_IN_CHECK)
+                || (!moverWasWhite && st == GameStateEnum.WHITE_IN_CHECK);
+        if (opponentInCheck) tags.add("check");
+
+        // Capture tag: infer via material blended change sign
+        ModuleContributionSummary b = collectModuleContributions(before, moverWasWhite);
+        ModuleContributionSummary a = collectModuleContributions(after, moverWasWhite);
+        int matB = getModule(b, "Material");
+        int matA = getModule(a, "Material");
+        if (matA > matB) tags.add("capture");
+
+        // King safety swing (own safety improves/worsens)
+        int ksB = getModule(b, "King safety");
+        int ksA = getModule(a, "King safety");
+        int ksDelta = ksA - ksB;
+        if (ksDelta >= 30) tags.add("king-safety↑");
+        else if (ksDelta <= -30) tags.add("king-safety↓");
+
+        return String.join(", ", tags);
+    }
+
+    /** Fetch blended value of a named module (or 0 if absent). */
+    private int getModule(ModuleContributionSummary s, String name) {
+        for (ModuleContribution c : s.contributions()) {
+            if (c.name().equals(name)) return c.blended();
+        }
+        return 0;
+    }
+
+    /** Top-3 absolute module gains/losses from 'from' → 'to'. sign=+1 keeps gains first; sign=-1 would invert if needed. */
+    private String renderTopModuleDiffs(String heading,
+                                        ModuleContributionSummary from,
+                                        ModuleContributionSummary to,
+                                        int sign) {
+        if (from == null || to == null) return "";
+        Map<String, ModuleContribution> idxFrom = indexByModule(from.contributions());
+        Map<String, ModuleContribution> idxTo = indexByModule(to.contributions());
+        record D(String name, int delta) {}
+        List<D> deltas = new ArrayList<>();
+        for (String k : idxFrom.keySet()) {
+            ModuleContribution a = idxFrom.get(k);
+            ModuleContribution b = idxTo.get(k);
+            if (b == null) continue;
+            int d = b.blended() - a.blended();
+            if (d != 0) deltas.add(new D(k, d));
+        }
+        if (deltas.isEmpty()) return "";
+        deltas.sort(Comparator.comparingInt((D d) -> Math.abs(d.delta())).reversed());
+        String ls = System.lineSeparator();
+        StringBuilder sb = new StringBuilder();
+        sb.append(heading).append(":").append(ls);
+        for (int i = 0; i < Math.min(3, deltas.size()); i++) {
+            D d = deltas.get(i);
+            sb.append("    - ").append(d.name).append(": ").append(formatPawns(d.delta)).append(ls);
+        }
+        return sb.toString();
+    }
+
+    /** Head-to-head module comparison: where chosen outperforms expected. */
+    private String renderHeadToHeadModuleDiffs(String heading,
+                                               ModuleContributionSummary chosen,
+                                               ModuleContributionSummary expected) {
+        if (chosen == null || expected == null) return "";
+        Map<String, ModuleContribution> c = indexByModule(chosen.contributions());
+        Map<String, ModuleContribution> e = indexByModule(expected.contributions());
+        record D(String name, int delta) {}
+        List<D> better = new ArrayList<>();
+        for (String k : c.keySet()) {
+            ModuleContribution mc = c.get(k);
+            ModuleContribution me = e.get(k);
+            if (me == null) continue;
+            int d = mc.blended() - me.blended();
+            if (d > 0) better.add(new D(k, d));
+        }
+        if (better.isEmpty()) return "";
+        better.sort(Comparator.comparingInt((D d) -> d.delta()).reversed());
+        String ls = System.lineSeparator();
+        StringBuilder sb = new StringBuilder();
+        sb.append(heading).append(":").append(ls);
+        for (int i = 0; i < Math.min(3, better.size()); i++) {
+            D d = better.get(i);
+            sb.append("    - ").append(d.name).append(": ").append(formatPawns(d.delta)).append(ls);
+        }
+        return sb.toString();
+    }
+
 
     private String renderPrincipalVariation(boolean whiteToMove, List<MoveAndScore> pv) {
         if (pv == null || pv.isEmpty()) {
