@@ -23,9 +23,19 @@ public final class SearchTask {
     private final AtomicBoolean stop = new AtomicBoolean(false);
     private final AtomicReference<BestMoveDepth> best;
     private final AtomicInteger iterationDepth = new AtomicInteger(0);
+    private final SearchInstrumentation instrumentation;
     private static final double SCORE_EPSILON = 1e-3;
 
     SearchTask(long id, long boardHash, boolean whiteToMove, long deadline, int threadCount) {
+        this(id, boardHash, whiteToMove, deadline, threadCount, SearchInstrumentation.disabled());
+    }
+
+    SearchTask(long id,
+               long boardHash,
+               boolean whiteToMove,
+               long deadline,
+               int threadCount,
+               SearchInstrumentation instrumentation) {
         this.id = id;
         this.boardHash = boardHash;
         this.whiteToMove = whiteToMove;
@@ -33,6 +43,7 @@ public final class SearchTask {
         this.completion = new CountDownLatch(Math.max(1, threadCount));
         double initialScore = whiteToMove ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
         this.best = new AtomicReference<>(new BestMoveDepth(-1, initialScore, 0));
+        this.instrumentation = instrumentation != null ? instrumentation : SearchInstrumentation.disabled();
     }
 
     long getId() { return id; }
@@ -44,6 +55,8 @@ public final class SearchTask {
     void workerDone() { completion.countDown(); }
     void requestStop() { stop.set(true); }
     boolean isStopRequested() { return stop.get(); }
+
+    SearchInstrumentation getInstrumentation() { return instrumentation; }
 
     boolean beginIteration(int depth) {
         while (true) {

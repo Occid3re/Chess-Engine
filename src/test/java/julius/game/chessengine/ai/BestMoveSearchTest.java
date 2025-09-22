@@ -372,6 +372,11 @@ public class BestMoveSearchTest {
             sb.append(renderWhyNotExpected(fen, whiteToMove, chosenEval, expectedRef));
         }
 
+        SearchDiagnostics diagnostics = ai.getLastDiagnostics();
+        if (diagnostics != null && diagnostics != SearchDiagnostics.EMPTY) {
+            sb.append(renderSearchDiagnostics(diagnostics));
+        }
+
         sb.append("Total legal moves: ").append(legalMoveCount);
         if (!Double.isNaN(spread)) {
             sb.append(" (evaluation spread: ").append(formatCentipawns(spread)).append(")");
@@ -395,6 +400,50 @@ public class BestMoveSearchTest {
                 .append(System.lineSeparator());
         sb.append("==================================").append(System.lineSeparator());
 
+        return sb.toString();
+    }
+
+    private String renderSearchDiagnostics(SearchDiagnostics diagnostics) {
+        String ls = System.lineSeparator();
+        StringBuilder sb = new StringBuilder();
+        sb.append("Search heuristics summary:").append(ls);
+
+        String bestScore = Double.isNaN(diagnostics.bestScore())
+                ? "n/a"
+                : formatCentipawns(diagnostics.bestScore() * 100.0) + " pawns";
+
+        sb.append(String.format(Locale.US,
+                "  Depth reached: %d plies (selective: %d, qsearch max: %d)%n",
+                diagnostics.bestDepth(), diagnostics.deepestPlyVisited(), diagnostics.deepestQuiescencePly()));
+        sb.append(String.format(Locale.US,
+                "  Best score: %s, iterations: %d%n",
+                bestScore,
+                diagnostics.iterationsCompleted()));
+        sb.append(String.format(Locale.US,
+                "  Root moves: %d generated, %d explored, root β-cutoffs: %d%n",
+                diagnostics.rootMovesGenerated(), diagnostics.rootMovesExplored(), diagnostics.rootBetaCutoffs()));
+        sb.append(String.format(Locale.US,
+                "  Aspiration window restarts: fail-low %d, fail-high %d, full resets %d%n",
+                diagnostics.aspirationFailLows(), diagnostics.aspirationFailHighs(), diagnostics.aspirationResets()));
+        sb.append(String.format(Locale.US,
+                "  TT lookups: %d (hits %d, exact %d, cutoffs %d)%n",
+                diagnostics.transpositionLookups(), diagnostics.transpositionHits(), diagnostics.transpositionExactHits(),
+                diagnostics.transpositionCutoffs()));
+        sb.append(String.format(Locale.US,
+                "  Null-move pruning: tries %d, prunes %d, verifications %d (fails %d)%n",
+                diagnostics.nullMoveTries(), diagnostics.nullMovePrunes(), diagnostics.nullMoveVerifications(),
+                diagnostics.nullMoveVerificationFails()));
+        sb.append(String.format(Locale.US,
+                "  Late move reductions: %d applied (avg %s plies), prunes %d, futility prunes %d%n",
+                diagnostics.lateMoveReductions(), diagnostics.formatAverageLmrReduction(),
+                diagnostics.lateMovePrunes(), diagnostics.futilityPrunes()));
+        sb.append(String.format(Locale.US,
+                "  Interior β-cutoffs: %d, static eval calls: %d%n",
+                diagnostics.betaCutoffs(), diagnostics.staticEvalCalls()));
+        sb.append(String.format(Locale.US,
+                "  Quiescence: nodes %d, stand-pat cuts %d, delta prunes %d, SEE prunes %d, captures %d%n",
+                diagnostics.quiescenceNodes(), diagnostics.quiescenceStandPatCuts(), diagnostics.quiescenceDeltaPrunes(),
+                diagnostics.quiescenceSeePrunes(), diagnostics.quiescenceCaptures()));
         return sb.toString();
     }
 
