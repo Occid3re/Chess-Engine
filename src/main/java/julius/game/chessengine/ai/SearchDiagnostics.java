@@ -66,6 +66,7 @@ public record SearchDiagnostics(
             0L,
             0L,
             0L,
+            0L,
             0L
     );
 
