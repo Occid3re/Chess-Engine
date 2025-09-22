@@ -23,6 +23,7 @@ public final class SearchTask {
     private final AtomicBoolean stop = new AtomicBoolean(false);
     private final AtomicReference<BestMoveDepth> best;
     private final AtomicInteger iterationDepth = new AtomicInteger(0);
+    private static final double SCORE_EPSILON = 1e-3;
 
     SearchTask(long id, long boardHash, boolean whiteToMove, long deadline, int threadCount) {
         this.id = id;
@@ -79,7 +80,8 @@ public final class SearchTask {
         while (true) {
             BestMoveDepth cur = best.get();
             boolean betterScore = isBetterScore(whiteToMove, ms.score, cur.score);
-            boolean deeperTie = ms.score == cur.score && depth > cur.depth;
+            boolean scoresApproximatelyEqual = Math.abs(ms.score - cur.score) <= SCORE_EPSILON;
+            boolean deeperTie = scoresApproximatelyEqual && depth > cur.depth;
             if (!betterScore && !deeperTie ) return false;
 
             BestMoveDepth next = new BestMoveDepth(ms.move, ms.score, depth);
