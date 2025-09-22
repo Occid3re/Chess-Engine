@@ -183,6 +183,48 @@ public class BitBoardTest {
     }
 
     @Test
+    public void PERFT_blackToMove() {
+        Engine engine = new Engine();
+        engine.importBoardFromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq -");
+
+        PerftNode d1 = perft(1, engine);
+        assertEquals(20, d1.getNodes());
+        assertEquals(0, d1.getCaptures());
+        assertEquals(0, d1.getEnPassant());
+        assertEquals(0, d1.getCastles());
+        assertEquals(0, d1.getPromotions());
+        assertEquals(0, d1.getChecks());
+        assertEquals(0, d1.getCheckmates());
+
+        PerftNode d2 = perft(2, engine);
+        assertEquals(400, d2.getNodes());
+        assertEquals(0, d2.getCaptures());
+        assertEquals(0, d2.getEnPassant());
+        assertEquals(0, d2.getCastles());
+        assertEquals(0, d2.getPromotions());
+        assertEquals(0, d2.getChecks());
+        assertEquals(0, d2.getCheckmates());
+
+        PerftNode d3 = perft(3, engine);
+        assertEquals(8902, d3.getNodes());
+        assertEquals(34, d3.getCaptures());
+        assertEquals(0, d3.getEnPassant());
+        assertEquals(0, d3.getCastles());
+        assertEquals(0, d3.getPromotions());
+        assertEquals(12, d3.getChecks());
+        assertEquals(0, d3.getCheckmates());
+
+        PerftNode d4 = perft(4, engine);
+        assertEquals(197281, d4.getNodes());
+        assertEquals(1576, d4.getCaptures());
+        assertEquals(0, d4.getEnPassant());
+        assertEquals(0, d4.getCastles());
+        assertEquals(0, d4.getPromotions());
+        assertEquals(469, d4.getChecks());
+        assertEquals(8, d4.getCheckmates());
+    }
+
+    @Test
 //    r . . . k . . r   8
 //    p . p p q p b .   7
 //    b n . . p n p .   6
