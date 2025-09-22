@@ -1471,13 +1471,23 @@ public class AI {
             boolean lmpPrecomputed = false;
             boolean lmpGivesCheck = false;
             boolean lmpAttacksQueen = false;
+            boolean lmpAttacksKingZone = false;
             int lmpThreshold = 8 + depth * 2;
             if (!inCheckAtNode && !isTactical && depth <= 3 && index > lmpThreshold) {
                 simulatorEngine.performMove(move);
                 lmpGivesCheck = isSideInCheck(simulatorEngine, !isWhite);
                 lmpAttacksQueen = attacksOpponentQueenNow(simulatorEngine, isWhite);
+                lmpAttacksKingZone = attacksOpponentKingZone(simulatorEngine, isWhite);
                 lmpPrecomputed = true;
+                boolean skipQuiet = isQuiet
+                        && !lmpGivesCheck
+                        && !lmpAttacksQueen
+                        && !lmpAttacksKingZone
+                        && !seeWinsMaterial;
                 simulatorEngine.undoLastMove();
+                if (skipQuiet) {
+                    continue;
+                }
             }
 
             simulatorEngine.performMove(move);
@@ -1485,7 +1495,7 @@ public class AI {
 
             boolean givesCheck = lmpPrecomputed ? lmpGivesCheck : isSideInCheck(simulatorEngine, !isWhite);
             boolean attacksQueen = lmpPrecomputed ? lmpAttacksQueen : attacksOpponentQueenNow(simulatorEngine, isWhite);
-            boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, isWhite);
+            boolean attacksKingZone = lmpPrecomputed ? lmpAttacksKingZone : attacksOpponentKingZone(simulatorEngine, isWhite);
             boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
 
             int nextDepth = depth - 1;
@@ -1661,13 +1671,34 @@ public class AI {
             int pawnsOnFileBefore = (enemyKingSquare >= 0 && affectsKingFilePawns) ? countPawnsOnFile(boardBefore, kingFileMask) : 0;
 
             boolean isTactical = isCapture || isPromotion;
+            boolean lmpPrecomputed = false;
+            boolean lmpGivesCheck = false;
+            boolean lmpAttacksQueen = false;
+            boolean lmpAttacksKingZone = false;
+            int lmpThreshold = 8 + depth * 2;
+            if (!inCheckAtNode && !isTactical && depth <= 3 && index > lmpThreshold) {
+                simulatorEngine.performMove(move);
+                lmpGivesCheck = isSideInCheck(simulatorEngine, !isWhite);
+                lmpAttacksQueen = attacksOpponentQueenNow(simulatorEngine, isWhite);
+                lmpAttacksKingZone = attacksOpponentKingZone(simulatorEngine, isWhite);
+                lmpPrecomputed = true;
+                boolean skipQuiet = isQuiet
+                        && !lmpGivesCheck
+                        && !lmpAttacksQueen
+                        && !lmpAttacksKingZone
+                        && !seeWinsMaterial;
+                simulatorEngine.undoLastMove();
+                if (skipQuiet) {
+                    continue;
+                }
+            }
 
             simulatorEngine.performMove(move);
             long newBoardHash = simulatorEngine.getBoardStateHash();
 
-            boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
-            boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, isWhite);
-            boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, isWhite);
+            boolean givesCheck = lmpPrecomputed ? lmpGivesCheck : isSideInCheck(simulatorEngine, !isWhite);
+            boolean attacksQueen = lmpPrecomputed ? lmpAttacksQueen : attacksOpponentQueenNow(simulatorEngine, isWhite);
+            boolean attacksKingZone = lmpPrecomputed ? lmpAttacksKingZone : attacksOpponentKingZone(simulatorEngine, isWhite);
             boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
 
             int nextDepth = depth - 1;
