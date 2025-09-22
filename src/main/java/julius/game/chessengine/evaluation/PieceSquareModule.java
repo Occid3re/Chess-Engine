@@ -47,13 +47,13 @@ public final class PieceSquareModule implements EvaluationModule {
 
     private static final int DEVELOPMENT_PHASE_THRESHOLD = 64;
     private static final int QUEEN_DEVELOPMENT_PHASE_THRESHOLD = 80;
-    private static final int UNDEVELOPED_MINOR_PENALTY = -20;
-    private static final int EARLY_QUEEN_DEVELOPMENT_PENALTY_PER_MINOR = -15;
+    private static final int UNDEVELOPED_MINOR_PENALTY = -30;
+    private static final int EARLY_QUEEN_DEVELOPMENT_PENALTY_PER_MINOR = -20;
     private static final int MIN_UNDEVELOPED_MINORS_FOR_QUEEN_PENALTY = 2;
-    private static final int START_POSITION_PENALTY = -40;
+    private static final int START_POSITION_PENALTY = -60;
     private static final int BLEND_SCALE = 256;
-    private static final int CASTLING_BONUS = 20;
-    private static final int NOT_CASTLED_AND_ROOK_MOVE_PENALTY = -10;
+    private static final int CASTLING_BONUS = 35;
+    private static final int NOT_CASTLED_AND_ROOK_MOVE_PENALTY = -20;
 
     private static final long NOT_A_FILE = ~FileMasks[0];
     private static final long NOT_H_FILE = ~FileMasks[7];
