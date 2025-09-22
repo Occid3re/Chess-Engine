@@ -875,6 +875,12 @@ public class AI {
         int bestMove = -1;
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
 
+        final AtomicReference<Double> alphaRef = new AtomicReference<>(alpha);
+        final AtomicReference<Double> betaRef = new AtomicReference<>(beta);
+        final java.util.concurrent.atomic.AtomicInteger bestMoveRef =
+                new java.util.concurrent.atomic.AtomicInteger(bestMove);
+        final AtomicReference<Double> bestScoreRef = new AtomicReference<>(bestScore);
+
         if (abortRequested(deadline)) return null;
 
         simulatorEngine.performMove(firstMove);
@@ -900,6 +906,11 @@ public class AI {
 
         if (isWhitesTurn) alpha = Math.max(alpha, firstScore);
         else beta = Math.min(beta, firstScore);
+
+        bestMoveRef.set(bestMove);
+        bestScoreRef.set(bestScore);
+        alphaRef.set(alpha);
+        betaRef.set(beta);
         if (alpha >= beta) return new MoveAndScore(bestMove, bestScore);
 
         final int fanout = Math.min(ROOT_PARALLEL_LIMIT, orderedMoves.size() - 1);
@@ -908,10 +919,6 @@ public class AI {
         final CompletionService<MoveAndScore> ecs = new ExecutorCompletionService<>(searchPool);
         final List<Future<MoveAndScore>> futures = new ArrayList<>(fanout);
 
-        final AtomicReference<Double> alphaRef = new AtomicReference<>(alpha);
-        final AtomicReference<Double> betaRef = new AtomicReference<>(beta);
-        final java.util.concurrent.atomic.AtomicInteger bestMoveRef = new java.util.concurrent.atomic.AtomicInteger(bestMove);
-        final AtomicReference<Double> bestScoreRef = new AtomicReference<>(bestScore);
         final AtomicBoolean stopRef = new AtomicBoolean(false);
         final java.util.concurrent.locks.ReentrantLock fullResLock = new java.util.concurrent.locks.ReentrantLock();
 
