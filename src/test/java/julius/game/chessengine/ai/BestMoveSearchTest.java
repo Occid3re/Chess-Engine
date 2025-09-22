@@ -193,15 +193,22 @@ public class BestMoveSearchTest {
 
         AI ai = new AI(engine);
         ai.setTimeLimit(1000L); // milliseconds
+        long startNodes = ai.getNodesVisited();
+        long startNullMoves = ai.getNullMoveCount();
+        long searchStartNanos = System.nanoTime();
 
         boolean whiteToMove = fen.split(" ")[1].equals("w");
         ai.startAutoPlay(whiteToMove, !whiteToMove);
 
         long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2);
         int lastMove = -1;
+        long observedElapsedNanos = 0L;
         while (System.currentTimeMillis() < deadline) {
             lastMove = engine.getLastMove();
-            if (lastMove != -1) break;
+            if (lastMove != -1) {
+                observedElapsedNanos = System.nanoTime() - searchStartNanos;
+                break;
+            }
             TimeUnit.MILLISECONDS.sleep(50);
         }
 
@@ -209,14 +216,34 @@ public class BestMoveSearchTest {
 
         Assertions.assertNotEquals(-1, lastMove, "Engine failed to make a move for FEN: " + fen);
         String moveString = Move.convertIntToMove(lastMove).toString();
-        String statistics = compileMoveStatistics(fen, moveString, ai, expectedMoves);
+        long searchMillis = TimeUnit.NANOSECONDS.toMillis(observedElapsedNanos);
+        long nodesVisited = Math.max(0L, ai.getNodesVisited() - startNodes);
+        long nullMovesTried = Math.max(0L, ai.getNullMoveCount() - startNullMoves);
+        List<MoveAndScore> principalVariation = new ArrayList<>(ai.getCalculatedLine());
+        String statistics = compileMoveStatistics(
+                fen,
+                moveString,
+                ai,
+                expectedMoves,
+                nodesVisited,
+                nullMovesTried,
+                searchMillis,
+                principalVariation
+        );
         System.out.println(statistics);
         Assertions.assertTrue(expectedMoves.contains(moveString),
                 "Expected one of " + expectedMoves + " but got " + moveString + " for FEN: " + fen
                         + statistics);
     }
 
-    private String compileMoveStatistics(String fen, String chosenMove, AI ai, List<String> expectedMoves) {
+    private String compileMoveStatistics(String fen,
+                                         String chosenMove,
+                                         AI ai,
+                                         List<String> expectedMoves,
+                                         long nodesVisited,
+                                         long nullMovesTried,
+                                         long searchMillis,
+                                         List<MoveAndScore> principalVariation) {
         Engine analysisEngine = new Engine();
         analysisEngine.importBoardFromFen(fen);
 
@@ -249,7 +276,17 @@ public class BestMoveSearchTest {
                 .findFirst()
                 .orElse(null);
 
-        String pvString = renderPrincipalVariation(whiteToMove, ai.getCalculatedLine());
+        String pvString = renderPrincipalVariation(whiteToMove, principalVariation);
+        int pvLength = principalVariation != null ? principalVariation.size() : 0;
+        int legalMoveCount = evaluations.size();
+        int chosenRank = chosenEval != null ? evaluations.indexOf(chosenEval) + 1 : -1;
+        MoveEvaluation topCandidate = evaluations.isEmpty() ? null : evaluations.get(0);
+        double deltaVsBest = chosenEval != null && topCandidate != null
+                ? chosenEval.score() - topCandidate.score()
+                : Double.NaN;
+        double spread = evaluations.isEmpty()
+                ? Double.NaN
+                : evaluations.get(0).score() - evaluations.get(evaluations.size() - 1).score();
 
         StringBuilder sb = new StringBuilder();
         sb.append(System.lineSeparator());
@@ -259,6 +296,17 @@ public class BestMoveSearchTest {
         sb.append("Expected best moves: ").append(expectedMoves).append(System.lineSeparator());
         sb.append("Baseline evaluation: ").append(formatCentipawns(baselineForMover)).append(" pawns")
                 .append(System.lineSeparator());
+        sb.append("Search threads: ").append(ai.getSearchThreads())
+                .append(", Lazy SMP workers: ").append(ai.getLazySmpThreads()).append(System.lineSeparator());
+        sb.append("Time limit: ").append(ai.getTimeLimit()).append(" ms, elapsed: ")
+                .append(searchMillis).append(" ms").append(System.lineSeparator());
+        sb.append("Nodes visited (Δ): ").append(nodesVisited);
+        if (searchMillis > 0) {
+            double kNps = (nodesVisited / (double) searchMillis);
+            sb.append(" (~").append(String.format(Locale.US, "%.1f", kNps)).append(" kN/s)");
+        }
+        sb.append(System.lineSeparator());
+        sb.append("Null moves tried (Δ): ").append(nullMovesTried).append(System.lineSeparator());
 
         if (chosenEval != null) {
             double delta = chosenEval.score() - baselineForMover;
@@ -266,12 +314,25 @@ public class BestMoveSearchTest {
                     .append(" -> ").append(formatCentipawns(chosenEval.score())).append(" pawns")
                     .append(" (Δ vs baseline: ").append(formatCentipawns(delta)).append(")")
                     .append(System.lineSeparator());
+            if (!Double.isNaN(deltaVsBest) && Math.abs(deltaVsBest) > 0.005) {
+                sb.append("Rank among legal: ").append(chosenRank).append("/").append(legalMoveCount)
+                        .append(" (Δ vs top: ").append(formatCentipawns(deltaVsBest)).append(")")
+                        .append(System.lineSeparator());
+            } else if (chosenRank != -1) {
+                sb.append("Rank among legal: ").append(chosenRank).append("/").append(legalMoveCount)
+                        .append(System.lineSeparator());
+            }
         } else {
             sb.append("Chosen move: ").append(chosenMove)
                     .append(" (not present in legal move snapshot)")
                     .append(System.lineSeparator());
         }
 
+        sb.append("Total legal moves: ").append(legalMoveCount);
+        if (!Double.isNaN(spread)) {
+            sb.append(" (evaluation spread: ").append(formatCentipawns(spread)).append(")");
+        }
+        sb.append(System.lineSeparator());
         sb.append("Top candidates by evaluation:").append(System.lineSeparator());
         for (int i = 0; i < Math.min(5, evaluations.size()); i++) {
             MoveEvaluation ev = evaluations.get(i);
@@ -288,7 +349,9 @@ public class BestMoveSearchTest {
             sb.append(System.lineSeparator());
         }
 
-        sb.append("Principal variation: ").append(pvString).append(System.lineSeparator());
+        sb.append("Principal variation: ").append(pvString)
+                .append(" (length ").append(pvLength).append(")")
+                .append(System.lineSeparator());
         sb.append("==================================").append(System.lineSeparator());
 
         return sb.toString();
