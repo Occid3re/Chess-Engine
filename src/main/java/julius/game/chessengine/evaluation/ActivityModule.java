@@ -1,6 +1,5 @@
 package julius.game.chessengine.evaluation;
 
-import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.helper.BishopHelper;
@@ -398,7 +397,7 @@ public final class ActivityModule implements EvaluationModule {
         return pieceType == BISHOP || pieceType == ROOK || pieceType == QUEEN;
     }
 
-    private void rebuildFromBoard(BitBoard board) {
+    private void rebuildFromBoard(EvaluationContext.BoardView board) {
         Arrays.fill(midgameTotals, 0);
         Arrays.fill(endgameTotals, 0);
         for (PieceActivity activity : activities) {
@@ -408,6 +407,12 @@ public final class ActivityModule implements EvaluationModule {
         whitePieces = 0L;
         blackPieces = 0L;
         sliderSquares = 0L;
+
+        if (board == null) {
+            updateScoreCache();
+            dirty = false;
+            return;
+        }
 
         registerPieces(board.getWhitePawns(), WHITE, PAWN);
         registerPieces(board.getWhiteKnights(), WHITE, KNIGHT);

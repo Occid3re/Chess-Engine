@@ -2,7 +2,6 @@ package julius.game.chessengine.evaluation;
 
 import java.util.Arrays;
 
-import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.figures.PieceType;
 /**
@@ -158,10 +157,16 @@ public final class MaterialModule implements EvaluationModule {
         updateScoreCaches();
     }
 
-    private void rebuildFromBoard(BitBoard board) {
+    private void rebuildFromBoard(EvaluationContext.BoardView board) {
         Arrays.fill(midgameMaterial, 0);
         Arrays.fill(endgameMaterial, 0);
         Arrays.fill(bishopCounts, 0);
+
+        if (board == null) {
+            updateScoreCaches();
+            dirty = false;
+            return;
+        }
 
         accumulatePieces(WHITE, PAWN, Long.bitCount(board.getWhitePawns()));
         accumulatePieces(WHITE, KNIGHT, Long.bitCount(board.getWhiteKnights()));

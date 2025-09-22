@@ -60,17 +60,18 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
 
     @Override
     public void initialize(EvaluationContext context) {
-        BitBoard board = Objects.requireNonNull(context, "context").getBoard();
+        EvaluationContext.BoardView board = Objects.requireNonNull(context, "context").getBoard();
         markAllFilesDirty();
-        evaluate(board);
+        evaluate(board, context.getWhiteAttackMap(), context.getBlackAttackMap());
     }
 
     @Override
     public void evaluate(EvaluationContext context) {
-        evaluate(Objects.requireNonNull(context, "context").getBoard());
+        Objects.requireNonNull(context, "context");
+        evaluate(context.getBoard(), context.getWhiteAttackMap(), context.getBlackAttackMap());
     }
 
-    public PawnStructureView evaluate(BitBoard board) {
+    public PawnStructureView evaluate(EvaluationContext.BoardView board, long whiteAttacks, long blackAttacks) {
         if (board == null) {
             currentView = PawnStructureView.empty();
             midgameScoreCache = 0;
@@ -89,8 +90,6 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         long allPieces = board.getAllPieces();
         long whiteRooks = board.getWhiteRooks();
         long blackRooks = board.getBlackRooks();
-        long whiteAttacks = board.getAttackBitboard(true);
-        long blackAttacks = board.getAttackBitboard(false);
         long whiteKing = board.getWhiteKing();
         long blackKing = board.getBlackKing();
 
@@ -255,10 +254,14 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
     }
 
     public PawnStructureView getView(BitBoard board) {
-        return evaluate(board);
+        if (board == null) {
+            return evaluate((EvaluationContext.BoardView) null, 0L, 0L);
+        }
+        EvaluationContext.BoardView view = EvaluationContext.BoardView.from(board);
+        return evaluate(view, board.getAttackBitboard(true), board.getAttackBitboard(false));
     }
 
-    public int countHalfOpenFilesWithRooks(BitBoard board, long rooksBitboard, boolean isWhite) {
+    public int countHalfOpenFilesWithRooks(EvaluationContext.BoardView board, long rooksBitboard, boolean isWhite) {
         if (rooksBitboard == 0L) {
             return 0;
         }
@@ -282,7 +285,12 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         return count;
     }
 
-    public int countOpenFilesWithRooks(BitBoard board, long rooksBitboard) {
+    public int countHalfOpenFilesWithRooks(BitBoard board, long rooksBitboard, boolean isWhite) {
+        EvaluationContext.BoardView view = board == null ? null : EvaluationContext.BoardView.from(board);
+        return countHalfOpenFilesWithRooks(view, rooksBitboard, isWhite);
+    }
+
+    public int countOpenFilesWithRooks(EvaluationContext.BoardView board, long rooksBitboard) {
         if (rooksBitboard == 0L) {
             return 0;
         }
@@ -297,6 +305,11 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
             }
         }
         return count;
+    }
+
+    public int countOpenFilesWithRooks(BitBoard board, long rooksBitboard) {
+        EvaluationContext.BoardView view = board == null ? null : EvaluationContext.BoardView.from(board);
+        return countOpenFilesWithRooks(view, rooksBitboard);
     }
 
     private void handleMove(int move) {
@@ -326,7 +339,7 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         }
     }
 
-    private void refreshFileMetadata(BitBoard board) {
+    private void refreshFileMetadata(EvaluationContext.BoardView board) {
         if (!metadataDirty || board == null) {
             return;
         }

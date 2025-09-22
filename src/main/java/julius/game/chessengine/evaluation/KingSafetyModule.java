@@ -128,22 +128,10 @@ public final class KingSafetyModule implements EvaluationModule {
     }
 
     public KingSafetyView evaluate(BitBoard board) {
-        if (board == null) {
-            for (SideState state : sideStates) {
-                state.reset();
-            }
-            midgameScoreCache = 0;
-            endgameScoreCache = 0;
-            currentView = KingSafetyView.empty();
-            dirty = false;
-            return currentView;
-        }
-        long whiteAttacks = board.getAttackBitboard(true);
-        long blackAttacks = board.getAttackBitboard(false);
-        rebuildSideState(sideStates[WHITE], board, true, whiteAttacks, blackAttacks);
-        rebuildSideState(sideStates[BLACK], board, false, blackAttacks, whiteAttacks);
-        refreshScoreCaches();
-        dirty = false;
+        EvaluationContext.BoardView view = board == null ? null : EvaluationContext.BoardView.from(board);
+        long whiteAttacks = board == null ? 0L : board.getAttackBitboard(true);
+        long blackAttacks = board == null ? 0L : board.getAttackBitboard(false);
+        rebuildFromSnapshot(view, whiteAttacks, blackAttacks);
         return currentView;
     }
 
@@ -152,9 +140,24 @@ public final class KingSafetyModule implements EvaluationModule {
     }
 
     private void rebuildFromContext(EvaluationContext context) {
-        BitBoard board = context.getBoard();
-        long whiteAttacks = context.getWhiteAttackMap();
-        long blackAttacks = context.getBlackAttackMap();
+        if (context == null) {
+            rebuildFromSnapshot(null, 0L, 0L);
+            return;
+        }
+        rebuildFromSnapshot(context.getBoard(), context.getWhiteAttackMap(), context.getBlackAttackMap());
+    }
+
+    private void rebuildFromSnapshot(EvaluationContext.BoardView board, long whiteAttacks, long blackAttacks) {
+        for (SideState state : sideStates) {
+            state.reset();
+        }
+        if (board == null) {
+            midgameScoreCache = 0;
+            endgameScoreCache = 0;
+            currentView = KingSafetyView.empty();
+            dirty = false;
+            return;
+        }
         rebuildSideState(sideStates[WHITE], board, true, whiteAttacks, blackAttacks);
         rebuildSideState(sideStates[BLACK], board, false, blackAttacks, whiteAttacks);
         refreshScoreCaches();
@@ -214,8 +217,8 @@ public final class KingSafetyModule implements EvaluationModule {
                 return true;
             }
         }
-        BitBoard previousBoard = previous.getBoard();
-        BitBoard currentBoard = current.getBoard();
+        EvaluationContext.BoardView previousBoard = previous.getBoard();
+        EvaluationContext.BoardView currentBoard = current.getBoard();
         long prevQueens = side == WHITE ? previousBoard.getWhiteQueens() : previousBoard.getBlackQueens();
         long currQueens = side == WHITE ? currentBoard.getWhiteQueens() : currentBoard.getBlackQueens();
         if (prevQueens != currQueens) {
@@ -235,7 +238,8 @@ public final class KingSafetyModule implements EvaluationModule {
         return false;
     }
 
-    private void rebuildSideState(SideState state, BitBoard board, boolean isWhite, long friendlyAttacks, long enemyAttacks) {
+    private void rebuildSideState(SideState state, EvaluationContext.BoardView board, boolean isWhite,
+                                  long friendlyAttacks, long enemyAttacks) {
         state.reset();
         long kingBits = isWhite ? board.getWhiteKing() : board.getBlackKing();
         if (kingBits == 0) {
@@ -305,7 +309,7 @@ public final class KingSafetyModule implements EvaluationModule {
         state.endgameQueenPenalty = queenEnd;
     }
 
-    private void computeBackrankWeaknessPenalty(SideState state, BitBoard board, boolean isWhite) {
+    private void computeBackrankWeaknessPenalty(SideState state, EvaluationContext.BoardView board, boolean isWhite) {
         state.backrankWeaknessMidgame = 0;
         state.backrankWeaknessEndgame = 0;
         if (state.kingSquare < 0) {
@@ -371,7 +375,7 @@ public final class KingSafetyModule implements EvaluationModule {
         return mask;
     }
 
-    private long computeFriendlyNonKingAttacks(BitBoard board, boolean isWhite) {
+    private long computeFriendlyNonKingAttacks(EvaluationContext.BoardView board, boolean isWhite) {
         long attacks = 0L;
         long occupancy = board.getAllPieces();
 

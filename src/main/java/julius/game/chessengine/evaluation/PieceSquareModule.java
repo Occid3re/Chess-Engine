@@ -2,7 +2,6 @@ package julius.game.chessengine.evaluation;
 
 import java.util.Arrays;
 
-import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.figures.PieceType;
 
@@ -494,7 +493,7 @@ public final class PieceSquareModule implements EvaluationModule {
         developmentDirty = false;
     }
 
-    private void recalculateCastlingContribution(BitBoard board, int phase) {
+    private void recalculateCastlingContribution(EvaluationContext.BoardView board, int phase) {
         if (!castlingDirty) {
             return;
         }
@@ -513,7 +512,7 @@ public final class PieceSquareModule implements EvaluationModule {
         castlingDirty = false;
     }
 
-    private int computeCastlingContribution(BitBoard board, int phase) {
+    private int computeCastlingContribution(EvaluationContext.BoardView board, int phase) {
         int materialBalance = computeMaterialBalance(board);
         int whiteAdjustment = computeCastlingAdjustment(
                 board.getWhiteKing(),
@@ -609,7 +608,7 @@ public final class PieceSquareModule implements EvaluationModule {
         return adjustment;
     }
 
-    private static int computeMaterialBalance(BitBoard board) {
+    private static int computeMaterialBalance(EvaluationContext.BoardView board) {
         int whiteMaterial = Long.bitCount(board.getWhitePawns()) * PAWN_VALUE
                 + Long.bitCount(board.getWhiteKnights()) * KNIGHT_VALUE
                 + Long.bitCount(board.getWhiteBishops()) * BISHOP_VALUE
@@ -623,7 +622,7 @@ public final class PieceSquareModule implements EvaluationModule {
         return whiteMaterial - blackMaterial;
     }
 
-    private void rebuildFromBoard(BitBoard board) {
+    private void rebuildFromBoard(EvaluationContext.BoardView board) {
         Arrays.fill(occupantColor, -1);
         Arrays.fill(occupantPiece, 0);
         Arrays.fill(midgameContributionBySquare, 0);
@@ -636,6 +635,13 @@ public final class PieceSquareModule implements EvaluationModule {
         endgameTotal = 0;
         developmentContribution = 0;
         castlingContribution = 0;
+
+        if (board == null) {
+            developmentDirty = true;
+            castlingDirty = true;
+            initialized = true;
+            return;
+        }
 
         fillPieces(board.getWhitePawns(), WHITE, PAWN);
         fillPieces(board.getWhiteKnights(), WHITE, KNIGHT);

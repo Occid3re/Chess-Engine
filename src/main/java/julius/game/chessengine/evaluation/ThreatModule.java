@@ -1,6 +1,5 @@
 package julius.game.chessengine.evaluation;
 
-import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.helper.BishopHelper;
@@ -62,7 +61,7 @@ public final class ThreatModule implements EvaluationModule {
             return;
         }
         Objects.requireNonNull(context, "context");
-        BitBoard board = context.getBoard();
+        EvaluationContext.BoardView board = context.getBoard();
         if (board == null) {
             midgameScoreCache = 0;
             endgameScoreCache = 0;
@@ -111,7 +110,7 @@ public final class ThreatModule implements EvaluationModule {
         dirty = true;
     }
 
-    private int evaluateSide(BitBoard board, boolean isWhite, long friendlyAttacks, long enemyAttacks) {
+    private int evaluateSide(EvaluationContext.BoardView board, boolean isWhite, long friendlyAttacks, long enemyAttacks) {
         long pieces = isWhite ? board.getWhitePieces() : board.getBlackPieces();
         long enemyPawns = isWhite ? board.getBlackPawns() : board.getWhitePawns();
         int enemyPawnColor = isWhite ? BLACK : WHITE;
@@ -179,7 +178,7 @@ public final class ThreatModule implements EvaluationModule {
         return Math.max(basePenalty, scaled);
     }
 
-    private int leastValuableDefenderValue(BitBoard board, boolean isWhite, int targetSquare) {
+    private int leastValuableDefenderValue(EvaluationContext.BoardView board, boolean isWhite, int targetSquare) {
         long mask = 1L << targetSquare;
         int colorIndex = isWhite ? WHITE : BLACK;
         int minValue = Integer.MAX_VALUE;
