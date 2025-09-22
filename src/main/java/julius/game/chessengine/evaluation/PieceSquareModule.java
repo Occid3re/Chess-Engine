@@ -47,19 +47,15 @@ public final class PieceSquareModule implements EvaluationModule {
 
     private static final int DEVELOPMENT_PHASE_THRESHOLD = 64;
     private static final int QUEEN_DEVELOPMENT_PHASE_THRESHOLD = 80;
-    /**
-     * Development related constants.  The previous tuning undervalued quick piece development which
-     * in turn made the search favour premature pawn breaks or queen forays.  The new values roughly
-     * double the incentives so that the evaluation clearly prefers natural development and timely
-     * castling.
-     */
-    private static final int UNDEVELOPED_MINOR_PENALTY = -36;
-    private static final int EARLY_QUEEN_DEVELOPMENT_PENALTY_PER_MINOR = -28;
+
+    private static final int UNDEVELOPED_MINOR_PENALTY = -30;
+    private static final int EARLY_QUEEN_DEVELOPMENT_PENALTY_PER_MINOR = -20;
     private static final int MIN_UNDEVELOPED_MINORS_FOR_QUEEN_PENALTY = 2;
     private static final int START_POSITION_PENALTY = -60;
     private static final int BLEND_SCALE = 256;
-    private static final int CASTLING_BONUS = 36;
-    private static final int NOT_CASTLED_AND_ROOK_MOVE_PENALTY = -18;
+    private static final int CASTLING_BONUS = 35;
+    private static final int NOT_CASTLED_AND_ROOK_MOVE_PENALTY = -20;
+
 
     private static final long NOT_A_FILE = ~FileMasks[0];
     private static final long NOT_H_FILE = ~FileMasks[7];
