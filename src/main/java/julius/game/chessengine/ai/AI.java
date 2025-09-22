@@ -2001,9 +2001,13 @@ public class AI {
 
         // If side to move is in check, search all legal evasions (not only captures)
         boolean inCheck = isSideInCheck(simulatorEngine, isWhitesTurn);
+        boolean mateThreat = false;
+        if (!inCheck) {
+            mateThreat = hasImmediateMateThreat(simulatorEngine, isWhitesTurn);
+        }
 
         double standPat = evaluateStaticPosition(simulatorEngine.getGameState(), isWhitesTurn, depth);
-        if (!inCheck) {
+        if (!inCheck && !mateThreat) {
             if (standPat >= beta) {
                 return beta; // fail-hard beta
             }
@@ -2018,8 +2022,8 @@ public class AI {
             }
         }
 
-        // Generate moves: evasions if in check, else captures/promotions
-        MoveList moves = inCheck
+        // Generate moves: evasions if in check, all legal moves if we must parry mate, else captures/promotions
+        MoveList moves = (inCheck || mateThreat)
                 ? simulatorEngine.getAllLegalMoves()
                 : getQuiescenceCandidates(simulatorEngine, isWhitesTurn);
 
@@ -2034,7 +2038,8 @@ public class AI {
             boolean isQuiet = !isCapture && !isPromotion;
 
             // --- SEE pruning: drop clearly losing captures or quiet moves (keeps promotions) ---
-            if ((!inCheck && isCapture && !isPromotion) || isQuiet) {
+            boolean allowSeePrune = !inCheck && !mateThreat;
+            if (allowSeePrune && ((!inCheck && isCapture && !isPromotion) || isQuiet)) {
                 int see = simulatorEngine.see(m);
                 if (see < 0) {
                     simulatorEngine.performMove(m);
@@ -2096,23 +2101,52 @@ public class AI {
         MoveList candidates = new MoveList();
         for (int i = 0; i < allLegalMoves.size(); i++) {
             int m = allLegalMoves.getMove(i);
-            boolean isCapture = MoveHelper.isCapture(m);
-            boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
-            if (isCapture || isPromotion) {
-                candidates.add(m);
-                continue;
-            }
-
-            simulatorEngine.performMove(m);
-            boolean givesCheck = isSideInCheck(simulatorEngine, !isWhitesTurn);
-            simulatorEngine.undoLastMove();
-
-            if (givesCheck) {
+            if (MoveHelper.isCapture(m) || MoveHelper.isPawnPromotionMove(m)) {
                 candidates.add(m);
             }
         }
 
         return candidates;
+    }
+
+    private boolean hasImmediateMateThreat(Engine simulatorEngine, boolean isWhitesTurn) {
+        BitBoard board = new BitBoard(simulatorEngine.getBitBoard());
+        if (board.whitesTurn == isWhitesTurn) {
+            board.flipSideToMove();
+        }
+
+        MoveList opponentMoves = board.generateAllPossibleMoves(!isWhitesTurn);
+        for (int i = 0; i < opponentMoves.size(); i++) {
+            int move = opponentMoves.getMove(i);
+            board.performMove(move);
+
+            boolean opponentLeftInCheck = board.isInCheck(!isWhitesTurn);
+            if (!opponentLeftInCheck && board.isInCheck(isWhitesTurn)) {
+                if (!hasLegalEscape(board, isWhitesTurn)) {
+                    board.undoMove(move);
+                    return true;
+                }
+            }
+
+            board.undoMove(move);
+        }
+
+        return false;
+    }
+
+    private boolean hasLegalEscape(BitBoard board, boolean isWhitesTurn) {
+        MoveList replies = board.generateAllPossibleMoves(isWhitesTurn);
+        for (int i = 0; i < replies.size(); i++) {
+            int reply = replies.getMove(i);
+            board.performMove(reply);
+            boolean stillInCheck = board.isInCheck(isWhitesTurn);
+            board.undoMove(reply);
+
+            if (!stillInCheck) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private synchronized boolean positionChanged() {
