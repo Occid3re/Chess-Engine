@@ -217,9 +217,6 @@ public class AI {
     @Getter
     private long nullMoveCount = 0;
 
-    @Getter
-    private volatile int lastCompletedDepth = 0;
-
     public AI(Engine mainEngine) {
         log.info("### SearchThreads = " + searchThreads + ", LazySmpThreads = " + lazySmpThreads);
         this.mainEngine = mainEngine;
@@ -613,7 +610,6 @@ public class AI {
         previousBestMove = -1;
         previousBestMoveHash = -1;
         searchResultReady = false;
-        lastCompletedDepth = 0;
     }
 
 
@@ -779,10 +775,8 @@ public class AI {
 
         BestMoveDepth best = task.getBest();
         int move = best.move;
-        int depth = best.depth;
 
         if (move != -1) {
-            lastCompletedDepth = depth;
             currentBestMove = move;
             bestMoveForHash = task.getBoardHash();
             previousBestMove = move;
@@ -807,7 +801,6 @@ public class AI {
         previousBestMove = -1;
         previousBestMoveHash = -1;
         searchResultReady = false;
-        lastCompletedDepth = 0;
         this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
     }
 
