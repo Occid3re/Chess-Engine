@@ -1910,11 +1910,16 @@ public class AI {
         }
 
         // Keep TT move hard-pinned at the front (index 0), sort the remainder by key
+        long ttSortKey = 0L;
+        int pinnedTtMove = ttMove;
         int sortStart = 0;
-        if (ttIndex > 0) {
-            long ttCombined = sortKeys[ttIndex];
-            System.arraycopy(sortKeys, 0, sortKeys, 1, ttIndex);
-            sortKeys[0] = ttCombined;
+        if (ttIndex >= 0) {
+            ttSortKey = sortKeys[ttIndex];
+            pinnedTtMove = moveBuffer[ttIndex];
+            if (ttIndex > 0) {
+                System.arraycopy(sortKeys, 0, sortKeys, 1, ttIndex);
+            }
+            sortKeys[0] = ttSortKey;
             sortStart = 1;
         }
 
@@ -1923,7 +1928,7 @@ public class AI {
         // Build result in descending order (bigger category/score first)
         int outIndex = 0;
         if (ttIndex != -1) {
-            moveBuffer[outIndex++] = (int) (sortKeys[0] & 0xFFFFFFFFL);
+            moveBuffer[outIndex++] = pinnedTtMove;
             for (int i = size - 1; i >= 1; i--) {
                 moveBuffer[outIndex++] = (int) (sortKeys[i] & 0xFFFFFFFFL);
             }
