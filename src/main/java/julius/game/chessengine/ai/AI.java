@@ -2019,7 +2019,9 @@ public class AI {
         }
 
         // Generate moves: evasions if in check, else captures/promotions
-        MoveList moves = inCheck ? simulatorEngine.getAllLegalMoves() : getPossibleCapturesOrPromotions(simulatorEngine);
+        MoveList moves = inCheck
+                ? simulatorEngine.getAllLegalMoves()
+                : getQuiescenceCandidates(simulatorEngine, isWhitesTurn);
 
         // Order them (captures first via MVV-LVA/promotion bonus, killers/history still help)
         MoveList ordered = sortMovesByEfficiency(moves, 0, simulatorEngine.getBoardStateHash(), -1,
@@ -2089,17 +2091,28 @@ public class AI {
         return isWhitesTurn ? scoreDifference : -scoreDifference;
     }
 
-    private MoveList getPossibleCapturesOrPromotions(Engine simulatorEngine) {
+    private MoveList getQuiescenceCandidates(Engine simulatorEngine, boolean isWhitesTurn) {
         MoveList allLegalMoves = simulatorEngine.getAllLegalMoves();
-        MoveList capturesAndPromotions = new MoveList();
+        MoveList candidates = new MoveList();
         for (int i = 0; i < allLegalMoves.size(); i++) {
             int m = allLegalMoves.getMove(i);
-            if (MoveHelper.isCapture(m) || MoveHelper.isPawnPromotionMove(m)) {
-                capturesAndPromotions.add(m);
+            boolean isCapture = MoveHelper.isCapture(m);
+            boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
+            if (isCapture || isPromotion) {
+                candidates.add(m);
+                continue;
+            }
+
+            simulatorEngine.performMove(m);
+            boolean givesCheck = isSideInCheck(simulatorEngine, !isWhitesTurn);
+            simulatorEngine.undoLastMove();
+
+            if (givesCheck) {
+                candidates.add(m);
             }
         }
 
-        return capturesAndPromotions;
+        return candidates;
     }
 
     private synchronized boolean positionChanged() {
