@@ -133,6 +133,14 @@ public class BestMoveSearchTest {
                 new Object[]{
                         "r3kb1r/2p1pppp/2n4B/p2p1b2/B2P4/2P2N2/2P2PPP/R2Q1RK1 b kq - 0 13",
                         List.of("Bd7")
+                },
+                new Object[]{
+                        "2r3k1/pQ1R1ppp/4p3/8/8/2P5/P4PPP/4R1K1 b - - 2 25",
+                        List.of("Rf8")
+                },
+                new Object[]{
+                        "6r1/1pk2p1p/p3p3/b3P1p1/P1p5/1q6/8/K1Br4 b - - 13 38",
+                        List.of("Rxc1", "Bc3")
                 }
         );
     }
