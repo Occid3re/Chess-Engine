@@ -279,8 +279,8 @@ public class BestMoveSearchTest {
         analysisEngine.importBoardFromFen(fen);
 
         boolean whiteToMove = fen.split(" ")[1].equals("w");
-        double baselineForMover = orientScoreForMover(whiteToMove,
-                analysisEngine.getGameState().getScore().getScoreDifference());
+        double baselineForMoverCentipawns = orientScoreForMover(whiteToMove,
+                analysisEngine.getGameState().getScore().getScoreDifference()) * 100.0;
 
         MoveList legalMovesSnapshot = analysisEngine.getAllLegalMoves();
         List<Integer> legalMoves = new ArrayList<>(legalMovesSnapshot.size());
@@ -293,14 +293,14 @@ public class BestMoveSearchTest {
         for (int moveInt : legalMoves) {
             analysisEngine.performMove(moveInt);
             double scoreDiff = analysisEngine.getGameState().getScore().getScoreDifference();
-            double moverScore = orientScoreForMover(whiteToMove, scoreDiff);
+            double moverScoreCentipawns = orientScoreForMover(whiteToMove, scoreDiff) * 100.0;
             analysisEngine.undoLastMove();
-            evaluations.add(new MoveEvaluation(Move.convertIntToMove(moveInt).toString(), moverScore, moveInt));
+            evaluations.add(new MoveEvaluation(Move.convertIntToMove(moveInt).toString(), moverScoreCentipawns, moveInt));
         }
 
         Comparator<MoveEvaluation> comparator = whiteToMove
-                ? Comparator.comparingDouble(MoveEvaluation::score).reversed()
-                : Comparator.comparingDouble(MoveEvaluation::score);
+                ? Comparator.comparingDouble(MoveEvaluation::centipawns).reversed()
+                : Comparator.comparingDouble(MoveEvaluation::centipawns);
         evaluations.sort(comparator);
 
         MoveEvaluation chosenEval = evaluations.stream()
@@ -314,11 +314,11 @@ public class BestMoveSearchTest {
         int chosenRank = chosenEval != null ? evaluations.indexOf(chosenEval) + 1 : -1;
         MoveEvaluation topCandidate = evaluations.isEmpty() ? null : evaluations.get(0);
         double deltaVsBest = chosenEval != null && topCandidate != null
-                ? chosenEval.score() - topCandidate.score()
+                ? chosenEval.centipawns() - topCandidate.centipawns()
                 : Double.NaN;
         double spread = evaluations.isEmpty()
                 ? Double.NaN
-                : evaluations.get(0).score() - evaluations.get(evaluations.size() - 1).score();
+                : evaluations.get(0).centipawns() - evaluations.get(evaluations.size() - 1).centipawns();
 
         StringBuilder sb = new StringBuilder();
         sb.append(System.lineSeparator());
@@ -326,7 +326,7 @@ public class BestMoveSearchTest {
         sb.append("FEN: ").append(fen).append(System.lineSeparator());
         sb.append("Side to move: ").append(whiteToMove ? "White" : "Black").append(System.lineSeparator());
         sb.append("Expected best moves: ").append(expectedMoves).append(System.lineSeparator());
-        sb.append("Baseline evaluation: ").append(formatCentipawns(baselineForMover)).append(" pawns")
+        sb.append("Baseline evaluation: ").append(formatCentipawns(baselineForMoverCentipawns)).append(" pawns")
                 .append(System.lineSeparator());
         sb.append("Search threads: ").append(ai.getSearchThreads())
                 .append(", Lazy SMP workers: ").append(ai.getLazySmpThreads()).append(System.lineSeparator());
@@ -341,12 +341,12 @@ public class BestMoveSearchTest {
         sb.append("Null moves tried (Δ): ").append(nullMovesTried).append(System.lineSeparator());
 
         if (chosenEval != null) {
-            double delta = chosenEval.score() - baselineForMover;
+            double delta = chosenEval.centipawns() - baselineForMoverCentipawns;
             sb.append("Chosen move: ").append(chosenMove)
-                    .append(" -> ").append(formatCentipawns(chosenEval.score())).append(" pawns")
+                    .append(" -> ").append(formatCentipawns(chosenEval.centipawns())).append(" pawns")
                     .append(" (Δ vs baseline: ").append(formatCentipawns(delta)).append(")")
                     .append(System.lineSeparator());
-            if (!Double.isNaN(deltaVsBest) && Math.abs(deltaVsBest) > 0.005) {
+            if (!Double.isNaN(deltaVsBest) && Math.abs(deltaVsBest) > 0.5) {
                 sb.append("Rank among legal: ").append(chosenRank).append("/").append(legalMoveCount)
                         .append(" (Δ vs top: ").append(formatCentipawns(deltaVsBest)).append(")")
                         .append(System.lineSeparator());
@@ -381,10 +381,10 @@ public class BestMoveSearchTest {
         for (int i = 0; i < Math.min(5, evaluations.size()); i++) {
             MoveEvaluation ev = evaluations.get(i);
             sb.append("  ").append(i + 1).append(". ").append(ev.move())
-                    .append(" -> ").append(formatCentipawns(ev.score())).append(" pawns");
+                    .append(" -> ").append(formatCentipawns(ev.centipawns())).append(" pawns");
             if (chosenEval != null) {
-                double d = ev.score() - chosenEval.score();
-                if (Math.abs(d) < 0.5) sb.append(" (matches chosen)");
+                double d = ev.centipawns() - chosenEval.centipawns();
+                if (Math.abs(d) < 50.0) sb.append(" (matches chosen)");
                 else sb.append(" (Δ vs chosen: ").append(formatCentipawns(d)).append(")");
             }
             sb.append(System.lineSeparator());
@@ -580,7 +580,7 @@ public class BestMoveSearchTest {
         for (MoveAndScore moveAndScore : pv) {
             String notation = Move.convertIntToMove(moveAndScore.getMove()).toString();
             double orientedScore = moverIsWhite ? moveAndScore.getScore() : -moveAndScore.getScore();
-            segments.add(notation + " (" + formatCentipawns(orientedScore) + " pawns)");
+            segments.add(notation + " (" + formatCentipawns(orientedScore * 100.0) + " pawns)");
             moverIsWhite = !moverIsWhite;
         }
         return String.join(" -> ", segments);
@@ -841,6 +841,6 @@ public class BestMoveSearchTest {
     private record ModuleDelta(String name, int delta) {
     }
 
-    private record MoveEvaluation(String move, double score, int moveInt) {
+    private record MoveEvaluation(String move, double centipawns, int moveInt) {
     }
 }
