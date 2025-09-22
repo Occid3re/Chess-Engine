@@ -93,7 +93,12 @@ public class UciHandler {
 
     private void registerOptions() {
         options.put("Threads", new UciOption("Threads", "spin", "1", 1, 128,
-                v -> ai.setSearchThreads(Integer.parseInt(v))));
+                v -> {
+                    int requested = Integer.parseInt(v);
+                    ai.setSearchThreads(requested);
+                    output.accept("info string Threads requested " + requested
+                            + " active " + ai.getSearchThreads());
+                }));
         options.put("Hash", new UciOption("Hash", "spin", "16",
                 AI.MIN_HASH_SIZE_MB, AI.MAX_HASH_SIZE_MB,
                 v -> ai.setHashSizeMb(Integer.parseInt(v))));
