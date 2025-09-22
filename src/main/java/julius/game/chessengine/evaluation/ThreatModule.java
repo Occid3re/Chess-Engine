@@ -34,16 +34,16 @@ public final class ThreatModule implements EvaluationModule {
     private static final RookHelper ROOK_HELPER = RookHelper.getInstance();
 
     static {
-        HANGING_PENALTIES[PAWN] = -12;
-        HANGING_PENALTIES[KNIGHT] = -30;
-        HANGING_PENALTIES[BISHOP] = -30;
-        HANGING_PENALTIES[ROOK] = -45;
-        HANGING_PENALTIES[QUEEN] = -70;
+        HANGING_PENALTIES[PAWN] = -16;
+        HANGING_PENALTIES[KNIGHT] = -36;
+        HANGING_PENALTIES[BISHOP] = -36;
+        HANGING_PENALTIES[ROOK] = -55;
+        HANGING_PENALTIES[QUEEN] = -80;
 
-        PAWN_THREAT_PENALTIES[KNIGHT] = -10;
-        PAWN_THREAT_PENALTIES[BISHOP] = -10;
-        PAWN_THREAT_PENALTIES[ROOK] = -18;
-        PAWN_THREAT_PENALTIES[QUEEN] = -25;
+        PAWN_THREAT_PENALTIES[KNIGHT] = -14;
+        PAWN_THREAT_PENALTIES[BISHOP] = -14;
+        PAWN_THREAT_PENALTIES[ROOK] = -22;
+        PAWN_THREAT_PENALTIES[QUEEN] = -30;
     }
 
     private int midgameScoreCache;

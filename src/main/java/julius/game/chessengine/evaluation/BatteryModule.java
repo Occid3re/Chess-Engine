@@ -17,9 +17,9 @@ public final class BatteryModule implements EvaluationModule {
     private static final int QUEEN = MoveHelper.pieceTypeToInt(PieceType.QUEEN);
     private static final int KING = MoveHelper.pieceTypeToInt(PieceType.KING);
 
-    private static final int BATTERY_FORMATION_MIDGAME = 12;
-    private static final int BATTERY_FORMATION_ENDGAME = 8;
-    private static final int BATTERY_RAY_CONTROL_MIDGAME = 1;
+    private static final int BATTERY_FORMATION_MIDGAME = 18;
+    private static final int BATTERY_FORMATION_ENDGAME = 12;
+    private static final int BATTERY_RAY_CONTROL_MIDGAME = 2;
     private static final int BATTERY_RAY_CONTROL_ENDGAME = 1;
 
     private static final int[] BATTERY_ATTACK_MIDGAME = new int[7];
@@ -36,22 +36,22 @@ public final class BatteryModule implements EvaluationModule {
     };
 
     static {
-        BATTERY_ATTACK_MIDGAME[PAWN] = 5;
-        BATTERY_ATTACK_ENDGAME[PAWN] = 4;
+        BATTERY_ATTACK_MIDGAME[PAWN] = 6;
+        BATTERY_ATTACK_ENDGAME[PAWN] = 5;
 
-        BATTERY_ATTACK_MIDGAME[KNIGHT] = 7;
-        BATTERY_ATTACK_ENDGAME[KNIGHT] = 6;
+        BATTERY_ATTACK_MIDGAME[KNIGHT] = 9;
+        BATTERY_ATTACK_ENDGAME[KNIGHT] = 8;
 
-        BATTERY_ATTACK_MIDGAME[BISHOP] = 7;
-        BATTERY_ATTACK_ENDGAME[BISHOP] = 6;
+        BATTERY_ATTACK_MIDGAME[BISHOP] = 9;
+        BATTERY_ATTACK_ENDGAME[BISHOP] = 8;
 
-        BATTERY_ATTACK_MIDGAME[ROOK] = 11;
-        BATTERY_ATTACK_ENDGAME[ROOK] = 9;
+        BATTERY_ATTACK_MIDGAME[ROOK] = 14;
+        BATTERY_ATTACK_ENDGAME[ROOK] = 12;
 
-        BATTERY_ATTACK_MIDGAME[QUEEN] = 15;
-        BATTERY_ATTACK_ENDGAME[QUEEN] = 12;
+        BATTERY_ATTACK_MIDGAME[QUEEN] = 20;
+        BATTERY_ATTACK_ENDGAME[QUEEN] = 16;
 
-        BATTERY_ATTACK_MIDGAME[KING] = 24;
+        BATTERY_ATTACK_MIDGAME[KING] = 30;
         BATTERY_ATTACK_ENDGAME[KING] = 28;
     }
 

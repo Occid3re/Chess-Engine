@@ -22,19 +22,19 @@ import static julius.game.chessengine.helper.PawnMoveTables.PAWN_PUSHES;
  */
 public final class PawnStructureModule implements EvaluationModule, MaterialModule.PawnChangeListener {
 
-    public static final int CENTER_PAWN_BONUS = 15;
-    public static final int PASSED_PAWN_BONUS = 60;
-    public static final int CONNECTED_PAWN_BONUS = 8;
-    public static final int PAWN_ISLAND_PENALTY = -5;
-    public static final int DOUBLED_PAWN_PENALTY = -12;
-    public static final int ISOLATED_PAWN_PENALTY = -10;
-    public static final int ADVANCED_PAWN_BONUS = 8;
-    public static final int BLOCKED_PAWN_PENALTY = -10;
-    public static final int BACKWARD_PAWN_PENALTY = -12;
-    public static final int OWN_KING_BLOCKS_PASSED_PAWN_PENALTY = -150;
-    public static final int PASSED_PAWN_FREE_PATH_BONUS_PER_RANK = 12;
-    public static final int ROOK_HALF_OPEN_FILE_BONUS = 15;
-    public static final int ROOK_OPEN_FILE_BONUS = 25;
+    public static final int CENTER_PAWN_BONUS = 20;
+    public static final int PASSED_PAWN_BONUS = 80;
+    public static final int CONNECTED_PAWN_BONUS = 12;
+    public static final int PAWN_ISLAND_PENALTY = -8;
+    public static final int DOUBLED_PAWN_PENALTY = -18;
+    public static final int ISOLATED_PAWN_PENALTY = -16;
+    public static final int ADVANCED_PAWN_BONUS = 12;
+    public static final int BLOCKED_PAWN_PENALTY = -14;
+    public static final int BACKWARD_PAWN_PENALTY = -16;
+    public static final int OWN_KING_BLOCKS_PASSED_PAWN_PENALTY = -180;
+    public static final int PASSED_PAWN_FREE_PATH_BONUS_PER_RANK = 16;
+    public static final int ROOK_HALF_OPEN_FILE_BONUS = 18;
+    public static final int ROOK_OPEN_FILE_BONUS = 30;
 
     private static final int WHITE = 0;
     private static final int BLACK = 1;
