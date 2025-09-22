@@ -1,9 +1,20 @@
 package julius.game.chessengine.ai;
 
+import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.Move;
 import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameStateEnum;
+import julius.game.chessengine.evaluation.ActivityModule;
+import julius.game.chessengine.evaluation.BatteryModule;
+import julius.game.chessengine.evaluation.EvaluationContext;
+import julius.game.chessengine.evaluation.EvaluationModule;
+import julius.game.chessengine.evaluation.EvaluationPipeline;
+import julius.game.chessengine.evaluation.KingSafetyModule;
+import julius.game.chessengine.evaluation.MaterialModule;
+import julius.game.chessengine.evaluation.PawnStructureModule;
+import julius.game.chessengine.evaluation.PieceSquareModule;
+import julius.game.chessengine.evaluation.ThreatModule;
 import julius.game.chessengine.utils.Score;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -14,8 +25,10 @@ import org.junit.jupiter.params.provider.MethodSource;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
@@ -27,6 +40,8 @@ import java.util.stream.Stream;
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class BestMoveSearchTest {
+
+    private static final int BLEND_SCALE = 256;
 
     /**
      * Test matrix: (fen, expected moves in algebraic notation). Some positions
@@ -279,7 +294,7 @@ public class BestMoveSearchTest {
             double scoreDiff = analysisEngine.getGameState().getScore().getScoreDifference();
             double moverScore = orientScoreForMover(whiteToMove, scoreDiff);
             analysisEngine.undoLastMove();
-            evaluations.add(new MoveEvaluation(Move.convertIntToMove(moveInt).toString(), moverScore));
+            evaluations.add(new MoveEvaluation(Move.convertIntToMove(moveInt).toString(), moverScore, moveInt));
         }
 
         Comparator<MoveEvaluation> comparator = whiteToMove
@@ -338,6 +353,7 @@ public class BestMoveSearchTest {
                 sb.append("Rank among legal: ").append(chosenRank).append("/").append(legalMoveCount)
                         .append(System.lineSeparator());
             }
+            sb.append(renderModuleInfluence(fen, whiteToMove, chosenEval, topCandidate));
         } else {
             sb.append("Chosen move: ").append(chosenMove)
                     .append(" (not present in legal move snapshot)")
@@ -389,6 +405,219 @@ public class BestMoveSearchTest {
         return String.join(" -> ", segments);
     }
 
+    private String renderModuleInfluence(String fen,
+                                         boolean whiteToMove,
+                                         MoveEvaluation chosenEval,
+                                         MoveEvaluation topCandidate) {
+        Engine baselineEngine = createEngineForMove(fen, null);
+        Engine chosenEngine = createEngineForMove(fen, chosenEval.moveInt());
+
+        ModuleContributionSummary baseline = collectModuleContributions(baselineEngine, whiteToMove);
+        ModuleContributionSummary chosen = collectModuleContributions(chosenEngine, whiteToMove);
+
+        ModuleContributionSummary alternative = null;
+        String alternativeMove = null;
+        if (topCandidate != null && topCandidate.moveInt() != chosenEval.moveInt()) {
+            Engine alternativeEngine = createEngineForMove(fen, topCandidate.moveInt());
+            alternative = collectModuleContributions(alternativeEngine, whiteToMove);
+            alternativeMove = topCandidate.move();
+        }
+
+        return formatModuleBreakdown(chosenEval.move(), alternativeMove, baseline, chosen, alternative);
+    }
+
+    private Engine createEngineForMove(String fen, Integer moveInt) {
+        Engine engine = new Engine();
+        engine.importBoardFromFen(fen);
+        if (moveInt != null) {
+            engine.performMove(moveInt);
+        }
+        return engine;
+    }
+
+    private ModuleContributionSummary collectModuleContributions(Engine engine, boolean whiteToMove) {
+        return collectModuleContributions(engine.getBitBoard(), engine.getGameState().getState(), whiteToMove);
+    }
+
+    private ModuleContributionSummary collectModuleContributions(BitBoard bitBoard,
+                                                                 GameStateEnum state,
+                                                                 boolean whiteToMove) {
+        MaterialModule material = new MaterialModule();
+        PawnStructureModule pawns = new PawnStructureModule();
+        PieceSquareModule pieceSquares = new PieceSquareModule();
+        ActivityModule activity = new ActivityModule();
+        BatteryModule battery = new BatteryModule();
+        KingSafetyModule kingSafety = new KingSafetyModule();
+        ThreatModule threat = new ThreatModule();
+
+        material.setPawnChangeListener(pawns);
+
+        List<EvaluationModule> modules = List.of(
+                material,
+                pawns,
+                pieceSquares,
+                activity,
+                battery,
+                kingSafety,
+                threat
+        );
+
+        EvaluationPipeline pipeline = new EvaluationPipeline(modules);
+        EvaluationContext context = EvaluationContext.from(new BitBoard(bitBoard), state);
+        pipeline.initialize(context);
+        pipeline.getBlendedScore();
+
+        int phase = context.getPhase();
+        int orientation = whiteToMove ? 1 : -1;
+
+        List<ModuleContribution> contributions = new ArrayList<>(modules.size() + 1);
+        contributions.add(createContribution("Material", material, phase, orientation));
+        contributions.add(createContribution("Pawns", pawns, phase, orientation));
+        contributions.add(createContribution("Piece-square", pieceSquares, phase, orientation));
+        contributions.add(createContribution("Activity", activity, phase, orientation));
+        contributions.add(createContribution("Battery", battery, phase, orientation));
+        contributions.add(createContribution("King safety", kingSafety, phase, orientation));
+        contributions.add(createContribution("Threats", threat, phase, orientation));
+
+        int checkAdjustment = orientation * rawCheckAdjustment(state);
+        if (checkAdjustment != 0) {
+            contributions.add(new ModuleContribution("Check status", checkAdjustment, checkAdjustment, checkAdjustment));
+        }
+
+        return new ModuleContributionSummary(contributions);
+    }
+
+    private ModuleContribution createContribution(String name, EvaluationModule module, int phase, int orientation) {
+        int midgame = module.getMidgameScore();
+        int endgame = module.getEndgameScore();
+        int blended = blendScores(midgame, endgame, phase);
+        return new ModuleContribution(
+                name,
+                orientation * midgame,
+                orientation * endgame,
+                orientation * blended
+        );
+    }
+
+    private static int blendScores(int midgame, int endgame, int phase) {
+        int clamped = Math.max(0, Math.min(BLEND_SCALE, phase));
+        int midgameWeight = BLEND_SCALE - clamped;
+        int endgameWeight = clamped;
+        long blended = (long) midgame * midgameWeight + (long) endgame * endgameWeight;
+        return (int) (blended / BLEND_SCALE);
+    }
+
+    private static int rawCheckAdjustment(GameStateEnum state) {
+        if (state == null) {
+            return 0;
+        }
+        return switch (state) {
+            case BLACK_IN_CHECK -> Score.CHECK;
+            case WHITE_IN_CHECK -> -Score.CHECK;
+            default -> 0;
+        };
+    }
+
+    private String formatModuleBreakdown(String chosenMove,
+                                         String alternativeMove,
+                                         ModuleContributionSummary baseline,
+                                         ModuleContributionSummary chosen,
+                                         ModuleContributionSummary alternative) {
+        String lineSeparator = System.lineSeparator();
+        StringBuilder sb = new StringBuilder(lineSeparator);
+        sb.append("Module-level evaluation insights:").append(lineSeparator);
+
+        Map<String, ModuleContribution> chosenIndex = indexByModule(chosen.contributions());
+        Map<String, ModuleContribution> alternativeIndex = alternative != null
+                ? indexByModule(alternative.contributions())
+                : Map.of();
+
+        for (ModuleContribution base : baseline.contributions()) {
+            ModuleContribution chosenContribution = chosenIndex.get(base.name());
+            if (chosenContribution == null) {
+                continue;
+            }
+            int chosenDelta = chosenContribution.blended() - base.blended();
+            sb.append(String.format(Locale.US,
+                    "  %-14s %s -> %s (Δ %s",
+                    base.name(),
+                    formatPawns(base.blended()),
+                    formatPawns(chosenContribution.blended()),
+                    formatPawns(chosenDelta)));
+            if (alternative != null) {
+                ModuleContribution altContribution = alternativeIndex.get(base.name());
+                int altDelta = altContribution != null ? altContribution.blended() - base.blended() : 0;
+                sb.append(", alt Δ ").append(formatPawns(altDelta));
+            }
+            sb.append(")").append(lineSeparator);
+        }
+
+        int chosenDeltaTotal = chosen.totalBlended() - baseline.totalBlended();
+        sb.append(String.format(Locale.US,
+                "  %-14s %s -> %s (Δ %s",
+                "TOTAL",
+                formatPawns(baseline.totalBlended()),
+                formatPawns(chosen.totalBlended()),
+                formatPawns(chosenDeltaTotal)));
+        if (alternative != null) {
+            int alternativeDeltaTotal = alternative.totalBlended() - baseline.totalBlended();
+            sb.append(", alt Δ ").append(formatPawns(alternativeDeltaTotal));
+        }
+        sb.append(")").append(lineSeparator);
+
+        sb.append(renderTopDeltas("Top module swings for " + chosenMove, baseline, chosen));
+        if (alternative != null && alternativeMove != null) {
+            sb.append(renderTopDeltas("Top module swings for " + alternativeMove, baseline, alternative));
+        }
+
+        return sb.toString();
+    }
+
+    private Map<String, ModuleContribution> indexByModule(List<ModuleContribution> contributions) {
+        Map<String, ModuleContribution> index = new LinkedHashMap<>(contributions.size());
+        for (ModuleContribution contribution : contributions) {
+            index.put(contribution.name(), contribution);
+        }
+        return index;
+    }
+
+    private String renderTopDeltas(String heading,
+                                   ModuleContributionSummary baseline,
+                                   ModuleContributionSummary updated) {
+        Map<String, ModuleContribution> updatedIndex = indexByModule(updated.contributions());
+        List<ModuleDelta> deltas = new ArrayList<>();
+        for (ModuleContribution base : baseline.contributions()) {
+            ModuleContribution updatedContribution = updatedIndex.get(base.name());
+            if (updatedContribution == null) {
+                continue;
+            }
+            int delta = updatedContribution.blended() - base.blended();
+            if (delta != 0) {
+                deltas.add(new ModuleDelta(base.name(), delta));
+            }
+        }
+        if (deltas.isEmpty()) {
+            return "";
+        }
+        deltas.sort(Comparator.comparingInt((ModuleDelta d) -> Math.abs(d.delta())).reversed());
+
+        String lineSeparator = System.lineSeparator();
+        StringBuilder sb = new StringBuilder();
+        sb.append("  ").append(heading).append(":").append(lineSeparator);
+        int limit = Math.min(3, deltas.size());
+        for (int i = 0; i < limit; i++) {
+            ModuleDelta delta = deltas.get(i);
+            sb.append("    - ").append(delta.name())
+                    .append(": ").append(formatPawns(delta.delta()))
+                    .append(lineSeparator);
+        }
+        return sb.toString();
+    }
+
+    private String formatPawns(int centipawns) {
+        return formatCentipawns(centipawns) + " pawns";
+    }
+
     private static double orientScoreForMover(boolean whiteToMove, double scoreDifference) {
         return whiteToMove ? scoreDifference : -scoreDifference;
     }
@@ -411,6 +640,26 @@ public class BestMoveSearchTest {
         field.set(target, value);
     }
 
-    private record MoveEvaluation(String move, double score) {
+    private record ModuleContributionSummary(List<ModuleContribution> contributions) {
+        ModuleContributionSummary {
+            contributions = List.copyOf(contributions);
+        }
+
+        int totalBlended() {
+            int sum = 0;
+            for (ModuleContribution contribution : contributions) {
+                sum += contribution.blended();
+            }
+            return sum;
+        }
+    }
+
+    private record ModuleContribution(String name, int midgame, int endgame, int blended) {
+    }
+
+    private record ModuleDelta(String name, int delta) {
+    }
+
+    private record MoveEvaluation(String move, double score, int moveInt) {
     }
 }
