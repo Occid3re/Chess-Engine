@@ -26,8 +26,31 @@ class ThreatModuleTest {
         assertEquals(expectedPenalty, pipeline.getBlendedScore());
     }
 
+    @Test
+    void queenBishopBatteryCreatesAdditionalPressure() {
+        BitBoard board = FEN.translateFENtoBitBoard("4k3/4n3/6r1/8/8/3B4/2Q5/4K3 w - - 0 1");
+
+        ThreatModule threatModule = new ThreatModule();
+        EvaluationPipeline pipeline = new EvaluationPipeline(List.of(threatModule));
+        pipeline.initialize(EvaluationContext.from(board, null));
+
+        int formationBonus = ThreatModuleTestConstants.BATTERY_FORMATION_BASE
+                + ThreatModuleTestConstants.BATTERY_QUEEN_BONUS;
+        int rookPenalty = Math.max(ThreatModuleTestConstants.BATTERY_MINIMUM_PENALTY,
+                MaterialModule.ROOK_VALUE / ThreatModuleTestConstants.BATTERY_PENALTY_DIVISOR);
+        int expectedScore = formationBonus + rookPenalty;
+
+        assertEquals(expectedScore, pipeline.getMidgameScore());
+        assertEquals(expectedScore, pipeline.getEndgameScore());
+        assertEquals(expectedScore, pipeline.getBlendedScore());
+    }
+
     private static final class ThreatModuleTestConstants {
         private static final int KNIGHT_PAWN_THREAT = -10;
+        private static final int BATTERY_FORMATION_BASE = 12;
+        private static final int BATTERY_QUEEN_BONUS = 4;
+        private static final int BATTERY_PENALTY_DIVISOR = 16;
+        private static final int BATTERY_MINIMUM_PENALTY = 6;
 
         private ThreatModuleTestConstants() {
         }

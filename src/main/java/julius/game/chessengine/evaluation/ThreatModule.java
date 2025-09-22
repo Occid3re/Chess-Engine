@@ -29,6 +29,13 @@ public final class ThreatModule implements EvaluationModule {
 
     private static final int[] HANGING_PENALTIES = new int[7];
     private static final int[] PAWN_THREAT_PENALTIES = new int[7];
+    private static final int[] BATTERY_THREAT_PENALTIES = new int[7];
+
+    private static final int[] ROOK_DELTAS = {8, -8, 1, -1};
+    private static final int[] BISHOP_DELTAS = {9, -9, 7, -7};
+
+    private static final int BATTERY_FORMATION_BONUS = 12;
+    private static final int BATTERY_KING_PRESSURE = 24;
 
     private static final BishopHelper BISHOP_HELPER = BishopHelper.getInstance();
     private static final RookHelper ROOK_HELPER = RookHelper.getInstance();
@@ -44,6 +51,12 @@ public final class ThreatModule implements EvaluationModule {
         PAWN_THREAT_PENALTIES[BISHOP] = -10;
         PAWN_THREAT_PENALTIES[ROOK] = -18;
         PAWN_THREAT_PENALTIES[QUEEN] = -25;
+
+        BATTERY_THREAT_PENALTIES[PAWN] = scaledBatteryPenalty(MaterialModule.PAWN_VALUE);
+        BATTERY_THREAT_PENALTIES[KNIGHT] = scaledBatteryPenalty(MaterialModule.KNIGHT_VALUE);
+        BATTERY_THREAT_PENALTIES[BISHOP] = scaledBatteryPenalty(MaterialModule.BISHOP_VALUE);
+        BATTERY_THREAT_PENALTIES[ROOK] = scaledBatteryPenalty(MaterialModule.ROOK_VALUE);
+        BATTERY_THREAT_PENALTIES[QUEEN] = scaledBatteryPenalty(MaterialModule.QUEEN_VALUE);
     }
 
     private int midgameScoreCache;
@@ -151,6 +164,7 @@ public final class ThreatModule implements EvaluationModule {
             }
             remaining ^= bit;
         }
+        penalty += evaluateBatteryContribution(board, isWhite);
         return penalty;
     }
 
@@ -257,5 +271,196 @@ public final class ThreatModule implements EvaluationModule {
             remaining ^= pawn;
         }
         return mask;
+    }
+
+    private static int scaledBatteryPenalty(int materialValue) {
+        return Math.max(6, materialValue / 16);
+    }
+
+    private int evaluateBatteryContribution(EvaluationContext.BoardView board, boolean isWhite) {
+        if (board == null) {
+            return 0;
+        }
+        long ownPieces = isWhite ? board.getWhitePieces() : board.getBlackPieces();
+        long enemyPieces = isWhite ? board.getBlackPieces() : board.getWhitePieces();
+        long ownKing = isWhite ? board.getWhiteKing() : board.getBlackKing();
+        long enemyKing = isWhite ? board.getBlackKing() : board.getWhiteKing();
+
+        int score = 0;
+        score += evaluateBatteries(board, isWhite, enemyPieces, enemyKing, true);
+        score += evaluateBatteries(board, !isWhite, ownPieces, ownKing, false);
+        return score;
+    }
+
+    private int evaluateBatteries(EvaluationContext.BoardView board,
+                                   boolean batteryColorIsWhite,
+                                   long targetPieces,
+                                   long targetKing,
+                                   boolean sameSide) {
+        long occupancy = board.getAllPieces();
+        long friendlyPieces = batteryColorIsWhite ? board.getWhitePieces() : board.getBlackPieces();
+
+        long bishops = batteryColorIsWhite ? board.getWhiteBishops() : board.getBlackBishops();
+        long rooks = batteryColorIsWhite ? board.getWhiteRooks() : board.getBlackRooks();
+        long queens = batteryColorIsWhite ? board.getWhiteQueens() : board.getBlackQueens();
+
+        int score = 0;
+        score += evaluateBatteryRays(board, bishops | queens, occupancy, friendlyPieces,
+                targetPieces, targetKing, sameSide, BISHOP_DELTAS);
+        score += evaluateBatteryRays(board, rooks | queens, occupancy, friendlyPieces,
+                targetPieces, targetKing, sameSide, ROOK_DELTAS);
+        return score;
+    }
+
+    private int evaluateBatteryRays(EvaluationContext.BoardView board,
+                                     long sliders,
+                                     long occupancy,
+                                     long friendlyPieces,
+                                     long targetPieces,
+                                     long targetKing,
+                                     boolean sameSide,
+                                     int[] deltas) {
+        int score = 0;
+        long remaining = sliders;
+        while (remaining != 0) {
+            long bit = remaining & -remaining;
+            int square = Long.numberOfTrailingZeros(bit);
+            PieceType rearType = board.getPieceTypeAtIndex(square);
+            if (rearType == null) {
+                remaining ^= bit;
+                continue;
+            }
+            for (int delta : deltas) {
+                int frontSquare = locateFrontSlider(board, square, delta, occupancy, friendlyPieces);
+                if (frontSquare == -1 || square >= frontSquare) {
+                    continue;
+                }
+                PieceType frontType = board.getPieceTypeAtIndex(frontSquare);
+                if (!supportsDirection(frontType, delta)) {
+                    continue;
+                }
+                long attackMask = rayBeyond(frontSquare, delta, occupancy);
+                long effectiveMask = attackMask & ~friendlyPieces;
+                if (effectiveMask == 0) {
+                    continue;
+                }
+                if (sameSide) {
+                    score += batteryFormationBonus(rearType, frontType);
+                }
+                if (!sameSide) {
+                    long threatenedPieces = effectiveMask & targetPieces;
+                    if (threatenedPieces != 0) {
+                        score += batteryThreatPenalty(board, threatenedPieces);
+                    }
+                    if ((effectiveMask & targetKing) != 0) {
+                        score -= BATTERY_KING_PRESSURE;
+                    }
+                }
+            }
+            remaining ^= bit;
+        }
+        return score;
+    }
+
+    private int locateFrontSlider(EvaluationContext.BoardView board,
+                                  int square,
+                                  int delta,
+                                  long occupancy,
+                                  long friendlyPieces) {
+        int current = step(square, delta);
+        while (current != -1) {
+            long mask = 1L << current;
+            if ((occupancy & mask) != 0) {
+                if ((friendlyPieces & mask) != 0) {
+                    return current;
+                }
+                return -1;
+            }
+            current = step(current, delta);
+        }
+        return -1;
+    }
+
+    private long rayBeyond(int square, int delta, long occupancy) {
+        long mask = 0L;
+        int current = square;
+        while (true) {
+            current = step(current, delta);
+            if (current == -1) {
+                break;
+            }
+            long bit = 1L << current;
+            mask |= bit;
+            if ((occupancy & bit) != 0) {
+                break;
+            }
+        }
+        return mask;
+    }
+
+    private int batteryThreatPenalty(EvaluationContext.BoardView board, long threatenedPieces) {
+        int penalty = 0;
+        long remaining = threatenedPieces;
+        while (remaining != 0) {
+            long bit = remaining & -remaining;
+            int index = Long.numberOfTrailingZeros(bit);
+            PieceType type = board.getPieceTypeAtIndex(index);
+            if (type != null) {
+                int typeBits = MoveHelper.pieceTypeToInt(type);
+                penalty -= BATTERY_THREAT_PENALTIES[typeBits];
+            }
+            remaining ^= bit;
+        }
+        return penalty;
+    }
+
+    private static boolean supportsDirection(PieceType type, int delta) {
+        if (type == null) {
+            return false;
+        }
+        return switch (type) {
+            case BISHOP -> isDiagonalDelta(delta);
+            case ROOK -> isOrthogonalDelta(delta);
+            case QUEEN -> true;
+            default -> false;
+        };
+    }
+
+    private static boolean isDiagonalDelta(int delta) {
+        return delta == 9 || delta == -9 || delta == 7 || delta == -7;
+    }
+
+    private static boolean isOrthogonalDelta(int delta) {
+        return delta == 8 || delta == -8 || delta == 1 || delta == -1;
+    }
+
+    private int batteryFormationBonus(PieceType rearType, PieceType frontType) {
+        if (rearType == null || frontType == null) {
+            return 0;
+        }
+        int bonus = BATTERY_FORMATION_BONUS;
+        if (rearType == PieceType.QUEEN || frontType == PieceType.QUEEN) {
+            bonus += 4;
+        }
+        if (rearType == PieceType.ROOK && frontType == PieceType.ROOK) {
+            bonus += 2;
+        }
+        return bonus;
+    }
+
+    private static int step(int square, int delta) {
+        int file = square & 7;
+        int rank = square >>> 3;
+        return switch (delta) {
+            case 1 -> file == 7 ? -1 : square + 1;
+            case -1 -> file == 0 ? -1 : square - 1;
+            case 8 -> rank == 7 ? -1 : square + 8;
+            case -8 -> rank == 0 ? -1 : square - 8;
+            case 9 -> (file == 7 || rank == 7) ? -1 : square + 9;
+            case -9 -> (file == 0 || rank == 0) ? -1 : square - 9;
+            case 7 -> (file == 0 || rank == 7) ? -1 : square + 7;
+            case -7 -> (file == 7 || rank == 0) ? -1 : square - 7;
+            default -> -1;
+        };
     }
 }
