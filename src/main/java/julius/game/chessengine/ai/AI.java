@@ -1278,7 +1278,8 @@ public class AI {
             return isWhite ? -m : +m; // side-to-move is losing here
         }
         if (simulatorEngine.getGameState().isInStateDraw()) {
-            return evaluateStaticPosition(simulatorEngine.getGameState(), isWhite, plyFromRoot);
+            double drawScore = evaluateStaticPosition(simulatorEngine.getGameState(), isWhite, plyFromRoot);
+            return isWhite ? drawScore : -drawScore;
         }
 
         // STRICT DEPTH MANAGEMENT:
