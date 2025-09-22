@@ -68,6 +68,8 @@ public class BitBoard {
     private final Deque<Integer> halfmoveHistory = new ArrayDeque<>();
     @Getter(AccessLevel.NONE)
     private final Deque<Integer> fullmoveHistory = new ArrayDeque<>();
+    @Getter(AccessLevel.NONE)
+    private final Deque<Integer> capturedPieceHistory = new ArrayDeque<>();
 
     // This variable needs to be set whenever a move is made
     @Getter
@@ -160,6 +162,7 @@ public class BitBoard {
         this.fullmoveNumber = fullmoveNumber;
         this.halfmoveHistory.clear();
         this.fullmoveHistory.clear();
+        this.capturedPieceHistory.clear();
         initPieceBoardFromBitboards();
         recomputeWhiteAttackMap();
         recomputeBlackAttackMap();
@@ -217,6 +220,7 @@ public class BitBoard {
         this.fullmoveNumber = other.fullmoveNumber;
         this.halfmoveHistory.addAll(other.halfmoveHistory);
         this.fullmoveHistory.addAll(other.fullmoveHistory);
+        this.capturedPieceHistory.addAll(other.capturedPieceHistory);
     }
     public void setLastMoveDoubleStepPawnIndex(int index) {
         int oldEp = getEnPassantTargetIndex();
@@ -303,6 +307,7 @@ public class BitBoard {
         fullmoveNumber = 1;
         halfmoveHistory.clear();
         fullmoveHistory.clear();
+        capturedPieceHistory.clear();
         initPieceBoardFromBitboards();
         recomputeWhiteAttackMap();
         recomputeBlackAttackMap();
@@ -1316,8 +1321,18 @@ public class BitBoard {
         if (isCapture) {
             int capIndex = isEnPassant ? (isWhite ? toIndex - 8 : toIndex + 8) : toIndex;
             PieceType capType = pieceBoard[capIndex];
+            if (capType == null) {
+                capType = deducePieceTypeFromBitboards(capIndex, !isWhite);
+                if (capType == null) {
+                    log.warn("Capture from {} to {} expected a piece but none was found", fromIndex, capIndex);
+                }
+            }
+            int capturedBits = (capType != null) ? MoveHelper.pieceTypeToInt(capType) : 0;
+            capturedPieceHistory.push(capturedBits);
             Color capColor = isWhite ? Color.BLACK : Color.WHITE;
-            xorPiece(capColor, capType, capIndex);
+            if (capType != null) {
+                xorPiece(capColor, capType, capIndex);
+            }
             long capMask = 1L << capIndex;
 
             if (isWhite) {
@@ -1528,6 +1543,26 @@ public class BitBoard {
         return pieceBoard[index];
     }
 
+    private PieceType deducePieceTypeFromBitboards(int index, boolean isWhite) {
+        long mask = 1L << index;
+        if (isWhite) {
+            if ((whitePawns & mask) != 0) return PieceType.PAWN;
+            if ((whiteKnights & mask) != 0) return PieceType.KNIGHT;
+            if ((whiteBishops & mask) != 0) return PieceType.BISHOP;
+            if ((whiteRooks & mask) != 0) return PieceType.ROOK;
+            if ((whiteQueens & mask) != 0) return PieceType.QUEEN;
+            if ((whiteKing & mask) != 0) return PieceType.KING;
+        } else {
+            if ((blackPawns & mask) != 0) return PieceType.PAWN;
+            if ((blackKnights & mask) != 0) return PieceType.KNIGHT;
+            if ((blackBishops & mask) != 0) return PieceType.BISHOP;
+            if ((blackRooks & mask) != 0) return PieceType.ROOK;
+            if ((blackQueens & mask) != 0) return PieceType.QUEEN;
+            if ((blackKing & mask) != 0) return PieceType.KING;
+        }
+        return null;
+    }
+
     public Color getPieceColorAtIndex(int index) {
         long positionMask = 1L << index;
 
@@ -1684,6 +1719,15 @@ public class BitBoard {
         boolean isRookFirstMove = MoveHelper.isRookFirstMove(move);
         int doubleStepPawnIndex = MoveHelper.deriveLastMoveDoubleStepPawnIndex(move);
 
+        if (isCapture) {
+            int historyBits = capturedPieceHistory.isEmpty() ? 0 : capturedPieceHistory.pop();
+            if (capturedPieceTypeBits == 0) {
+                capturedPieceTypeBits = historyBits;
+            } else if (historyBits != 0 && capturedPieceTypeBits != historyBits) {
+                log.warn("Captured piece type mismatch for move {}: encoded {}, history {}", move, capturedPieceTypeBits, historyBits);
+            }
+        }
+
         int oldEp = getEnPassantTargetIndex();
         boolean oldWK = !whiteKingMoved && !whiteRookH1Moved;
         boolean oldWQ = !whiteKingMoved && !whiteRookA1Moved;
@@ -1699,8 +1743,10 @@ public class BitBoard {
         if (isCapture) {
             int capIndex = isEnPassantMove ? (isWhite ? toIndex - 8 : toIndex + 8) : toIndex;
             PieceType capType = pieceTypeFromBits(capturedPieceTypeBits);
-            Color capColor = isWhite ? Color.BLACK : Color.WHITE;
-            xorPiece(capColor, capType, capIndex);
+            if (capType != null) {
+                Color capColor = isWhite ? Color.BLACK : Color.WHITE;
+                xorPiece(capColor, capType, capIndex);
+            }
         }
 
         if (isCastlingMove) {
@@ -1854,6 +1900,11 @@ public class BitBoard {
 
     private void undoCapture(int toIndex, int capturedPieceTypeBits, boolean isCapture, boolean isWhite, boolean isEnPassant) {
         if (!isCapture) return;
+
+        if (capturedPieceTypeBits == 0) {
+            log.warn("Undo capture skipped at {} because captured piece type information was unavailable", toIndex);
+            return;
+        }
 
         int enPassantModifier = isEnPassant ? (isWhite ? -8 : 8) : 0;
         int restoreIndex = toIndex + enPassantModifier;
