@@ -295,6 +295,7 @@ public class BestMoveSearchTest {
         double spread = evaluations.isEmpty()
                 ? Double.NaN
                 : evaluations.get(0).score() - evaluations.get(evaluations.size() - 1).score();
+        int completedDepth = Math.max(0, ai.getLastCompletedDepth());
 
         StringBuilder sb = new StringBuilder();
         sb.append(System.lineSeparator());
@@ -321,6 +322,7 @@ public class BestMoveSearchTest {
             sb.append("Chosen move: ").append(chosenMove)
                     .append(" -> ").append(formatCentipawns(chosenEval.score())).append(" pawns")
                     .append(" (Δ vs baseline: ").append(formatCentipawns(delta)).append(")")
+                    .append(" (depth: ").append(completedDepth).append(")")
                     .append(System.lineSeparator());
             if (!Double.isNaN(deltaVsBest) && Math.abs(deltaVsBest) > 0.005) {
                 sb.append("Rank among legal: ").append(chosenRank).append("/").append(legalMoveCount)
@@ -333,6 +335,7 @@ public class BestMoveSearchTest {
         } else {
             sb.append("Chosen move: ").append(chosenMove)
                     .append(" (not present in legal move snapshot)")
+                    .append(" (depth: ").append(completedDepth).append(")")
                     .append(System.lineSeparator());
         }
 
