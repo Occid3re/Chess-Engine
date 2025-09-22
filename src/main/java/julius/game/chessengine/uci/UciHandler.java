@@ -2,6 +2,7 @@ package julius.game.chessengine.uci;
 
 import julius.game.chessengine.ai.AI;
 import julius.game.chessengine.ai.MoveAndScore;
+import julius.game.chessengine.ai.SearchDiagnostics;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.Engine;
@@ -398,6 +399,18 @@ public class UciHandler {
             builder.append(" nodes ").append(nodes);
         }
         output.accept(builder.toString());
+
+        SearchDiagnostics diagnostics = ai.getLastDiagnostics();
+        if (diagnostics != null) {
+            int generated = diagnostics.rootMovesGenerated();
+            int explored = diagnostics.rootMovesExplored();
+            if (generated > 0 || explored > 0) {
+                int difference = generated - explored;
+                output.accept("info string rootmoves generated " + generated
+                        + " explored " + explored
+                        + " diff " + difference);
+            }
+        }
 
         GameState gameState = ai.getMainEngine().getGameState();
         if (gameState != null && gameState.getState() != null) {
