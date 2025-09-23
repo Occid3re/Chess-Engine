@@ -6,6 +6,9 @@ import julius.game.chessengine.figures.PieceType;
 import lombok.extern.log4j.Log4j2;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import static julius.game.chessengine.board.MoveHelper.convertStringToIndex;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -35,6 +38,25 @@ public class BitBoardTest {
     };
 
 
+    private static int createMove(BitBoard board, String from, String to, PieceType pieceType, boolean isWhite,
+                                   boolean isCapture, boolean isCastling, boolean isEnPassant,
+                                   PieceType promotionPiece, PieceType capturedPiece) {
+        int fromIndex = convertStringToIndex(from);
+        int toIndex = convertStringToIndex(to);
+        boolean kingFirstMove = pieceType == PieceType.KING && board.hasKingNotMoved(isWhite);
+        boolean rookFirstMove = pieceType == PieceType.ROOK && !board.hasRookMoved(fromIndex);
+        return MoveHelper.createMoveInt(fromIndex, toIndex, pieceType, isWhite, isCapture, isCastling, isEnPassant,
+                promotionPiece, capturedPiece, kingFirstMove, rookFirstMove, board.getLastMoveDoubleStepPawnIndex());
+    }
+
+    private static void assertCachedMapsMatch(BitBoard board) {
+        long expectedWhite = board.generateAttackBitboard(true);
+        long expectedBlack = board.generateAttackBitboard(false);
+        assertEquals(expectedWhite, board.getAttackBitboard(true), "White attack map mismatch");
+        assertEquals(expectedBlack, board.getAttackBitboard(false), "Black attack map mismatch");
+    }
+
+
     @Test
     public void HashTest() {
         Engine a = new Engine();
@@ -47,6 +69,143 @@ public class BitBoardTest {
         b.logBoard();
 
         assertEquals(a.getBoardStateHash(), b.getBoardStateHash());
+    }
+
+    @Test
+    void attackMapsStayAccurateAfterQuietSequence() {
+        BitBoard board = new BitBoard();
+        List<Integer> moves = new ArrayList<>();
+
+        moves.add(createMove(board, "g1", "f3", PieceType.KNIGHT, true,
+                false, false, false, null, null));
+        board.performMove(moves.get(moves.size() - 1));
+        assertFalse(board.isWhiteAttackDirty(), "Quiet move should keep white attack map clean");
+        assertFalse(board.isBlackAttackDirty(), "Quiet move should keep black attack map clean");
+        assertCachedMapsMatch(board);
+
+        moves.add(createMove(board, "b8", "c6", PieceType.KNIGHT, false,
+                false, false, false, null, null));
+        board.performMove(moves.get(moves.size() - 1));
+        assertFalse(board.isWhiteAttackDirty());
+        assertFalse(board.isBlackAttackDirty());
+        assertCachedMapsMatch(board);
+
+        moves.add(createMove(board, "e2", "e4", PieceType.PAWN, true,
+                false, false, false, null, null));
+        board.performMove(moves.get(moves.size() - 1));
+        assertFalse(board.isWhiteAttackDirty());
+        assertFalse(board.isBlackAttackDirty());
+        assertCachedMapsMatch(board);
+
+        moves.add(createMove(board, "e7", "e5", PieceType.PAWN, false,
+                false, false, false, null, null));
+        board.performMove(moves.get(moves.size() - 1));
+        assertFalse(board.isWhiteAttackDirty());
+        assertFalse(board.isBlackAttackDirty());
+        assertCachedMapsMatch(board);
+
+        moves.add(createMove(board, "f1", "c4", PieceType.BISHOP, true,
+                false, false, false, null, null));
+        board.performMove(moves.get(moves.size() - 1));
+        assertFalse(board.isWhiteAttackDirty());
+        assertFalse(board.isBlackAttackDirty());
+        assertCachedMapsMatch(board);
+
+        moves.add(createMove(board, "g8", "f6", PieceType.KNIGHT, false,
+                false, false, false, null, null));
+        board.performMove(moves.get(moves.size() - 1));
+        assertFalse(board.isWhiteAttackDirty());
+        assertFalse(board.isBlackAttackDirty());
+        assertCachedMapsMatch(board);
+
+        for (int i = moves.size() - 1; i >= 0; i--) {
+            board.undoMove(moves.get(i));
+            assertCachedMapsMatch(board);
+            assertFalse(board.isWhiteAttackDirty());
+            assertFalse(board.isBlackAttackDirty());
+        }
+    }
+
+    @Test
+    void attackMapsCorrectAfterCaptureAndEnPassant() {
+        BitBoard board = new BitBoard();
+        List<Integer> moves = new ArrayList<>();
+
+        moves.add(createMove(board, "e2", "e4", PieceType.PAWN, true,
+                false, false, false, null, null));
+        board.performMove(moves.get(moves.size() - 1));
+        assertFalse(board.isWhiteAttackDirty());
+        assertFalse(board.isBlackAttackDirty());
+        assertCachedMapsMatch(board);
+
+        moves.add(createMove(board, "d7", "d5", PieceType.PAWN, false,
+                false, false, false, null, null));
+        board.performMove(moves.get(moves.size() - 1));
+        assertFalse(board.isWhiteAttackDirty());
+        assertFalse(board.isBlackAttackDirty());
+        assertCachedMapsMatch(board);
+
+        moves.add(createMove(board, "e4", "d5", PieceType.PAWN, true,
+                true, false, false, null, PieceType.PAWN));
+        board.performMove(moves.get(moves.size() - 1));
+        assertFalse(board.isWhiteAttackDirty());
+        assertFalse(board.isBlackAttackDirty());
+        assertCachedMapsMatch(board);
+
+        moves.add(createMove(board, "e7", "e5", PieceType.PAWN, false,
+                false, false, false, null, null));
+        board.performMove(moves.get(moves.size() - 1));
+        assertFalse(board.isWhiteAttackDirty());
+        assertFalse(board.isBlackAttackDirty());
+        assertCachedMapsMatch(board);
+
+        int enPassantMove = createMove(board, "d5", "e6", PieceType.PAWN, true,
+                true, false, true, null, PieceType.PAWN);
+        moves.add(enPassantMove);
+        board.performMove(enPassantMove);
+
+        assertTrue(board.isWhiteAttackDirty(), "En passant should mark white attacks dirty for rebuild");
+        assertTrue(board.isBlackAttackDirty(), "En passant should mark black attacks dirty for rebuild");
+        long expectedWhite = board.generateAttackBitboard(true);
+        long expectedBlack = board.generateAttackBitboard(false);
+        assertEquals(expectedWhite, board.getAttackBitboard(true));
+        assertEquals(expectedBlack, board.getAttackBitboard(false));
+        assertFalse(board.isWhiteAttackDirty());
+        assertFalse(board.isBlackAttackDirty());
+
+        for (int i = moves.size() - 1; i >= 0; i--) {
+            board.undoMove(moves.get(i));
+            if (i == moves.size() - 1) {
+                assertTrue(board.isWhiteAttackDirty());
+                assertTrue(board.isBlackAttackDirty());
+                assertCachedMapsMatch(board);
+                assertFalse(board.isWhiteAttackDirty());
+                assertFalse(board.isBlackAttackDirty());
+            } else {
+                assertCachedMapsMatch(board);
+                assertFalse(board.isWhiteAttackDirty());
+                assertFalse(board.isBlackAttackDirty());
+            }
+        }
+    }
+
+    @Test
+    void attackMapsUpdatedAfterPromotion() {
+        Engine engine = new Engine();
+        engine.importBoardFromFen("4k3/P7/8/8/8/8/8/4K3 w - - 0 1");
+        BitBoard board = engine.getBitBoard();
+
+        int promotionMove = createMove(board, "a7", "a8", PieceType.PAWN, true,
+                false, false, false, PieceType.QUEEN, null);
+        board.performMove(promotionMove);
+        assertFalse(board.isWhiteAttackDirty());
+        assertFalse(board.isBlackAttackDirty());
+        assertCachedMapsMatch(board);
+
+        board.undoMove(promotionMove);
+        assertCachedMapsMatch(board);
+        assertFalse(board.isWhiteAttackDirty());
+        assertFalse(board.isBlackAttackDirty());
     }
 
     @Test
