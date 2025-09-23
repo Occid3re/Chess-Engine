@@ -2,6 +2,7 @@ package julius.game.chessengine.evaluation;
 
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.utils.Score;
+import lombok.Getter;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -29,7 +30,9 @@ public final class EvaluationPipeline {
     }
 
     private final List<ModuleState> modules;
+    @Getter
     private EvaluationContext context;
+    @Getter
     private boolean initialized;
     private boolean aggregateDirty = true;
     private int midgameTotal;
@@ -103,23 +106,14 @@ public final class EvaluationPipeline {
         if (context == null) {
             return 0;
         }
-        int phase = clamp(context.phase());
-        int midgameWeight = BLEND_SCALE - phase;
-        int endgameWeight = phase;
+        int endgameWeight = clamp(context.phase());
+        int midgameWeight = BLEND_SCALE - endgameWeight;
         long blended = (long) midgameTotal * midgameWeight + (long) endgameTotal * endgameWeight;
         return (int) (blended / BLEND_SCALE);
     }
 
     public double getScoreDifference() {
         return getBlendedScore() / 100.0;
-    }
-
-    public boolean isInitialized() {
-        return initialized;
-    }
-
-    public EvaluationContext getContext() {
-        return context;
     }
 
     private void refreshTotals() {
@@ -163,10 +157,7 @@ public final class EvaluationPipeline {
         if (phase < 0) {
             return 0;
         }
-        if (phase > BLEND_SCALE) {
-            return BLEND_SCALE;
-        }
-        return phase;
+        return Math.min(phase, BLEND_SCALE);
     }
 
     private int computeCheckAdjustment() {

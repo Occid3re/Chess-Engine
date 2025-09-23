@@ -4,6 +4,8 @@ import java.util.Arrays;
 
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.figures.PieceType;
+import lombok.Setter;
+
 /**
  * Tracks per-side material using incremental updates so the evaluation pipeline can
  * access midgame and endgame material totals without rescanning the board.
@@ -53,6 +55,7 @@ public final class MaterialModule implements EvaluationModule {
     private final int[] endgameMaterial = new int[2];
     private final int[] bishopCounts = new int[2];
 
+    @Setter
     private PawnChangeListener pawnChangeListener;
     private boolean dirty = true;
     private int midgameScoreCache;
@@ -74,17 +77,13 @@ public final class MaterialModule implements EvaluationModule {
     @Override
     public void applyMove(MoveContext moveContext) {
         boolean forward = isForwardMove(moveContext);
-        updateMaterial(moveContext.getMove(), !forward);
+        updateMaterial(moveContext.move(), !forward);
     }
 
     @Override
     public void undoMove(MoveContext moveContext) {
         boolean forward = isForwardMove(moveContext);
-        updateMaterial(moveContext.getMove(), !forward);
-    }
-
-    public void setPawnChangeListener(PawnChangeListener listener) {
-        this.pawnChangeListener = listener;
+        updateMaterial(moveContext.move(), !forward);
     }
 
     @Override
@@ -108,11 +107,11 @@ public final class MaterialModule implements EvaluationModule {
     }
 
     private boolean isForwardMove(MoveContext moveContext) {
-        EvaluationContext previous = moveContext.getPreviousContext();
+        EvaluationContext previous = moveContext.previousContext();
         if (previous == null) {
             return true;
         }
-        boolean moveIsWhite = MoveHelper.isWhitesMove(moveContext.getMove());
+        boolean moveIsWhite = MoveHelper.isWhitesMove(moveContext.move());
         return previous.whiteToMove() == moveIsWhite;
     }
 

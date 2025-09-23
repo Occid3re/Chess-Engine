@@ -146,8 +146,8 @@ public final class ActivityModule implements EvaluationModule {
     @Override
     public void applyMove(MoveContext moveContext) {
         boolean forward = isForwardMove(moveContext);
-        if (!updateForMove(moveContext.getMove(), forward)) {
-            rebuildFromBoard(moveContext.getCurrentContext().board());
+        if (!updateForMove(moveContext.move(), forward)) {
+            rebuildFromBoard(moveContext.currentContext().board());
         }
     }
 
@@ -553,11 +553,11 @@ public final class ActivityModule implements EvaluationModule {
     }
 
     private boolean isForwardMove(MoveContext moveContext) {
-        EvaluationContext previous = moveContext.getPreviousContext();
+        EvaluationContext previous = moveContext.previousContext();
         if (previous == null) {
             return true;
         }
-        boolean moveIsWhite = MoveHelper.isWhitesMove(moveContext.getMove());
+        boolean moveIsWhite = MoveHelper.isWhitesMove(moveContext.move());
         return previous.whiteToMove() == moveIsWhite;
     }
 

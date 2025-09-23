@@ -5,6 +5,7 @@ import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.helper.BishopHelper;
 import julius.game.chessengine.helper.RookHelper;
+import lombok.Getter;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -56,8 +57,8 @@ public final class KingSafetyModule implements EvaluationModule {
     }
 
     private final SideState[] sideStates = {new SideState(), new SideState()};
+    @Getter
     private KingSafetyView currentView = KingSafetyView.empty();
-    private boolean initialized;
     private boolean dirty = true;
     private int midgameScoreCache;
     private int endgameScoreCache;
@@ -66,7 +67,6 @@ public final class KingSafetyModule implements EvaluationModule {
     public void initialize(EvaluationContext context) {
         Objects.requireNonNull(context, "context");
         rebuildFromContext(context);
-        initialized = true;
     }
 
     @Override
@@ -79,16 +79,13 @@ public final class KingSafetyModule implements EvaluationModule {
 
     @Override
     public void applyMove(MoveContext moveContext) {
-        if (!ensureInitialized(moveContext)) {
-            return;
-        }
-        EvaluationContext previous = moveContext.getPreviousContext();
-        EvaluationContext current = moveContext.getCurrentContext();
-        if (previous == null || current == null) {
+        EvaluationContext previous = moveContext.previousContext();
+        EvaluationContext current = moveContext.currentContext();
+        if (previous == null) {
             rebuildFromContext(current);
             return;
         }
-        int move = moveContext.getMove();
+        int move = moveContext.move();
         int movedPiece = MoveHelper.derivePieceTypeBits(move);
         int capturedPiece = MoveHelper.deriveCapturedPieceTypeBits(move);
         if (movedPiece == KING || capturedPiece == KING) {
@@ -164,26 +161,14 @@ public final class KingSafetyModule implements EvaluationModule {
         dirty = false;
     }
 
-    private boolean ensureInitialized(MoveContext moveContext) {
-        if (initialized) {
-            return true;
-        }
-        EvaluationContext context = moveContext.getCurrentContext();
-        if (context == null) {
-            return false;
-        }
-        initialize(context);
-        return true;
-    }
-
     private boolean sideNeedsUpdate(int side, MoveContext moveContext) {
         SideState state = sideStates[side];
         if (state.kingSquare < 0) {
             return true;
         }
-        EvaluationContext previous = moveContext.getPreviousContext();
-        EvaluationContext current = moveContext.getCurrentContext();
-        if (previous == null || current == null) {
+        EvaluationContext previous = moveContext.previousContext();
+        EvaluationContext current = moveContext.currentContext();
+        if (previous == null) {
             return true;
         }
         long prevEnemyAttacks = side == WHITE ? previous.blackAttackMap() : previous.whiteAttackMap();
@@ -194,7 +179,7 @@ public final class KingSafetyModule implements EvaluationModule {
         if (zoneDiff != 0) {
             return true;
         }
-        int move = moveContext.getMove();
+        int move = moveContext.move();
         int from = MoveHelper.deriveFromIndex(move);
         int to = MoveHelper.deriveToIndex(move);
         long moveMask = (1L << from) | (1L << to);
@@ -232,10 +217,7 @@ public final class KingSafetyModule implements EvaluationModule {
             }
             queenMask ^= q;
         }
-        if (state.backrankMask != 0 && ((prevFriendlyAttacks ^ currFriendlyAttacks) & state.backrankMask) != 0) {
-            return true;
-        }
-        return false;
+        return state.backrankMask != 0 && ((prevFriendlyAttacks ^ currFriendlyAttacks) & state.backrankMask) != 0;
     }
 
     private void rebuildSideState(SideState state, EvaluationContext.BoardView board, boolean isWhite,
@@ -270,7 +252,7 @@ public final class KingSafetyModule implements EvaluationModule {
         state.defenderCount = Long.bitCount(friendlyAttacks & state.kingZone);
 
         long allPieces = board.allPieces();
-        accumulatePawnAttacks(state, isWhite ? board.blackPawns() : board.whitePawns(), !isWhite);
+        accumulatePawnAttacks(state, enemyPawns, !isWhite);
         accumulateKnightAttacks(state, isWhite ? board.blackKnights() : board.whiteKnights());
         accumulateBishopAttacks(state, isWhite ? board.blackBishops() : board.whiteBishops(), allPieces);
         accumulateRookAttacks(state, isWhite ? board.blackRooks() : board.whiteRooks(), allPieces);
@@ -389,8 +371,7 @@ public final class KingSafetyModule implements EvaluationModule {
             remaining ^= pawn;
         }
 
-        long knights = isWhite ? board.whiteKnights() : board.blackKnights();
-        remaining = knights;
+        remaining = isWhite ? board.whiteKnights() : board.blackKnights();
         while (remaining != 0) {
             long knight = remaining & -remaining;
             int index = Long.numberOfTrailingZeros(knight);
@@ -398,8 +379,7 @@ public final class KingSafetyModule implements EvaluationModule {
             remaining ^= knight;
         }
 
-        long bishops = isWhite ? board.whiteBishops() : board.blackBishops();
-        remaining = bishops;
+        remaining = isWhite ? board.whiteBishops() : board.blackBishops();
         while (remaining != 0) {
             long bishop = remaining & -remaining;
             int index = Long.numberOfTrailingZeros(bishop);
@@ -408,8 +388,7 @@ public final class KingSafetyModule implements EvaluationModule {
             remaining ^= bishop;
         }
 
-        long rooks = isWhite ? board.whiteRooks() : board.blackRooks();
-        remaining = rooks;
+        remaining = isWhite ? board.whiteRooks() : board.blackRooks();
         while (remaining != 0) {
             long rook = remaining & -remaining;
             int index = Long.numberOfTrailingZeros(rook);
@@ -418,8 +397,7 @@ public final class KingSafetyModule implements EvaluationModule {
             remaining ^= rook;
         }
 
-        long queens = isWhite ? board.whiteQueens() : board.blackQueens();
-        remaining = queens;
+        remaining = isWhite ? board.whiteQueens() : board.blackQueens();
         while (remaining != 0) {
             long queen = remaining & -remaining;
             int index = Long.numberOfTrailingZeros(queen);
@@ -553,99 +531,39 @@ public final class KingSafetyModule implements EvaluationModule {
         endgameScoreCache = whiteEnd - blackEnd;
         currentView = new KingSafetyView(
                 PhaseScore.of(sideStates[WHITE].midgameKingSafety, sideStates[WHITE].endgameKingSafety),
-                PhaseScore.of(sideStates[BLACK].midgameKingSafety, sideStates[BLACK].endgameKingSafety),
-                PhaseScore.of(sideStates[WHITE].midgameQueenPenalty, sideStates[WHITE].endgameQueenPenalty),
-                PhaseScore.of(sideStates[BLACK].midgameQueenPenalty, sideStates[BLACK].endgameQueenPenalty)
+                PhaseScore.of(sideStates[BLACK].midgameKingSafety, sideStates[BLACK].endgameKingSafety)
         );
     }
 
-    public KingSafetyView getCurrentView() {
-        return currentView;
-    }
-
-    public static final class KingSafetyView {
-        private final PhaseScore whiteKing;
-        private final PhaseScore blackKing;
-        private final PhaseScore whiteQueen;
-        private final PhaseScore blackQueen;
-
-        private KingSafetyView(PhaseScore whiteKing, PhaseScore blackKing,
-                               PhaseScore whiteQueen, PhaseScore blackQueen) {
-            this.whiteKing = whiteKing;
-            this.blackKing = blackKing;
-            this.whiteQueen = whiteQueen;
-            this.blackQueen = blackQueen;
-        }
+    public record KingSafetyView(PhaseScore whiteKing, PhaseScore blackKing) {
 
         public static KingSafetyView empty() {
-            PhaseScore zero = PhaseScore.of(0, 0);
-            return new KingSafetyView(zero, zero, zero, zero);
+                PhaseScore zero = PhaseScore.of(0, 0);
+                return new KingSafetyView(zero, zero);
+            }
+
         }
 
-        public PhaseScore whiteKing() {
-            return whiteKing;
-        }
-
-        public PhaseScore blackKing() {
-            return blackKing;
-        }
-
-        public PhaseScore whiteQueen() {
-            return whiteQueen;
-        }
-
-        public PhaseScore blackQueen() {
-            return blackQueen;
-        }
-
-        public int whiteMidgameTotal() {
-            return whiteKing.midgame + whiteQueen.midgame;
-        }
-
-        public int whiteEndgameTotal() {
-            return whiteKing.endgame + whiteQueen.endgame;
-        }
-
-        public int blackMidgameTotal() {
-            return blackKing.midgame + blackQueen.midgame;
-        }
-
-        public int blackEndgameTotal() {
-            return blackKing.endgame + blackQueen.endgame;
-        }
-    }
-
-    public static final class PhaseScore {
-        private final int midgame;
-        private final int endgame;
-
-        private PhaseScore(int midgame, int endgame) {
-            this.midgame = midgame;
-            this.endgame = endgame;
-        }
+    public record PhaseScore(int midgame, int endgame) {
 
         public static PhaseScore of(int midgame, int endgame) {
-            return new PhaseScore(midgame, endgame);
-        }
-
-        public int blend(int phase) {
-            int clamped = clampPhase(phase);
-            int midWeight = 256 - clamped;
-            int endWeight = clamped;
-            long blended = (long) midgame * midWeight + (long) endgame * endWeight;
-            return (int) (blended / 256);
-        }
-
-        private static int clampPhase(int phase) {
-            if (phase < 0) {
-                return 0;
+                return new PhaseScore(midgame, endgame);
             }
-            if (phase > 256) {
-                return 256;
+
+            public int blend(int phase) {
+                int endWeight = clampPhase(phase);
+                int midWeight = 256 - endWeight;
+                long blended = (long) midgame * midWeight + (long) endgame * endWeight;
+                return (int) (blended / 256);
             }
-            return phase;
+
+            private static int clampPhase(int phase) {
+                if (phase < 0) {
+                    return 0;
+                }
+                return Math.min(phase, 256);
+            }
         }
-    }
 
     private static final class SideState {
         private int kingSquare = -1;

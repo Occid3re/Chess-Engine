@@ -174,10 +174,10 @@ public final class PieceSquareModule implements EvaluationModule {
         }
         boolean forward = isForwardMove(moveContext);
         castlingDirty = true;
-        if (!updateForMove(moveContext.getMove(), forward)) {
-            rebuildFromBoard(moveContext.getCurrentContext().board());
+        if (!updateForMove(moveContext.move(), forward)) {
+            rebuildFromBoard(moveContext.currentContext().board());
         }
-        int phase = clampPhase(moveContext.getCurrentContext().phase());
+        int phase = clampPhase(moveContext.currentContext().phase());
         if (phase != currentPhase) {
             currentPhase = phase;
             developmentDirty = true;
@@ -186,7 +186,7 @@ public final class PieceSquareModule implements EvaluationModule {
             recalculateDevelopmentContribution();
         }
         if (castlingDirty) {
-            recalculateCastlingContribution(moveContext.getCurrentContext().board(), currentPhase);
+            recalculateCastlingContribution(moveContext.currentContext().board(), currentPhase);
         }
         dirty = false;
     }
@@ -225,7 +225,7 @@ public final class PieceSquareModule implements EvaluationModule {
         if (initialized) {
             return true;
         }
-        EvaluationContext context = moveContext.getCurrentContext();
+        EvaluationContext context = moveContext.currentContext();
         if (context == null) {
             return false;
         }
@@ -688,11 +688,11 @@ public final class PieceSquareModule implements EvaluationModule {
     }
 
     private boolean isForwardMove(MoveContext moveContext) {
-        EvaluationContext previous = moveContext.getPreviousContext();
+        EvaluationContext previous = moveContext.previousContext();
         if (previous == null) {
             return true;
         }
-        boolean moverIsWhite = MoveHelper.isWhitesMove(moveContext.getMove());
+        boolean moverIsWhite = MoveHelper.isWhitesMove(moveContext.move());
         return previous.whiteToMove() == moverIsWhite;
     }
 

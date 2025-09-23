@@ -177,30 +177,13 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         currentView = new PawnStructureView(
                 whiteCenter,
                 blackCenter,
-                whiteDoubled,
-                blackDoubled,
-                whiteIsolated,
-                blackIsolated,
-                whiteConnected,
-                blackConnected,
-                whiteRookHalfOpen,
-                blackRookHalfOpen,
-                whiteRookOpen,
-                blackRookOpen,
-                whiteIslands,
-                blackIslands,
                 whitePassed,
                 blackPassed,
                 whiteAdvance,
-                blackAdvance,
                 whiteBlocked,
                 blackBlocked,
                 whiteBackward,
-                blackBackward,
-                whiteMidgameTotal,
-                whiteEndgameTotal,
-                blackMidgameTotal,
-                blackEndgameTotal
+                blackBackward
         );
 
         midgameScoreCache = whiteMidgameTotal - blackMidgameTotal;
@@ -211,12 +194,12 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
 
     @Override
     public void applyMove(MoveContext moveContext) {
-        handleMove(moveContext.getMove());
+        handleMove(moveContext.move());
     }
 
     @Override
     public void undoMove(MoveContext moveContext) {
-        handleMove(moveContext.getMove());
+        handleMove(moveContext.move());
     }
 
     @Override
@@ -255,7 +238,7 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
 
     public PawnStructureView getView(BitBoard board) {
         if (board == null) {
-            return evaluate((EvaluationContext.BoardView) null, 0L, 0L);
+            return evaluate(null, 0L, 0L);
         }
         EvaluationContext.BoardView view = EvaluationContext.BoardView.from(board);
         return evaluate(view, board.getAttackBitboard(true), board.getAttackBitboard(false));
@@ -354,16 +337,14 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
             dirtyFiles[file] = false;
             touched = true;
         }
+        metadataDirty = false;
         if (touched) {
-            metadataDirty = false;
             for (boolean fileDirty : dirtyFiles) {
                 if (fileDirty) {
                     metadataDirty = true;
                     break;
                 }
             }
-        } else {
-            metadataDirty = false;
         }
     }
 
@@ -387,7 +368,7 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
 
     private static CachedStructure getStructure(long whitePawns, long blackPawns) {
         PawnStructureKey key = new PawnStructureKey(whitePawns, blackPawns);
-        return STRUCTURE_CACHE.computeIfAbsent(key, k -> new CachedStructure(whitePawns, blackPawns));
+        return STRUCTURE_CACHE.computeIfAbsent(key, _ -> new CachedStructure(whitePawns, blackPawns));
     }
 
     private static int calculatePawnAdvanceBonus(long pawns, long allPieces, long enemyAttacks, boolean isWhite, int phase) {
@@ -557,235 +538,36 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         }
     }
 
-    public static final class PhaseScore {
-        private final int midgame;
-        private final int endgame;
-
-        private PhaseScore(int midgame, int endgame) {
-            this.midgame = midgame;
-            this.endgame = endgame;
-        }
+    public record PhaseScore(int midgame, int endgame) {
 
         public static PhaseScore of(int midgame, int endgame) {
-            return new PhaseScore(midgame, endgame);
+                return new PhaseScore(midgame, endgame);
+            }
+
+            public static PhaseScore constant(int value) {
+                return new PhaseScore(value, value);
+            }
+
+            public int blend(int phase) {
+                int endWeight = Math.max(0, Math.min(256, phase));
+                int midWeight = 256 - endWeight;
+                long blended = (long) midgame * midWeight + (long) endgame * endWeight;
+                return (int) (blended / 256);
+            }
         }
 
-        public static PhaseScore constant(int value) {
-            return new PhaseScore(value, value);
-        }
-
-        public int blend(int phase) {
-            int clamped = Math.max(0, Math.min(256, phase));
-            int midWeight = 256 - clamped;
-            int endWeight = clamped;
-            long blended = (long) midgame * midWeight + (long) endgame * endWeight;
-            return (int) (blended / 256);
-        }
-
-        public int midgame() {
-            return midgame;
-        }
-
-        public int endgame() {
-            return endgame;
-        }
-    }
-
-    public static final class PawnStructureView {
-        private final PhaseScore whiteCenter;
-        private final PhaseScore blackCenter;
-        private final PhaseScore whiteDoubled;
-        private final PhaseScore blackDoubled;
-        private final PhaseScore whiteIsolated;
-        private final PhaseScore blackIsolated;
-        private final PhaseScore whiteConnected;
-        private final PhaseScore blackConnected;
-        private final PhaseScore whiteRookHalfOpen;
-        private final PhaseScore blackRookHalfOpen;
-        private final PhaseScore whiteRookOpen;
-        private final PhaseScore blackRookOpen;
-        private final PhaseScore whiteIslands;
-        private final PhaseScore blackIslands;
-        private final PhaseScore whitePassed;
-        private final PhaseScore blackPassed;
-        private final PhaseScore whiteAdvance;
-        private final PhaseScore blackAdvance;
-        private final PhaseScore whiteBlocked;
-        private final PhaseScore blackBlocked;
-        private final PhaseScore whiteBackward;
-        private final PhaseScore blackBackward;
-
-        private final int whiteMidgameTotal;
-        private final int whiteEndgameTotal;
-        private final int blackMidgameTotal;
-        private final int blackEndgameTotal;
-
-        private PawnStructureView(
-                PhaseScore whiteCenter,
-                PhaseScore blackCenter,
-                PhaseScore whiteDoubled,
-                PhaseScore blackDoubled,
-                PhaseScore whiteIsolated,
-                PhaseScore blackIsolated,
-                PhaseScore whiteConnected,
-                PhaseScore blackConnected,
-                PhaseScore whiteRookHalfOpen,
-                PhaseScore blackRookHalfOpen,
-                PhaseScore whiteRookOpen,
-                PhaseScore blackRookOpen,
-                PhaseScore whiteIslands,
-                PhaseScore blackIslands,
-                PhaseScore whitePassed,
-                PhaseScore blackPassed,
-                PhaseScore whiteAdvance,
-                PhaseScore blackAdvance,
-                PhaseScore whiteBlocked,
-                PhaseScore blackBlocked,
-                PhaseScore whiteBackward,
-                PhaseScore blackBackward,
-                int whiteMidgameTotal,
-                int whiteEndgameTotal,
-                int blackMidgameTotal,
-                int blackEndgameTotal) {
-            this.whiteCenter = whiteCenter;
-            this.blackCenter = blackCenter;
-            this.whiteDoubled = whiteDoubled;
-            this.blackDoubled = blackDoubled;
-            this.whiteIsolated = whiteIsolated;
-            this.blackIsolated = blackIsolated;
-            this.whiteConnected = whiteConnected;
-            this.blackConnected = blackConnected;
-            this.whiteRookHalfOpen = whiteRookHalfOpen;
-            this.blackRookHalfOpen = blackRookHalfOpen;
-            this.whiteRookOpen = whiteRookOpen;
-            this.blackRookOpen = blackRookOpen;
-            this.whiteIslands = whiteIslands;
-            this.blackIslands = blackIslands;
-            this.whitePassed = whitePassed;
-            this.blackPassed = blackPassed;
-            this.whiteAdvance = whiteAdvance;
-            this.blackAdvance = blackAdvance;
-            this.whiteBlocked = whiteBlocked;
-            this.blackBlocked = blackBlocked;
-            this.whiteBackward = whiteBackward;
-            this.blackBackward = blackBackward;
-            this.whiteMidgameTotal = whiteMidgameTotal;
-            this.whiteEndgameTotal = whiteEndgameTotal;
-            this.blackMidgameTotal = blackMidgameTotal;
-            this.blackEndgameTotal = blackEndgameTotal;
-        }
+    public record PawnStructureView(PhaseScore whiteCenter, PhaseScore blackCenter, PhaseScore whitePassed,
+                                    PhaseScore blackPassed, PhaseScore whiteAdvance, PhaseScore whiteBlocked,
+                                    PhaseScore blackBlocked, PhaseScore whiteBackward, PhaseScore blackBackward) {
 
         public static PawnStructureView empty() {
-            PhaseScore zero = PhaseScore.constant(0);
-            return new PawnStructureView(zero, zero, zero, zero, zero, zero, zero, zero,
-            zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero,
-                    0, 0, 0, 0);
-        }
+                PhaseScore zero = PhaseScore.constant(0);
+                return new PawnStructureView(zero, zero,
+                        zero, zero, zero, zero, zero, zero, zero
+                );
+            }
 
-        public PhaseScore whiteCenter() {
-            return whiteCenter;
         }
-
-        public PhaseScore blackCenter() {
-            return blackCenter;
-        }
-
-        public PhaseScore whiteDoubled() {
-            return whiteDoubled;
-        }
-
-        public PhaseScore blackDoubled() {
-            return blackDoubled;
-        }
-
-        public PhaseScore whiteIsolated() {
-            return whiteIsolated;
-        }
-
-        public PhaseScore blackIsolated() {
-            return blackIsolated;
-        }
-
-        public PhaseScore whiteConnected() {
-            return whiteConnected;
-        }
-
-        public PhaseScore blackConnected() {
-            return blackConnected;
-        }
-
-        public PhaseScore whiteRookHalfOpen() {
-            return whiteRookHalfOpen;
-        }
-
-        public PhaseScore blackRookHalfOpen() {
-            return blackRookHalfOpen;
-        }
-
-        public PhaseScore whiteRookOpen() {
-            return whiteRookOpen;
-        }
-
-        public PhaseScore blackRookOpen() {
-            return blackRookOpen;
-        }
-
-        public PhaseScore whiteIslands() {
-            return whiteIslands;
-        }
-
-        public PhaseScore blackIslands() {
-            return blackIslands;
-        }
-
-        public PhaseScore whitePassed() {
-            return whitePassed;
-        }
-
-        public PhaseScore blackPassed() {
-            return blackPassed;
-        }
-
-        public PhaseScore whiteAdvance() {
-            return whiteAdvance;
-        }
-
-        public PhaseScore blackAdvance() {
-            return blackAdvance;
-        }
-
-        public PhaseScore whiteBlocked() {
-            return whiteBlocked;
-        }
-
-        public PhaseScore blackBlocked() {
-            return blackBlocked;
-        }
-
-        public PhaseScore whiteBackward() {
-            return whiteBackward;
-        }
-
-        public PhaseScore blackBackward() {
-            return blackBackward;
-        }
-
-        public int blendWhiteTotal(int phase) {
-            return blendTotal(whiteMidgameTotal, whiteEndgameTotal, phase);
-        }
-
-        public int blendBlackTotal(int phase) {
-            return blendTotal(blackMidgameTotal, blackEndgameTotal, phase);
-        }
-
-        private static int blendTotal(int midgame, int endgame, int phase) {
-            int clamped = Math.max(0, Math.min(256, phase));
-            int midWeight = 256 - clamped;
-            int endWeight = clamped;
-            long blended = (long) midgame * midWeight + (long) endgame * endWeight;
-            return (int) (blended / 256);
-        }
-    }
 
     private static final class FileState {
         private final int file;
