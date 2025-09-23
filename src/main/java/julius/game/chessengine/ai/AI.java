@@ -959,6 +959,7 @@ public class AI {
         return t != null ? t.getInstrumentation() : SearchInstrumentation.disabled();
     }
 
+
     private MoveAndScore getBestMoveParallel(Engine simulatorEngine,
                                              SearchTask task,
                                              int depth,
@@ -978,20 +979,25 @@ public class AI {
         SearchInstrumentation instr = instrumentation();
         instr.recordRootMovesGenerated(orderedMoves.size());
 
-        int firstMove = orderedMoves.getMove(0);
-        int bestMove = -1;
-        double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
-
         final AtomicReference<Double> alphaRef = new AtomicReference<>(alpha);
         final AtomicReference<Double> betaRef = new AtomicReference<>(beta);
         final java.util.concurrent.atomic.AtomicInteger bestMoveRef =
-                new java.util.concurrent.atomic.AtomicInteger(bestMove);
-        final AtomicReference<Double> bestScoreRef = new AtomicReference<>(bestScore);
+                new java.util.concurrent.atomic.AtomicInteger(-1);
+        final AtomicReference<Double> bestScoreRef = new AtomicReference<>(isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY);
+        final AtomicReference<MoveAndScore> fallbackMateRef = new AtomicReference<>();
+        final Set<Integer> refutedRootMoves = ConcurrentHashMap.newKeySet();
+        final AtomicBoolean stopRef = new AtomicBoolean(false);
+        final AtomicBoolean mateWinFound = new AtomicBoolean(false);
+
+        double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
+        int bestMove = -1;
 
         if (abortRequested(deadline)) return null;
 
+        int firstMove = orderedMoves.getMove(0);
         instr.recordRootMoveExplored();
         simulatorEngine.performMove(firstMove);
+        long firstChildHash = simulatorEngine.getBoardStateHash();
         double firstScore;
         if (simulatorEngine.getGameState().isInStateCheckMate()) {
             firstScore = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
@@ -1007,27 +1013,28 @@ public class AI {
                 return null;
             }
         }
+        applyRootScore(isWhitesTurn, firstMove, firstScore, firstChildHash, depth - 1,
+                alphaRef, betaRef, bestMoveRef, bestScoreRef, fallbackMateRef,
+                refutedRootMoves, mateWinFound, stopRef);
         simulatorEngine.undoLastMove();
 
-        bestMove = firstMove;
-        bestScore = firstScore;
+        if (mateWinFound.get()) {
+            return new MoveAndScore(bestMoveRef.get(), bestScoreRef.get());
+        }
 
-        if (isWhitesTurn) alpha = Math.max(alpha, firstScore);
-        else beta = Math.min(beta, firstScore);
+        bestMove = bestMoveRef.get();
+        bestScore = bestScoreRef.get();
+        alpha = alphaRef.get();
+        beta = betaRef.get();
 
-        bestMoveRef.set(bestMove);
-        bestScoreRef.set(bestScore);
-        alphaRef.set(alpha);
-        betaRef.set(beta);
-        if (alpha >= beta) return new MoveAndScore(bestMove, bestScore);
+        if (orderedMoves.size() == 1) {
+            MoveAndScore fallback = fallbackMateRef.get();
+            return bestMove != -1 ? new MoveAndScore(bestMove, bestScore) : fallback;
+        }
 
         final int fanout = Math.min(Math.min(ROOT_PARALLEL_LIMIT, searchThreads * 2), orderedMoves.size() - 1);
-        if (fanout <= 0) return new MoveAndScore(bestMove, bestScore);
-
         final CompletionService<MoveAndScore> ecs = new ExecutorCompletionService<>(searchPool);
-        final List<Future<MoveAndScore>> futures = new ArrayList<>(fanout);
-
-        final AtomicBoolean stopRef = new AtomicBoolean(false);
+        final List<Future<MoveAndScore>> futures = new ArrayList<>(Math.max(fanout, 0));
         final java.util.concurrent.locks.ReentrantLock fullResLock = new java.util.concurrent.locks.ReentrantLock();
 
         for (int i = 1; i <= fanout; i++) {
@@ -1064,44 +1071,28 @@ public class AI {
                         if (probe == EXIT_FLAG || abortRequested(deadline)) return null;
                     }
 
-                    boolean needsFull = isWhitesTurn ? (probe > alphaRef.get() + 0.05) : (probe < betaRef.get() - 0.05);
                     double finalScore = probe;
+                    boolean needsFull = isWhitesTurn ? (probe > alphaRef.get() + 0.05) : (probe < betaRef.get() - 0.05);
 
                     if (needsFull && !stopRef.get()) {
                         fullResLock.lock();
                         try {
                             if (!stopRef.get() && !abortRequested(deadline)) {
-                                double aNow = alphaRef.get(), bNow = betaRef.get();
+                                double aNow = alphaRef.get();
+                                double bNow = betaRef.get();
                                 double full = alphaBeta(e, depth - 1, aNow, bNow, !isWhitesTurn, deadline, moveInt, 1, 0);
-                                if (full != EXIT_FLAG) {
-                                    finalScore = full;
-                                    if (isWhitesTurn) {
-                                        if (full > aNow) alphaRef.set(full);
-                                    } else {
-                                        if (full < bNow) betaRef.set(full);
-                                    }
-                                    Double curBest = bestScoreRef.get();
-                                    if (isBetterScore(isWhitesTurn, full, curBest)) {
-                                        bestScoreRef.set(full);
-                                        bestMoveRef.set(moveInt);
-                                    }
-                                    if (alphaRef.get() >= betaRef.get()) stopRef.set(true);
-                                }
+                                if (full == EXIT_FLAG) return null;
+                                finalScore = full;
                             }
                         } finally {
                             fullResLock.unlock();
                         }
-                    } else {
-                        Double curBest = bestScoreRef.get();
-                        if (isBetterScore(isWhitesTurn, finalScore, curBest)) {
-                            bestScoreRef.set(finalScore);
-                            bestMoveRef.set(moveInt);
-                            if (isWhitesTurn && finalScore > alphaRef.get()) alphaRef.set(finalScore);
-                            if (!isWhitesTurn && finalScore < betaRef.get()) betaRef.set(finalScore);
-                            if (alphaRef.get() >= betaRef.get()) stopRef.set(true);
-                        }
                     }
 
+                    long childHash = e.getBoardStateHash();
+                    applyRootScore(isWhitesTurn, moveInt, finalScore, childHash, depth - 1,
+                            alphaRef, betaRef, bestMoveRef, bestScoreRef, fallbackMateRef,
+                            refutedRootMoves, mateWinFound, stopRef);
                     return new MoveAndScore(moveInt, finalScore);
                 } finally {
                     if (helperHeuristics.hasUpdates()) {
@@ -1119,13 +1110,11 @@ public class AI {
                 if (stopRef.get() || abortRequested(deadline)) break;
                 Future<MoveAndScore> f = ecs.take();
                 completed++;
-                MoveAndScore res = f.get();
-                if (res == null) continue;
+                if (f.get() == null) continue;
 
-                alpha = alphaRef.get();
-                beta = betaRef.get();
+                if (mateWinFound.get()) break;
 
-                if (alpha >= beta) {
+                if (alphaRef.get() >= betaRef.get()) {
                     stopRef.set(true);
                     break;
                 }
@@ -1135,7 +1124,9 @@ public class AI {
         } catch (Exception ex) {
             log.warn("Parallel root YBWC error", ex);
         } finally {
-            for (Future<MoveAndScore> f : futures) if (!f.isDone()) f.cancel(true);
+            for (Future<MoveAndScore> f : futures) {
+                if (!f.isDone()) f.cancel(true);
+            }
         }
 
         alpha = alphaRef.get();
@@ -1143,15 +1134,21 @@ public class AI {
         bestMove = bestMoveRef.get();
         bestScore = bestScoreRef.get();
 
+        if (mateWinFound.get()) {
+            return new MoveAndScore(bestMoveRef.get(), bestScoreRef.get());
+        }
+
         if (!stopRef.get()) {
             for (int idx = fanout + 1; idx < orderedMoves.size(); idx++) {
                 if (abortRequested(deadline)) {
                     break;
                 }
-
                 int moveInt = orderedMoves.getMove(idx);
+                if (refutedRootMoves.contains(moveInt)) continue;
+
                 instr.recordRootMoveExplored();
                 simulatorEngine.performMove(moveInt);
+                long childHash = simulatorEngine.getBoardStateHash();
 
                 double score;
                 if (simulatorEngine.getGameState().isInStateCheckMate()) {
@@ -1168,21 +1165,19 @@ public class AI {
                         break;
                     }
                 }
+
+                applyRootScore(isWhitesTurn, moveInt, score, childHash, depth - 1,
+                        alphaRef, betaRef, bestMoveRef, bestScoreRef, fallbackMateRef,
+                        refutedRootMoves, mateWinFound, stopRef);
                 simulatorEngine.undoLastMove();
 
-                if (isBetterScore(isWhitesTurn, score, bestScore)) {
-                    bestScore = score;
-                    bestMove = moveInt;
-                    bestScoreRef.set(bestScore);
-                    bestMoveRef.set(bestMove);
-                }
+                alpha = alphaRef.get();
+                beta = betaRef.get();
+                bestMove = bestMoveRef.get();
+                bestScore = bestScoreRef.get();
 
-                if (isWhitesTurn) {
-                    alpha = Math.max(alpha, score);
-                    alphaRef.set(alpha);
-                } else {
-                    beta = Math.min(beta, score);
-                    betaRef.set(beta);
+                if (mateWinFound.get()) {
+                    return new MoveAndScore(bestMoveRef.get(), bestScoreRef.get());
                 }
 
                 if (alpha >= beta) {
@@ -1193,8 +1188,109 @@ public class AI {
             }
         }
 
-        return bestMove != -1 ? new MoveAndScore(bestMove, bestScore) : null;
+        if (bestMove != -1) {
+            return new MoveAndScore(bestMove, bestScore);
+        }
+        MoveAndScore fallback = fallbackMateRef.get();
+        return fallback != null ? fallback : null;
     }
+
+    private void applyRootScore(boolean isWhitesTurn,
+                                 int move,
+                                 double score,
+                                 long childHash,
+                                 int depthRemaining,
+                                 AtomicReference<Double> alphaRef,
+                                 AtomicReference<Double> betaRef,
+                                 java.util.concurrent.atomic.AtomicInteger bestMoveRef,
+                                 AtomicReference<Double> bestScoreRef,
+                                 AtomicReference<MoveAndScore> fallbackMateRef,
+                                 Set<Integer> refutedRootMoves,
+                                 AtomicBoolean mateWinFound,
+                                 AtomicBoolean stopRef) {
+        if (isWinningMateForUs(isWhitesTurn, score)) {
+            publishExactMateToTT(childHash, score, depthRemaining);
+            mateWinFound.set(true);
+            bestMoveRef.set(move);
+            bestScoreRef.set(score);
+            if (isWhitesTurn) {
+                alphaRef.updateAndGet(current -> Math.max(current, score));
+            } else {
+                betaRef.updateAndGet(current -> Math.min(current, score));
+            }
+            stopRef.set(true);
+            return;
+        }
+
+        if (isLosingMateForUs(isWhitesTurn, score)) {
+            publishExactMateToTT(childHash, score, depthRemaining);
+            refutedRootMoves.add(move);
+            updateFallbackMate(fallbackMateRef, isWhitesTurn, move, score);
+            return;
+        }
+
+        Double currentBest = bestScoreRef.get();
+        if (isBetterScore(isWhitesTurn, score, currentBest)) {
+            bestScoreRef.set(score);
+            bestMoveRef.set(move);
+        }
+
+        if (isWhitesTurn) {
+            alphaRef.updateAndGet(current -> Math.max(current, score));
+        } else {
+            betaRef.updateAndGet(current -> Math.min(current, score));
+        }
+
+        if (alphaRef.get() >= betaRef.get()) {
+            stopRef.set(true);
+        }
+    }
+
+    private void updateFallbackMate(AtomicReference<MoveAndScore> fallbackRef,
+                                    boolean isWhitesTurn,
+                                    int move,
+                                    double score) {
+        MoveAndScore candidate = null;
+        while (true) {
+            MoveAndScore current = fallbackRef.get();
+            if (current != null && !isBetterScore(isWhitesTurn, score, current.getScore())) {
+                return;
+            }
+            if (candidate == null) {
+                candidate = new MoveAndScore(move, score);
+            }
+            if (fallbackRef.compareAndSet(current, candidate)) {
+                return;
+            }
+        }
+    }
+
+    private boolean isWinningMateForUs(boolean isWhitesTurn, double score) {
+        double threshold = CHECKMATE - 50;
+        return isWhitesTurn ? score >= threshold : score <= -threshold;
+    }
+
+    private boolean isLosingMateForUs(boolean isWhitesTurn, double score) {
+        double threshold = CHECKMATE - 50;
+        return isWhitesTurn ? score <= -threshold : score >= threshold;
+    }
+
+    private void publishExactMateToTT(long childHash, double score, int depthRemaining) {
+        if (transpositionTable == null) {
+            return;
+        }
+        int depthForEntry = Math.max(maxDepth, Math.max(0, depthRemaining) + 6);
+        TranspositionTableEntry existing = transpositionTable.get(childHash);
+        if (existing != null
+                && existing.nodeType == NodeType.EXACT
+                && existing.depth >= depthForEntry
+                && existing.score == score) {
+            return;
+        }
+        transpositionTable.put(childHash,
+                new TranspositionTableEntry(score, depthForEntry, NodeType.EXACT, -1), depthForEntry);
+    }
+
 
 
     private boolean shouldStopCalculating(long deadline) {
