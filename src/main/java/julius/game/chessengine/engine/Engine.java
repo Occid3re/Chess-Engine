@@ -45,7 +45,7 @@ public class Engine {
         long estimatedBytesPerEntry = 256;                        // adjust if profiling suggests otherwise
 
         long computedSize = Math.max(1, budget / estimatedBytesPerEntry);
-        int heuristicMaxSize = (int) Math.min(500_000, computedSize);
+        int heuristicMaxSize = (int) computedSize;
         int heuristicMaxAgeMs = 86_400_000; // 24h; set <=0 to disable time expiry
 
         // Overrides via System Properties
