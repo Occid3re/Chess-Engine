@@ -21,11 +21,6 @@ public class UciHandler {
     private Thread searchThread;
     private final Map<String, UciOption> options = new LinkedHashMap<>();
     private int moveOverheadMs = 0;
-    private final Object ponderLock = new Object();
-    private volatile boolean pondering = false;
-    private volatile boolean ponderHit = false;
-    private volatile boolean suppressBestMoveOutput = false;
-    private volatile int storedPonderMove = -1;
 
     public UciHandler() {
         this.engine = new Engine();
@@ -46,17 +41,13 @@ public class UciHandler {
         switch (cmd) {
             case "uci" -> sendId();
             case "isready" -> {
-                stopInternal(true);
+                stop();
                 System.out.println("readyok");
             }
             case "ucinewgame" -> newGame();
             case "position" -> setPosition(tokens);
             case "go" -> go(tokens);
-            case "stop" -> {
-                boolean suppress = pondering && !ponderHit;
-                stopInternal(suppress);
-            }
-            case "ponderhit" -> ponderHit();
+            case "stop" -> stop();
             case "setoption" -> setOption(tokens);
             case "quit" -> {
                 return false;
@@ -264,13 +255,12 @@ public class UciHandler {
     }
 
     private void go(String[] tokens) {
-        // Stop any previous search thread quietly before starting a new search
-        stopInternal(true);
+        // Stop any previous search thread
+        stop();
 
         long wtime = 0, btime = 0, winc = 0, binc = 0, movetime = 0;
         int depth = 0;
         int movestogo = 0;
-        boolean ponder = false;
         for (int i = 1; i < tokens.length; i++) {
             switch (tokens[i]) {
                 case "wtime" -> wtime = Long.parseLong(tokens[++i]);
@@ -280,7 +270,6 @@ public class UciHandler {
                 case "movetime" -> movetime = Long.parseLong(tokens[++i]);
                 case "depth" -> depth = Integer.parseInt(tokens[++i]);
                 case "movestogo" -> movestogo = Integer.parseInt(tokens[++i]);
-                case "ponder" -> ponder = true;
                 default -> { /* ignore */ }
             }
         }
@@ -289,11 +278,6 @@ public class UciHandler {
             ai.setMaxDepth(depth);
         }
 
-        storedPonderMove = -1;
-        pondering = ponder;
-        ponderHit = false;
-        suppressBestMoveOutput = false;
-
         boolean whitesTurn = engine.whitesTurn();
         long timeLeft = whitesTurn ? wtime : btime;
         long inc = whitesTurn ? winc : binc;
@@ -301,102 +285,49 @@ public class UciHandler {
         ai.setTimeLimit(limit);
 
         searchThread = new Thread(() -> {
-            final boolean isPonderSearch = ponder;
             ai.startAutoPlay(false, false); // start calculation without auto-move
             try {
                 while (!Thread.currentThread().isInterrupted()) {
                     Integer bm = ai.getCurrentBestMoveInt();
                     if (bm != null && bm != -1) {
-                        storedPonderMove = bm;
-                        if (!isPonderSearch || ponderHit) {
-                            break;
-                        }
+                        break;
                     }
-                    synchronized (ponderLock) {
-                        if (Thread.currentThread().isInterrupted()) {
-                            break;
-                        }
-                        try {
-                            ponderLock.wait(50);
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                            break;
-                        }
-                    }
+                    Thread.sleep(50);
                 }
+            } catch (InterruptedException ignored) {
+                // interrupted by stop()
             } finally {
-                boolean shouldOutput = !suppressBestMoveOutput && (!isPonderSearch || ponderHit);
-                int finalMove = storedPonderMove;
                 Integer bm = ai.getCurrentBestMoveInt();
                 if (bm != null && bm != -1) {
-                    finalMove = bm;
-                }
-                if (shouldOutput) {
-                    if (finalMove != -1) {
-                        engine.performMove(finalMove);
-                        System.out.println("bestmove " + toUci(finalMove));
+                    engine.performMove(bm);
+                    System.out.println("bestmove " + toUci(bm));
+                } else {
+                    MoveList legal = engine.getAllLegalMoves();
+                    if (legal.size() > 0) {
+                        int move = legal.getMove(0);
+                        engine.performMove(move);
+                        System.out.println("bestmove " + toUci(move));
                     } else {
-                        MoveList legal = engine.getAllLegalMoves();
-                        if (legal.size() > 0) {
-                            int move = legal.getMove(0);
-                            engine.performMove(move);
-                            System.out.println("bestmove " + toUci(move));
-                        } else {
-                            System.out.println("bestmove (none)");
-                        }
+                        System.out.println("bestmove (none)");
                     }
                 }
                 ai.stopCalculation();
-                if (isPonderSearch) {
-                    storedPonderMove = -1;
-                    pondering = false;
-                    ponderHit = false;
-                }
-                suppressBestMoveOutput = false;
                 UciHandler.this.searchThread = null;
             }
         });
         searchThread.start();
     }
 
-    private void ponderHit() {
-        if (!pondering || searchThread == null) {
-            return;
-        }
-        ponderHit = true;
-        suppressBestMoveOutput = false;
-        synchronized (ponderLock) {
-            ponderLock.notifyAll();
-        }
-    }
-
-    private void stopInternal(boolean suppressOutput) {
-        suppressBestMoveOutput = suppressOutput;
-        if (suppressOutput) {
-            storedPonderMove = -1;
-            ponderHit = false;
-        }
-        boolean wasPondering = pondering;
-        pondering = false;
-        synchronized (ponderLock) {
-            ponderLock.notifyAll();
-        }
+    private void stop() {
         ai.stopCalculation();
-        if (searchThread != null) {
-            if (searchThread.isAlive()) {
-                searchThread.interrupt();
-                try {
-                    searchThread.join();
-                } catch (InterruptedException ignored) {
-                    Thread.currentThread().interrupt();
-                }
+        if (searchThread != null && searchThread.isAlive()) {
+            searchThread.interrupt();
+            try {
+                searchThread.join();
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
             }
             searchThread = null;
-        }
-        suppressBestMoveOutput = false;
-        if (wasPondering) {
-            storedPonderMove = -1;
-            ponderHit = false;
         }
     }
 }
