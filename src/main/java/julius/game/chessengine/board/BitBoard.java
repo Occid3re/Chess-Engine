@@ -999,16 +999,43 @@ public class BitBoard {
             return;
         }
 
+        int failureIndex = tryApplyAttackDelta(colorWhite, attackMask, delta);
+        if (failureIndex == -1) {
+            return;
+        }
+
+        if (colorWhite) {
+            recomputeWhiteAttackMap();
+        } else {
+            recomputeBlackAttackMap();
+        }
+
+        failureIndex = tryApplyAttackDelta(colorWhite, attackMask, delta);
+        if (failureIndex != -1) {
+            throw new IllegalStateException(
+                    "Negative attack count detected at square " + failureIndex + " after rebuilding attack map");
+        }
+    }
+
+    private int tryApplyAttackDelta(boolean colorWhite, long attackMask, int delta) {
         int[] counts = colorWhite ? whiteAttackCounts : blackAttackCounts;
         long map = colorWhite ? whiteAttackMap : blackAttackMap;
+
+        if (delta < 0) {
+            long checkMask = attackMask;
+            while (checkMask != 0) {
+                int index = Long.numberOfTrailingZeros(checkMask);
+                if (counts[index] + delta < 0) {
+                    return index;
+                }
+                checkMask &= checkMask - 1;
+            }
+        }
 
         long bits = attackMask;
         while (bits != 0) {
             int index = Long.numberOfTrailingZeros(bits);
             counts[index] += delta;
-            if (counts[index] < 0) {
-                throw new IllegalStateException("Negative attack count detected at square " + index);
-            }
             long sqMask = 1L << index;
             if (counts[index] > 0) {
                 map |= sqMask;
@@ -1023,6 +1050,8 @@ public class BitBoard {
         } else {
             blackAttackMap = map;
         }
+
+        return -1;
     }
 
     private List<SliderUpdate> prepareSliderUpdates(long impactedMask) {
