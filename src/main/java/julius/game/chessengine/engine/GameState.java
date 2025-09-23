@@ -1,6 +1,7 @@
 package julius.game.chessengine.engine;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.MoveList;
@@ -11,7 +12,6 @@ import lombok.extern.log4j.Log4j2;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
-import java.util.HashMap;
 
 
 @Data
@@ -19,7 +19,7 @@ import java.util.HashMap;
 public class GameState {
 
     private final Deque<Long> hashHistory = new ArrayDeque<>(256);
-    private final HashMap<Long, Integer> repetition = new HashMap<>();
+    private final Long2IntOpenHashMap repetition = new Long2IntOpenHashMap();
     private final IntArrayList halfmoveStack = new IntArrayList();
     private final IntArrayList fullmoveStack = new IntArrayList();
 
@@ -155,14 +155,14 @@ public class GameState {
      */
     public void recordHash(long zKey) {
         hashHistory.addLast(zKey);
-        repetition.merge(zKey, 1, Integer::sum);
+        repetition.addTo(zKey, 1);
         lastZobrist = zKey;
     }
 
     public void removeHash(long zKey) {
         // Called on undo at the current head
-        Integer c = repetition.get(zKey);
-        if (c != null) {
+        int c = repetition.get(zKey);
+        if (c != 0) {
             if (c <= 1) repetition.remove(zKey);
             else repetition.put(zKey, c - 1);
         }
@@ -172,7 +172,7 @@ public class GameState {
     }
 
     public boolean isThreefoldRepetition() {
-        return repetition.getOrDefault(lastZobrist, 0) >= 3;
+        return repetition.get(lastZobrist) >= 3;
     }
 
     public void resetHalfmoveClock() { halfmoveClock = 0; }
