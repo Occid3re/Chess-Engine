@@ -2199,6 +2199,12 @@ public class AI {
 
         final int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
 
+        final boolean prevWasCapture = prevMove >= 0 && MoveHelper.isCapture(prevMove);
+        final int recaptureSquare = prevWasCapture ? ((prevMove >>> 6) & 0x3F) : -1;
+        final int prevCapturedValue = prevWasCapture
+                ? Score.getPieceValue(MoveHelper.deriveCapturedPieceTypeBits(prevMove))
+                : 0;
+
         // Category encoding (higher is earlier):
         // 7: TT move, 6: promotions, 5: good captures, 4: equal captures,
         // 3: killer[0], 2: killer[1], 1: quiets (history), 0: bad captures
@@ -2209,6 +2215,8 @@ public class AI {
         final int PROMOTION_ORDER_BONUS = 900;   // strong push for promotions
         final int KILLER0_BONUS = 50;            // distinguish first vs second killer
         final int KILLER1_BONUS = 30;
+        final int RECAPTURE_BASE_BONUS = 200;
+        final int RECAPTURE_VALUE_SCALE = 8;
 
         // Hash move (TT) handling — keep your "pin to front" approach
         TranspositionTableEntry ttEntry = transpositionTable.get(boardHash);
@@ -2235,6 +2243,8 @@ public class AI {
             // Compute base features
             final boolean isCapture = MoveHelper.isCapture(moveInt);
             final boolean isPromotion = MoveHelper.isPawnPromotionMove(moveInt);
+            final int from = moveInt & 0x3F;
+            final int to = (moveInt >>> 6) & 0x3F;
 
             int seeValue = 0;
             boolean hasSee = false;
@@ -2274,6 +2284,7 @@ public class AI {
             } else if (isCapture) {
                 // MVV-LVA for captures; classify as good/equal/bad without SEE
                 final int mvvLva = calculateMvvLvaScore(moveInt); // victim - attacker (can be negative)
+                boolean isRecapture = prevWasCapture && to == recaptureSquare;
                 if (seeValue > 0) {
                     category = CAT_CAP_GOOD;
                 } else if (seeValue == 0) {
@@ -2287,6 +2298,14 @@ public class AI {
                 if (score < 0) {
                     score = 0;
                 }
+                if (isRecapture) {
+                    // Recaptures often refute tactical attempts; treat them generously even if SEE is neutral
+                    if (category == CAT_CAP_BAD) {
+                        category = CAT_CAP_EQUAL;
+                    }
+                    int recaptureBonus = RECAPTURE_BASE_BONUS + (prevCapturedValue * RECAPTURE_VALUE_SCALE);
+                    score += recaptureBonus;
+                }
             } else if (moveInt == k0) {
                 category = CAT_KILLER0;
                 score = KILLER_MOVE_SCORE + KILLER0_BONUS;
@@ -2295,11 +2314,12 @@ public class AI {
                 score = KILLER_MOVE_SCORE + KILLER1_BONUS;
             } else {
                 // Quiet with history
-                final int from = moveInt & 0x3F;
-                final int to = (moveInt >>> 6) & 0x3F;
                 category = CAT_QUIET;
                 score = historyTable[from][to]; // butterfly history
-                if (moveInt == cm) score += COUNTER_MOVE_BONUS;
+            }
+
+            if (moveInt != ttMove && moveInt == cm) {
+                score += COUNTER_MOVE_BONUS;
             }
 
             // Persist (kept for compatibility with your buffers)
