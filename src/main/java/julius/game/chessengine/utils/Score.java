@@ -105,7 +105,7 @@ public class Score {
             return;
         }
 
-        synchronizePipeline(updated);
+        synchronizePipeline(updated, false);
         MoveContext moveContext = new MoveContext(move, previous, updated);
         evaluationPipeline.applyMove(moveContext);
     }
@@ -121,16 +121,22 @@ public class Score {
             return;
         }
 
-        synchronizePipeline(updated);
+        synchronizePipeline(updated, false);
         MoveContext moveContext = new MoveContext(move, previous, updated);
         evaluationPipeline.undoMove(moveContext);
     }
 
     private void synchronizePipeline(EvaluationContext context) {
+        synchronizePipeline(context, true);
+    }
+
+    private void synchronizePipeline(EvaluationContext context, boolean invalidateModules) {
         if (!evaluationPipeline.isInitialized()) {
             evaluationPipeline.initialize(context);
-        } else {
+        } else if (invalidateModules) {
             evaluationPipeline.updateContext(context);
+        } else {
+            evaluationPipeline.setContextWithoutInvalidation(context);
         }
     }
 
