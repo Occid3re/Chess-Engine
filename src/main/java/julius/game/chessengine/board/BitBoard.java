@@ -6,11 +6,11 @@ import julius.game.chessengine.helper.KnightHelper;
 import julius.game.chessengine.helper.RookHelper;
 import julius.game.chessengine.helper.ZobristTable;
 import julius.game.chessengine.utils.Color;
-import julius.game.chessengine.board.MoveHelper;
 
 import julius.game.chessengine.utils.Score;
 import lombok.AccessLevel;
 import lombok.Getter;
+import lombok.Setter;
 import lombok.extern.log4j.Log4j2;
 
 import java.util.ArrayDeque;
@@ -50,7 +50,9 @@ public class BitBoard {
     private long blackPieces = 0L;
     private long allPieces = 0L;
     private long zKey = 0L;
+    @Setter
     private int halfmoveClock = 0;
+    @Setter
     private int fullmoveNumber = 1;
     /**
      * Bitboards caching the squares attacked by each side.
@@ -160,9 +162,6 @@ public class BitBoard {
         this.blackKingHasCastled = blackKingHasCastled;
         this.halfmoveClock = halfmoveClock;
         this.fullmoveNumber = fullmoveNumber;
-        this.halfmoveHistory.clear();
-        this.fullmoveHistory.clear();
-        this.capturedPieceHistory.clear();
         initPieceBoardFromBitboards();
         recomputeWhiteAttackMap();
         recomputeBlackAttackMap();
@@ -228,14 +227,6 @@ public class BitBoard {
         int newEp = getEnPassantTargetIndex();
         if (oldEp != -1) xorEp(oldEp);
         if (newEp != -1) xorEp(newEp);
-    }
-
-    public void setHalfmoveClock(int halfmoveClock) {
-        this.halfmoveClock = halfmoveClock;
-    }
-
-    public void setFullmoveNumber(int fullmoveNumber) {
-        this.fullmoveNumber = fullmoveNumber;
     }
 
     public void flipSideToMove() {
@@ -428,7 +419,6 @@ public class BitBoard {
 
         while (true) {
             // Build attackers for the side to move now
-            long pawns   = sideWhite ? W[1] : B[1];
             long knights = sideWhite ? W[2] : B[2];
             long bishops = sideWhite ? W[3] : B[3];
             long rooks   = sideWhite ? W[4] : B[4];
@@ -444,7 +434,7 @@ public class BitBoard {
             long attQueens  = (bRay | rRay) & queens;
             long attKing    = KING_ATTACKS[to] & king;
 
-            long fromBB = 0L;
+            long fromBB;
             int  attBits = 0;
             int attFrom = -1;
             long attMask = 0L;
@@ -612,7 +602,7 @@ public class BitBoard {
         occCopy &= ~fromMask;
         occCopy |= toMask;
 
-        return !isSquareAttackedInSee(target, !kingIsWhite, wCopy, bCopy, occCopy);
+        return isSquareNotAttackedInSee(target, !kingIsWhite, wCopy, bCopy, occCopy);
     }
 
     private int selectLegalAttacker(long attackers, int attBits, boolean sideWhite,
@@ -664,18 +654,18 @@ public class BitBoard {
             return false;
         }
         int kingSquare = Long.numberOfTrailingZeros(kingBB);
-        return !isSquareAttackedInSee(kingSquare, !attackerWhite, wCopy, bCopy, occCopy);
+        return isSquareNotAttackedInSee(kingSquare, !attackerWhite, wCopy, bCopy, occCopy);
     }
 
-    private boolean isSquareAttackedInSee(int square, boolean attackerWhite,
-                                          long[] whiteByType, long[] blackByType, long occ) {
+    private boolean isSquareNotAttackedInSee(int square, boolean attackerWhite,
+                                             long[] whiteByType, long[] blackByType, long occ) {
         if (pawnAttackersToSquare(square, attackerWhite, whiteByType[1], blackByType[1]) != 0) {
-            return true;
+            return false;
         }
 
         long knights = attackerWhite ? whiteByType[2] : blackByType[2];
         if ((KnightHelper.knightMoveTable[square] & knights) != 0) {
-            return true;
+            return false;
         }
 
         long bishops = attackerWhite ? whiteByType[3] : blackByType[3];
@@ -685,15 +675,15 @@ public class BitBoard {
 
         long bishopRays = bishopAttacksFromWithOcc(square, occ);
         if ((bishopRays & (bishops | queens)) != 0) {
-            return true;
+            return false;
         }
 
         long rookRays = rookAttacksFromWithOcc(square, occ);
         if ((rookRays & (rooks | queens)) != 0) {
-            return true;
+            return false;
         }
 
-        return (KING_ATTACKS[square] & king) != 0;
+        return (KING_ATTACKS[square] & king) == 0;
     }
 
 
@@ -1874,7 +1864,7 @@ public class BitBoard {
 
     private void undoPieceMove(int pieceTypeBits, int fromIndex, int toIndex, boolean isWhite) {
         long bb = intToPiecesBitboard(pieceTypeBits, isWhite);
-        // move bit back
+        // move a bit back
         bb &= ~(1L << toIndex);
         bb |= (1L << fromIndex);
         setBitboardForPieceFast(pieceTypeBits, isWhite, bb);
@@ -1894,7 +1884,7 @@ public class BitBoard {
         // mirror on pieceBoard
         pieceBoard[fromIndex] = PieceType.PAWN;
         if (!wasCapture) {
-            pieceBoard[toIndex] = null; // if capture, undoCapture already restored captured piece there
+            pieceBoard[toIndex] = null;
         }
     }
 
@@ -2017,15 +2007,6 @@ public class BitBoard {
         return rank * 8 + file;
     }
 
-
-    private PieceType getPieceTypeAtSquare(int square) {
-
-        return getPieceTypeAtIndex(square);
-    }
-
-    private Color getPieceColorAtSquare(int square) {
-        return getPieceColorAtIndex(square);
-    }
 
     private int getPieceIndex(PieceType pieceType, Color pieceColor) {
         int index = pieceType.ordinal() * 2; // There are two colors for each piece type
