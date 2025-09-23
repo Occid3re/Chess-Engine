@@ -224,6 +224,50 @@ public class UciHandler {
         return from + to;
     }
 
+    private String formatBestMove(String bestMove, String ponderMove) {
+        if (ponderMove == null || ponderMove.isEmpty()) {
+            return "bestmove " + bestMove;
+        }
+        return "bestmove " + bestMove + " ponder " + ponderMove;
+    }
+
+    private String computePonderMove(int bestMove) {
+        List<MoveAndScore> principalVariation = ai.getCalculatedLine();
+        if (principalVariation == null) {
+            return null;
+        }
+
+        List<MoveAndScore> snapshot;
+        synchronized (principalVariation) {
+            snapshot = new ArrayList<>(principalVariation);
+        }
+
+        if (snapshot.isEmpty()) {
+            return null;
+        }
+
+        MoveAndScore firstMove = snapshot.get(0);
+        if (firstMove == null || firstMove.getMove() != bestMove) {
+            return null;
+        }
+
+        if (snapshot.size() < 2) {
+            return null;
+        }
+
+        MoveAndScore ponderCandidate = snapshot.get(1);
+        if (ponderCandidate == null) {
+            return null;
+        }
+
+        int ponderMove = ponderCandidate.getMove();
+        if (ponderMove < 0) {
+            return null;
+        }
+
+        return toUci(ponderMove);
+    }
+
     static long estimateMovesToGo(long timeLeft, long increment) {
         if (timeLeft <= 0) {
             return 1;
@@ -340,8 +384,9 @@ public class UciHandler {
                     output.accept("bestmove 0000");
                 } else {
                     if (bm != null && bm != -1) {
+                        String ponderMove = computePonderMove(bm);
                         engine.performMove(bm);
-                        output.accept("bestmove " + toUci(bm));
+                        output.accept(formatBestMove(toUci(bm), ponderMove));
                     } else {
                         MoveList legal = engine.getAllLegalMoves();
                         if (legal.size() > 0) {
