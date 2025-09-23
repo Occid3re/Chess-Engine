@@ -66,6 +66,12 @@ public final class EvaluationPipeline {
         markAllDirty();
     }
 
+    public void setContextWithoutInvalidation(EvaluationContext context) {
+        ensureInitialized();
+        this.context = Objects.requireNonNull(context, "context");
+        aggregateDirty = true;
+    }
+
     public void applyMove(MoveContext moveContext) {
         ensureInitialized();
         for (ModuleState state : modules) {

@@ -214,6 +214,40 @@ public class ScoreEvaluationTest {
         assertEquals(initialEndgame, score.getEndgameScore());
     }
 
+    @Test
+    void incrementalSearchPathRefreshesBlendedScore() {
+        BitBoard board = FEN.translateFENtoBitBoard("8/8/8/3p4/3P4/8/8/8 w - - 0 1");
+        Score score = Score.initializeScore(board);
+
+        int initialBlended = score.getBlendedScore();
+
+        int from = MoveHelper.convertStringToIndex("d4");
+        int to = MoveHelper.convertStringToIndex("d5");
+        int move = MoveHelper.createMoveInt(from, to, PieceType.PAWN, true, true,
+                false, false, null, PieceType.PAWN, false, false, board.getLastMoveDoubleStepPawnIndex());
+
+        board.performMove(move);
+        score.applyMove(board, move, null);
+
+        int afterCapture = score.getBlendedScore();
+        assertTrue(afterCapture > initialBlended);
+
+        board.undoMove(move);
+        score.undoMove(board, move, null);
+
+        assertEquals(initialBlended, score.getBlendedScore());
+
+        board.performMove(move);
+        score.applyMove(board, move, null);
+
+        assertEquals(afterCapture, score.getBlendedScore());
+
+        board.undoMove(move);
+        score.undoMove(board, move, null);
+
+        assertEquals(initialBlended, score.getBlendedScore());
+    }
+
     private static int blendedModuleScore(EvaluationModule module, BitBoard board) {
         EvaluationPipeline pipeline = new EvaluationPipeline(java.util.List.of(module));
         pipeline.initialize(EvaluationContext.from(board, null));
