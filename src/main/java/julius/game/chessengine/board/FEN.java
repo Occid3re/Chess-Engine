@@ -3,18 +3,12 @@ package julius.game.chessengine.board;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.utils.Color;
-import lombok.Data;
-import lombok.RequiredArgsConstructor;
 
 import java.util.Objects;
 
 import static julius.game.chessengine.board.MoveHelper.convertIndexToString;
 
-@Data
-@RequiredArgsConstructor
-public class FEN {
-    private final String renderBoard;
-
+public record FEN(String renderBoard) {
     public static FEN translateBoardToFEN(BitBoard board, GameState gameState) {
         Objects.requireNonNull(board, "board");
         Objects.requireNonNull(gameState, "gameState");
@@ -222,7 +216,6 @@ public class FEN {
                     halfmoveClock = 0;
                 }
             } catch (NumberFormatException ignored) {
-                halfmoveClock = 0;
             }
         }
 
@@ -233,7 +226,6 @@ public class FEN {
                     fullmoveNumber = 1;
                 }
             } catch (NumberFormatException ignored) {
-                fullmoveNumber = 1;
             }
         }
 

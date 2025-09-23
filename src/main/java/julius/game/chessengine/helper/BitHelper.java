@@ -1,7 +1,5 @@
 package julius.game.chessengine.helper;
 
-import julius.game.chessengine.board.Position;
-
 public class BitHelper {
 
     public static final long[] RankMasks = new long[]{

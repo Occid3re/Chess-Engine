@@ -20,17 +20,8 @@ public class PgnParser {
     private final Engine engine = new Engine();
     private final ArrayList<Integer> line;
 
-    private String event = "Alieknek testing";
-    private String site = "Neulengbach";
-    private String date = ZonedDateTime.now().toString();
-    private String round = "1";
-    private String whitePlayer = "Alieknek";
-    private String blackPlayer = "Alieknek";
-    private String result = "-";
+    private final String date = ZonedDateTime.now().toString();
 
-
-    boolean sameFile = false;
-    boolean sameRank = false;
 
     public PgnParser(ArrayList<Integer> line) {
         this.line = line;
@@ -57,12 +48,18 @@ public class PgnParser {
     }
 
     private void addMetadata(StringBuilder pgn) {
+        String event = "Alieknek testing";
         pgn.append("[Event \"").append(event).append("\"]\n");
+        String site = "Neulengbach";
         pgn.append("[Site \"").append(site).append("\"]\n");
         pgn.append("[Date \"").append(date).append("\"]\n");
+        String round = "1";
         pgn.append("[Round \"").append(round).append("\"]\n");
+        String whitePlayer = "Alieknek";
         pgn.append("[White \"").append(whitePlayer).append("\"]\n");
+        String blackPlayer = "Alieknek";
         pgn.append("[Black \"").append(blackPlayer).append("\"]\n");
+        String result = "-";
         pgn.append("[Result \"").append(result).append("\"]\n\n");
     }
 

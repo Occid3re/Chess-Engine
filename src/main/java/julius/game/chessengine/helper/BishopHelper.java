@@ -286,12 +286,7 @@ public class BishopHelper {
         }
 
         // If we get here, the current in-memory table should match; rebuild if size differs.
-        if (bishopAttacks[square] == null || bishopAttacks[square].length != size) {
-            bishopAttacks[square] = trial;
-        } else {
-            // Ensure table aligns; if not, replace to avoid false negatives in tests.
-            bishopAttacks[square] = trial;
-        }
+        bishopAttacks[square] = trial;
         return true;
     }
 

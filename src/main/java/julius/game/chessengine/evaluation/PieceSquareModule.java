@@ -573,7 +573,24 @@ public final class PieceSquareModule implements EvaluationModule {
         boolean applyPenalty = false;
         if (!hasCastled) {
             int kingIndex = Long.numberOfTrailingZeros(king);
-            long forwardMask = getForwardMask(king, white);
+            long forwardMask;
+            if (white) {
+                forwardMask = king << 8;
+                if ((king & NOT_A_FILE) != 0) {
+                    forwardMask |= (king << 7);
+                }
+                if ((king & NOT_H_FILE) != 0) {
+                    forwardMask |= (king << 9);
+                }
+            } else {
+                forwardMask = king >>> 8;
+                if ((king & NOT_A_FILE) != 0) {
+                    forwardMask |= (king >>> 9);
+                }
+                if ((king & NOT_H_FILE) != 0) {
+                    forwardMask |= (king >>> 7);
+                }
+            }
             boolean missingShield = Long.bitCount(pawns & forwardMask) < 3;
             int fileIndex = kingIndex & 7;
             long fileMask = FileMasks[fileIndex];
@@ -596,28 +613,6 @@ public final class PieceSquareModule implements EvaluationModule {
             }
         }
         return adjustment;
-    }
-
-    private static long getForwardMask(long king, boolean white) {
-        long forwardMask;
-        if (white) {
-            forwardMask = king << 8;
-            if ((king & NOT_A_FILE) != 0) {
-                forwardMask |= (king << 7);
-            }
-            if ((king & NOT_H_FILE) != 0) {
-                forwardMask |= (king << 9);
-            }
-        } else {
-            forwardMask = king >>> 8;
-            if ((king & NOT_A_FILE) != 0) {
-                forwardMask |= (king >>> 9);
-            }
-            if ((king & NOT_H_FILE) != 0) {
-                forwardMask |= (king >>> 7);
-            }
-        }
-        return forwardMask;
     }
 
     private static int computeMaterialBalance(EvaluationContext.BoardView board) {

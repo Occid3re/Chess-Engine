@@ -1,5 +1,7 @@
 package julius.game.chessengine.ai;
 
+import java.util.Arrays;
+
 /**
  * Fixed-size transposition table implementation for single-threaded search.
  * Each hashed index owns a small cluster of entries so the search can keep
@@ -11,18 +13,7 @@ public class PlainFixedSizeTranspositionTable<V> implements TranspositionTable<V
 
     private static final int CLUSTER_SIZE = 4;
 
-    private static final class Entry<V> {
-        final long key;
-        final V value;
-        final int depth;
-        final int age;
-
-        Entry(long key, V value, int depth, int age) {
-            this.key = key;
-            this.value = value;
-            this.depth = depth;
-            this.age = age;
-        }
+    private record Entry<V>(long key, V value, int depth, int age) {
     }
 
     private final Entry<V>[] table;
@@ -31,7 +22,7 @@ public class PlainFixedSizeTranspositionTable<V> implements TranspositionTable<V
     private int currentAge;
 
     @SuppressWarnings("unchecked")
-    public PlainFixedSizeTranspositionTable(int capacity, Class<V> valueClass) {
+    public PlainFixedSizeTranspositionTable(int capacity) {
         int clusters = 1;
         int minClusters = Math.max(1, (capacity + CLUSTER_SIZE - 1) / CLUSTER_SIZE);
         while (clusters < minClusters) {
@@ -92,21 +83,17 @@ public class PlainFixedSizeTranspositionTable<V> implements TranspositionTable<V
             }
         }
 
-        if (shallowEntry != null && shallowEntry.depth < depth) {
+        if (shallowEntry.depth < depth) {
             table[shallowSlot] = new Entry<>(key, value, depth, currentAge);
             return;
         }
 
-        if (oldestSlot != -1) {
-            table[oldestSlot] = new Entry<>(key, value, depth, currentAge);
-        }
+        table[oldestSlot] = new Entry<>(key, value, depth, currentAge);
     }
 
     @Override
     public void clear() {
-        for (int i = 0; i < table.length; i++) {
-            table[i] = null;
-        }
+        Arrays.fill(table, null);
         size = 0;
         currentAge = 0;
     }

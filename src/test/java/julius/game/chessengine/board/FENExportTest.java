@@ -16,6 +16,6 @@ class FENExportTest {
 
         FEN exportedFen = engine.translateBoardToFen();
 
-        assertEquals(expectedFen, exportedFen.getRenderBoard());
+        assertEquals(expectedFen, exportedFen.renderBoard());
     }
 }

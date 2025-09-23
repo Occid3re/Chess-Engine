@@ -27,10 +27,6 @@ public class KingHelper {
         }
     }
 
-    private long kingAttackBitmask(int positionIndex) {
-        return KING_ATTACKS[positionIndex];
-    }
-
     public static final int[] BLACK_KING_POSITIONAL_VALUES = {
             // mirror of white king MG
             -30,-40,-40,-50,-50,-40,-40,-30,

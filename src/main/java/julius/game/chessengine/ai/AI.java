@@ -247,11 +247,11 @@ public class AI {
 
         this.transpositionTable = concurrent
                 ? new FixedSizeTranspositionTable<>(mainCapacity)
-                : new PlainFixedSizeTranspositionTable<>(mainCapacity, TranspositionTableEntry.class);
+                : new PlainFixedSizeTranspositionTable<>(mainCapacity);
 
         this.captureTranspositionTable = concurrent
                 ? new FixedSizeTranspositionTable<>(captureCapacity)
-                : new PlainFixedSizeTranspositionTable<>(captureCapacity, CaptureTranspositionTableEntry.class);
+                : new PlainFixedSizeTranspositionTable<>(captureCapacity);
     }
 
     private static int computeTableCapacity(long budgetBytes, int entryBytes, int minEntries, int maxEntries) {
@@ -481,7 +481,7 @@ public class AI {
             }
 
             lastIterScore = ms.score;
-            task.publishBest(ms, currentDepth, simulatorEngine);
+            task.publishBest(ms, currentDepth);
             instr.recordIterationComplete(currentDepth);
             if (heuristics.hasUpdates()) {
                 mergeThreadHeuristics(heuristics);
@@ -800,7 +800,7 @@ public class AI {
         if (currentBoardState != task.getBoardHash()) return;
 
         BestMoveDepth best = task.getBest();
-        int move = best.move;
+        int move = best.move();
 
         if (move != -1) {
             currentBestMove = move;
@@ -809,7 +809,7 @@ public class AI {
             previousBestMoveHash = task.getBoardHash();
             searchResultReady = true;
             fillCalculatedLine(simulatorEngine);
-            lastDiagnostics = task.getInstrumentation().snapshot(best.depth, best.score);
+            lastDiagnostics = task.getInstrumentation().snapshot(best.depth(), best.score());
             return;
         }
 
@@ -820,7 +820,7 @@ public class AI {
             previousBestMoveHash = task.getBoardHash();
             searchResultReady = true;
             fillCalculatedLine(simulatorEngine);
-            lastDiagnostics = task.getInstrumentation().snapshot(best.depth, best.score);
+            lastDiagnostics = task.getInstrumentation().snapshot(best.depth(), best.score());
             return;
         }
 
@@ -830,7 +830,7 @@ public class AI {
         previousBestMoveHash = -1;
         searchResultReady = false;
         clearPrincipalVariation();
-        lastDiagnostics = task.getInstrumentation().snapshot(best.depth, best.score);
+        lastDiagnostics = task.getInstrumentation().snapshot(best.depth(), best.score());
     }
 
     private boolean isMoveStillLegal(Engine simulatorEngine, int move) {

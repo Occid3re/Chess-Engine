@@ -8,8 +8,6 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static julius.game.chessengine.helper.BitHelper.FileMasks;
-
 @Log4j2
 public class RookHelper {
 
@@ -17,7 +15,6 @@ public class RookHelper {
     private static final String ROOK_MAGIC_NUMBERS_PATH_write = "src/main/resources" + ROOK_MAGIC_NUMBERS_PATH;
 
     // Rook directions
-    private static final int[][] directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
 
     public final long[] rookMasks = new long[64];
     public final long[][] rookAttacks = new long[64][];
@@ -107,32 +104,6 @@ public class RookHelper {
     }
 
     // ----------------------- Convenience stats -----------------------
-
-    public static int countRooksOnOpenFiles(long rooksBitboard, long allPawns) {
-        int count = 0;
-        for (char file = 'a'; file <= 'h'; file++) {
-            if (isRookOnOpenFile(rooksBitboard, allPawns, file)) count++;
-        }
-        return count;
-    }
-
-    public static int countRooksOnHalfOpenFiles(long rooksBitboard, long ownPawnsBitboard, long opponentPawnsBitboard) {
-        int count = 0;
-        for (char file = 'a'; file <= 'h'; file++) {
-            if (isRookOnHalfOpenFile(rooksBitboard, ownPawnsBitboard, opponentPawnsBitboard, file)) count++;
-        }
-        return count;
-    }
-
-    private static boolean isRookOnOpenFile(long rooksBitboard, long allPawns, char file) {
-        long fileBitboard = FileMasks[file - 'a'];
-        return (allPawns & fileBitboard) == 0 && (rooksBitboard & fileBitboard) != 0;
-    }
-
-    private static boolean isRookOnHalfOpenFile(long rooksBitboard, long ownPawnsBitboard, long opponentPawnsBitboard, char file) {
-        long fileBitboard = FileMasks[file - 'a'];
-        return (ownPawnsBitboard & fileBitboard) == 0 && (opponentPawnsBitboard & fileBitboard) != 0 && (rooksBitboard & fileBitboard) != 0;
-    }
 
     // ----------------------- Mining API (used by your test) -----------------------
 
@@ -383,11 +354,7 @@ public class RookHelper {
         }
 
         // Ensure in-memory table reflects this perfect mapping.
-        if (rookAttacks[square] == null || rookAttacks[square].length != size) {
-            rookAttacks[square] = trial;
-        } else {
-            rookAttacks[square] = trial;
-        }
+        rookAttacks[square] = trial;
         return true;
     }
 

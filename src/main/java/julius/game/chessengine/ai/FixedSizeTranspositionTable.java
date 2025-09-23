@@ -16,18 +16,7 @@ public class FixedSizeTranspositionTable<V> implements TranspositionTable<V> {
 
     private static final int CLUSTER_SIZE = 4;
 
-    private static final class Entry<V> {
-        final long key;
-        final V value;
-        final int depth;
-        final int age;
-
-        Entry(long key, V value, int depth, int age) {
-            this.key = key;
-            this.value = value;
-            this.depth = depth;
-            this.age = age;
-        }
+    private record Entry<V>(long key, V value, int depth, int age) {
     }
 
     private final AtomicReferenceArray<Entry<V>> table;
@@ -107,20 +96,17 @@ public class FixedSizeTranspositionTable<V> implements TranspositionTable<V> {
                 }
             }
 
-            if (shallowEntry != null && shallowEntry.depth < depth) {
+            if (shallowEntry.depth < depth) {
                 Entry<V> newEntry = new Entry<>(key, value, depth, currentAge.get());
                 if (table.compareAndSet(shallowSlot, shallowEntry, newEntry)) {
                     return;
                 }
-                continue retry;
+                continue;
             }
 
-            if (oldestEntry != null) {
-                Entry<V> newEntry = new Entry<>(key, value, depth, currentAge.get());
-                if (table.compareAndSet(oldestSlot, oldestEntry, newEntry)) {
-                    return;
-                }
-                continue retry;
+            Entry<V> newEntry = new Entry<>(key, value, depth, currentAge.get());
+            if (table.compareAndSet(oldestSlot, oldestEntry, newEntry)) {
+                return;
             }
         }
     }

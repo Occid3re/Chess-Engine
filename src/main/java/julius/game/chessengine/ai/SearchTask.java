@@ -1,7 +1,5 @@
 package julius.game.chessengine.ai;
 
-import julius.game.chessengine.engine.Engine;
-
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -87,14 +85,14 @@ public final class SearchTask {
      * If it's better (or equal score but deeper), publish it.
      * Returns true if best was updated.
      */
-    boolean publishBest(MoveAndScore ms, int depth, Engine simulator /*not used; kept for API compatibility*/) {
+    boolean publishBest(MoveAndScore ms, int depth  /*not used; kept for API compatibility*/) {
         if (ms == null || ms.move == -1) return false;
 
         while (true) {
             BestMoveDepth cur = best.get();
-            boolean betterScore = isBetterScore(whiteToMove, ms.score, cur.score);
-            boolean scoresApproximatelyEqual = Math.abs(ms.score - cur.score) <= SCORE_EPSILON;
-            boolean deeperTie = scoresApproximatelyEqual && depth > cur.depth;
+            boolean betterScore = isBetterScore(whiteToMove, ms.score, cur.score());
+            boolean scoresApproximatelyEqual = Math.abs(ms.score - cur.score()) <= SCORE_EPSILON;
+            boolean deeperTie = scoresApproximatelyEqual && depth > cur.depth();
             if (!betterScore && !deeperTie ) return false;
 
             BestMoveDepth next = new BestMoveDepth(ms.move, ms.score, depth);

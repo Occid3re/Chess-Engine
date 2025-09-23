@@ -1,6 +1,5 @@
 package julius.game.chessengine.ai;
 
-import julius.game.chessengine.board.Move;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Component;
 
@@ -28,16 +27,18 @@ public class OpeningBook {
     }
 
     private void loadOpenings() {
-        try (InputStream is = getClass().getResourceAsStream(OPENINGS_FILE_PATH);
-             BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+        try (InputStream is = getClass().getResourceAsStream(OPENINGS_FILE_PATH)) {
+            assert is != null;
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
 
-            String line;
-            while ((line = reader.readLine()) != null) {
-                String[] parts = line.split(",");
-                if (parts.length == 2) {
-                    int move = Integer.parseInt(parts[0].trim());
-                    long boardStateHash = Long.parseLong(parts[1].trim());
-                    openings.computeIfAbsent(boardStateHash, k -> new ArrayList<>()).add(move);
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    String[] parts = line.split(",");
+                    if (parts.length == 2) {
+                        int move = Integer.parseInt(parts[0].trim());
+                        long boardStateHash = Long.parseLong(parts[1].trim());
+                        openings.computeIfAbsent(boardStateHash, _ -> new ArrayList<>()).add(move);
+                    }
                 }
             }
         } catch (IOException | NullPointerException e) {
@@ -46,7 +47,7 @@ public class OpeningBook {
     }
 
     public void addOpening(int move, long boardStateHash) {
-        List<Integer> existingMoves = openings.computeIfAbsent(boardStateHash, k -> new ArrayList<>());
+        List<Integer> existingMoves = openings.computeIfAbsent(boardStateHash, _ -> new ArrayList<>());
         if (!existingMoves.contains(move)) {
             existingMoves.add(move);
             writeOpening(move, boardStateHash); // Writes to the file
@@ -75,8 +76,7 @@ public class OpeningBook {
             return -1; // or a default move, depending on how you want to handle this scenario
         }
         Random random = new Random();
-        int randomMove = moves.get(random.nextInt(moves.size()));
-        return randomMove;
+        return moves.get(random.nextInt(moves.size()));
     }
 
     public boolean containsMoveAndBoardStateHash(long boardStateHashBeforeMove, int move) {

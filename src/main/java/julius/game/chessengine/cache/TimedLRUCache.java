@@ -2,12 +2,7 @@ package julius.game.chessengine.cache;
 
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
-
-import java.util.AbstractMap;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
-import java.util.function.BiConsumer;
+import lombok.Getter;
 
 /**
  * A lightweight LRU cache with optional time-based eviction. Keys are
@@ -37,7 +32,9 @@ public class TimedLRUCache<V> {
         }
     }
 
+    @Getter
     private final int maxSize;
+    @Getter
     private final long maxAgeMs;
 
     private final Long2ObjectOpenHashMap<Entry<V>> map = new Long2ObjectOpenHashMap<>();
@@ -83,12 +80,6 @@ public class TimedLRUCache<V> {
         }
     }
 
-    public boolean containsKey(long key) {
-        synchronized (lock) {
-            return map.containsKey(key);
-        }
-    }
-
     public int size() {
         synchronized (lock) {
             return map.size();
@@ -109,14 +100,6 @@ public class TimedLRUCache<V> {
             keyQueue.clear();
             timeQueue.clear();
         }
-    }
-
-    public int getMaxSize() {
-        return maxSize;
-    }
-
-    public long getMaxAgeMs() {
-        return maxAgeMs;
     }
 
     private void evictLocked(long now) {
@@ -154,16 +137,4 @@ public class TimedLRUCache<V> {
         }
     }
 
-    public void forEach(BiConsumer<Long, V> action) {
-        Objects.requireNonNull(action, "action");
-        List<AbstractMap.SimpleEntry<Long, V>> snapshot = new ArrayList<>();
-        synchronized (lock) {
-            map.long2ObjectEntrySet().fastForEach(e ->
-                    snapshot.add(new AbstractMap.SimpleEntry<>(e.getLongKey(), e.getValue().value))
-            );
-        }
-        for (AbstractMap.SimpleEntry<Long, V> entry : snapshot) {
-            action.accept(entry.getKey(), entry.getValue());
-        }
-    }
 }

@@ -16,13 +16,13 @@ class EngineConcurrencyTest {
         Engine reference = new Engine();
         MoveList referenceMoves = reference.getAllLegalMoves();
         int expectedMoveCount = referenceMoves.size();
-        String expectedFen = reference.translateBoardToFen().getRenderBoard();
+        String expectedFen = reference.translateBoardToFen().renderBoard();
         long expectedHash = reference.getBoardStateHash();
 
         Engine engine = new Engine();
         engine.startNewGame();
 
-        Assertions.assertEquals(expectedFen, engine.translateBoardToFen().getRenderBoard());
+        Assertions.assertEquals(expectedFen, engine.translateBoardToFen().renderBoard());
         Assertions.assertEquals(expectedHash, engine.getBoardStateHash());
 
         CountDownLatch startLatch = new CountDownLatch(1);
@@ -84,7 +84,7 @@ class EngineConcurrencyTest {
 
         MoveList finalMoves = engine.getAllLegalMoves();
         Assertions.assertEquals(expectedMoveCount, finalMoves.size());
-        Assertions.assertEquals(expectedFen, engine.translateBoardToFen().getRenderBoard());
+        Assertions.assertEquals(expectedFen, engine.translateBoardToFen().renderBoard());
         Assertions.assertEquals(expectedHash, engine.getBoardStateHash());
         Map<String, String> finalBoard = engine.buildRenderBoard();
         Assertions.assertEquals(32, finalBoard.size());

@@ -63,10 +63,6 @@ final class SearchInstrumentation {
         this.enabled = enabled;
     }
 
-    boolean isEnabled() {
-        return enabled;
-    }
-
     void recordIterationComplete(int depth) {
         if (!enabled) return;
         iterationsCompleted.increment();
