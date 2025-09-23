@@ -11,7 +11,6 @@ import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.function.LongConsumer;
-import java.util.stream.Collectors;
 
 import static julius.game.chessengine.board.MoveHelper.convertIndexToString;
 
@@ -20,26 +19,23 @@ import static julius.game.chessengine.board.MoveHelper.convertIndexToString;
 public class Engine {
 
     /*
-     * Adaptive cache configuration
-     * ---------------------------
-     * By default we:
-     *  - Allocate ~8% of max heap (min 64MB) for the legal-moves cache.
-     *  - Assume ~256 bytes per entry (heuristic), clamped between 50k and 500k entries.
-     *  - Use a long TTL (24h). Legal move lists for a board state don't "age" by wall-clock,
-     *    so eviction should primarily be LRU. You can disable time expiry by setting TTL <= 0.
-     *
-     * Overrides (priority: System Property > Env Var > Heuristic):
-     *  - chess.cache.maxSize (int)
-     *  - chess.cache.maxAgeMs (long)
-     *  - CHESS_CACHE_MAX_SIZE (int)
-     *  - CHESS_CACHE_MAX_AGE_MS (long)
-     *
-     * This makes it easy to run multiple app versions with different cache sizing.
-     */
-    private static final class CacheConfig {
-        final int maxSize;
-        final int maxAgeMs;
-        CacheConfig(int maxSize, int maxAgeMs) { this.maxSize = maxSize; this.maxAgeMs = maxAgeMs; }
+         * Adaptive cache configuration
+         * ---------------------------
+         * By default we:
+         *  - Allocate ~8% of max heap (min 64MB) for the legal-moves cache.
+         *  - Assume ~256 bytes per entry (heuristic), clamped between 50k and 500k entries.
+         *  - Use a long TTL (24h). Legal move lists for a board state don't "age" by wall-clock,
+         *    so eviction should primarily be LRU. You can disable time expiry by setting TTL <= 0.
+         *
+         * Overrides (priority: System Property > Env Var > Heuristic):
+         *  - chess.cache.maxSize (int)
+         *  - chess.cache.maxAgeMs (long)
+         *  - CHESS_CACHE_MAX_SIZE (int)
+         *  - CHESS_CACHE_MAX_AGE_MS (long)
+         *
+         * This makes it easy to run multiple app versions with different cache sizing.
+         */
+        private record CacheConfig(int maxSize, int maxAgeMs) {
     }
 
     private static CacheConfig computeCacheConfig() {
@@ -53,12 +49,12 @@ public class Engine {
         int heuristicMaxAgeMs = 86_400_000; // 24h; set <=0 to disable time expiry
 
         // Overrides via System Properties
-        Integer sysMaxSize = getIntSysProp("chess.cache.maxSize");
-        Long sysMaxAgeMs   = getLongSysProp("chess.cache.maxAgeMs");
+        Integer sysMaxSize = getIntSysProp();
+        Long sysMaxAgeMs   = getLongSysProp();
 
         // Fallback to environment variables if system properties absent
-        Integer envMaxSize = (sysMaxSize == null) ? getIntEnv("CHESS_CACHE_MAX_SIZE") : null;
-        Long envMaxAgeMs   = (sysMaxAgeMs == null) ? getLongEnv("CHESS_CACHE_MAX_AGE_MS") : null;
+        Integer envMaxSize = (sysMaxSize == null) ? getIntEnv() : null;
+        Long envMaxAgeMs   = (sysMaxAgeMs == null) ? getLongEnv() : null;
 
         int maxSize = firstNonNull(sysMaxSize, envMaxSize, heuristicMaxSize);
         long maxAge = firstNonNull(sysMaxAgeMs, envMaxAgeMs, (long) heuristicMaxAgeMs);
@@ -74,23 +70,23 @@ public class Engine {
         return new CacheConfig(maxSize, (int) Math.min(Integer.MAX_VALUE, Math.max(Integer.MIN_VALUE, maxAge)));
     }
 
-    private static Integer getIntSysProp(String key) {
-        String v = System.getProperty(key);
+    private static Integer getIntSysProp() {
+        String v = System.getProperty("chess.cache.maxSize");
         return parseInt(v);
     }
 
-    private static Long getLongSysProp(String key) {
-        String v = System.getProperty(key);
+    private static Long getLongSysProp() {
+        String v = System.getProperty("chess.cache.maxAgeMs");
         return parseLong(v);
     }
 
-    private static Integer getIntEnv(String key) {
-        String v = System.getenv(key);
+    private static Integer getIntEnv() {
+        String v = System.getenv("CHESS_CACHE_MAX_SIZE");
         return parseInt(v);
     }
 
-    private static Long getLongEnv(String key) {
-        String v = System.getenv(key);
+    private static Long getLongEnv() {
+        String v = System.getenv("CHESS_CACHE_MAX_AGE_MS");
         return parseLong(v);
     }
 
@@ -125,11 +121,12 @@ public class Engine {
     @Getter
     private ArrayList<Integer> line = new ArrayList<>();
     private ArrayList<Integer> redoLine = new ArrayList<>();
+    @Getter
     private BitBoard bitBoard = new BitBoard();
     @Getter
     private GameState gameState = new GameState(bitBoard);
 
-    private LongConsumer onPositionChanged = h -> {};
+    private LongConsumer onPositionChanged = _ -> {};
 
 
     public Engine() {
@@ -159,7 +156,7 @@ public class Engine {
     }
 
     public void setOnPositionChanged(LongConsumer cb) {
-        this.onPositionChanged = (cb != null ? cb : h -> {});
+        this.onPositionChanged = (cb != null ? cb : _ -> {});
     }
     private void notifyPositionChanged() {
         onPositionChanged.accept(getBoardStateHash());
@@ -170,10 +167,6 @@ public class Engine {
         synchronized (boardLock) {
             return bitBoard.see(move);
         }
-    }
-
-    public BitBoard getBitBoard() {
-        return bitBoard;
     }
 
     public MoveList getAllLegalMoves() {
@@ -188,12 +181,6 @@ public class Engine {
                 generateLegalMoves();
             }
             return legalMoves;
-        }
-    }
-
-    public int getEnPassantTargetIndex() {
-        synchronized (boardLock) {
-            return bitBoard.getEnPassantTargetIndex();
         }
     }
 
@@ -321,20 +308,6 @@ public class Engine {
         }
     }
 
-    // Each of these methods would need to be implemented to handle the specific move generation for each piece type.
-    public List<Move> getMovesFromIndex(int fromIndex) {
-        MoveList legalMoves = getAllLegalMoves();
-        List<Move> movesFromIndex = new ArrayList<>();
-        for (int i = 0; i < legalMoves.size(); i++) {
-            int m = legalMoves.getMove(i);
-            int from = MoveHelper.deriveFromIndex(m); // Extract the first 6 bits
-            if (from == fromIndex) {
-                movesFromIndex.add(Move.convertIntToMove(m));
-            }
-        }
-        return movesFromIndex;
-    }
-
     public void moveRandomFigure(boolean isWhite) {
         MoveList moves = getAllLegalMoves();
         if (moves.size() == 0) {
@@ -345,16 +318,12 @@ public class Engine {
         performMove(randomMove);
     }
 
-    public GameState moveFigure(int fromIndex, int toIndex, int promotionPiece) {
-        return moveFigure(bitBoard, fromIndex, toIndex, promotionPiece);
-    }
-
     // always queen
     public void moveFigure(int fromIndex, int toIndex) {
         moveFigure(bitBoard, fromIndex, toIndex, 5);
     }
 
-    public GameState moveFigure(BitBoard bitBoard, int fromIndex, int toIndex, int promotionPiece) {
+    public void moveFigure(BitBoard bitBoard, int fromIndex, int toIndex, int promotionPiece) {
         synchronized (boardLock) {
             // Determine the piece type and color from the bitboard based on the 'from' position
             PieceType pieceType = bitBoard.getPieceTypeAtIndex(fromIndex);
@@ -379,7 +348,6 @@ public class Engine {
                 performMove(move);
             }
 
-            return gameState;
         }
     }
 
@@ -399,12 +367,6 @@ public class Engine {
             }
         }
         return move;
-    }
-
-    public List<Position> getPossibleMovesForPosition(int fromIndex) {
-        return getMovesFromIndex(fromIndex).stream()
-                .map(Move::getTo)
-                .collect(Collectors.toList());
     }
 
     public long getBoardStateHash() {
