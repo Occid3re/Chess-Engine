@@ -436,6 +436,7 @@ public class UciHandler {
     private void ponderHit() {
         if (ponderActive) {
             ponderShouldOutputMove = true;
+            ai.requestStop();
         }
     }
 
