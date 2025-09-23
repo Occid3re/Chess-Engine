@@ -2,11 +2,9 @@ package julius.game.chessengine.board;
 
 import lombok.extern.log4j.Log4j2;
 
-import java.util.Arrays;
-
 @Log4j2
 public class MoveList {
-    private int[] moves;
+    private final int[] moves;
     private int moveCount;
     private static final int MAX_SIZE = 218; // Maximum number of legal moves
 
@@ -28,6 +26,8 @@ public class MoveList {
         // Ensure the cloned list also has the full capacity so that it can be
         // reused without triggering resizes.
         this.moves = new int[MAX_SIZE];
+        this.stringRepresentation = original.stringRepresentation;
+        this.isStringRepresentationStale = original.isStringRepresentationStale;
         System.arraycopy(original.moves, 0, this.moves, 0, original.moveCount);
     }
 
@@ -52,10 +52,6 @@ public class MoveList {
         return moves[index];
     }
 
-    public int[] toArray() {
-        return Arrays.copyOf(moves, moveCount);
-    }
-
     public int[] get() {
         return this.moves;
     }
@@ -78,20 +74,6 @@ public class MoveList {
             throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + moveCount);
         }
         moves[index] = move;
-        isStringRepresentationStale = true;
-    }
-
-    /**
-     * Swap two moves in-place.
-     */
-    public void swap(int i, int j) {
-        if (i < 0 || i >= moveCount || j < 0 || j >= moveCount) {
-            throw new IndexOutOfBoundsException("i: " + i + ", j: " + j + ", Size: " + moveCount);
-        }
-        if (i == j) return;
-        int tmp = moves[i];
-        moves[i] = moves[j];
-        moves[j] = tmp;
         isStringRepresentationStale = true;
     }
 

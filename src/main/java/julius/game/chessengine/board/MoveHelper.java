@@ -28,14 +28,6 @@ public class MoveHelper {
         return (move >> 18) & 0x07;
     }
 
-    /**
-     * Returns the two-bit special property field.
-     * Use this method only when both bits are required.
-     */
-    public static int deriveSpecialProperty(int move) {
-        return (move >> 16) & 0x03;
-    }
-
     public static boolean isCapture(int move) {
         return ((move >>> 16) & 0x1) != 0;
     }

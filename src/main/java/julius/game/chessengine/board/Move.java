@@ -1,9 +1,9 @@
 package julius.game.chessengine.board;
 
 import julius.game.chessengine.figures.PieceType;
-import julius.game.chessengine.utils.Color;
 import lombok.Getter;
 
+@Getter
 public class Move {
 
     //pieceType
@@ -32,20 +32,14 @@ public class Move {
     //<111111> <111111>   <1>         <111>       <11>   <000>        <1>             <1>           <1>         <1>           <1>
 
     // Getters for all the fields
-    @Getter
     private final Position from;
-    @Getter
     private final Position to;
-    @Getter
     private final PieceType pieceType;
-    @Getter
     private final boolean colorWhite; // Color of the piece being moved
     private final boolean isCapture;
     private final boolean isCastlingMove;
     private final boolean isEnPassantMove;
-    @Getter
     private final PieceType promotionPieceType; // This can be null if no promotion
-    @Getter
     private final PieceType capturedPieceType;
 
     private final boolean isKingFirstMove;
@@ -81,28 +75,8 @@ public class Move {
         this.isRookFirstMove = originalMove.isRookFirstMove();
     }
 
-    public boolean isCapture() {
-        return isCapture;
-    }
-
-    public boolean isCastlingMove() {
-        return isCastlingMove;
-    }
-
-    public boolean isEnPassantMove() {
-        return isEnPassantMove;
-    }
-
     public boolean isPromotionMove() {
         return promotionPieceType != null;
-    }
-
-    public boolean isKingFirstMove() {
-        return isKingFirstMove;
-    }
-
-    public boolean isRookFirstMove() {
-        return isRookFirstMove;
     }
 
 
