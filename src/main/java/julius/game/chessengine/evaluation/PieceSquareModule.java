@@ -55,6 +55,9 @@ public final class PieceSquareModule implements EvaluationModule {
     private static final int CASTLING_BONUS = 35;
     private static final int NOT_CASTLED_AND_ROOK_MOVE_PENALTY = -20;
 
+    private static final int PIECE_SQUARE_WEIGHT_NUMERATOR = 3;
+    private static final int PIECE_SQUARE_WEIGHT_DENOMINATOR = 4;
+
     private static final long NOT_A_FILE = ~FileMasks[0];
     private static final long NOT_H_FILE = ~FileMasks[7];
 
@@ -373,6 +376,8 @@ public final class PieceSquareModule implements EvaluationModule {
             mg = -mg;
             eg = -eg;
         }
+        mg = scalePieceSquareContribution(mg);
+        eg = scalePieceSquareContribution(eg);
         midgameContributionBySquare[square] = mg;
         endgameContributionBySquare[square] = eg;
         midgameTotal += mg;
@@ -458,6 +463,16 @@ public final class PieceSquareModule implements EvaluationModule {
 
     private boolean isQueenStartSquare(int color, int square) {
         return QUEEN_START_SQUARE[color] == square;
+    }
+
+    private static int scalePieceSquareContribution(int value) {
+        int scaled = value * PIECE_SQUARE_WEIGHT_NUMERATOR;
+        if (scaled >= 0) {
+            return (scaled + PIECE_SQUARE_WEIGHT_DENOMINATOR / 2)
+                    / PIECE_SQUARE_WEIGHT_DENOMINATOR;
+        }
+        return -((-scaled + PIECE_SQUARE_WEIGHT_DENOMINATOR / 2)
+                / PIECE_SQUARE_WEIGHT_DENOMINATOR);
     }
 
     private void recalculateDevelopmentContribution() {
