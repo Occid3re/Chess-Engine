@@ -16,7 +16,7 @@ import shlex
 import platform
 from pathlib import Path
 import datetime
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 import threading
 import asyncio
 import random
@@ -40,6 +40,33 @@ LICHESS_TOKEN = os.environ.get("LICHESS_TOKEN") or "YOUR_TOKEN_HERE"
 MOVE_TIME = float(os.environ.get("BOT_MOVE_TIME", "0.5"))
 # Dedicated lower floor for very fast games (bullet)
 BULLET_MOVE_TIME = float(os.environ.get("BOT_BULLET_MOVE_TIME", "0.4"))
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+ABSOLUTE_MIN_THINK_TIME = _env_float("BOT_ABSOLUTE_MIN_THINK", 0.05)
+
+_ADAPTIVE_FLOOR_DEFAULT = _env_float("BOT_ADAPTIVE_FLOOR_FRACTION", 0.06)
+_ADAPTIVE_FLOOR_INC_DEFAULT = _env_float("BOT_ADAPTIVE_FLOOR_INCREMENT_FRACTION", 0.35)
+
+ADAPTIVE_FLOOR_FRACTIONS: Dict[str, float] = {
+    "bullet": _env_float("BOT_ADAPTIVE_FLOOR_FRACTION_BULLET", 0.1),
+    "blitz": _env_float("BOT_ADAPTIVE_FLOOR_FRACTION_BLITZ", _ADAPTIVE_FLOOR_DEFAULT),
+    "rapid": _env_float("BOT_ADAPTIVE_FLOOR_FRACTION_RAPID", max(0.04, _ADAPTIVE_FLOOR_DEFAULT * 0.8)),
+    "classical": _env_float("BOT_ADAPTIVE_FLOOR_FRACTION_CLASSICAL", max(0.03, _ADAPTIVE_FLOOR_DEFAULT * 0.6)),
+}
+
+ADAPTIVE_FLOOR_INCREMENT_FRACTIONS: Dict[str, float] = {
+    "bullet": _env_float("BOT_ADAPTIVE_FLOOR_INCREMENT_FRACTION_BULLET", 0.55),
+    "blitz": _env_float("BOT_ADAPTIVE_FLOOR_INCREMENT_FRACTION_BLITZ", _ADAPTIVE_FLOOR_INC_DEFAULT),
+    "rapid": _env_float("BOT_ADAPTIVE_FLOOR_INCREMENT_FRACTION_RAPID", max(0.25, _ADAPTIVE_FLOOR_INC_DEFAULT * 0.8)),
+    "classical": _env_float("BOT_ADAPTIVE_FLOOR_INCREMENT_FRACTION_CLASSICAL", max(0.2, _ADAPTIVE_FLOOR_INC_DEFAULT * 0.6)),
+}
 
 # Estimated full moves to help time management
 ESTIMATED_GAME_MOVES = int(os.environ.get("BOT_GAME_MOVES", "40"))
@@ -416,14 +443,15 @@ def _estimate_tc_bucket(limit_seconds: Optional[float], increment_seconds: Optio
 
 def calc_move_time(state: dict, my_color_is_white: bool,
                    clock_initial: Optional[float] = None,
-                   clock_increment: Optional[float] = None) -> float:
+                   clock_increment: Optional[float] = None) -> Tuple[float, float]:
     key_time = "wtime" if my_color_is_white else "btime"
     key_inc = "winc" if my_color_is_white else "binc"
     time_ms = state.get(key_time)
     inc_ms = state.get(key_inc)
 
     if time_ms is None:
-        return MOVE_TIME
+        floor = max(ABSOLUTE_MIN_THINK_TIME, MOVE_TIME)
+        return floor, floor
 
     if isinstance(time_ms, datetime.timedelta):
         remaining = time_ms.total_seconds()
@@ -431,7 +459,8 @@ def calc_move_time(state: dict, my_color_is_white: bool,
         try:
             remaining = float(time_ms) / 1000.0
         except (TypeError, ValueError):
-            return MOVE_TIME
+            floor = max(ABSOLUTE_MIN_THINK_TIME, MOVE_TIME)
+            return floor, floor
     remaining = max(0.0, remaining)
 
     if isinstance(inc_ms, datetime.timedelta):
@@ -494,11 +523,21 @@ def calc_move_time(state: dict, my_color_is_white: bool,
     cap_threshold = min(cap_threshold, max(0.0, remaining))
     cap_threshold = min(cap_threshold, max(0.0, remaining * cap_fraction))
 
+    floor_fraction = ADAPTIVE_FLOOR_FRACTIONS.get(tc_bucket, _ADAPTIVE_FLOOR_DEFAULT)
+    inc_fraction = ADAPTIVE_FLOOR_INCREMENT_FRACTIONS.get(tc_bucket, _ADAPTIVE_FLOOR_INC_DEFAULT)
+    adaptive_floor = remaining * max(0.0, floor_fraction) + increment * max(0.0, inc_fraction)
+    adaptive_floor = min(floor, adaptive_floor) if adaptive_floor > 0.0 else floor
+
     floor = min(floor, cap_threshold)
+    floor = min(floor, adaptive_floor)
+    floor = max(ABSOLUTE_MIN_THINK_TIME, floor)
+
     think = min(think, cap_threshold)
     think = max(floor, think)
 
-    return max(0.05, think)
+    think = max(ABSOLUTE_MIN_THINK_TIME, think)
+
+    return think, floor
 
 
 def safe_make_move(client: berserk.Client, game_id: str, uci: str) -> bool:
@@ -625,10 +664,12 @@ def play_game(client: berserk.Client,
                     _cancel_abort_timer()
 
                 if is_my_turn(board, my_color_is_white) and not board.is_game_over():
-                    think_time = calc_move_time(state, my_color_is_white, clock_initial, clock_increment)
+                    think_time, min_floor = calc_move_time(state, my_color_is_white, clock_initial, clock_increment)
                     slack = 0.1 if tc_bucket == "bullet" else 0.15
                     try:
-                        result = engine.play(board, chess.engine.Limit(time=max(0.05, think_time - slack)))
+                        limit_time = max(min_floor, think_time - slack)
+                        limit_time = max(ABSOLUTE_MIN_THINK_TIME, limit_time)
+                        result = engine.play(board, chess.engine.Limit(time=limit_time))
                         move_sent = safe_make_move(client, game_id, result.move.uci())
                         if not move_sent:
                             print("[warn] Move send failed, retrying once")
@@ -665,7 +706,7 @@ def play_game(client: berserk.Client,
                     continue
 
                 if is_my_turn(board, my_color_is_white):
-                    think_time = calc_move_time(state, my_color_is_white, clock_initial, clock_increment)
+                    think_time, min_floor = calc_move_time(state, my_color_is_white, clock_initial, clock_increment)
                     if tc_bucket is None and clock_initial is None:
                         key_time = "wtime" if my_color_is_white else "btime"
                         time_val = state.get(key_time)
@@ -680,7 +721,9 @@ def play_game(client: berserk.Client,
                             tc_bucket = _estimate_tc_bucket(clock_initial, clock_increment)
                     slack = 0.1 if tc_bucket == "bullet" else 0.15
                     try:
-                        result = engine.play(board, chess.engine.Limit(time=max(0.05, think_time - slack)))
+                        limit_time = max(min_floor, think_time - slack)
+                        limit_time = max(ABSOLUTE_MIN_THINK_TIME, limit_time)
+                        result = engine.play(board, chess.engine.Limit(time=limit_time))
                         move_sent = safe_make_move(client, game_id, result.move.uci())
                         if not move_sent:
                             print("[warn] Move send failed, retrying once")
