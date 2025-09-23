@@ -98,6 +98,11 @@ public class AI {
 
     public static final double EXIT_FLAG = Double.MAX_VALUE;
 
+    private static final int SEE_CACHE_MASK = 1024 - 1; // power of two
+    private final ThreadLocal<int[]> seeCacheKeys = ThreadLocal.withInitial(() -> new int[SEE_CACHE_MASK + 1]);
+    private final ThreadLocal<int[]> seeCacheVals = ThreadLocal.withInitial(() -> new int[SEE_CACHE_MASK + 1]);
+
+
     /**
      * Fixed-size transposition table. Uses a non-atomic implementation when running
      * with a single search thread to avoid the overhead of atomic operations.
@@ -968,7 +973,7 @@ public class AI {
         betaRef.set(beta);
         if (alpha >= beta) return new MoveAndScore(bestMove, bestScore);
 
-        final int fanout = Math.min(ROOT_PARALLEL_LIMIT, orderedMoves.size() - 1);
+        final int fanout = Math.min(Math.min(ROOT_PARALLEL_LIMIT, searchThreads * 2), orderedMoves.size() - 1);
         if (fanout <= 0) return new MoveAndScore(bestMove, bestScore);
 
         final CompletionService<MoveAndScore> ecs = new ExecutorCompletionService<>(searchPool);
@@ -1011,7 +1016,7 @@ public class AI {
                         if (probe == EXIT_FLAG || abortRequested(deadline)) return null;
                     }
 
-                    boolean needsFull = isWhitesTurn ? (probe > alphaRef.get()) : (probe < betaRef.get());
+                    boolean needsFull = isWhitesTurn ? (probe > alphaRef.get() + 0.05) : (probe < betaRef.get() - 0.05);
                     double finalScore = probe;
 
                     if (needsFull && !stopRef.get()) {
@@ -1514,41 +1519,27 @@ public class AI {
     /**
      * LMR reduction: larger for deeper plies and later moves; tuned to be safe.
      */
-    private static final int HISTORY_REDUCTION_MAX = 4000;
+    private static final int LMR_HISTORY_MAX = 4000;
 
+    // Tuned to give you ~1–3 plies reduction for late, quiet moves at depth 6–12.
     private int lmrReduction(int depth, int moveIndex, int historyScore) {
-        if (depth <= 1) {
-            return 0;
-        }
+        if (depth <= 2) return 0;
 
-        int clampedDepth = Math.max(1, Math.min(depth, LMR_MAX_DEPTH));
-        int clampedMoveIndex = Math.max(0, Math.min(moveIndex, LMR_MAX_MOVES - 1));
+        // Base from depth and lateness
+        double d = Math.log1p(depth);             // 1.. ~2.6
+        double m = Math.log1p(moveIndex + 1);     // 0.. ~5.0 for very late moves
+        double base = 0.35 * d * m;               // gentle scale
 
-        int history = Math.max(0, Math.min(historyScore, HISTORY_REDUCTION_MAX));
-        double normalized = HISTORY_REDUCTION_MAX == 0
-                ? 0.0
-                : history / (double) HISTORY_REDUCTION_MAX;
-        double bucketPosition = normalized * (HISTORY_BUCKETS - 1);
-        int lowerBucket = (int) Math.floor(bucketPosition);
-        int upperBucket = Math.min(HISTORY_BUCKETS - 1, lowerBucket + 1);
-        double fraction = bucketPosition - lowerBucket;
+        // History cuts reduction (good history => reduce less)
+        int h = Math.max(0, Math.min(historyScore, LMR_HISTORY_MAX));
+        double hist = (LMR_HISTORY_MAX == 0) ? 0.0 : (double) h / LMR_HISTORY_MAX;
+        double penalty = 0.8 * hist;              // up to -0.8 ply
 
-        int lowerValue = LMR_REDUCTION_TABLE[clampedDepth][clampedMoveIndex][lowerBucket];
-        if (upperBucket == lowerBucket) {
-            return Math.min(lowerValue, depth - 1);
-        }
+        int r = (int) Math.floor(base - penalty);
 
-        int upperValue = LMR_REDUCTION_TABLE[clampedDepth][clampedMoveIndex][upperBucket];
-        double interpolated = lowerValue + fraction * (upperValue - lowerValue);
-        int reduction = (int) Math.floor(interpolated + 1e-9);
-        int maxReduction = Math.max(0, depth - 1);
-        if (reduction < 0) {
-            reduction = 0;
-        }
-        if (reduction > maxReduction) {
-            reduction = maxReduction;
-        }
-        return reduction;
+        if (r < 1) r = 1;
+        if (r > depth - 1) r = depth - 1;
+        return r;
     }
 
     private double computeStandPatMargin(BitBoard board, int depthRemaining, int nextDepth) {
@@ -2045,6 +2036,9 @@ public class AI {
      */
     MoveList sortMovesByEfficiency(MoveList moves, int currentDepth, long boardHash, int prevMove,
                                    Engine simulatorEngine) {
+        final int[] seeKeys = seeCacheKeys.get();
+        final int[] seeVals = seeCacheVals.get();
+        Arrays.fill(seeKeys, 0); // 0 = empty
         final int size = moves.size();
         final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
@@ -2105,10 +2099,20 @@ public class AI {
             int seeValue = 0;
             boolean hasSee = false;
             if (isCapture) {
-                seeValue = seeCache.computeIfAbsent(moveInt, simulatorEngine::see);
+                int slot = (int) (Integer.toUnsignedLong(moveInt) * 2654435761L);
+                slot &= SEE_CACHE_MASK;
+                if (slot == 0) {
+                    slot = 1;
+                }
+                if (seeKeys[slot] == moveInt) {
+                    seeValue = seeVals[slot];
+                } else {
+                    seeValue = simulatorEngine.see(moveInt);
+                    seeKeys[slot] = moveInt;
+                    seeVals[slot] = seeValue;
+                }
                 hasSee = true;
             }
-
             int category;
             int score;
 
@@ -2248,40 +2252,34 @@ public class AI {
 
     private double quiescenceSearch(Engine simulatorEngine, boolean isWhitesTurn,
                                     double alpha, double beta, long deadline, int depth) {
-        // early stop
-        if (abortRequested(deadline)) {
-            return AI.EXIT_FLAG;
-        }
+        if (abortRequested(deadline)) return AI.EXIT_FLAG;
 
-        // If side to move is in check, search all legal evasions (not only captures)
         boolean inCheck = isSideInCheck(simulatorEngine, isWhitesTurn);
         SearchInstrumentation instr = instrumentation();
         instr.recordQuiescenceNode(depth);
 
         double standPat = evaluateStaticPosition(simulatorEngine.getGameState(), isWhitesTurn, depth);
+
         if (!inCheck) {
             if (standPat >= beta) {
                 instr.recordQuiescenceStandPatCut();
-                return beta; // fail-hard beta
+                return beta;
             }
-            if (alpha < standPat) {
-                alpha = standPat; // raise alpha via stand-pat
-            }
+            if (alpha < standPat) alpha = standPat;
 
-            // Simple delta/futility-like guard: if even a big swing cannot beat alpha, cut
-            final int BIG_DELTA = 1000; // ~queen
-            if (standPat + BIG_DELTA < alpha) {
+            // Slightly stronger delta guard
+            final int BIG_DELTA = 900; // ≈ queen, was 1000
+            if (standPat + BIG_DELTA <= alpha) {
                 instr.recordQuiescenceDeltaPrune();
                 return alpha;
             }
         }
 
-        // Generate moves: evasions if in check, else captures/promotions
-        MoveList moves = inCheck ? simulatorEngine.getAllLegalMoves() : getPossibleCapturesOrPromotions(simulatorEngine);
+        MoveList moves = inCheck ? simulatorEngine.getAllLegalMoves()
+                : getPossibleCapturesOrPromotions(simulatorEngine);
 
-        // Order them (captures first via MVV-LVA/promotion bonus, killers/history still help)
-        MoveList ordered = sortMovesByEfficiency(moves, 0, simulatorEngine.getBoardStateHash(), -1,
-                simulatorEngine);
+        MoveList ordered = sortMovesByEfficiency(moves, 0,
+                simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
 
         for (int i = 0; i < ordered.size(); i++) {
             int m = ordered.getMove(i);
@@ -2289,7 +2287,13 @@ public class AI {
             boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
             boolean isQuiet = !isCapture && !isPromotion;
 
-            // --- SEE pruning: drop clearly losing captures or quiet moves (keeps promotions) ---
+            // Skip quiet stuff in qsearch unless in check (evasions)
+            if (!inCheck && isQuiet) continue;
+
+            // Skip non-capture promotions when not in check; too noisy here
+            if (!inCheck && isPromotion && !isCapture) continue;
+
+            // SEE prune losing captures/quiets unless they give check
             if ((!inCheck && isCapture && !isPromotion) || isQuiet) {
                 int see = simulatorEngine.see(m);
                 if (see < 0) {
@@ -2302,25 +2306,21 @@ public class AI {
                     }
                 }
             }
+
             simulatorEngine.performMove(m);
             instr.recordQuiescenceCaptureSearched();
-            // Propagate timeout BEFORE negation
+
             double child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
             simulatorEngine.undoLastMove();
-
             if (child == EXIT_FLAG) return EXIT_FLAG;
 
             double score = -child;
-
-            if (score >= beta) {
-                return beta;
-            }
-            if (score > alpha) {
-                alpha = score;
-            }
+            if (score >= beta) return beta;
+            if (score > alpha) alpha = score;
         }
         return alpha;
     }
+
 
     private double evaluateStaticPosition(GameState gameState, boolean isWhitesTurn, int depthOrPly) {
         instrumentation().recordStaticEvalCall();
