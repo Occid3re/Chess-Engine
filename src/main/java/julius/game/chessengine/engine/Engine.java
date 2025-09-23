@@ -60,8 +60,16 @@ public class Engine {
         Integer envMaxSize = (sysMaxSize == null) ? getIntEnv("CHESS_CACHE_MAX_SIZE") : null;
         Long envMaxAgeMs   = (sysMaxAgeMs == null) ? getLongEnv("CHESS_CACHE_MAX_AGE_MS") : null;
 
-        int maxSize = firstNonNull(sysMaxSize, envMaxSize, heuristicMaxSize);
-        long maxAge = firstNonNull(sysMaxAgeMs, envMaxAgeMs, (long) heuristicMaxAgeMs);
+        int maxSize = (sysMaxSize != null)
+                ? sysMaxSize
+                : (envMaxSize != null)
+                ? envMaxSize
+                : heuristicMaxSize;
+        long maxAge = (sysMaxAgeMs != null)
+                ? sysMaxAgeMs
+                : (envMaxAgeMs != null)
+                ? envMaxAgeMs
+                : (long) heuristicMaxAgeMs;
 
         // Defensive clamps
         if (maxSize <= 0) maxSize = heuristicMaxSize;
@@ -102,12 +110,6 @@ public class Engine {
     private static Long parseLong(String v) {
         if (v == null || v.isEmpty()) return null;
         try { return Long.parseLong(v.trim()); } catch (NumberFormatException ignored) { return null; }
-    }
-
-    @SafeVarargs
-    private static <T> T firstNonNull(T... values) {
-        for (T v : values) if (v != null) return v;
-        return null;
     }
 
     // --- Cache instance based on computed configuration ---
@@ -155,6 +157,8 @@ public class Engine {
             this.legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
 
             this.openingBook = other.openingBook;
+            LongConsumer callback = other.onPositionChanged;
+            this.onPositionChanged = (callback != null) ? callback : h -> {};
         }
     }
 
@@ -223,7 +227,7 @@ public class Engine {
             this.bitBoard = FEN.translateFENtoBitBoard(fen);
             this.gameState = new GameState(bitBoard);
 
-            // Ensure the imported state reflects the parsed halfmove/fullmove counters and
+            // Ensure the imported state reflects the parsed half-move/full-move counters and
             // repetition baseline.  The constructor copies the counters from the bitboard, but
             // we explicitly reset the historical bookkeeping so future updates start from this
             // root position.
