@@ -1912,7 +1912,7 @@ public class AI {
             alpha = Math.max(alpha, eval);
             if (beta <= alpha) {
                 updateKillerMoves(depth, move);
-                incrementHistory(move, depth);
+                incrementHistory(prevMove, move, depth);
                 heuristics.recordCounterMove(prevMove, move);
                 instr.recordBetaCutoff();
                 break;
@@ -2136,7 +2136,7 @@ public class AI {
             beta = Math.min(beta, eval);
             if (alpha >= beta) {
                 updateKillerMoves(depth, move);
-                incrementHistory(move, depth);
+                incrementHistory(prevMove, move, depth);
                 heuristics.recordCounterMove(prevMove, move);
                 instr.recordBetaCutoff();
                 break;
@@ -2223,6 +2223,7 @@ public class AI {
         final int prevTo = (prevMove >= 0) ? ((prevMove >>> 6) & 0x3F) : -1;
         final int cm = (prevFrom >= 0) ? counterMove[prevFrom][prevTo] : -1;
         final int COUNTER_MOVE_BONUS = 400;
+        final int CONTINUATION_HISTORY_DIVISOR = 8;
 
         for (int i = 0; i < size; i++) {
             final int moveInt = moves.getMove(i);
@@ -2299,6 +2300,10 @@ public class AI {
                 final int to = (moveInt >>> 6) & 0x3F;
                 category = CAT_QUIET;
                 score = historyTable[from][to]; // butterfly history
+                if (prevTo >= 0) {
+                    int continuationScore = heuristics.continuation[prevTo][to];
+                    score += continuationScore / CONTINUATION_HISTORY_DIVISOR;
+                }
                 if (moveInt == cm) score += COUNTER_MOVE_BONUS;
             }
 
@@ -2520,8 +2525,10 @@ public class AI {
         threadHeuristics.get().recordKiller(depth, move);
     }
 
-    private void incrementHistory(int move, int depth) {
-        threadHeuristics.get().addHistory(move, depth);
+    private void incrementHistory(int prevMove, int move, int depth) {
+        Heuristics heuristics = threadHeuristics.get();
+        heuristics.addHistory(move, depth);
+        heuristics.addContinuation(prevMove, move, depth);
     }
 
     private void clearHistoryTable() {
@@ -2552,6 +2559,7 @@ public class AI {
 
         private int[][] killers;
         private final int[][] history;
+        private final int[][] continuation;
         private final int[][] counter;
 
         private boolean[] killerDirty;
@@ -2562,6 +2570,11 @@ public class AI {
         private final boolean[] historyDirty;
         private final int[] historyDirtyList;
         private int historyDirtyCount;
+
+        private final int[] continuationDelta;
+        private final boolean[] continuationDirty;
+        private final int[] continuationDirtyList;
+        private int continuationDirtyCount;
 
         private final int[] counterUpdates;
         private final boolean[] counterDirty;
@@ -2574,6 +2587,7 @@ public class AI {
         Heuristics(int depth) {
             this.killers = allocateKillers(Math.max(1, depth));
             this.history = new int[BOARD_SQUARES][BOARD_SQUARES];
+            this.continuation = new int[BOARD_SQUARES][BOARD_SQUARES];
             this.counter = new int[BOARD_SQUARES][BOARD_SQUARES];
             for (int f = 0; f < BOARD_SQUARES; f++) {
                 Arrays.fill(counter[f], -1);
@@ -2583,6 +2597,9 @@ public class AI {
             this.historyDelta = new int[HISTORY_SIZE];
             this.historyDirty = new boolean[HISTORY_SIZE];
             this.historyDirtyList = new int[HISTORY_SIZE];
+            this.continuationDelta = new int[HISTORY_SIZE];
+            this.continuationDirty = new boolean[HISTORY_SIZE];
+            this.continuationDirtyList = new int[HISTORY_SIZE];
             this.counterUpdates = new int[HISTORY_SIZE];
             Arrays.fill(counterUpdates, -1);
             this.counterDirty = new boolean[HISTORY_SIZE];
@@ -2620,6 +2637,7 @@ public class AI {
             }
             for (int f = 0; f < BOARD_SQUARES; f++) {
                 System.arraycopy(base.history[f], 0, history[f], 0, BOARD_SQUARES);
+                System.arraycopy(base.continuation[f], 0, continuation[f], 0, BOARD_SQUARES);
                 System.arraycopy(base.counter[f], 0, counter[f], 0, BOARD_SQUARES);
             }
         }
@@ -2646,6 +2664,13 @@ public class AI {
             }
             historyDirtyCount = 0;
 
+            for (int i = 0; i < continuationDirtyCount; i++) {
+                int idx = continuationDirtyList[i];
+                continuationDirty[idx] = false;
+                continuationDelta[idx] = 0;
+            }
+            continuationDirtyCount = 0;
+
             for (int i = 0; i < counterDirtyCount; i++) {
                 int idx = counterDirtyList[i];
                 counterDirty[idx] = false;
@@ -2657,7 +2682,7 @@ public class AI {
         }
 
         boolean hasUpdates() {
-            return killerDirtyCount > 0 || historyDirtyCount > 0 || counterDirtyCount > 0;
+            return killerDirtyCount > 0 || historyDirtyCount > 0 || continuationDirtyCount > 0 || counterDirtyCount > 0;
         }
 
         void recordKiller(int depth, int move) {
@@ -2697,6 +2722,25 @@ public class AI {
             historyDelta[idx] += delta;
         }
 
+        void addContinuation(int prevMove, int move, int depth) {
+            if (move == -1 || prevMove < 0) {
+                return;
+            }
+            if (MoveHelper.isCapture(move) || MoveHelper.isPawnPromotionMove(move)) {
+                return;
+            }
+            int prevTo = (prevMove >>> 6) & 0x3F;
+            int to = (move >>> 6) & 0x3F;
+            int delta = depth * depth;
+            continuation[prevTo][to] += delta;
+            int idx = (prevTo << 6) | to;
+            if (!continuationDirty[idx]) {
+                continuationDirty[idx] = true;
+                continuationDirtyList[continuationDirtyCount++] = idx;
+            }
+            continuationDelta[idx] += delta;
+        }
+
         void recordCounterMove(int prevMove, int move) {
             if (prevMove < 0) {
                 return;
@@ -2729,6 +2773,12 @@ public class AI {
                 int to = idx & 0x3F;
                 target.history[from][to] += historyDelta[idx];
             }
+            for (int i = 0; i < continuationDirtyCount; i++) {
+                int idx = continuationDirtyList[i];
+                int from = idx >>> 6;
+                int to = idx & 0x3F;
+                target.continuation[from][to] += continuationDelta[idx];
+            }
             for (int i = 0; i < counterDirtyCount; i++) {
                 int idx = counterDirtyList[i];
                 int from = idx >>> 6;
@@ -2758,6 +2808,7 @@ public class AI {
             for (int f = 0; f < BOARD_SQUARES; f++) {
                 for (int t = 0; t < BOARD_SQUARES; t++) {
                     history[f][t] >>= 1;
+                    continuation[f][t] >>= 1;
                 }
             }
         }
@@ -2765,6 +2816,7 @@ public class AI {
         void clearHistory() {
             for (int f = 0; f < BOARD_SQUARES; f++) {
                 Arrays.fill(history[f], 0);
+                Arrays.fill(continuation[f], 0);
             }
             resetUpdates();
         }
