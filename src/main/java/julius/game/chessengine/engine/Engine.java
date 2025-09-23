@@ -328,7 +328,9 @@ public class Engine {
      * - uses an internal scratch list for generation, but always publishes snapshots
      */
     public Engine createSimulation() {
-        return withBoardLock(() -> new Engine(this, false));
+        Engine simulation = withBoardLock(() -> new Engine(this, false));
+        simulation.setOnPositionChanged(null);
+        return simulation;
     }
 
     // --- Core move generation ---
