@@ -28,9 +28,9 @@ public class GameState {
     private Score score;
 
     @Getter
-    private int halfmoveClock = 0;          // resets on pawn move or capture
+    private int halfmoveClock;          // resets on pawn move or capture
     @Getter
-    private int fullmoveNumber = 1;
+    private int fullmoveNumber;
     private long lastZobrist = 0L;          // last committed root hash
 
     public GameState(BitBoard bitBoard) {
