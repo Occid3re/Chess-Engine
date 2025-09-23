@@ -33,6 +33,8 @@ public class UciHandler {
     private final Consumer<String> output;
     private final Supplier<Boolean> running;
     private Thread searchThread;
+    private volatile boolean ponderActive = false;
+    private volatile boolean ponderShouldOutputMove = false;
     private final Map<String, UciOption> options = new LinkedHashMap<>();
     private int moveOverheadMs = 0;
     private final AtomicLong lastInfoNanos = new AtomicLong(0L);
@@ -69,6 +71,7 @@ public class UciHandler {
             case "position" -> setPosition(tokens);
             case "go" -> go(tokens);
             case "stop" -> stop();
+            case "ponderhit" -> ponderHit();
             case "setoption" -> setOption(tokens);
             case "quit" -> {
                 stop();
@@ -273,6 +276,7 @@ public class UciHandler {
         long wtime = 0, btime = 0, winc = 0, binc = 0, movetime = 0;
         int depth = 0;
         int movestogo = 0;
+        boolean ponder = false;
         for (int i = 1; i < tokens.length; i++) {
             switch (tokens[i]) {
                 case "wtime" -> wtime = Long.parseLong(tokens[++i]);
@@ -282,6 +286,7 @@ public class UciHandler {
                 case "movetime" -> movetime = Long.parseLong(tokens[++i]);
                 case "depth" -> depth = Integer.parseInt(tokens[++i]);
                 case "movestogo" -> movestogo = Integer.parseInt(tokens[++i]);
+                case "ponder" -> ponder = true;
                 default -> { /* ignore */ }
             }
         }
@@ -296,7 +301,11 @@ public class UciHandler {
         long limit = computeTimeLimit(timeLeft, inc, movetime, movestogo, moveOverheadMs);
         ai.setTimeLimit(limit);
 
+        ponderActive = ponder;
+        ponderShouldOutputMove = false;
+
         lastInfoNanos.set(0L);
+        boolean startedInPonder = ponder;
         searchThread = new Thread(() -> {
             ai.startAutoPlay(false, false); // start calculation without auto-move
             try {
@@ -312,7 +321,9 @@ public class UciHandler {
                     }
                     Integer bm = ai.getCurrentBestMoveInt();
                     if (bm != null && bm != -1) {
-                        break;
+                        if (!startedInPonder || ponderShouldOutputMove) {
+                            break;
+                        }
                     }
                     Thread.sleep(50);
                 }
@@ -321,21 +332,27 @@ public class UciHandler {
             } finally {
                 publishSearchInfo();
                 Integer bm = ai.getCurrentBestMoveInt();
-                if (bm != null && bm != -1) {
-                    engine.performMove(bm);
-                    output.accept("bestmove " + toUci(bm));
+                if (startedInPonder && !ponderShouldOutputMove) {
+                    output.accept("bestmove 0000");
                 } else {
-                    MoveList legal = engine.getAllLegalMoves();
-                    if (legal.size() > 0) {
-                        int move = legal.getMove(0);
-                        engine.performMove(move);
-                        output.accept("bestmove " + toUci(move));
+                    if (bm != null && bm != -1) {
+                        engine.performMove(bm);
+                        output.accept("bestmove " + toUci(bm));
                     } else {
-                        output.accept("bestmove (none)");
+                        MoveList legal = engine.getAllLegalMoves();
+                        if (legal.size() > 0) {
+                            int move = legal.getMove(0);
+                            engine.performMove(move);
+                            output.accept("bestmove " + toUci(move));
+                        } else {
+                            output.accept("bestmove (none)");
+                        }
                     }
                 }
                 ai.stopCalculation();
                 UciHandler.this.searchThread = null;
+                ponderActive = false;
+                ponderShouldOutputMove = false;
             }
         });
         searchThread.start();
@@ -360,6 +377,16 @@ public class UciHandler {
             if (!runningThread.isAlive() || runningThread == Thread.currentThread()) {
                 searchThread = null;
             }
+        }
+        if (searchThread == null) {
+            ponderActive = false;
+            ponderShouldOutputMove = false;
+        }
+    }
+
+    private void ponderHit() {
+        if (ponderActive) {
+            ponderShouldOutputMove = true;
         }
     }
 
