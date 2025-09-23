@@ -100,6 +100,8 @@ public class AI {
     private static final int SEE_CACHE_MASK = 1024 - 1; // power of two
     private final ThreadLocal<int[]> seeCacheKeys = ThreadLocal.withInitial(() -> new int[SEE_CACHE_MASK + 1]);
     private final ThreadLocal<int[]> seeCacheVals = ThreadLocal.withInitial(() -> new int[SEE_CACHE_MASK + 1]);
+    private final ThreadLocal<int[]> seeCacheGenerations = ThreadLocal.withInitial(() -> new int[SEE_CACHE_MASK + 1]);
+    private final ThreadLocal<int[]> seeCacheGenerationCounters = ThreadLocal.withInitial(() -> new int[]{0});
 
 
     /**
@@ -2052,7 +2054,14 @@ public class AI {
                                    Engine simulatorEngine) {
         final int[] seeKeys = seeCacheKeys.get();
         final int[] seeVals = seeCacheVals.get();
-        Arrays.fill(seeKeys, 0); // 0 = empty
+        final int[] seeGenerations = seeCacheGenerations.get();
+        final int[] generationHolder = seeCacheGenerationCounters.get();
+        int generation = generationHolder[0] + 1;
+        if (generation == 0) {
+            Arrays.fill(seeGenerations, 0);
+            generation = 1;
+        }
+        generationHolder[0] = generation;
         final int size = moves.size();
         final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
@@ -2118,12 +2127,13 @@ public class AI {
                 if (slot == 0) {
                     slot = 1;
                 }
-                if (seeKeys[slot] == moveInt) {
+                if (seeGenerations[slot] == generation && seeKeys[slot] == moveInt) {
                     seeValue = seeVals[slot];
                 } else {
                     seeValue = simulatorEngine.see(moveInt);
                     seeKeys[slot] = moveInt;
                     seeVals[slot] = seeValue;
+                    seeGenerations[slot] = generation;
                 }
                 hasSee = true;
             }
