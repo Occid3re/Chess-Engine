@@ -102,6 +102,13 @@ public class AI {
     private final ThreadLocal<int[]> seeCacheKeys = ThreadLocal.withInitial(() -> new int[SEE_CACHE_MASK + 1]);
     private final ThreadLocal<int[]> seeCacheVals = ThreadLocal.withInitial(() -> new int[SEE_CACHE_MASK + 1]);
 
+    private static final int LMR_MAX_DEPTH = 64;
+    private static final int LMR_MAX_INDEX = 220;
+    private static final int LMR_HISTORY_MAX = 4000;
+    private static final byte[] LMR_BASE;
+
+    private static final int[] MVV_LVA = new int[256];
+
 
     /**
      * Fixed-size transposition table. Uses a non-atomic implementation when running
@@ -145,14 +152,32 @@ public class AI {
 
     private final ThreadLocal<SortBuffers> sortBuffers =
             ThreadLocal.withInitial(() -> new SortBuffers(MAX_MOVE_LIST_SIZE));
-    private final ThreadLocal<Map<Integer, Integer>> seeCacheThreadLocal =
-            ThreadLocal.withInitial(() -> new HashMap<>(64));
-
     private static final int HISTORY_BUCKETS = 5;
 
     static {
         if (HISTORY_BUCKETS < 1) {
             throw new IllegalStateException("History bucket count must be positive");
+        }
+
+        LMR_BASE = new byte[(LMR_MAX_DEPTH + 1) * (LMR_MAX_INDEX + 1)];
+        for (int d = 0; d <= LMR_MAX_DEPTH; d++) {
+            double depthFactor = (d <= 0) ? 0.0 : ((double) d / (double) (d + 3));
+            for (int m = 0; m <= LMR_MAX_INDEX; m++) {
+                double late = (m <= 0) ? 0.0 : ((double) m / (double) (m + 2));
+                double base = 0.35 * (1.0 + 1.8 * depthFactor) * (1.0 + 3.0 * late) - 0.9;
+                int r = (int) Math.floor(base);
+                if (r < 0) r = 0;
+                if (r > 6) r = 6;
+                LMR_BASE[d * (LMR_MAX_INDEX + 1) + m] = (byte) r;
+            }
+        }
+
+        for (int a = 0; a < 16; a++) {
+            for (int v = 0; v < 16; v++) {
+                int attackerVal = Score.getPieceValue(a);
+                int victimVal = Score.getPieceValue(v);
+                MVV_LVA[(a << 8) | v] = victimVal - attackerVal;
+            }
         }
 
     }
@@ -1463,41 +1488,40 @@ public class AI {
     }
 
     private int computeNullMoveReduction(BitBoard board, int depth, boolean isWhite, int mobility) {
-        int maxReduction = depth - 2;
-        if (maxReduction <= 0) {
+        int maxR = depth - 2;
+        if (maxR <= 0) {
             return 0;
         }
 
         long pieces = isWhite ? board.getWhitePieces() : board.getBlackPieces();
         long pawns = isWhite ? board.getWhitePawns() : board.getBlackPawns();
-        int nonPawnMaterial = Long.bitCount(pieces) - Long.bitCount(pawns);
-        if (nonPawnMaterial < 0) {
-            nonPawnMaterial = 0;
+        int nonPawn = Long.bitCount(pieces) - Long.bitCount(pawns);
+        if (nonPawn < 0) {
+            nonPawn = 0;
         }
 
-        double reductionEstimate = getReductionEstimate(depth, mobility, nonPawnMaterial);
-
-        int reduction = (int) Math.floor(Math.max(0.0, reductionEstimate));
-        return Math.min(reduction, maxReduction);
-    }
-
-    private static double getReductionEstimate(int depth, int mobility, int nonPawnMaterial) {
-        double depthFactor = Math.min(depth, 10) / 10.0;
-        double materialFactor = Math.min(nonPawnMaterial, 12) / 12.0;
-        double mobilityFactor = Math.min(Math.max(mobility, 0), 30) / 30.0;
-
-        double reductionEstimate = 1.25
-                + (depthFactor * 1.5)
-                + (materialFactor * 0.75)
-                + (mobilityFactor * 0.5);
-
-        if (nonPawnMaterial <= 2 || mobility <= 4) {
-            reductionEstimate -= 0.75;
+        int r = 2;
+        if (depth >= 6) {
+            r++;
         }
-        if (mobility <= 2) {
-            reductionEstimate -= 0.5;
+        if (nonPawn >= 5) {
+            r++;
         }
-        return reductionEstimate;
+        if (mobility >= 12) {
+            r++;
+        }
+
+        if (nonPawn <= 2 || mobility <= 4) {
+            r--;
+        }
+
+        if (r < 1) {
+            r = 1;
+        }
+        if (r > maxR) {
+            r = maxR;
+        }
+        return r;
     }
 
     private int countPawnsOnFile(BitBoard board, long fileMask) {
@@ -1517,29 +1541,37 @@ public class AI {
         return pawnsAfter < pawnsBefore;
     }
 
-    /**
-     * LMR reduction: larger for deeper plies and later moves; tuned to be safe.
-     */
-    private static final int LMR_HISTORY_MAX = 4000;
-
-    // Tuned to give you ~1–3 plies reduction for late, quiet moves at depth 6–12.
     private int lmrReduction(int depth, int moveIndex, int historyScore) {
-        if (depth <= 2) return 0;
+        if (depth <= 2) {
+            return 0;
+        }
 
-        // Base from depth and lateness
-        double d = Math.log1p(depth);             // 1.. ~2.6
-        double m = Math.log1p(moveIndex + 1);     // 0.. ~5.0 for very late moves
-        double base = 0.35 * d * m;               // gentle scale
+        int m = moveIndex;
+        if (m < 0) {
+            m = 0;
+        } else if (m > LMR_MAX_INDEX) {
+            m = LMR_MAX_INDEX;
+        }
 
-        // History cuts reduction (good history => reduce less)
-        int h = Math.max(0, Math.min(historyScore, LMR_HISTORY_MAX));
-        double hist = (LMR_HISTORY_MAX == 0) ? 0.0 : (double) h / LMR_HISTORY_MAX;
-        double penalty = 0.8 * hist;              // up to -0.8 ply
+        int cappedDepth = Math.min(depth, LMR_MAX_DEPTH);
+        int base = LMR_BASE[cappedDepth * (LMR_MAX_INDEX + 1) + m] & 0xFF;
 
-        int r = (int) Math.floor(base - penalty);
+        int h = historyScore;
+        if (h < 0) {
+            h = 0;
+        } else if (h > LMR_HISTORY_MAX) {
+            h = LMR_HISTORY_MAX;
+        }
+        int divisor = (LMR_HISTORY_MAX == 0) ? 1 : LMR_HISTORY_MAX;
+        int histPenalty = h / divisor;
+        int r = base - histPenalty;
 
-        if (r < 1) r = 1;
-        if (r > depth - 1) r = depth - 1;
+        if (r < 1) {
+            r = 1;
+        }
+        if (r > depth - 1) {
+            r = depth - 1;
+        }
         return r;
     }
 
@@ -1571,8 +1603,9 @@ public class AI {
         final int[][] historyTable = heuristics.history;
 
         MoveList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
-        seeCache.clear();
+        final int[] seeKeys = seeCacheKeys.get();
+        final int[] seeVals = seeCacheVals.get();
+        Arrays.fill(seeKeys, 0);
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (abortRequested(deadline)) {
                 return EXIT_FLAG;
@@ -1595,7 +1628,7 @@ public class AI {
             // SEE pruning for losing captures/quiets (keep checks/promotions)
             boolean seePruneCandidate = (!inCheckAtNode && isCapture && !isPromotion) || isQuiet;
             if (seePruneCandidate) {
-                seeGain = seeCache.computeIfAbsent(move, simulatorEngine::see);
+                seeGain = fastSeeLookup(simulatorEngine, move, seeKeys, seeVals);
                 seeEvaluated = true;
                 if (seeGain < 0) {
                     simulatorEngine.performMove(move);
@@ -1795,8 +1828,9 @@ public class AI {
         final int[][] historyTable = heuristics.history;
 
         MoveList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
-        seeCache.clear();
+        final int[] seeKeys = seeCacheKeys.get();
+        final int[] seeVals = seeCacheVals.get();
+        Arrays.fill(seeKeys, 0);
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
                 return EXIT_FLAG;
@@ -1819,7 +1853,7 @@ public class AI {
 
             boolean seePruneCandidate = (!inCheckAtNode && isCapture && !isPromotion) || isQuiet;
             if (seePruneCandidate) {
-                seeGain = seeCache.computeIfAbsent(move, simulatorEngine::see);
+                seeGain = fastSeeLookup(simulatorEngine, move, seeKeys, seeVals);
                 seeEvaluated = true;
                 if (seeGain < 0) {
                     simulatorEngine.performMove(move);
@@ -2005,6 +2039,38 @@ public class AI {
     }
 
 
+    private int fastSeeLookup(Engine e, int move, int[] keys, int[] vals) {
+        int mask = SEE_CACHE_MASK;
+        int slot = (int) (Integer.toUnsignedLong(move) * 0x9E3779B9L);
+        slot &= mask;
+        if (slot == 0) {
+            slot = 1;
+        }
+
+        for (int i = 0; i < 4; i++) {
+            int k = keys[slot];
+            if (k == move) {
+                return vals[slot];
+            }
+            if (k == 0) {
+                int v = e.see(move);
+                keys[slot] = move;
+                vals[slot] = v;
+                return v;
+            }
+            slot = (slot + 1) & mask;
+            if (slot == 0) {
+                slot = 1;
+            }
+        }
+
+        int v = e.see(move);
+        keys[slot] = move;
+        vals[slot] = v;
+        return v;
+    }
+
+
     /**
      * Orders moves using a combination of transposition-table hints, promotions,
      * SEE-aware capture sorting, killer moves and history heuristics. Static
@@ -2020,8 +2086,6 @@ public class AI {
         final int[] seeVals = seeCacheVals.get();
         Arrays.fill(seeKeys, 0); // 0 = empty
         final int size = moves.size();
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
-        seeCache.clear();
 
         if (size == 0) {
             return moves;
@@ -2079,18 +2143,7 @@ public class AI {
             int seeValue = 0;
             boolean hasSee = false;
             if (isCapture) {
-                int slot = (int) (Integer.toUnsignedLong(moveInt) * 2654435761L);
-                slot &= SEE_CACHE_MASK;
-                if (slot == 0) {
-                    slot = 1;
-                }
-                if (seeKeys[slot] == moveInt) {
-                    seeValue = seeVals[slot];
-                } else {
-                    seeValue = simulatorEngine.see(moveInt);
-                    seeKeys[slot] = moveInt;
-                    seeVals[slot] = seeValue;
-                }
+                seeValue = fastSeeLookup(simulatorEngine, moveInt, seeKeys, seeVals);
                 hasSee = true;
             }
             int category;
@@ -2378,11 +2431,11 @@ public class AI {
 
     private int calculateMvvLvaScore(int move) {
         if (!MoveHelper.isCapture(move)) {
-            return 0; // Not a capture move
+            return 0;
         }
-        int victimValue = Score.getPieceValue(MoveHelper.deriveCapturedPieceTypeBits(move));
-        int attackerValue = Score.getPieceValue(MoveHelper.derivePieceTypeBits(move));
-        return victimValue - attackerValue;
+        int victim = MoveHelper.deriveCapturedPieceTypeBits(move) & 0xF;
+        int attacker = MoveHelper.derivePieceTypeBits(move) & 0xF;
+        return MVV_LVA[(attacker << 8) | victim];
     }
 
     private static final class Heuristics {
