@@ -174,12 +174,19 @@ public class AI {
 
         for (int a = 0; a < 16; a++) {
             for (int v = 0; v < 16; v++) {
-                int attackerVal = Score.getPieceValue(a);
-                int victimVal = Score.getPieceValue(v);
+                int attackerVal = mvvLvaPieceValue(a);
+                int victimVal = mvvLvaPieceValue(v);
                 MVV_LVA[(a << 8) | v] = victimVal - attackerVal;
             }
         }
 
+    }
+
+    private static int mvvLvaPieceValue(int pieceTypeBits) {
+        if (pieceTypeBits <= 0 || pieceTypeBits > 6) {
+            return 0;
+        }
+        return Score.getPieceValue(pieceTypeBits);
     }
 
     private ScheduledExecutorService scheduler;
