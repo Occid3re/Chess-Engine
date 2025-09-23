@@ -948,6 +948,15 @@ public class BitBoard {
         }
     }
 
+    private void refreshAttackMapsIfDirty() {
+        if (whiteAttackDirty) {
+            recomputeWhiteAttackMap();
+        }
+        if (blackAttackDirty) {
+            recomputeBlackAttackMap();
+        }
+    }
+
     private long computeAttacksForPiece(PieceType pieceType, int square, boolean colorWhite) {
         if (pieceType == null) {
             return 0L;
@@ -1522,6 +1531,7 @@ public class BitBoard {
         List<SliderUpdate> sliderUpdates = new ArrayList<>();
 
         if (!requiresFullRebuild) {
+            refreshAttackMapsIfDirty();
             applyAttackDelta(isWhite, computeAttacksForPiece(movingPiece, fromIndex, isWhite), -1);
 
             if (isCapture && capturedPieceType != null) {
@@ -1745,6 +1755,7 @@ public class BitBoard {
             whiteAttackDirty = true;
             blackAttackDirty = true;
         } else {
+            refreshAttackMapsIfDirty();
             PieceType finalPiece = pieceBoard[toIndex];
             applyAttackDelta(isWhite, computeAttacksForPiece(finalPiece, toIndex, isWhite), 1);
             for (SliderUpdate update : sliderUpdates) {
@@ -1974,6 +1985,7 @@ public class BitBoard {
         List<SliderUpdate> sliderUpdates = new ArrayList<>();
 
         if (!requiresFullRebuild) {
+            refreshAttackMapsIfDirty();
             applyAttackDelta(isWhite, computeAttacksForPiece(toPiece, toIndex, isWhite), -1);
 
             long impactedMask = collectSliderImpacts(fromIndex) | collectSliderImpacts(toIndex);
@@ -2044,6 +2056,7 @@ public class BitBoard {
             whiteAttackDirty = true;
             blackAttackDirty = true;
         } else {
+            refreshAttackMapsIfDirty();
             PieceType restoredPiece = pieceBoard[fromIndex];
             applyAttackDelta(isWhite, computeAttacksForPiece(restoredPiece, fromIndex, isWhite), 1);
 
