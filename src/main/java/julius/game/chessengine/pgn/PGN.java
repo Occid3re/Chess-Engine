@@ -1,5 +1,10 @@
 package julius.game.chessengine.pgn;
 
+import lombok.Getter;
+import lombok.Setter;
+
+@Setter
+@Getter
 public class PGN {
     private String pgn;
 
@@ -8,14 +13,6 @@ public class PGN {
     }
 
     public PGN(String pgn) {
-        this.pgn = pgn;
-    }
-
-    public String getPgn() {
-        return pgn;
-    }
-
-    public void setPgn(String pgn) {
         this.pgn = pgn;
     }
 
