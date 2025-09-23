@@ -22,8 +22,6 @@ public final class SearchTask {
     private final AtomicReference<BestMoveDepth> best;
     private final AtomicInteger iterationDepth = new AtomicInteger(0);
     private final SearchInstrumentation instrumentation;
-    private static final double SCORE_EPSILON = 1e-3;
-
     SearchTask(long id, long boardHash, boolean whiteToMove, long deadline, int threadCount) {
         this(id, boardHash, whiteToMove, deadline, threadCount, SearchInstrumentation.disabled());
     }
@@ -82,7 +80,7 @@ public final class SearchTask {
 
     /**
      * Called by a worker after finishing an ID iteration at some depth.
-     * If it's better (or equal score but deeper), publish it.
+     * If it's better (or comes from a deeper iteration), publish it.
      * Returns true if best was updated.
      */
     boolean publishBest(MoveAndScore ms, int depth  /*not used; kept for API compatibility*/) {
@@ -91,9 +89,11 @@ public final class SearchTask {
         while (true) {
             BestMoveDepth cur = best.get();
             boolean betterScore = isBetterScore(whiteToMove, ms.score, cur.score());
-            boolean scoresApproximatelyEqual = Math.abs(ms.score - cur.score()) <= SCORE_EPSILON;
-            boolean deeperTie = scoresApproximatelyEqual && depth > cur.depth();
-            if (!betterScore && !deeperTie ) return false;
+            boolean deeper = depth > cur.depth();
+
+            if (!betterScore && !deeper) {
+                return false;
+            }
 
             BestMoveDepth next = new BestMoveDepth(ms.move, ms.score, depth);
             if (best.compareAndSet(cur, next)) {
