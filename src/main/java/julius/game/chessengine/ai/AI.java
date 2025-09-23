@@ -9,7 +9,6 @@ import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.utils.Score;
 import lombok.Getter;
-import lombok.Setter;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Component;
 
@@ -186,8 +185,9 @@ public class AI {
     private int maxDepth = 64; // Adjust the level of depth according to your requirements
 
     @Getter
-    @Setter
     private long timeLimit; // milliseconds
+
+    public static final long INFINITE_TIME_LIMIT = Long.MAX_VALUE;
 
     private final boolean useNullMovePruning = Boolean.parseBoolean(
             System.getProperty("chessengine.nullMove", "true")
@@ -335,6 +335,19 @@ public class AI {
         }
         threadHeuristics.get().ensureCapacity(requestedDepth);
         this.maxDepth = requestedDepth;
+    }
+
+
+    public void setTimeLimit(long timeLimitMillis) {
+        if (timeLimitMillis <= 0L) {
+            this.timeLimit = INFINITE_TIME_LIMIT;
+            return;
+        }
+        if (timeLimitMillis >= INFINITE_TIME_LIMIT) {
+            this.timeLimit = INFINITE_TIME_LIMIT;
+            return;
+        }
+        this.timeLimit = timeLimitMillis;
     }
 
 
@@ -751,12 +764,33 @@ public class AI {
     }
 
 
+    private long computeDeadlineNanos() {
+        if (timeLimit >= INFINITE_TIME_LIMIT) {
+            return Long.MAX_VALUE;
+        }
+        long millis = timeLimit;
+        if (millis <= 0L) {
+            return Long.MAX_VALUE;
+        }
+        long nanos;
+        try {
+            nanos = Math.multiplyExact(millis, 1_000_000L);
+        } catch (ArithmeticException ex) {
+            return Long.MAX_VALUE;
+        }
+        long now = System.nanoTime();
+        if (nanos > 0L && now > Long.MAX_VALUE - nanos) {
+            return Long.MAX_VALUE;
+        }
+        return now + nanos;
+    }
+
     private void performCalculation() {
         try {
             Engine simulatorEngine = mainEngine.createSimulation();
             long boardStateHash = simulatorEngine.getBoardStateHash();
             boolean isWhite = simulatorEngine.whitesTurn();
-            long deadline = System.nanoTime() + timeLimit * 1_000_000;
+            long deadline = computeDeadlineNanos();
             beforeCalculationBoardState = boardStateHash;
 
             int bookMove = mainEngine.getOpeningBook().getRandomMoveForBoardStateHash(boardStateHash);
