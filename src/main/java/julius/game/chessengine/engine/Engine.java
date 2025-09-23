@@ -2,7 +2,6 @@ package julius.game.chessengine.engine;
 
 import julius.game.chessengine.ai.OpeningBook;
 import julius.game.chessengine.board.*;
-import julius.game.chessengine.cache.TimedLRUCache;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.utils.Color;
 import lombok.Getter;
@@ -17,100 +16,6 @@ import static julius.game.chessengine.board.MoveHelper.convertIndexToString;
 @Service
 @Log4j2
 public class Engine {
-
-    /*
-         * Adaptive cache configuration
-         * ---------------------------
-         * By default we:
-         *  - Allocate ~8% of max heap (min 64MB) for the legal-moves cache.
-         *  - Assume ~256 bytes per entry (heuristic), clamped between 50k and 500k entries.
-         *  - Use a long TTL (24h). Legal move lists for a board state don't "age" by wall-clock,
-         *    so eviction should primarily be LRU. You can disable time expiry by setting TTL <= 0.
-         *
-         * Overrides (priority: System Property > Env Var > Heuristic):
-         *  - chess.cache.maxSize (int)
-         *  - chess.cache.maxAgeMs (long)
-         *  - CHESS_CACHE_MAX_SIZE (int)
-         *  - CHESS_CACHE_MAX_AGE_MS (long)
-         *
-         * This makes it easy to run multiple app versions with different cache sizing.
-         */
-        private record CacheConfig(int maxSize, int maxAgeMs) {
-    }
-
-    private static CacheConfig computeCacheConfig() {
-        // Heuristic baseline
-        long maxHeap = Runtime.getRuntime().maxMemory();          // bytes
-        long budget  = Math.max(64L << 20, (maxHeap * 8) / 100);  // >=64MB or 8% of heap
-        long estimatedBytesPerEntry = 256;                        // adjust if profiling suggests otherwise
-
-        long computedSize = Math.max(1, budget / estimatedBytesPerEntry);
-        int heuristicMaxSize = (int) computedSize;
-        int heuristicMaxAgeMs = 86_400_000; // 24h; set <=0 to disable time expiry
-
-        // Overrides via System Properties
-        Integer sysMaxSize = getIntSysProp();
-        Long sysMaxAgeMs   = getLongSysProp();
-
-        // Fallback to environment variables if system properties absent
-        Integer envMaxSize = (sysMaxSize == null) ? getIntEnv() : null;
-        Long envMaxAgeMs   = (sysMaxAgeMs == null) ? getLongEnv() : null;
-
-        int maxSize = (sysMaxSize != null)
-                ? sysMaxSize
-                : (envMaxSize != null)
-                ? envMaxSize
-                : heuristicMaxSize;
-        long maxAge = (sysMaxAgeMs != null)
-                ? sysMaxAgeMs
-                : (envMaxAgeMs != null)
-                ? envMaxAgeMs
-                : (long) heuristicMaxAgeMs;
-
-        // Defensive clamps
-        if (maxSize <= 0) maxSize = heuristicMaxSize;
-        // maxAge can be <=0 to mean "no time-based expiry"
-
-        if (log.isInfoEnabled()) {
-            log.info("LegalMovesCache config -> maxSize={}, maxAgeMs={} (heap={}, budget~{}MB, heuristicSize={})",
-                    maxSize, maxAge, maxHeap, budget >> 20, heuristicMaxSize);
-        }
-        return new CacheConfig(maxSize, (int) Math.min(Integer.MAX_VALUE, Math.max(Integer.MIN_VALUE, maxAge)));
-    }
-
-    private static Integer getIntSysProp() {
-        String v = System.getProperty("chess.cache.maxSize");
-        return parseInt(v);
-    }
-
-    private static Long getLongSysProp() {
-        String v = System.getProperty("chess.cache.maxAgeMs");
-        return parseLong(v);
-    }
-
-    private static Integer getIntEnv() {
-        String v = System.getenv("CHESS_CACHE_MAX_SIZE");
-        return parseInt(v);
-    }
-
-    private static Long getLongEnv() {
-        String v = System.getenv("CHESS_CACHE_MAX_AGE_MS");
-        return parseLong(v);
-    }
-
-    private static Integer parseInt(String v) {
-        if (v == null || v.isEmpty()) return null;
-        try { return Integer.parseInt(v.trim()); } catch (NumberFormatException ignored) { return null; }
-    }
-
-    private static Long parseLong(String v) {
-        if (v == null || v.isEmpty()) return null;
-        try { return Long.parseLong(v.trim()); } catch (NumberFormatException ignored) { return null; }
-    }
-
-    // --- Cache instance based on computed configuration ---
-    private static final CacheConfig CACHE_CFG = computeCacheConfig();
-    private TimedLRUCache<MoveList> legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
 
     private final Object boardLock = new Object();
 
@@ -142,16 +47,9 @@ public class Engine {
             this.line = new ArrayList<>(other.line);
             this.redoLine = new ArrayList<>(other.redoLine);
 
-            // ❌ heavy: cloning the current legal list and cache
-            // this.legalMoves = other.legalMoves == null ? null : new MoveList(other.legalMoves);
-            // this.legalMovesNeedUpdate = other.legalMovesNeedUpdate;
-            // this.legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
-            // other.legalMovesCache.forEach((k, v) -> this.legalMovesCache.put(k, new MoveList(v)));
-
             // ✅ light: fresh empty state for the clone; compute lazily when needed
             this.legalMoves = null;
             this.legalMovesNeedUpdate = true;
-            this.legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
 
             this.openingBook = other.openingBook;
             LongConsumer callback = other.onPositionChanged;
@@ -257,25 +155,12 @@ public class Engine {
             line = new ArrayList<>();
             redoLine = new ArrayList<>();
             this.openingBook = OpeningBook.getInstance();
-            legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
-            // Optional: one cleanup to ensure fresh state
-            legalMovesCache.cleanup();
             notifyPositionChanged();
         }
     }
 
     private void generateLegalMoves() {
         synchronized (boardLock) {
-            final long boardStateHash = getBoardStateHash();
-
-            // Use cached result if available
-            MoveList cached = legalMovesCache.get(boardStateHash);
-            if (cached != null) {
-                this.legalMoves = new MoveList(cached);
-                legalMovesNeedUpdate = false;
-                return;
-            }
-
             if (gameState.isGameOver()) {
                 this.legalMoves = new MoveList();
                 legalMovesNeedUpdate = false;
@@ -300,15 +185,6 @@ public class Engine {
 
             this.legalMoves = legal;
             legalMovesNeedUpdate = false;
-            // Store a clone to keep the cache immutable from callers' perspective.
-            legalMovesCache.put(boardStateHash, new MoveList(legal));
-
-            int size = legalMovesCache.size();
-            if (size > CACHE_CFG.maxSize) {
-                // This should be rare due to eviction, but keep the guard to surface misconfigurations.
-                throw new RuntimeException(String.format(
-                        "LegalMovesCache size %s is larger than configured MAX_SIZE %s", size, CACHE_CFG.maxSize));
-            }
         }
     }
 
