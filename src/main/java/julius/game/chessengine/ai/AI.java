@@ -949,9 +949,16 @@ public class AI {
     private boolean abortRequested(long deadline) {
         if (Thread.currentThread().isInterrupted()) return true;
         if (System.nanoTime() > deadline) return true;
-        if (positionChanged()) return true;
+
         SearchTask t = threadSearchTask.get();
-        return t != null && t.isStopRequested();
+        if (t == null) {
+            // When no worker task is active (e.g. direct test invocations) there is no
+            // ongoing monitored position, so ignore stale-board checks.
+            return false;
+        }
+
+        if (positionChanged()) return true;
+        return t.isStopRequested();
     }
 
     private SearchInstrumentation instrumentation() {
