@@ -9,9 +9,8 @@ import julius.game.chessengine.utils.Color;
 import julius.game.chessengine.board.MoveHelper;
 
 import julius.game.chessengine.utils.Score;
-import lombok.AccessLevel;
-import lombok.Getter;
-import lombok.extern.log4j.Log4j2;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayDeque;
 import java.util.Arrays;
@@ -23,9 +22,9 @@ import static julius.game.chessengine.helper.BitHelper.*;
 import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
 import static julius.game.chessengine.helper.KnightHelper.knightMoveTable;
 
-@Log4j2
-@Getter
 public class BitBoard {
+
+    private static final Logger log = LogManager.getLogger(BitBoard.class);
 
     private static final PieceType[] PROMOTION_PIECES = {PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT};
 
@@ -64,15 +63,11 @@ public class BitBoard {
     // Reusable buffer for move generation to avoid frequent allocations.
     private final MoveList moveGenerationBuffer = new MoveList();
 
-    @Getter(AccessLevel.NONE)
     private final Deque<Integer> halfmoveHistory = new ArrayDeque<>();
-    @Getter(AccessLevel.NONE)
     private final Deque<Integer> fullmoveHistory = new ArrayDeque<>();
-    @Getter(AccessLevel.NONE)
     private final Deque<Integer> capturedPieceHistory = new ArrayDeque<>();
 
     // This variable needs to be set whenever a move is made
-    @Getter
     private int lastMoveDoubleStepPawnIndex;
 
     // Flags to track if the king and rooks have moved
@@ -2037,6 +2032,130 @@ public class BitBoard {
 
     public long getBoardStateHash() {
         return zKey;
+    }
+
+    public boolean isWhitesTurn() {
+        return whitesTurn;
+    }
+
+    public long getWhitePawns() {
+        return whitePawns;
+    }
+
+    public long getBlackPawns() {
+        return blackPawns;
+    }
+
+    public long getWhiteKnights() {
+        return whiteKnights;
+    }
+
+    public long getBlackKnights() {
+        return blackKnights;
+    }
+
+    public long getWhiteBishops() {
+        return whiteBishops;
+    }
+
+    public long getBlackBishops() {
+        return blackBishops;
+    }
+
+    public long getWhiteRooks() {
+        return whiteRooks;
+    }
+
+    public long getBlackRooks() {
+        return blackRooks;
+    }
+
+    public long getWhiteQueens() {
+        return whiteQueens;
+    }
+
+    public long getBlackQueens() {
+        return blackQueens;
+    }
+
+    public long getWhiteKing() {
+        return whiteKing;
+    }
+
+    public long getBlackKing() {
+        return blackKing;
+    }
+
+    public long getWhitePieces() {
+        return whitePieces;
+    }
+
+    public long getBlackPieces() {
+        return blackPieces;
+    }
+
+    public long getAllPieces() {
+        return allPieces;
+    }
+
+    public int getHalfmoveClock() {
+        return halfmoveClock;
+    }
+
+    public int getFullmoveNumber() {
+        return fullmoveNumber;
+    }
+
+    public int getLastMoveDoubleStepPawnIndex() {
+        return lastMoveDoubleStepPawnIndex;
+    }
+
+    public boolean isWhiteKingMoved() {
+        return whiteKingMoved;
+    }
+
+    public boolean isBlackKingMoved() {
+        return blackKingMoved;
+    }
+
+    public boolean isWhiteRookA1Moved() {
+        return whiteRookA1Moved;
+    }
+
+    public boolean isWhiteRookH1Moved() {
+        return whiteRookH1Moved;
+    }
+
+    public boolean isBlackRookA8Moved() {
+        return blackRookA8Moved;
+    }
+
+    public boolean isBlackRookH8Moved() {
+        return blackRookH8Moved;
+    }
+
+    public boolean isWhiteKingHasCastled() {
+        return whiteKingHasCastled;
+    }
+
+    public boolean isBlackKingHasCastled() {
+        return blackKingHasCastled;
+    }
+
+    public long getWhiteAttackMap() {
+        if (whiteAttackDirty) {
+            whiteAttackMap = computeAttackMap(true);
+            whiteAttackDirty = false;
+        }
+        return whiteAttackMap;
+    }
+
+    public long getBlackAttackMap() {
+        if (blackAttackDirty) {
+            blackAttackMap = computeAttackMap(false);
+            blackAttackDirty = false;
+        }
+        return blackAttackMap;
     }
 
 }

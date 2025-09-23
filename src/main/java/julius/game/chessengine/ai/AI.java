@@ -8,9 +8,8 @@ import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.utils.Score;
-import lombok.Getter;
-import lombok.Setter;
-import lombok.extern.log4j.Log4j2;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.stereotype.Component;
 
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -24,22 +23,20 @@ import static julius.game.chessengine.helper.BitHelper.FileMasks;
 import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
 import static julius.game.chessengine.utils.Score.*;
 
-@Log4j2
 @Component
 public class AI {
 
-    @Getter
+    private static final Logger log = LogManager.getLogger(AI.class);
+
     private final Engine mainEngine;
 
     /**
      * Number of threads used for searching. Defaults to single-threaded search but
      * can be adjusted at runtime via the UCI "Threads" option.
      */
-    @Getter
     private int searchThreads = Integer.getInteger("chessengine.searchThreads", 1);
 
     // number of Lazy SMP workers (≥1)
-    @Getter
     private int lazySmpThreads = Math.max(1, Integer.getInteger("chessengine.lazySmpThreads", 1));
 
     private Thread calculationCoordinator;
@@ -56,7 +53,6 @@ public class AI {
      * implementation does not dynamically resize the table, but the value is
      * tracked so that future improvements can honour it.
      */
-    @Getter
     private int hashSizeMb = 16;
 
     /**
@@ -109,7 +105,6 @@ public class AI {
      */
     private TranspositionTable<TranspositionTableEntry> transpositionTable;
 
-    @Getter
     private int transpositionTableCapacity;
 
     /**
@@ -117,7 +112,6 @@ public class AI {
      */
     private TranspositionTable<CaptureTranspositionTableEntry> captureTranspositionTable;
 
-    @Getter
     private int captureTranspositionTableCapacity;
 
     private static final int NUM_KILLER_MOVES = 2;
@@ -200,27 +194,20 @@ public class AI {
 
     private volatile long bestMoveForHash = -1;
 
-    @Getter
     private List<MoveAndScore> calculatedLine = Collections.synchronizedList(new ArrayList<>());
 
     // Game configuration parameters
 
-    @Getter
     private int maxDepth = 64; // Adjust the level of depth according to your requirements
 
-    @Getter
-    @Setter
     private long timeLimit; // milliseconds
 
     private final boolean useNullMovePruning = Boolean.parseBoolean(
             System.getProperty("chessengine.nullMove", "true")
     );
 
-    @Getter
     private long nodesVisited = 0;
-    @Getter
     private long nullMoveCount = 0;
-    @Getter
     private volatile SearchDiagnostics lastDiagnostics = SearchDiagnostics.EMPTY;
 
     public AI(Engine mainEngine) {
@@ -345,6 +332,58 @@ public class AI {
         }
         threadHeuristics.get().ensureCapacity(requestedDepth);
         this.maxDepth = requestedDepth;
+    }
+
+    public Engine getMainEngine() {
+        return mainEngine;
+    }
+
+    public int getSearchThreads() {
+        return searchThreads;
+    }
+
+    public int getLazySmpThreads() {
+        return lazySmpThreads;
+    }
+
+    public int getHashSizeMb() {
+        return hashSizeMb;
+    }
+
+    public int getTranspositionTableCapacity() {
+        return transpositionTableCapacity;
+    }
+
+    public int getCaptureTranspositionTableCapacity() {
+        return captureTranspositionTableCapacity;
+    }
+
+    public List<MoveAndScore> getCalculatedLine() {
+        return calculatedLine;
+    }
+
+    public int getMaxDepth() {
+        return maxDepth;
+    }
+
+    public long getTimeLimit() {
+        return timeLimit;
+    }
+
+    public void setTimeLimit(long timeLimit) {
+        this.timeLimit = timeLimit;
+    }
+
+    public long getNodesVisited() {
+        return nodesVisited;
+    }
+
+    public long getNullMoveCount() {
+        return nullMoveCount;
+    }
+
+    public SearchDiagnostics getLastDiagnostics() {
+        return lastDiagnostics;
     }
 
 

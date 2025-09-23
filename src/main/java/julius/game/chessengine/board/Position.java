@@ -1,12 +1,7 @@
 package julius.game.chessengine.board;
 
-import lombok.Data;
-import lombok.extern.log4j.Log4j2;
-
 import java.util.List;
 
-@Data
-@Log4j2
 public class Position {
 
     private char x;
@@ -24,6 +19,36 @@ public class Position {
 
     public String toString() {
         return x + String.valueOf(y);
+    }
+
+    public char getX() {
+        return x;
+    }
+
+    public void setX(char x) {
+        this.x = x;
+    }
+
+    public int getY() {
+        return y;
+    }
+
+    public void setY(int y) {
+        this.y = y;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Position position)) return false;
+        return x == position.x && y == position.y;
+    }
+
+    @Override
+    public int hashCode() {
+        int result = (int) x;
+        result = 31 * result + y;
+        return result;
     }
 
 

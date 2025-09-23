@@ -1,17 +1,19 @@
 package julius.game.chessengine.helper;
 
-import lombok.extern.log4j.Log4j2;
-
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import static julius.game.chessengine.helper.BitHelper.FileMasks;
 
-@Log4j2
 public class RookHelper {
+
+    private static final Logger log = LogManager.getLogger(RookHelper.class);
 
     private static final String ROOK_MAGIC_NUMBERS_PATH = "/magic/rook_magic_numbers.txt";
     private static final String ROOK_MAGIC_NUMBERS_PATH_write = "src/main/resources" + ROOK_MAGIC_NUMBERS_PATH;

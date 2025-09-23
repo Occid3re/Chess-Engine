@@ -3,17 +3,38 @@ package julius.game.chessengine.board;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.utils.Color;
-import lombok.Data;
-import lombok.RequiredArgsConstructor;
 
 import java.util.Objects;
 
 import static julius.game.chessengine.board.MoveHelper.convertIndexToString;
 
-@Data
-@RequiredArgsConstructor
 public class FEN {
     private final String renderBoard;
+
+    public FEN(String renderBoard) {
+        this.renderBoard = renderBoard;
+    }
+
+    public String getRenderBoard() {
+        return renderBoard;
+    }
+
+    @Override
+    public String toString() {
+        return renderBoard;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof FEN fen)) return false;
+        return Objects.equals(renderBoard, fen.renderBoard);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(renderBoard);
+    }
 
     public static FEN translateBoardToFEN(BitBoard board, GameState gameState) {
         Objects.requireNonNull(board, "board");

@@ -1,7 +1,5 @@
 package julius.game.chessengine.helper;
 
-import lombok.Getter;
-
 import java.util.Random;
 
 public class ZobristTable {
@@ -13,7 +11,6 @@ public class ZobristTable {
     private static final long[] castlingRightsHash = new long[CASTLING_RIGHTS];
     private static final long[] enPassantSquareHash = new long[SQUARES];
     // Method to get the hash value indicating it's Black's turn
-    @Getter
     private static final long blackTurnHash;
 
     static {
@@ -52,6 +49,10 @@ public class ZobristTable {
     // Method to get the hash value for a specific en passant file
     public static long getEnPassantSquareHash(int squareIndex) {
         return enPassantSquareHash[squareIndex];
+    }
+
+    public static long getBlackTurnHash() {
+        return blackTurnHash;
     }
 
 }

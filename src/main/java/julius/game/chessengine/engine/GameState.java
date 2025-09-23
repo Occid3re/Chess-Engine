@@ -5,17 +5,11 @@ import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.utils.Score;
-import lombok.Data;
-import lombok.Getter;
-import lombok.extern.log4j.Log4j2;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashMap;
 
-
-@Data
-@Log4j2
 public class GameState {
 
     private final Deque<Long> hashHistory = new ArrayDeque<>(256);
@@ -27,9 +21,7 @@ public class GameState {
 
     private Score score;
 
-    @Getter
     private int halfmoveClock = 0;          // resets on pawn move or capture
-    @Getter
     private int fullmoveNumber = 1;
     private long lastZobrist = 0L;          // last committed root hash
 
@@ -192,6 +184,46 @@ public class GameState {
         }
         bitBoard.setHalfmoveClock(halfmoveClock);
         bitBoard.setFullmoveNumber(fullmoveNumber);
+    }
+
+    public GameStateEnum getState() {
+        return state;
+    }
+
+    public void setState(GameStateEnum state) {
+        this.state = state;
+    }
+
+    public Score getScore() {
+        return score;
+    }
+
+    public void setScore(Score score) {
+        this.score = score;
+    }
+
+    public int getHalfmoveClock() {
+        return halfmoveClock;
+    }
+
+    public void setHalfmoveClock(int halfmoveClock) {
+        this.halfmoveClock = halfmoveClock;
+    }
+
+    public int getFullmoveNumber() {
+        return fullmoveNumber;
+    }
+
+    public void setFullmoveNumber(int fullmoveNumber) {
+        this.fullmoveNumber = fullmoveNumber;
+    }
+
+    public Deque<Long> getHashHistory() {
+        return hashHistory;
+    }
+
+    public HashMap<Long, Integer> getRepetition() {
+        return repetition;
     }
 
     @Override

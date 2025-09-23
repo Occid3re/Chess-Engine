@@ -1,10 +1,7 @@
 package julius.game.chessengine.board;
 
-import lombok.extern.log4j.Log4j2;
-
 import java.util.Arrays;
 
-@Log4j2
 public class MoveList {
     private int[] moves;
     private int moveCount;

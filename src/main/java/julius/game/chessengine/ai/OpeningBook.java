@@ -1,7 +1,8 @@
 package julius.game.chessengine.ai;
 
 import julius.game.chessengine.board.Move;
-import lombok.extern.log4j.Log4j2;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.stereotype.Component;
 
 import java.io.*;
@@ -9,12 +10,13 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 @Component
-@Log4j2
 public class OpeningBook {
     private static final String OPENINGS_FILE_PATH = "/opening/openings.txt";
     private final Map<Long, List<Integer>> openings = new HashMap<>();
 
     private static OpeningBook instance;
+
+    private static final Logger log = LogManager.getLogger(OpeningBook.class);
     
     private OpeningBook() {
         loadOpenings();
@@ -41,7 +43,7 @@ public class OpeningBook {
                 }
             }
         } catch (IOException | NullPointerException e) {
-            // Handle exceptions or log errors
+            log.warn("Failed to load opening book: {}", e.getMessage());
         }
     }
 
@@ -60,7 +62,7 @@ public class OpeningBook {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(file, true))) {
             writer.write(move + "," + boardStateHash + "\n");
         } catch (IOException e) {
-            // Handle exceptions or log errors
+            log.warn("Failed to persist opening move {} for hash {}", move, boardStateHash, e);
         }
     }
 

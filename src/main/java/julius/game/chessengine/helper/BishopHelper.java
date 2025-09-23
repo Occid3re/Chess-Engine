@@ -1,15 +1,17 @@
 package julius.game.chessengine.helper;
 
-import lombok.extern.log4j.Log4j2;
-
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
-@Log4j2
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 public class BishopHelper {
+
+    private static final Logger log = LogManager.getLogger(BishopHelper.class);
 
     private static final String BISHOP_MAGIC_NUMBERS_PATH = "/magic/bishop_magic_numbers.txt";
     private static final String BISHOP_MAGIC_NUMBERS_PATH_write = "src/main/resources" + BISHOP_MAGIC_NUMBERS_PATH;

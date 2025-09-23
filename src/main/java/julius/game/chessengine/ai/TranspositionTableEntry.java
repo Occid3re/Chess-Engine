@@ -1,8 +1,5 @@
 package julius.game.chessengine.ai;
 
-import lombok.Getter;
-
-@Getter
 public class TranspositionTableEntry {
     double score;
     int depth;
@@ -14,6 +11,22 @@ public class TranspositionTableEntry {
         this.depth = depth;
         this.nodeType = nodeType;
         this.bestMove = bestMove;
+    }
+
+    public double getScore() {
+        return score;
+    }
+
+    public int getDepth() {
+        return depth;
+    }
+
+    public NodeType getNodeType() {
+        return nodeType;
+    }
+
+    public int getBestMove() {
+        return bestMove;
     }
 
     @Override

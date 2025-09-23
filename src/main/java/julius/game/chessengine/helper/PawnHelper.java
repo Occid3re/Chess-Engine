@@ -1,12 +1,9 @@
 package julius.game.chessengine.helper;
 
-import lombok.extern.log4j.Log4j2;
-
 import static julius.game.chessengine.helper.BitHelper.FileMasks;
 import static julius.game.chessengine.helper.BitHelper.bitIndex;
 import static julius.game.chessengine.helper.BitHelper.fileBitboard;
 
-@Log4j2
 public class PawnHelper {
 
     public final static int[] WHITE_PAWN_MIDGAME_POSITIONAL_VALUES = {

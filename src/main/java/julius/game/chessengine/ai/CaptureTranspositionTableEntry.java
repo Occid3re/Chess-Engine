@@ -1,8 +1,5 @@
 package julius.game.chessengine.ai;
 
-import lombok.Getter;
-
-@Getter
 public class CaptureTranspositionTableEntry {
     double score;
     boolean isWhite;
@@ -10,6 +7,14 @@ public class CaptureTranspositionTableEntry {
     public CaptureTranspositionTableEntry(double score, boolean isWhite) {
         this.score = score;
         this.isWhite = isWhite;
+    }
+
+    public double getScore() {
+        return score;
+    }
+
+    public boolean isWhite() {
+        return isWhite;
     }
 
     @Override

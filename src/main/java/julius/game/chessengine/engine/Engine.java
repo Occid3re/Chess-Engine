@@ -5,8 +5,8 @@ import julius.game.chessengine.board.*;
 import julius.game.chessengine.cache.TimedLRUCache;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.utils.Color;
-import lombok.Getter;
-import lombok.extern.log4j.Log4j2;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -16,7 +16,6 @@ import java.util.stream.Collectors;
 import static julius.game.chessengine.board.MoveHelper.convertIndexToString;
 
 @Service
-@Log4j2
 public class Engine {
 
     /*
@@ -116,17 +115,14 @@ public class Engine {
 
     private final Object boardLock = new Object();
 
-    @Getter
     private OpeningBook openingBook;
 
     private boolean legalMovesNeedUpdate = true;
     private MoveList legalMoves;
 
-    @Getter
     private ArrayList<Integer> line = new ArrayList<>();
     private ArrayList<Integer> redoLine = new ArrayList<>();
     private BitBoard bitBoard = new BitBoard();
-    @Getter
     private GameState gameState = new GameState(bitBoard);
 
     private LongConsumer onPositionChanged = h -> {};
@@ -174,6 +170,18 @@ public class Engine {
 
     public BitBoard getBitBoard() {
         return bitBoard;
+    }
+
+    public OpeningBook getOpeningBook() {
+        return openingBook;
+    }
+
+    public List<Integer> getLine() {
+        return line;
+    }
+
+    public GameState getGameState() {
+        return gameState;
     }
 
     public MoveList getAllLegalMoves() {
@@ -552,3 +560,4 @@ public class Engine {
         }
     }
 }
+    private static final Logger log = LogManager.getLogger(Engine.class);

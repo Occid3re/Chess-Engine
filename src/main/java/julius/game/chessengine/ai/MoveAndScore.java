@@ -1,8 +1,5 @@
 package julius.game.chessengine.ai;
 
-import lombok.Getter;
-
-@Getter
 public class MoveAndScore {
 
     int move;
@@ -11,6 +8,14 @@ public class MoveAndScore {
     MoveAndScore(int move, double score) {
         this.move = move;
         this.score = score;
+    }
+
+    public int getMove() {
+        return move;
+    }
+
+    public double getScore() {
+        return score;
     }
 
 }
