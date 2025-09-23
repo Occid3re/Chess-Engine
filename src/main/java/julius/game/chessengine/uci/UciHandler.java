@@ -135,22 +135,7 @@ public class UciHandler {
         }
     }
 
-    private static class UciOption {
-        final String name;
-        final String type;
-        final String defaultValue;
-        final int min;
-        final int max;
-        final Consumer<String> setter;
-
-        UciOption(String name, String type, String defaultValue, int min, int max, Consumer<String> setter) {
-            this.name = name;
-            this.type = type;
-            this.defaultValue = defaultValue;
-            this.min = min;
-            this.max = max;
-            this.setter = setter;
-        }
+    private record UciOption(String name, String type, String defaultValue, int min, int max, Consumer<String> setter) {
     }
 
     private void newGame() {
@@ -393,8 +378,8 @@ public class UciHandler {
         long nodes = ai.getNodesVisited();
         StringBuilder builder = new StringBuilder("info");
         if (!line.isEmpty()) {
-            builder.append(" depth ").append(Math.max(1, line.size()));
-            builder.append(' ').append(formatScore(line.get(0).getScore()));
+            builder.append(" depth ").append(line.size());
+            builder.append(' ').append(formatScore(line.getFirst().getScore()));
             builder.append(" nodes ").append(nodes);
             String pv = buildPv(line);
             if (!pv.isEmpty()) {
@@ -442,7 +427,7 @@ public class UciHandler {
             if (moveAndScore == null) {
                 continue;
             }
-            if (pv.length() > 0) {
+            if (!pv.isEmpty()) {
                 pv.append(' ');
             }
             pv.append(toUci(moveAndScore.getMove()));

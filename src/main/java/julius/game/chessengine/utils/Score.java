@@ -30,21 +30,20 @@ public class Score {
     public static final int DRAW = 0;
     public static final int KILLER_MOVE_SCORE = 10000;
 
-    private final MaterialModule materialModule = new MaterialModule();
-    private final PawnStructureModule pawnStructureModule = new PawnStructureModule();
-    private final PieceSquareModule pieceSquareModule = new PieceSquareModule();
-    private final ActivityModule activityModule = new ActivityModule();
-    private final BatteryModule batteryModule = new BatteryModule();
-    private final KingSafetyModule kingSafetyModule = new KingSafetyModule();
-    private final ThreatModule threatModule = new ThreatModule();
-
     @JsonIgnore
     private final EvaluationPipeline evaluationPipeline;
     @JsonIgnore
     private EvaluationContext evaluationContext;
 
     public Score() {
+        MaterialModule materialModule = new MaterialModule();
+        PawnStructureModule pawnStructureModule = new PawnStructureModule();
         materialModule.setPawnChangeListener(pawnStructureModule);
+        PieceSquareModule pieceSquareModule = new PieceSquareModule();
+        ActivityModule activityModule = new ActivityModule();
+        BatteryModule batteryModule = new BatteryModule();
+        KingSafetyModule kingSafetyModule = new KingSafetyModule();
+        ThreatModule threatModule = new ThreatModule();
         this.evaluationPipeline = new EvaluationPipeline(List.of(
                 materialModule,
                 pawnStructureModule,
@@ -105,7 +104,7 @@ public class Score {
             return;
         }
 
-        synchronizePipeline(updated, false);
+        synchronizePipeline(updated);
         MoveContext moveContext = new MoveContext(move, previous, updated);
         evaluationPipeline.applyMove(moveContext);
     }
@@ -121,20 +120,14 @@ public class Score {
             return;
         }
 
-        synchronizePipeline(updated, false);
+        synchronizePipeline(updated);
         MoveContext moveContext = new MoveContext(move, previous, updated);
         evaluationPipeline.undoMove(moveContext);
     }
 
     private void synchronizePipeline(EvaluationContext context) {
-        synchronizePipeline(context, true);
-    }
-
-    private void synchronizePipeline(EvaluationContext context, boolean invalidateModules) {
         if (!evaluationPipeline.isInitialized()) {
             evaluationPipeline.initialize(context);
-        } else if (invalidateModules) {
-            evaluationPipeline.updateContext(context);
         } else {
             evaluationPipeline.setContextWithoutInvalidation(context);
         }
@@ -180,13 +173,4 @@ public class Score {
         };
     }
 
-    @JsonIgnore
-    public EvaluationContext getEvaluationContext() {
-        return evaluationContext;
-    }
-
-    @JsonIgnore
-    public EvaluationPipeline getEvaluationPipeline() {
-        return evaluationPipeline;
-    }
 }
