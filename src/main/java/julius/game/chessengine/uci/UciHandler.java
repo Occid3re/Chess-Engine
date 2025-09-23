@@ -35,6 +35,7 @@ public class UciHandler {
     private Thread searchThread;
     private volatile boolean ponderActive = false;
     private volatile boolean ponderShouldOutputMove = false;
+    private volatile long ponderTimeLimitMillis = AI.INFINITE_TIME_LIMIT;
     private final Map<String, UciOption> options = new LinkedHashMap<>();
     private int moveOverheadMs = 0;
     private final AtomicLong lastInfoNanos = new AtomicLong(0L);
@@ -301,8 +302,10 @@ public class UciHandler {
         long limit = computeTimeLimit(timeLeft, inc, movetime, movestogo, moveOverheadMs);
         if (ponder && movetime == 0) {
             ai.setTimeLimit(AI.INFINITE_TIME_LIMIT);
+            ponderTimeLimitMillis = limit;
         } else {
             ai.setTimeLimit(limit);
+            ponderTimeLimitMillis = AI.INFINITE_TIME_LIMIT;
         }
 
         ponderActive = ponder;
@@ -357,6 +360,7 @@ public class UciHandler {
                 UciHandler.this.searchThread = null;
                 ponderActive = false;
                 ponderShouldOutputMove = false;
+                ponderTimeLimitMillis = AI.INFINITE_TIME_LIMIT;
             }
         });
         searchThread.start();
@@ -385,12 +389,17 @@ public class UciHandler {
         if (searchThread == null) {
             ponderActive = false;
             ponderShouldOutputMove = false;
+            ponderTimeLimitMillis = AI.INFINITE_TIME_LIMIT;
         }
     }
 
     private void ponderHit() {
         if (ponderActive) {
             ponderShouldOutputMove = true;
+            long limit = ponderTimeLimitMillis;
+            if (limit > 0 && limit < AI.INFINITE_TIME_LIMIT) {
+                ai.setTimeLimit(limit);
+            }
         }
     }
 
