@@ -33,8 +33,8 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
     public static final int BACKWARD_PAWN_PENALTY = -12;
     public static final int OWN_KING_BLOCKS_PASSED_PAWN_PENALTY = -150;
     public static final int PASSED_PAWN_FREE_PATH_BONUS_PER_RANK = 12;
-    public static final int ROOK_HALF_OPEN_FILE_BONUS = 15;
-    public static final int ROOK_OPEN_FILE_BONUS = 25;
+    public static final int ROOK_HALF_OPEN_FILE_BONUS = 8;
+    public static final int ROOK_OPEN_FILE_BONUS = 12;
 
     private static final int WHITE = 0;
     private static final int BLACK = 1;
