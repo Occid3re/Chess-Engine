@@ -2370,7 +2370,8 @@ public class AI {
 
     private MoveList getPossibleCapturesOrPromotions(Engine simulatorEngine) {
         MoveList allLegalMoves = simulatorEngine.getAllLegalMoves();
-        MoveList capturesAndPromotions = new MoveList();
+        MoveList capturesAndPromotions = sortBuffers.get().captureFilterMoves;
+        capturesAndPromotions.clear();
         for (int i = 0; i < allLegalMoves.size(); i++) {
             int m = allLegalMoves.getMove(i);
             if (MoveHelper.isCapture(m) || MoveHelper.isPawnPromotionMove(m)) {
