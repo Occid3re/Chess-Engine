@@ -132,7 +132,7 @@ public final class ActivityModule implements EvaluationModule {
 
     @Override
     public void initialize(EvaluationContext context) {
-        rebuildFromBoard(context.getBoard());
+        rebuildFromBoard(context.board());
     }
 
     @Override
@@ -140,14 +140,14 @@ public final class ActivityModule implements EvaluationModule {
         if (!dirty) {
             return;
         }
-        rebuildFromBoard(context.getBoard());
+        rebuildFromBoard(context.board());
     }
 
     @Override
     public void applyMove(MoveContext moveContext) {
         boolean forward = isForwardMove(moveContext);
         if (!updateForMove(moveContext.getMove(), forward)) {
-            rebuildFromBoard(moveContext.getCurrentContext().getBoard());
+            rebuildFromBoard(moveContext.getCurrentContext().board());
         }
     }
 
@@ -397,19 +397,19 @@ public final class ActivityModule implements EvaluationModule {
             return;
         }
 
-        registerPieces(board.getWhitePawns(), WHITE, PAWN);
-        registerPieces(board.getWhiteKnights(), WHITE, KNIGHT);
-        registerPieces(board.getWhiteBishops(), WHITE, BISHOP);
-        registerPieces(board.getWhiteRooks(), WHITE, ROOK);
-        registerPieces(board.getWhiteQueens(), WHITE, QUEEN);
-        registerPieces(board.getWhiteKing(), WHITE, KING);
+        registerPieces(board.whitePawns(), WHITE, PAWN);
+        registerPieces(board.whiteKnights(), WHITE, KNIGHT);
+        registerPieces(board.whiteBishops(), WHITE, BISHOP);
+        registerPieces(board.whiteRooks(), WHITE, ROOK);
+        registerPieces(board.whiteQueens(), WHITE, QUEEN);
+        registerPieces(board.whiteKing(), WHITE, KING);
 
-        registerPieces(board.getBlackPawns(), BLACK, PAWN);
-        registerPieces(board.getBlackKnights(), BLACK, KNIGHT);
-        registerPieces(board.getBlackBishops(), BLACK, BISHOP);
-        registerPieces(board.getBlackRooks(), BLACK, ROOK);
-        registerPieces(board.getBlackQueens(), BLACK, QUEEN);
-        registerPieces(board.getBlackKing(), BLACK, KING);
+        registerPieces(board.blackPawns(), BLACK, PAWN);
+        registerPieces(board.blackKnights(), BLACK, KNIGHT);
+        registerPieces(board.blackBishops(), BLACK, BISHOP);
+        registerPieces(board.blackRooks(), BLACK, ROOK);
+        registerPieces(board.blackQueens(), BLACK, QUEEN);
+        registerPieces(board.blackKing(), BLACK, KING);
 
         allPieces = whitePieces | blackPieces;
 
@@ -558,7 +558,7 @@ public final class ActivityModule implements EvaluationModule {
             return true;
         }
         boolean moveIsWhite = MoveHelper.isWhitesMove(moveContext.getMove());
-        return previous.isWhiteToMove() == moveIsWhite;
+        return previous.whiteToMove() == moveIsWhite;
     }
 
     private static final class PieceActivity {

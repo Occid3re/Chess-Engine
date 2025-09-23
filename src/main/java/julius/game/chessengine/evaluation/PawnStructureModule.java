@@ -60,15 +60,15 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
 
     @Override
     public void initialize(EvaluationContext context) {
-        EvaluationContext.BoardView board = Objects.requireNonNull(context, "context").getBoard();
+        EvaluationContext.BoardView board = Objects.requireNonNull(context, "context").board();
         markAllFilesDirty();
-        evaluate(board, context.getWhiteAttackMap(), context.getBlackAttackMap());
+        evaluate(board, context.whiteAttackMap(), context.blackAttackMap());
     }
 
     @Override
     public void evaluate(EvaluationContext context) {
         Objects.requireNonNull(context, "context");
-        evaluate(context.getBoard(), context.getWhiteAttackMap(), context.getBlackAttackMap());
+        evaluate(context.board(), context.whiteAttackMap(), context.blackAttackMap());
     }
 
     public PawnStructureView evaluate(EvaluationContext.BoardView board, long whiteAttacks, long blackAttacks) {
@@ -85,13 +85,13 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
             return currentView;
         }
 
-        long whitePawns = board.getWhitePawns();
-        long blackPawns = board.getBlackPawns();
-        long allPieces = board.getAllPieces();
-        long whiteRooks = board.getWhiteRooks();
-        long blackRooks = board.getBlackRooks();
-        long whiteKing = board.getWhiteKing();
-        long blackKing = board.getBlackKing();
+        long whitePawns = board.whitePawns();
+        long blackPawns = board.blackPawns();
+        long allPieces = board.allPieces();
+        long whiteRooks = board.whiteRooks();
+        long blackRooks = board.blackRooks();
+        long whiteKing = board.whiteKing();
+        long blackKing = board.blackKing();
 
         CachedStructure structure = getStructure(whitePawns, blackPawns);
 
@@ -343,8 +343,8 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         if (!metadataDirty || board == null) {
             return;
         }
-        long whitePawns = board.getWhitePawns();
-        long blackPawns = board.getBlackPawns();
+        long whitePawns = board.whitePawns();
+        long blackPawns = board.blackPawns();
         boolean touched = false;
         for (int file = 0; file < 8; file++) {
             if (!dirtyFiles[file]) {

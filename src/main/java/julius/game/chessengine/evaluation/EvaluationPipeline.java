@@ -103,7 +103,7 @@ public final class EvaluationPipeline {
         if (context == null) {
             return 0;
         }
-        int phase = clamp(context.getPhase());
+        int phase = clamp(context.phase());
         int midgameWeight = BLEND_SCALE - phase;
         int endgameWeight = phase;
         long blended = (long) midgameTotal * midgameWeight + (long) endgameTotal * endgameWeight;
@@ -173,7 +173,7 @@ public final class EvaluationPipeline {
         if (context == null) {
             return 0;
         }
-        GameStateEnum state = context.getGameState();
+        GameStateEnum state = context.gameState();
         if (state == null) {
             return 0;
         }

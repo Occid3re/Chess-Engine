@@ -144,7 +144,7 @@ public final class KingSafetyModule implements EvaluationModule {
             rebuildFromSnapshot(null, 0L, 0L);
             return;
         }
-        rebuildFromSnapshot(context.getBoard(), context.getWhiteAttackMap(), context.getBlackAttackMap());
+        rebuildFromSnapshot(context.board(), context.whiteAttackMap(), context.blackAttackMap());
     }
 
     private void rebuildFromSnapshot(EvaluationContext.BoardView board, long whiteAttacks, long blackAttacks) {
@@ -186,10 +186,10 @@ public final class KingSafetyModule implements EvaluationModule {
         if (previous == null || current == null) {
             return true;
         }
-        long prevEnemyAttacks = side == WHITE ? previous.getBlackAttackMap() : previous.getWhiteAttackMap();
-        long currEnemyAttacks = side == WHITE ? current.getBlackAttackMap() : current.getWhiteAttackMap();
-        long prevFriendlyAttacks = side == WHITE ? previous.getWhiteAttackMap() : previous.getBlackAttackMap();
-        long currFriendlyAttacks = side == WHITE ? current.getWhiteAttackMap() : current.getBlackAttackMap();
+        long prevEnemyAttacks = side == WHITE ? previous.blackAttackMap() : previous.whiteAttackMap();
+        long currEnemyAttacks = side == WHITE ? current.blackAttackMap() : current.whiteAttackMap();
+        long prevFriendlyAttacks = side == WHITE ? previous.whiteAttackMap() : previous.blackAttackMap();
+        long currFriendlyAttacks = side == WHITE ? current.whiteAttackMap() : current.blackAttackMap();
         long zoneDiff = (prevEnemyAttacks ^ currEnemyAttacks) & state.kingZone;
         if (zoneDiff != 0) {
             return true;
@@ -217,10 +217,10 @@ public final class KingSafetyModule implements EvaluationModule {
                 return true;
             }
         }
-        EvaluationContext.BoardView previousBoard = previous.getBoard();
-        EvaluationContext.BoardView currentBoard = current.getBoard();
-        long prevQueens = side == WHITE ? previousBoard.getWhiteQueens() : previousBoard.getBlackQueens();
-        long currQueens = side == WHITE ? currentBoard.getWhiteQueens() : currentBoard.getBlackQueens();
+        EvaluationContext.BoardView previousBoard = previous.board();
+        EvaluationContext.BoardView currentBoard = current.board();
+        long prevQueens = side == WHITE ? previousBoard.whiteQueens() : previousBoard.blackQueens();
+        long currQueens = side == WHITE ? currentBoard.whiteQueens() : currentBoard.blackQueens();
         if (prevQueens != currQueens) {
             return true;
         }
@@ -241,7 +241,7 @@ public final class KingSafetyModule implements EvaluationModule {
     private void rebuildSideState(SideState state, EvaluationContext.BoardView board, boolean isWhite,
                                   long friendlyAttacks, long enemyAttacks) {
         state.reset();
-        long kingBits = isWhite ? board.getWhiteKing() : board.getBlackKing();
+        long kingBits = isWhite ? board.whiteKing() : board.blackKing();
         if (kingBits == 0) {
             return;
         }
@@ -256,8 +256,8 @@ public final class KingSafetyModule implements EvaluationModule {
             state.backrankMask = computeBackrankMask(kingSquare);
         }
 
-        long friendlyPawns = isWhite ? board.getWhitePawns() : board.getBlackPawns();
-        long enemyPawns = isWhite ? board.getBlackPawns() : board.getWhitePawns();
+        long friendlyPawns = isWhite ? board.whitePawns() : board.blackPawns();
+        long enemyPawns = isWhite ? board.blackPawns() : board.whitePawns();
 
         int shieldCount = Long.bitCount(friendlyPawns & state.shieldMask);
         state.missingShield = Math.max(0, 3 - shieldCount);
@@ -269,12 +269,12 @@ public final class KingSafetyModule implements EvaluationModule {
 
         state.defenderCount = Long.bitCount(friendlyAttacks & state.kingZone);
 
-        long allPieces = board.getAllPieces();
-        accumulatePawnAttacks(state, isWhite ? board.getBlackPawns() : board.getWhitePawns(), !isWhite);
-        accumulateKnightAttacks(state, isWhite ? board.getBlackKnights() : board.getWhiteKnights());
-        accumulateBishopAttacks(state, isWhite ? board.getBlackBishops() : board.getWhiteBishops(), allPieces);
-        accumulateRookAttacks(state, isWhite ? board.getBlackRooks() : board.getWhiteRooks(), allPieces);
-        accumulateQueenAttacks(state, isWhite ? board.getBlackQueens() : board.getWhiteQueens(), allPieces);
+        long allPieces = board.allPieces();
+        accumulatePawnAttacks(state, isWhite ? board.blackPawns() : board.whitePawns(), !isWhite);
+        accumulateKnightAttacks(state, isWhite ? board.blackKnights() : board.whiteKnights());
+        accumulateBishopAttacks(state, isWhite ? board.blackBishops() : board.whiteBishops(), allPieces);
+        accumulateRookAttacks(state, isWhite ? board.blackRooks() : board.whiteRooks(), allPieces);
+        accumulateQueenAttacks(state, isWhite ? board.blackQueens() : board.whiteQueens(), allPieces);
 
         int total = 0;
         long zone = state.kingZone;
@@ -293,7 +293,7 @@ public final class KingSafetyModule implements EvaluationModule {
         state.midgameKingSafety = baseMidgame + state.backrankWeaknessMidgame;
         state.endgameKingSafety = baseMidgame / 2 + state.backrankWeaknessEndgame;
 
-        long queens = isWhite ? board.getWhiteQueens() : board.getBlackQueens();
+        long queens = isWhite ? board.whiteQueens() : board.blackQueens();
         int queenMid = 0;
         int queenEnd = 0;
         long remaining = queens;
@@ -322,7 +322,7 @@ public final class KingSafetyModule implements EvaluationModule {
 
         long kingMask = 1L << state.kingSquare;
         long escapeSquares = computeEscapeSquares(kingMask, isWhite);
-        long occupiedEscape = escapeSquares & board.getAllPieces();
+        long occupiedEscape = escapeSquares & board.allPieces();
         if ((escapeSquares & ~occupiedEscape) != 0) {
             return;
         }
@@ -377,9 +377,9 @@ public final class KingSafetyModule implements EvaluationModule {
 
     private long computeFriendlyNonKingAttacks(EvaluationContext.BoardView board, boolean isWhite) {
         long attacks = 0L;
-        long occupancy = board.getAllPieces();
+        long occupancy = board.allPieces();
 
-        long pawns = isWhite ? board.getWhitePawns() : board.getBlackPawns();
+        long pawns = isWhite ? board.whitePawns() : board.blackPawns();
         int pawnColor = isWhite ? WHITE : BLACK;
         long remaining = pawns;
         while (remaining != 0) {
@@ -389,7 +389,7 @@ public final class KingSafetyModule implements EvaluationModule {
             remaining ^= pawn;
         }
 
-        long knights = isWhite ? board.getWhiteKnights() : board.getBlackKnights();
+        long knights = isWhite ? board.whiteKnights() : board.blackKnights();
         remaining = knights;
         while (remaining != 0) {
             long knight = remaining & -remaining;
@@ -398,7 +398,7 @@ public final class KingSafetyModule implements EvaluationModule {
             remaining ^= knight;
         }
 
-        long bishops = isWhite ? board.getWhiteBishops() : board.getBlackBishops();
+        long bishops = isWhite ? board.whiteBishops() : board.blackBishops();
         remaining = bishops;
         while (remaining != 0) {
             long bishop = remaining & -remaining;
@@ -408,7 +408,7 @@ public final class KingSafetyModule implements EvaluationModule {
             remaining ^= bishop;
         }
 
-        long rooks = isWhite ? board.getWhiteRooks() : board.getBlackRooks();
+        long rooks = isWhite ? board.whiteRooks() : board.blackRooks();
         remaining = rooks;
         while (remaining != 0) {
             long rook = remaining & -remaining;
@@ -418,7 +418,7 @@ public final class KingSafetyModule implements EvaluationModule {
             remaining ^= rook;
         }
 
-        long queens = isWhite ? board.getWhiteQueens() : board.getBlackQueens();
+        long queens = isWhite ? board.whiteQueens() : board.blackQueens();
         remaining = queens;
         while (remaining != 0) {
             long queen = remaining & -remaining;

@@ -60,7 +60,7 @@ public final class MaterialModule implements EvaluationModule {
 
     @Override
     public void initialize(EvaluationContext context) {
-        rebuildFromBoard(context.getBoard());
+        rebuildFromBoard(context.board());
     }
 
     @Override
@@ -68,7 +68,7 @@ public final class MaterialModule implements EvaluationModule {
         if (!dirty) {
             return;
         }
-        rebuildFromBoard(context.getBoard());
+        rebuildFromBoard(context.board());
     }
 
     @Override
@@ -113,7 +113,7 @@ public final class MaterialModule implements EvaluationModule {
             return true;
         }
         boolean moveIsWhite = MoveHelper.isWhitesMove(moveContext.getMove());
-        return previous.isWhiteToMove() == moveIsWhite;
+        return previous.whiteToMove() == moveIsWhite;
     }
 
     private void updateMaterial(int move, boolean undo) {
@@ -168,17 +168,17 @@ public final class MaterialModule implements EvaluationModule {
             return;
         }
 
-        accumulatePieces(WHITE, PAWN, Long.bitCount(board.getWhitePawns()));
-        accumulatePieces(WHITE, KNIGHT, Long.bitCount(board.getWhiteKnights()));
-        accumulatePieces(WHITE, BISHOP, Long.bitCount(board.getWhiteBishops()));
-        accumulatePieces(WHITE, ROOK, Long.bitCount(board.getWhiteRooks()));
-        accumulatePieces(WHITE, QUEEN, Long.bitCount(board.getWhiteQueens()));
+        accumulatePieces(WHITE, PAWN, Long.bitCount(board.whitePawns()));
+        accumulatePieces(WHITE, KNIGHT, Long.bitCount(board.whiteKnights()));
+        accumulatePieces(WHITE, BISHOP, Long.bitCount(board.whiteBishops()));
+        accumulatePieces(WHITE, ROOK, Long.bitCount(board.whiteRooks()));
+        accumulatePieces(WHITE, QUEEN, Long.bitCount(board.whiteQueens()));
 
-        accumulatePieces(BLACK, PAWN, Long.bitCount(board.getBlackPawns()));
-        accumulatePieces(BLACK, KNIGHT, Long.bitCount(board.getBlackKnights()));
-        accumulatePieces(BLACK, BISHOP, Long.bitCount(board.getBlackBishops()));
-        accumulatePieces(BLACK, ROOK, Long.bitCount(board.getBlackRooks()));
-        accumulatePieces(BLACK, QUEEN, Long.bitCount(board.getBlackQueens()));
+        accumulatePieces(BLACK, PAWN, Long.bitCount(board.blackPawns()));
+        accumulatePieces(BLACK, KNIGHT, Long.bitCount(board.blackKnights()));
+        accumulatePieces(BLACK, BISHOP, Long.bitCount(board.blackBishops()));
+        accumulatePieces(BLACK, ROOK, Long.bitCount(board.blackRooks()));
+        accumulatePieces(BLACK, QUEEN, Long.bitCount(board.blackQueens()));
 
         updateScoreCaches();
         dirty = false;

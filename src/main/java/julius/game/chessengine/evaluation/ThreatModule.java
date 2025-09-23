@@ -61,7 +61,7 @@ public final class ThreatModule implements EvaluationModule {
             return;
         }
         Objects.requireNonNull(context, "context");
-        EvaluationContext.BoardView board = context.getBoard();
+        EvaluationContext.BoardView board = context.board();
         if (board == null) {
             midgameScoreCache = 0;
             endgameScoreCache = 0;
@@ -69,8 +69,8 @@ public final class ThreatModule implements EvaluationModule {
             return;
         }
 
-        long whiteAttacks = context.getWhiteAttackMap();
-        long blackAttacks = context.getBlackAttackMap();
+        long whiteAttacks = context.whiteAttackMap();
+        long blackAttacks = context.blackAttackMap();
 
         int whitePenalty = evaluateSide(board, true, whiteAttacks, blackAttacks);
         int blackPenalty = evaluateSide(board, false, blackAttacks, whiteAttacks);
@@ -111,8 +111,8 @@ public final class ThreatModule implements EvaluationModule {
     }
 
     private int evaluateSide(EvaluationContext.BoardView board, boolean isWhite, long friendlyAttacks, long enemyAttacks) {
-        long pieces = isWhite ? board.getWhitePieces() : board.getBlackPieces();
-        long enemyPawns = isWhite ? board.getBlackPawns() : board.getWhitePawns();
+        long pieces = isWhite ? board.whitePieces() : board.blackPieces();
+        long enemyPawns = isWhite ? board.blackPawns() : board.whitePawns();
         int enemyPawnColor = isWhite ? BLACK : WHITE;
         long enemyPawnAttacks = computePawnAttackMask(enemyPawns, enemyPawnColor);
 
@@ -182,37 +182,37 @@ public final class ThreatModule implements EvaluationModule {
         long mask = 1L << targetSquare;
         int colorIndex = isWhite ? WHITE : BLACK;
         int minValue = Integer.MAX_VALUE;
-        long occupancy = board.getAllPieces();
+        long occupancy = board.allPieces();
 
-        long pawns = isWhite ? board.getWhitePawns() : board.getBlackPawns();
+        long pawns = isWhite ? board.whitePawns() : board.blackPawns();
         minValue = findCheapestDefender(pawns, MaterialModule.PAWN_VALUE, minValue,
                 square -> (PAWN_ATTACKS[colorIndex][square] & mask) != 0);
         if (minValue == MaterialModule.PAWN_VALUE) {
             return minValue;
         }
 
-        long knights = isWhite ? board.getWhiteKnights() : board.getBlackKnights();
+        long knights = isWhite ? board.whiteKnights() : board.blackKnights();
         minValue = findCheapestDefender(knights, MaterialModule.KNIGHT_VALUE, minValue,
                 square -> (julius.game.chessengine.helper.KnightHelper.knightMoveTable[square] & mask) != 0);
         if (minValue == MaterialModule.PAWN_VALUE) {
             return minValue;
         }
 
-        long bishops = isWhite ? board.getWhiteBishops() : board.getBlackBishops();
+        long bishops = isWhite ? board.whiteBishops() : board.blackBishops();
         minValue = findCheapestDefender(bishops, MaterialModule.BISHOP_VALUE, minValue,
                 square -> (BISHOP_HELPER.calculateBishopMoves(square, occupancy) & mask) != 0);
         if (minValue == MaterialModule.PAWN_VALUE) {
             return minValue;
         }
 
-        long rooks = isWhite ? board.getWhiteRooks() : board.getBlackRooks();
+        long rooks = isWhite ? board.whiteRooks() : board.blackRooks();
         minValue = findCheapestDefender(rooks, MaterialModule.ROOK_VALUE, minValue,
                 square -> (ROOK_HELPER.calculateRookMoves(square, occupancy) & mask) != 0);
         if (minValue == MaterialModule.PAWN_VALUE) {
             return minValue;
         }
 
-        long queens = isWhite ? board.getWhiteQueens() : board.getBlackQueens();
+        long queens = isWhite ? board.whiteQueens() : board.blackQueens();
         minValue = findCheapestDefender(queens, MaterialModule.QUEEN_VALUE, minValue,
                 square -> ((BISHOP_HELPER.calculateBishopMoves(square, occupancy)
                         | ROOK_HELPER.calculateRookMoves(square, occupancy)) & mask) != 0);
@@ -220,7 +220,7 @@ public final class ThreatModule implements EvaluationModule {
             return minValue;
         }
 
-        long king = isWhite ? board.getWhiteKing() : board.getBlackKing();
+        long king = isWhite ? board.whiteKing() : board.blackKing();
         minValue = findCheapestDefender(king, materialValueFor(KING), minValue,
                 square -> (KING_ATTACKS[square] & mask) != 0);
 

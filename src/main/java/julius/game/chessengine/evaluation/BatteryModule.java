@@ -75,13 +75,7 @@ public final class BatteryModule implements EvaluationModule {
             dirty = false;
             return;
         }
-        EvaluationContext.BoardView board = context.getBoard();
-        if (board == null) {
-            midgameScoreCache = 0;
-            endgameScoreCache = 0;
-            dirty = false;
-            return;
-        }
+        EvaluationContext.BoardView board = context.board();
 
         BatteryScore white = evaluateSide(board, true);
         BatteryScore black = evaluateSide(board, false);
@@ -123,17 +117,18 @@ public final class BatteryModule implements EvaluationModule {
 
     private BatteryScore evaluateSide(EvaluationContext.BoardView board, boolean isWhite) {
         BatteryScore score = new BatteryScore();
-        long occupancy = board.getAllPieces();
-        long friendlyPieces = isWhite ? board.getWhitePieces() : board.getBlackPieces();
-        long enemyPieces = isWhite ? board.getBlackPieces() : board.getWhitePieces();
+        long occupancy = board.allPieces();
+        long friendlyPieces = isWhite ? board.whitePieces() : board.blackPieces();
+        long enemyPieces = isWhite ? board.blackPieces() : board.whitePieces();
 
-        long diagonalCandidates = (isWhite ? board.getWhiteBishops() : board.getBlackBishops())
-                | (isWhite ? board.getWhiteQueens() : board.getBlackQueens());
+        long l = isWhite ? board.whiteQueens() : board.blackQueens();
+        long diagonalCandidates = (isWhite ? board.whiteBishops() : board.blackBishops())
+                | l;
         accumulateBatteries(board, diagonalCandidates, DIAGONAL_DIRECTIONS, occupancy,
                 friendlyPieces, enemyPieces, true, score);
 
-        long orthogonalCandidates = (isWhite ? board.getWhiteRooks() : board.getBlackRooks())
-                | (isWhite ? board.getWhiteQueens() : board.getBlackQueens());
+        long orthogonalCandidates = (isWhite ? board.whiteRooks() : board.blackRooks())
+                | l;
         accumulateBatteries(board, orthogonalCandidates, ORTHOGONAL_DIRECTIONS, occupancy,
                 friendlyPieces, enemyPieces, false, score);
 
@@ -230,14 +225,7 @@ public final class BatteryModule implements EvaluationModule {
         return type == PieceType.ROOK || type == PieceType.QUEEN;
     }
 
-    private static final class Direction {
-        private final int rankDelta;
-        private final int fileDelta;
-
-        private Direction(int rankDelta, int fileDelta) {
-            this.rankDelta = rankDelta;
-            this.fileDelta = fileDelta;
-        }
+    private record Direction(int rankDelta, int fileDelta) {
     }
 
     private static final class BatteryScore {

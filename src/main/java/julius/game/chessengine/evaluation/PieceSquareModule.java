@@ -147,10 +147,10 @@ public final class PieceSquareModule implements EvaluationModule {
 
     @Override
     public void initialize(EvaluationContext context) {
-        rebuildFromBoard(context.getBoard());
-        currentPhase = clampPhase(context.getPhase());
+        rebuildFromBoard(context.board());
+        currentPhase = clampPhase(context.phase());
         recalculateDevelopmentContribution();
-        recalculateCastlingContribution(context.getBoard(), currentPhase);
+        recalculateCastlingContribution(context.board(), currentPhase);
         dirty = false;
         initialized = true;
     }
@@ -160,10 +160,10 @@ public final class PieceSquareModule implements EvaluationModule {
         if (!dirty) {
             return;
         }
-        rebuildFromBoard(context.getBoard());
-        currentPhase = clampPhase(context.getPhase());
+        rebuildFromBoard(context.board());
+        currentPhase = clampPhase(context.phase());
         recalculateDevelopmentContribution();
-        recalculateCastlingContribution(context.getBoard(), currentPhase);
+        recalculateCastlingContribution(context.board(), currentPhase);
         dirty = false;
     }
 
@@ -175,9 +175,9 @@ public final class PieceSquareModule implements EvaluationModule {
         boolean forward = isForwardMove(moveContext);
         castlingDirty = true;
         if (!updateForMove(moveContext.getMove(), forward)) {
-            rebuildFromBoard(moveContext.getCurrentContext().getBoard());
+            rebuildFromBoard(moveContext.getCurrentContext().board());
         }
-        int phase = clampPhase(moveContext.getCurrentContext().getPhase());
+        int phase = clampPhase(moveContext.getCurrentContext().phase());
         if (phase != currentPhase) {
             currentPhase = phase;
             developmentDirty = true;
@@ -186,7 +186,7 @@ public final class PieceSquareModule implements EvaluationModule {
             recalculateDevelopmentContribution();
         }
         if (castlingDirty) {
-            recalculateCastlingContribution(moveContext.getCurrentContext().getBoard(), currentPhase);
+            recalculateCastlingContribution(moveContext.getCurrentContext().board(), currentPhase);
         }
         dirty = false;
     }
@@ -530,23 +530,23 @@ public final class PieceSquareModule implements EvaluationModule {
     private int computeCastlingContribution(EvaluationContext.BoardView board, int phase) {
         int materialBalance = computeMaterialBalance(board);
         int whiteAdjustment = computeCastlingAdjustment(
-                board.getWhiteKing(),
-                board.getWhitePawns(),
-                board.isWhiteKingHasCastled(),
-                board.isWhiteKingMoved(),
-                board.isWhiteRookA1Moved(),
-                board.isWhiteRookH1Moved(),
+                board.whiteKing(),
+                board.whitePawns(),
+                board.whiteKingHasCastled(),
+                board.whiteKingMoved(),
+                board.whiteRookA1Moved(),
+                board.whiteRookH1Moved(),
                 true,
                 phase,
                 materialBalance
         );
         int blackAdjustment = computeCastlingAdjustment(
-                board.getBlackKing(),
-                board.getBlackPawns(),
-                board.isBlackKingHasCastled(),
-                board.isBlackKingMoved(),
-                board.isBlackRookA8Moved(),
-                board.isBlackRookH8Moved(),
+                board.blackKing(),
+                board.blackPawns(),
+                board.blackKingHasCastled(),
+                board.blackKingMoved(),
+                board.blackRookA8Moved(),
+                board.blackRookH8Moved(),
                 false,
                 phase,
                 materialBalance
@@ -624,16 +624,16 @@ public final class PieceSquareModule implements EvaluationModule {
     }
 
     private static int computeMaterialBalance(EvaluationContext.BoardView board) {
-        int whiteMaterial = Long.bitCount(board.getWhitePawns()) * PAWN_VALUE
-                + Long.bitCount(board.getWhiteKnights()) * KNIGHT_VALUE
-                + Long.bitCount(board.getWhiteBishops()) * BISHOP_VALUE
-                + Long.bitCount(board.getWhiteRooks()) * ROOK_VALUE
-                + Long.bitCount(board.getWhiteQueens()) * QUEEN_VALUE;
-        int blackMaterial = Long.bitCount(board.getBlackPawns()) * PAWN_VALUE
-                + Long.bitCount(board.getBlackKnights()) * KNIGHT_VALUE
-                + Long.bitCount(board.getBlackBishops()) * BISHOP_VALUE
-                + Long.bitCount(board.getBlackRooks()) * ROOK_VALUE
-                + Long.bitCount(board.getBlackQueens()) * QUEEN_VALUE;
+        int whiteMaterial = Long.bitCount(board.whitePawns()) * PAWN_VALUE
+                + Long.bitCount(board.whiteKnights()) * KNIGHT_VALUE
+                + Long.bitCount(board.whiteBishops()) * BISHOP_VALUE
+                + Long.bitCount(board.whiteRooks()) * ROOK_VALUE
+                + Long.bitCount(board.whiteQueens()) * QUEEN_VALUE;
+        int blackMaterial = Long.bitCount(board.blackPawns()) * PAWN_VALUE
+                + Long.bitCount(board.blackKnights()) * KNIGHT_VALUE
+                + Long.bitCount(board.blackBishops()) * BISHOP_VALUE
+                + Long.bitCount(board.blackRooks()) * ROOK_VALUE
+                + Long.bitCount(board.blackQueens()) * QUEEN_VALUE;
         return whiteMaterial - blackMaterial;
     }
 
@@ -658,19 +658,19 @@ public final class PieceSquareModule implements EvaluationModule {
             return;
         }
 
-        fillPieces(board.getWhitePawns(), WHITE, PAWN);
-        fillPieces(board.getWhiteKnights(), WHITE, KNIGHT);
-        fillPieces(board.getWhiteBishops(), WHITE, BISHOP);
-        fillPieces(board.getWhiteRooks(), WHITE, ROOK);
-        fillPieces(board.getWhiteQueens(), WHITE, QUEEN);
-        fillPieces(board.getWhiteKing(), WHITE, KING);
+        fillPieces(board.whitePawns(), WHITE, PAWN);
+        fillPieces(board.whiteKnights(), WHITE, KNIGHT);
+        fillPieces(board.whiteBishops(), WHITE, BISHOP);
+        fillPieces(board.whiteRooks(), WHITE, ROOK);
+        fillPieces(board.whiteQueens(), WHITE, QUEEN);
+        fillPieces(board.whiteKing(), WHITE, KING);
 
-        fillPieces(board.getBlackPawns(), BLACK, PAWN);
-        fillPieces(board.getBlackKnights(), BLACK, KNIGHT);
-        fillPieces(board.getBlackBishops(), BLACK, BISHOP);
-        fillPieces(board.getBlackRooks(), BLACK, ROOK);
-        fillPieces(board.getBlackQueens(), BLACK, QUEEN);
-        fillPieces(board.getBlackKing(), BLACK, KING);
+        fillPieces(board.blackPawns(), BLACK, PAWN);
+        fillPieces(board.blackKnights(), BLACK, KNIGHT);
+        fillPieces(board.blackBishops(), BLACK, BISHOP);
+        fillPieces(board.blackRooks(), BLACK, ROOK);
+        fillPieces(board.blackQueens(), BLACK, QUEEN);
+        fillPieces(board.blackKing(), BLACK, KING);
 
         developmentDirty = true;
         castlingDirty = true;
@@ -693,7 +693,7 @@ public final class PieceSquareModule implements EvaluationModule {
             return true;
         }
         boolean moverIsWhite = MoveHelper.isWhitesMove(moveContext.getMove());
-        return previous.isWhiteToMove() == moverIsWhite;
+        return previous.whiteToMove() == moverIsWhite;
     }
 
     private static int clampPhase(int phase) {

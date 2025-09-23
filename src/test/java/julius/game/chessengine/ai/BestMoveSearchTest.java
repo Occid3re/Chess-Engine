@@ -694,7 +694,7 @@ public class BestMoveSearchTest {
         pipeline.initialize(context);
         pipeline.getBlendedScore();
 
-        int phase = context.getPhase();
+        int phase = context.phase();
         int orientation = whiteToMove ? 1 : -1;
 
         List<ModuleContribution> contributions = new ArrayList<>(modules.size() + 1);
