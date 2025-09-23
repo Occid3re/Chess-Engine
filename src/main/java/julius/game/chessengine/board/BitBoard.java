@@ -28,6 +28,9 @@ import static julius.game.chessengine.helper.KnightHelper.knightMoveTable;
 public class BitBoard {
 
     private static final PieceType[] PROMOTION_PIECES = {PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT};
+    private static final int[] SLIDER_FILE_DELTAS = {0, 0, 1, -1, 1, -1, 1, -1};
+    private static final int[] SLIDER_RANK_DELTAS = {1, -1, 0, 0, 1, 1, -1, -1};
+    private static final boolean[] SLIDER_DIRECTION_DIAGONAL = {false, false, false, false, true, true, true, true};
 
     BishopHelper bishopHelper = BishopHelper.getInstance();
     RookHelper rookHelper = RookHelper.getInstance();
@@ -59,7 +62,11 @@ public class BitBoard {
     private long blackAttackMap = 0L;
     private boolean whiteAttackDirty = true;
     private boolean blackAttackDirty = true;
+    private final int[] whiteAttackCounts = new int[64];
+    private final int[] blackAttackCounts = new int[64];
     private PieceType[] pieceBoard = new PieceType[64];
+    private static final int SLIDER_BUFFER_INITIAL_CAPACITY = 16;
+    private final ThreadLocal<SliderBuffer> sliderBufferHolder = ThreadLocal.withInitial(SliderBuffer::new);
 
     // Reusable buffer for move generation to avoid frequent allocations.
     private final MoveList moveGenerationBuffer = new MoveList();
@@ -214,6 +221,8 @@ public class BitBoard {
         this.blackAttackMap = other.blackAttackMap;
         this.whiteAttackDirty = other.whiteAttackDirty;
         this.blackAttackDirty = other.blackAttackDirty;
+        System.arraycopy(other.whiteAttackCounts, 0, this.whiteAttackCounts, 0, this.whiteAttackCounts.length);
+        System.arraycopy(other.blackAttackCounts, 0, this.blackAttackCounts, 0, this.blackAttackCounts.length);
         this.zKey = other.zKey;
         this.pieceBoard = Arrays.copyOf(other.pieceBoard, other.pieceBoard.length);
         this.halfmoveClock = other.halfmoveClock;
@@ -331,6 +340,8 @@ public class BitBoard {
 
         whiteAttackDirty = true;
         blackAttackDirty = true;
+        Arrays.fill(whiteAttackCounts, 0);
+        Arrays.fill(blackAttackCounts, 0);
     }
 
     /** Bishop-ray attacks from 'sq' with an explicit occupancy. */
@@ -881,13 +892,211 @@ public class BitBoard {
     }
 
     private void recomputeWhiteAttackMap() {
-        whiteAttackMap = generateAttackBitboard(true);
+        whiteAttackMap = 0L;
+        Arrays.fill(whiteAttackCounts, 0);
+        rebuildAttackMap(true);
         whiteAttackDirty = false;
     }
 
     private void recomputeBlackAttackMap() {
-        blackAttackMap = generateAttackBitboard(false);
+        blackAttackMap = 0L;
+        Arrays.fill(blackAttackCounts, 0);
+        rebuildAttackMap(false);
         blackAttackDirty = false;
+    }
+
+    private void rebuildAttackMap(boolean colorWhite) {
+        long pawns = colorWhite ? whitePawns : blackPawns;
+        while (pawns != 0) {
+            int index = Long.numberOfTrailingZeros(pawns);
+            applyAttackDelta(colorWhite, computePawnAttacks(index, colorWhite), 1);
+            pawns &= pawns - 1;
+        }
+
+        long knights = colorWhite ? whiteKnights : blackKnights;
+        while (knights != 0) {
+            int index = Long.numberOfTrailingZeros(knights);
+            applyAttackDelta(colorWhite, knightAttackBitmask(index), 1);
+            knights &= knights - 1;
+        }
+
+        long bishops = colorWhite ? whiteBishops : blackBishops;
+        while (bishops != 0) {
+            int index = Long.numberOfTrailingZeros(bishops);
+            applyAttackDelta(colorWhite, bishopAttackBitmask(index), 1);
+            bishops &= bishops - 1;
+        }
+
+        long rooks = colorWhite ? whiteRooks : blackRooks;
+        while (rooks != 0) {
+            int index = Long.numberOfTrailingZeros(rooks);
+            applyAttackDelta(colorWhite, rookAttackBitmask(index), 1);
+            rooks &= rooks - 1;
+        }
+
+        long queens = colorWhite ? whiteQueens : blackQueens;
+        while (queens != 0) {
+            int index = Long.numberOfTrailingZeros(queens);
+            applyAttackDelta(colorWhite, queenAttackBitmask(index), 1);
+            queens &= queens - 1;
+        }
+
+        long king = colorWhite ? whiteKing : blackKing;
+        if (king != 0) {
+            int index = Long.numberOfTrailingZeros(king);
+            applyAttackDelta(colorWhite, KING_ATTACKS[index], 1);
+        }
+    }
+
+    private long computeAttacksForPiece(PieceType pieceType, int square, boolean colorWhite) {
+        if (pieceType == null) {
+            return 0L;
+        }
+        return switch (pieceType) {
+            case PAWN -> computePawnAttacks(square, colorWhite);
+            case KNIGHT -> knightAttackBitmask(square);
+            case BISHOP -> bishopAttackBitmask(square);
+            case ROOK -> rookAttackBitmask(square);
+            case QUEEN -> queenAttackBitmask(square);
+            case KING -> KING_ATTACKS[square];
+        };
+    }
+
+    private long computePawnAttacks(int index, boolean colorWhite) {
+        long mask = 1L << index;
+        if (colorWhite) {
+            long attacks = 0L;
+            if ((mask & FileMasks[0]) == 0) {
+                attacks |= mask << 7;
+            }
+            if ((mask & FileMasks[7]) == 0) {
+                attacks |= mask << 9;
+            }
+            return attacks;
+        } else {
+            long attacks = 0L;
+            if ((mask & FileMasks[7]) == 0) {
+                attacks |= mask >>> 7;
+            }
+            if ((mask & FileMasks[0]) == 0) {
+                attacks |= mask >>> 9;
+            }
+            return attacks;
+        }
+    }
+
+    private void applyAttackDelta(boolean colorWhite, long attackMask, int delta) {
+        if (attackMask == 0L || delta == 0) {
+            return;
+        }
+
+        int[] counts = colorWhite ? whiteAttackCounts : blackAttackCounts;
+        long map = colorWhite ? whiteAttackMap : blackAttackMap;
+
+        long bits = attackMask;
+        while (bits != 0) {
+            int index = Long.numberOfTrailingZeros(bits);
+            int newValue = counts[index] += delta;
+            assert newValue >= 0 : "Negative attack count detected at square " + index;
+            long sqMask = 1L << index;
+            if (newValue > 0) {
+                map |= sqMask;
+            } else {
+                map &= ~sqMask;
+            }
+            bits &= bits - 1;
+        }
+
+        if (colorWhite) {
+            whiteAttackMap = map;
+        } else {
+            blackAttackMap = map;
+        }
+    }
+
+    private int prepareSliderUpdates(long impactedMask, SliderBuffer buffer) {
+        int count = 0;
+        long mask = impactedMask;
+        while (mask != 0) {
+            int square = Long.numberOfTrailingZeros(mask);
+            PieceType type = pieceBoard[square];
+            if (type != null && isSliderPiece(type)) {
+                buffer.ensureCapacity(count + 1);
+                boolean whitePiece = (whitePieces & (1L << square)) != 0;
+                applyAttackDelta(whitePiece, computeAttacksForPiece(type, square, whitePiece), -1);
+                buffer.squares[count] = square;
+                buffer.whitePieces[count] = whitePiece;
+                buffer.types[count] = type;
+                count++;
+            }
+            mask &= mask - 1;
+        }
+        return count;
+    }
+
+    private long collectSliderImpacts(int square) {
+        if (square < 0 || square >= 64) {
+            return 0L;
+        }
+        long impacted = 0L;
+        for (int dir = 0; dir < SLIDER_FILE_DELTAS.length; dir++) {
+            int current = square;
+            while (true) {
+                current = stepInDirection(current, SLIDER_FILE_DELTAS[dir], SLIDER_RANK_DELTAS[dir]);
+                if (current == -1) {
+                    break;
+                }
+                PieceType type = pieceBoard[current];
+                if (type != null) {
+                    if (isSliderInDirection(type, SLIDER_DIRECTION_DIAGONAL[dir])) {
+                        impacted |= 1L << current;
+                    }
+                    break;
+                }
+            }
+        }
+        return impacted;
+    }
+
+    private boolean isSliderPiece(PieceType type) {
+        return type == PieceType.BISHOP || type == PieceType.ROOK || type == PieceType.QUEEN;
+    }
+
+    private boolean isSliderInDirection(PieceType type, boolean diagonal) {
+        if (type == PieceType.QUEEN) {
+            return true;
+        }
+        if (diagonal) {
+            return type == PieceType.BISHOP;
+        }
+        return type == PieceType.ROOK;
+    }
+
+    private int stepInDirection(int square, int fileDelta, int rankDelta) {
+        int file = square & 7;
+        int rank = square >>> 3;
+        int newFile = file + fileDelta;
+        int newRank = rank + rankDelta;
+        if (newFile < 0 || newFile > 7 || newRank < 0 || newRank > 7) {
+            return -1;
+        }
+        return (newRank << 3) + newFile;
+    }
+
+    private static final class SliderBuffer {
+        private int[] squares = new int[SLIDER_BUFFER_INITIAL_CAPACITY];
+        private boolean[] whitePieces = new boolean[SLIDER_BUFFER_INITIAL_CAPACITY];
+        private PieceType[] types = new PieceType[SLIDER_BUFFER_INITIAL_CAPACITY];
+
+        private void ensureCapacity(int required) {
+            if (squares.length >= required) {
+                return;
+            }
+            int newCapacity = Math.max(required, squares.length << 1);
+            squares = Arrays.copyOf(squares, newCapacity);
+            whitePieces = Arrays.copyOf(whitePieces, newCapacity);
+            types = Arrays.copyOf(types, newCapacity);
+        }
     }
 
     private void generatePawnMoves(boolean whitesTurn, MoveList moves) {
@@ -1313,61 +1522,88 @@ public class BitBoard {
 
         PieceType movingPiece = pieceTypeFromBits(pieceBits);
         Color moverColor = isWhite ? Color.WHITE : Color.BLACK;
+        int captureIndex = -1;
+        PieceType capturedPieceType = null;
+        if (isCapture) {
+            captureIndex = isEnPassant ? (isWhite ? toIndex - 8 : toIndex + 8) : toIndex;
+            capturedPieceType = pieceBoard[captureIndex];
+            if (capturedPieceType == null) {
+                capturedPieceType = deducePieceTypeFromBitboards(captureIndex, !isWhite);
+            }
+        }
+
+        boolean requiresFullRebuild = isCastling;
+        SliderBuffer sliderBuffer = null;
+        int sliderCount = 0;
+
+        if (!requiresFullRebuild) {
+            applyAttackDelta(isWhite, computeAttacksForPiece(movingPiece, fromIndex, isWhite), -1);
+
+            if (isCapture && capturedPieceType != null) {
+                applyAttackDelta(!isWhite, computeAttacksForPiece(capturedPieceType, captureIndex, !isWhite), -1);
+            }
+
+            long impactedMask = collectSliderImpacts(fromIndex) | collectSliderImpacts(toIndex);
+            if (isEnPassant) {
+                int epCaptureIndex = isWhite ? toIndex - 8 : toIndex + 8;
+                impactedMask |= collectSliderImpacts(epCaptureIndex);
+            }
+            if (impactedMask != 0) {
+                sliderBuffer = sliderBufferHolder.get();
+                sliderCount = prepareSliderUpdates(impactedMask, sliderBuffer);
+            }
+        }
+
         xorPiece(moverColor, movingPiece, fromIndex);
         PieceType placedPiece = promoBits == 0 ? movingPiece : pieceTypeFromBits(promoBits);
         xorPiece(moverColor, placedPiece, toIndex);
 
         // ---- 1) Captures (fast, no aggregates yet)
         if (isCapture) {
-            int capIndex = isEnPassant ? (isWhite ? toIndex - 8 : toIndex + 8) : toIndex;
-            PieceType capType = pieceBoard[capIndex];
-            if (capType == null) {
-                capType = deducePieceTypeFromBitboards(capIndex, !isWhite);
-                if (capType == null) {
-                    log.warn("Capture from {} to {} expected a piece but none was found", fromIndex, capIndex);
-                }
+            if (capturedPieceType == null) {
+                log.warn("Capture from {} to {} expected a piece but none was found", fromIndex, captureIndex);
             }
-            int capturedBits = (capType != null) ? MoveHelper.pieceTypeToInt(capType) : 0;
+            int capturedBits = (capturedPieceType != null) ? MoveHelper.pieceTypeToInt(capturedPieceType) : 0;
             capturedPieceHistory.push(capturedBits);
             Color capColor = isWhite ? Color.BLACK : Color.WHITE;
-            if (capType != null) {
-                xorPiece(capColor, capType, capIndex);
+            if (capturedPieceType != null && captureIndex != -1) {
+                xorPiece(capColor, capturedPieceType, captureIndex);
             }
-            long capMask = 1L << capIndex;
+            long capMask = 1L << captureIndex;
 
             if (isWhite) {
                 if ((blackPawns & capMask) != 0) {
                     blackPawns &= ~capMask;
-                    pieceBoard[capIndex] = null;
+                    pieceBoard[captureIndex] = null;
                 } else if ((blackKnights & capMask) != 0) {
                     blackKnights &= ~capMask;
-                    pieceBoard[capIndex] = null;
+                    pieceBoard[captureIndex] = null;
                 } else if ((blackBishops & capMask) != 0) {
                     blackBishops &= ~capMask;
-                    pieceBoard[capIndex] = null;
+                    pieceBoard[captureIndex] = null;
                 } else if ((blackRooks & capMask) != 0) {
                     blackRooks &= ~capMask;
-                    pieceBoard[capIndex] = null;
+                    pieceBoard[captureIndex] = null;
                 } else if ((blackQueens & capMask) != 0) {
                     blackQueens &= ~capMask;
-                    pieceBoard[capIndex] = null;
+                    pieceBoard[captureIndex] = null;
                 } else if ((blackKing & capMask) != 0) throw new IllegalStateException("Cannot capture the king");
             } else {
                 if ((whitePawns & capMask) != 0) {
                     whitePawns &= ~capMask;
-                    pieceBoard[capIndex] = null;
+                    pieceBoard[captureIndex] = null;
                 } else if ((whiteKnights & capMask) != 0) {
                     whiteKnights &= ~capMask;
-                    pieceBoard[capIndex] = null;
+                    pieceBoard[captureIndex] = null;
                 } else if ((whiteBishops & capMask) != 0) {
                     whiteBishops &= ~capMask;
-                    pieceBoard[capIndex] = null;
+                    pieceBoard[captureIndex] = null;
                 } else if ((whiteRooks & capMask) != 0) {
                     whiteRooks &= ~capMask;
-                    pieceBoard[capIndex] = null;
+                    pieceBoard[captureIndex] = null;
                 } else if ((whiteQueens & capMask) != 0) {
                     whiteQueens &= ~capMask;
-                    pieceBoard[capIndex] = null;
+                    pieceBoard[captureIndex] = null;
                 } else if ((whiteKing & capMask) != 0) throw new IllegalStateException("Cannot capture the king");
             }
         }
@@ -1521,9 +1757,24 @@ public class BitBoard {
         // ---- 5) Finalize once
         updateAggregatedBitboards();
 
-        // Any move changes slider lines, so both sides’ maps become stale.
-        whiteAttackDirty = true;
-        blackAttackDirty = true;
+        if (requiresFullRebuild) {
+            whiteAttackDirty = true;
+            blackAttackDirty = true;
+        } else {
+            PieceType finalPiece = pieceBoard[toIndex];
+            applyAttackDelta(isWhite, computeAttacksForPiece(finalPiece, toIndex, isWhite), 1);
+            if (sliderBuffer != null) {
+                for (int i = 0; i < sliderCount; i++) {
+                    int square = sliderBuffer.squares[i];
+                    PieceType type = sliderBuffer.types[i];
+                    if (pieceBoard[square] == type) {
+                        boolean whitePiece = sliderBuffer.whitePieces[i];
+                        applyAttackDelta(whitePiece,
+                                computeAttacksForPiece(type, square, whitePiece), 1);
+                    }
+                }
+            }
+        }
 
         if (isCapture || pieceBits == 1) {
             halfmoveClock = 0;
@@ -1737,16 +1988,33 @@ public class BitBoard {
         PieceType movingPiece = pieceTypeFromBits(pieceTypeBits);
         Color moverColor = isWhite ? Color.WHITE : Color.BLACK;
         PieceType toPiece = promotionPieceTypeBits == 0 ? movingPiece : pieceTypeFromBits(promotionPieceTypeBits);
+        PieceType capturedPieceType = pieceTypeFromBits(capturedPieceTypeBits);
+        int captureIndex = isCapture ? (isEnPassantMove ? (isWhite ? toIndex - 8 : toIndex + 8) : toIndex) : -1;
+
+        boolean requiresFullRebuild = isCastlingMove;
+        SliderBuffer sliderBuffer = null;
+        int sliderCount = 0;
+
+        if (!requiresFullRebuild) {
+            applyAttackDelta(isWhite, computeAttacksForPiece(toPiece, toIndex, isWhite), -1);
+
+            long impactedMask = collectSliderImpacts(fromIndex) | collectSliderImpacts(toIndex);
+            if (isEnPassantMove) {
+                int epCaptureIndex = isWhite ? toIndex - 8 : toIndex + 8;
+                impactedMask |= collectSliderImpacts(epCaptureIndex);
+            }
+            if (impactedMask != 0) {
+                sliderBuffer = sliderBufferHolder.get();
+                sliderCount = prepareSliderUpdates(impactedMask, sliderBuffer);
+            }
+        }
+
         xorPiece(moverColor, toPiece, toIndex);
         xorPiece(moverColor, movingPiece, fromIndex);
 
-        if (isCapture) {
-            int capIndex = isEnPassantMove ? (isWhite ? toIndex - 8 : toIndex + 8) : toIndex;
-            PieceType capType = pieceTypeFromBits(capturedPieceTypeBits);
-            if (capType != null) {
-                Color capColor = isWhite ? Color.BLACK : Color.WHITE;
-                xorPiece(capColor, capType, capIndex);
-            }
+        if (isCapture && capturedPieceType != null && captureIndex != -1) {
+            Color capColor = isWhite ? Color.BLACK : Color.WHITE;
+            xorPiece(capColor, capturedPieceType, captureIndex);
         }
 
         if (isCastlingMove) {
@@ -1793,10 +2061,35 @@ public class BitBoard {
         if (oldBK != newBK) xorCastlingRight(2);
         if (oldBQ != newBQ) xorCastlingRight(3);
 
-        // 8) finalize aggregates once; mark attacks dirty (lazy recompute)
+        // 8) finalize aggregates once; update incremental attack state or mark dirty
         updateAggregatedBitboards();
-        whiteAttackDirty = true;
-        blackAttackDirty = true;
+        if (requiresFullRebuild) {
+            whiteAttackDirty = true;
+            blackAttackDirty = true;
+        } else {
+            PieceType restoredPiece = pieceBoard[fromIndex];
+            applyAttackDelta(isWhite, computeAttacksForPiece(restoredPiece, fromIndex, isWhite), 1);
+
+            if (isCapture && capturedPieceType != null && captureIndex != -1) {
+                PieceType restoredCaptured = pieceBoard[captureIndex];
+                if (restoredCaptured != null) {
+                    applyAttackDelta(!isWhite,
+                            computeAttacksForPiece(restoredCaptured, captureIndex, !isWhite), 1);
+                }
+            }
+
+            if (sliderBuffer != null) {
+                for (int i = 0; i < sliderCount; i++) {
+                    int square = sliderBuffer.squares[i];
+                    PieceType type = sliderBuffer.types[i];
+                    if (pieceBoard[square] == type) {
+                        boolean whitePiece = sliderBuffer.whitePieces[i];
+                        applyAttackDelta(whitePiece,
+                                computeAttacksForPiece(type, square, whitePiece), 1);
+                    }
+                }
+            }
+        }
 
         if (!halfmoveHistory.isEmpty()) {
             halfmoveClock = halfmoveHistory.pop();
