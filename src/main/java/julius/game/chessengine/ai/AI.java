@@ -195,6 +195,7 @@ public class AI {
 
     @Getter
     private long nodesVisited = 0;
+    private volatile long searchStartTimeNanos = 0L;
     @Getter
     private long nullMoveCount = 0;
     @Getter
@@ -585,9 +586,28 @@ public class AI {
         searchResultReady = false;
         currentBoardState = -1;
         beforeCalculationBoardState = -2;
+        nodesVisited = 0L;
+        searchStartTimeNanos = 0L;
         clearPrincipalVariation();
         mainEngine.startNewGame();
         clearHistoryTable();
+    }
+
+    public long getSearchElapsedMillis() {
+        long start = searchStartTimeNanos;
+        if (start == 0L) {
+            return 0L;
+        }
+        long elapsedNanos = System.nanoTime() - start;
+        if (elapsedNanos <= 0L) {
+            return 0L;
+        }
+        return TimeUnit.NANOSECONDS.toMillis(elapsedNanos);
+    }
+
+    private void resetSearchCounters() {
+        nodesVisited = 0L;
+        searchStartTimeNanos = System.nanoTime();
     }
 
     public void stopCalculation() {
@@ -753,6 +773,7 @@ public class AI {
 
             SearchInstrumentation instrumentation = SearchInstrumentation.enabled();
             lastDiagnostics = SearchDiagnostics.EMPTY;
+            resetSearchCounters();
             SearchTask task = new SearchTask(searchIdGenerator.incrementAndGet(), boardStateHash, isWhite, deadline, lazySmpThreads, instrumentation);
             activeSearch.set(task);
             if (bestMoveForHash == boardStateHash && currentBestMove != -1) {
