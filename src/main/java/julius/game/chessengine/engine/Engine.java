@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.function.LongConsumer;
+import java.util.function.Supplier;
 
 import static julius.game.chessengine.board.MoveHelper.convertIndexToString;
 
@@ -19,71 +20,57 @@ import static julius.game.chessengine.board.MoveHelper.convertIndexToString;
 public class Engine {
 
     /*
-         * Adaptive cache configuration
-         * ---------------------------
-         * By default we:
-         *  - Allocate ~8% of max heap (min 64MB) for the legal-moves cache.
-         *  - Assume ~256 bytes per entry (heuristic), clamped between 50k and 500k entries.
-         *  - Use a long TTL (24h). Legal move lists for a board state don't "age" by wall-clock,
-         *    so eviction should primarily be LRU. You can disable time expiry by setting TTL <= 0.
-         *
-         * Overrides (priority: System Property > Env Var > Heuristic):
-         *  - chess.cache.maxSize (int)
-         *  - chess.cache.maxAgeMs (long)
-         *  - CHESS_CACHE_MAX_SIZE (int)
-         *  - CHESS_CACHE_MAX_AGE_MS (long)
-         *
-         * This makes it easy to run multiple app versions with different cache sizing.
-         */
-        private record CacheConfig(int maxSize, int maxAgeMs) {
+     * Adaptive cache configuration
+     * ---------------------------
+     * By default we:
+     *  - Allocate ~8% of max heap (min 64MB) for the legal-moves cache.
+     *  - Assume ~256 bytes per entry (heuristic), clamped between 50k and 500k entries.
+     *  - Use a long TTL (24h). Legal move lists for a board state don't "age" by wall-clock,
+     *    so eviction should primarily be LRU. You can disable time expiry by setting TTL <= 0.
+     *
+     * Overrides (priority: System Property > Env Var > Heuristic):
+     *  - chess.cache.maxSize (int)
+     *  - chess.cache.maxAgeMs (long)
+     *  - CHESS_CACHE_MAX_SIZE (int)
+     *  - CHESS_CACHE_MAX_AGE_MS (long)
+     *
+     * This makes it easy to run multiple app versions with different cache sizing.
+     */
+    private record CacheConfig(int maxSize, int maxAgeMs) {
+        static CacheConfig of(int maxSize, int maxAgeMs) {
+            return new CacheConfig(maxSize, maxAgeMs);
+        }
     }
 
     private static CacheConfig computeCacheConfig() {
-        // Heuristic baseline
-        long maxHeap = Runtime.getRuntime().maxMemory();          // bytes
-        long budget  = Math.max(64L << 20, (maxHeap * 8) / 100);  // >=64MB or 8% of heap
-        long estimatedBytesPerEntry = 256;                        // adjust if profiling suggests otherwise
+        // 1) Explicit overrides
+        Integer sysInt = getIntProp();
+        Long sysLong = getLongProp();
+        Integer envInt = getIntEnv();
+        Long envLong = getLongEnv();
 
-        long computedSize = Math.max(1, budget / estimatedBytesPerEntry);
-        int heuristicMaxSize = (int) computedSize;
-        int heuristicMaxAgeMs = 86_400_000; // 24h; set <=0 to disable time expiry
+        Integer overrideMax = (sysInt != null ? sysInt : envInt);
+        Long overrideAge = (sysLong != null ? sysLong : envLong);
 
-        // Overrides via System Properties
-        Integer sysMaxSize = getIntSysProp();
-        Long sysMaxAgeMs   = getLongSysProp();
+        // 2) Heuristic baseline
+        long maxHeap = Runtime.getRuntime().maxMemory();
+        long targetBytes = Math.max((long) (maxHeap * 0.08), 64L * 1024 * 1024); // at least 64MB
+        // assume ~256 bytes per entry
+        int heuristicMax = (int) Math.max(50_000, Math.min(targetBytes / 256, 500_000));
+        int maxSize = (overrideMax != null) ? overrideMax : heuristicMax;
 
-        // Fallback to environment variables if system properties absent
-        Integer envMaxSize = (sysMaxSize == null) ? getIntEnv() : null;
-        Long envMaxAgeMs   = (sysMaxAgeMs == null) ? getLongEnv() : null;
+        int defaultTtlMs = 24 * 60 * 60 * 1000;
+        int maxAgeMs = (overrideAge != null) ? (int) Math.max(Integer.MIN_VALUE, Math.min(Integer.MAX_VALUE, overrideAge)) : defaultTtlMs;
 
-        int maxSize = (sysMaxSize != null)
-                ? sysMaxSize
-                : (envMaxSize != null)
-                ? envMaxSize
-                : heuristicMaxSize;
-        long maxAge = (sysMaxAgeMs != null)
-                ? sysMaxAgeMs
-                : (envMaxAgeMs != null)
-                ? envMaxAgeMs
-                : (long) heuristicMaxAgeMs;
-
-        // Defensive clamps
-        if (maxSize <= 0) maxSize = heuristicMaxSize;
-        // maxAge can be <=0 to mean "no time-based expiry"
-
-        if (log.isInfoEnabled()) {
-            log.info("LegalMovesCache config -> maxSize={}, maxAgeMs={} (heap={}, budget~{}MB, heuristicSize={})",
-                    maxSize, maxAge, maxHeap, budget >> 20, heuristicMaxSize);
-        }
-        return new CacheConfig(maxSize, (int) Math.min(Integer.MAX_VALUE, Math.max(Integer.MIN_VALUE, maxAge)));
+        return CacheConfig.of(maxSize, maxAgeMs);
     }
 
-    private static Integer getIntSysProp() {
+    private static Integer getIntProp() {
         String v = System.getProperty("chess.cache.maxSize");
         return parseInt(v);
     }
 
-    private static Long getLongSysProp() {
+    private static Long getLongProp() {
         String v = System.getProperty("chess.cache.maxAgeMs");
         return parseLong(v);
     }
@@ -100,24 +87,43 @@ public class Engine {
 
     private static Integer parseInt(String v) {
         if (v == null || v.isEmpty()) return null;
-        try { return Integer.parseInt(v.trim()); } catch (NumberFormatException ignored) { return null; }
+        try {
+            return Integer.parseInt(v.trim());
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     private static Long parseLong(String v) {
         if (v == null || v.isEmpty()) return null;
-        try { return Long.parseLong(v.trim()); } catch (NumberFormatException ignored) { return null; }
+        try {
+            return Long.parseLong(v.trim());
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     // --- Cache instance based on computed configuration ---
     private static final CacheConfig CACHE_CFG = computeCacheConfig();
-    private TimedLRUCache<MoveList> legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
+
+    // May be null when caching disabled
+    private TimedLRUCache<MoveList> legalMovesCache;
 
     private final Object boardLock = new Object();
+
+    // Feature flag: disable LRU cache and synchronization for lightweight, thread-confined search engines
+    private final boolean useMoveCache;
+
+    // Scratch buffer reused when caching/sync is disabled.
+    // IMPORTANT: We never expose this buffer to callers; we publish snapshots instead.
+    private final MoveList scratchMoveList;
 
     @Getter
     private OpeningBook openingBook;
 
     private boolean legalMovesNeedUpdate = true;
+
+    // Current position's legal moves (always a fresh per-position list; callers get a snapshot copy).
     private MoveList legalMoves;
 
     @Getter
@@ -128,189 +134,257 @@ public class Engine {
     @Getter
     private GameState gameState = new GameState(bitBoard);
 
-    private LongConsumer onPositionChanged = _ -> {};
+    private LongConsumer onPositionChanged = _ -> {
+    };
 
+    // --- Constructors ---
 
     public Engine() {
+        this(true);
+    }
+
+    public Engine(boolean useMoveCache) {
+        this.useMoveCache = useMoveCache;
+        this.scratchMoveList = useMoveCache ? null : new MoveList();
         startNewGame();
     }
 
     public Engine(Engine other) {
-        synchronized (other.boardLock) {
+        this(other, other.useMoveCache);
+    }
+
+    private Engine(Engine other, boolean useMoveCache) {
+        this.useMoveCache = useMoveCache;
+        this.scratchMoveList = useMoveCache ? null : new MoveList();
+        withBoardLock(other.boardLock, () -> {
             this.bitBoard = new BitBoard(other.bitBoard);
             this.gameState = new GameState(other.gameState);
             this.line = new ArrayList<>(other.line);
             this.redoLine = new ArrayList<>(other.redoLine);
 
-            // ❌ heavy: cloning the current legal list and cache
-            // this.legalMoves = other.legalMoves == null ? null : new MoveList(other.legalMoves);
-            // this.legalMovesNeedUpdate = other.legalMovesNeedUpdate;
-            // this.legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
-            // other.legalMovesCache.forEach((k, v) -> this.legalMovesCache.put(k, new MoveList(v)));
-
-            // ✅ light: fresh empty state for the clone; compute lazily when needed
+            // Fresh state for the clone: compute lazily
             this.legalMoves = null;
             this.legalMovesNeedUpdate = true;
-            this.legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
+            this.legalMovesCache = useMoveCache ? new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs) : null;
 
             this.openingBook = other.openingBook;
             LongConsumer callback = other.onPositionChanged;
-            this.onPositionChanged = (callback != null) ? callback : _ -> {};
+            this.onPositionChanged = (callback != null) ? callback : _ -> {
+            };
+        });
+    }
+
+    // --- Lock helpers (no sync when useMoveCache == false) ---
+
+    private void withBoardLock(Runnable action) {
+        if (useMoveCache) {
+            synchronized (boardLock) {
+                action.run();
+            }
+        } else {
+            action.run();
         }
     }
 
-    public void setOnPositionChanged(LongConsumer cb) {
-        this.onPositionChanged = (cb != null ? cb : _ -> {});
+    private static void withBoardLock(Object lock, Runnable action) {
+        synchronized (lock) {
+            action.run();
+        }
     }
+
+    private <T> T withBoardLock(Supplier<T> action) {
+        if (useMoveCache) {
+            synchronized (boardLock) {
+                return action.get();
+            }
+        }
+        return action.get();
+    }
+
+    // --- Lifecycle / notifications ---
+
+    public void setOnPositionChanged(LongConsumer cb) {
+        this.onPositionChanged = (cb != null ? cb : _ -> {
+        });
+    }
+
     private void notifyPositionChanged() {
         onPositionChanged.accept(getBoardStateHash());
     }
 
-    /** Expose BitBoard's SEE to callers (AI). */
-    public int see(int move) {
-        synchronized (boardLock) {
-            return bitBoard.see(move);
+    private void startNewGameLocked() {
+        bitBoard = new BitBoard();
+        gameState = new GameState(bitBoard);
+        legalMovesNeedUpdate = true;
+        line = new ArrayList<>();
+        redoLine = new ArrayList<>();
+        this.openingBook = OpeningBook.getInstance();
+
+        if (useMoveCache) {
+            legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
+            legalMovesCache.cleanup();
+        } else {
+            legalMovesCache = null;
+            if (scratchMoveList != null) scratchMoveList.clear();
         }
+
+        // Publish a clean per-position list.
+        legalMoves = new MoveList();
+
+        notifyPositionChanged();
     }
+
+    public void startNewGame() {
+        withBoardLock(this::startNewGameLocked);
+    }
+
+    // --- SEE passthrough ---
+
+    /**
+     * Expose BitBoard's SEE to callers (AI).
+     */
+    public int see(int move) {
+        return withBoardLock(() -> bitBoard.see(move));
+    }
+
+    // --- Legal-move access (returns a stable snapshot) ---
 
     public MoveList getAllLegalMoves() {
-        synchronized (boardLock) {
+        return withBoardLock(() -> {
             if (gameState.isGameOver()) {
-                if (legalMoves == null) {
-                    legalMoves = new MoveList();  // Create only if null
-                } else {
-                    legalMoves.clear();  // Clear existing list instead of creating a new one
+                // Ensure we publish an empty list for terminal nodes
+                if (legalMoves == null || legalMoves.size() != 0) {
+                    legalMoves = new MoveList();
                 }
             } else if (legalMovesNeedUpdate) {
-                generateLegalMoves();
+                generateLegalMovesInternal();
             }
-            return legalMoves;
-        }
+            // Return a snapshot so callers can sort/iterate safely
+            return new MoveList(legalMoves);
+        });
     }
 
+    // --- Move making ---
+
     public void performMove(int move) {
-        synchronized (boardLock) {
-            boolean isOpeningMove = false;
-            if (!gameState.isGameOver()) {
-                long boardStateHashBeforeMove = getBoardStateHash();
-                bitBoard.performMove(move);
-                long newHash = getBoardStateHash();
-                gameState.recordHash(newHash);
-                if (openingBook.containsMoveAndBoardStateHash(boardStateHashBeforeMove, move)) {
-                    isOpeningMove = true;
-                }
-                generateLegalMoves();
-                gameState.pushHalfmoveClock();
-                gameState.update(bitBoard, legalMoves, move, isOpeningMove);
-                gameState.getScore().applyMove(bitBoard, move, gameState.getState());
-                line.add(move);
-                notifyPositionChanged();
-            }
+        withBoardLock(() -> performMoveLocked(move));
+    }
+
+    private void performMoveLocked(int move) {
+        if (gameState.isGameOver()) return;
+
+        boolean isOpeningMove = false;
+        long boardStateHashBeforeMove = bitBoard.getBoardStateHash();
+
+        bitBoard.performMove(move);
+        long newHash = bitBoard.getBoardStateHash();
+        gameState.recordHash(newHash);
+
+        if (openingBook.containsMoveAndBoardStateHash(boardStateHashBeforeMove, move)) {
+            isOpeningMove = true;
         }
+
+        generateLegalMovesInternal();
+        gameState.pushHalfmoveClock();
+        gameState.update(bitBoard, legalMoves, move, isOpeningMove);
+        gameState.getScore().applyMove(bitBoard, move, gameState.getState());
+        line.add(move);
+        notifyPositionChanged();
     }
 
     public void importBoardFromFen(String fen) {
-        synchronized (boardLock) {
+        withBoardLock(() -> {
             this.bitBoard = FEN.translateFENtoBitBoard(fen);
             this.gameState = new GameState(bitBoard);
 
-            // Ensure the imported state reflects the parsed half-move/full-move counters and
-            // repetition baseline.  The constructor copies the counters from the bitboard, but
-            // we explicitly reset the historical bookkeeping so future updates start from this
-            // root position.
             gameState.setHalfmoveClock(bitBoard.getHalfmoveClock());
             gameState.setFullmoveNumber(bitBoard.getFullmoveNumber());
             gameState.getHashHistory().clear();
             gameState.getRepetition().clear();
-            gameState.recordHash(getBoardStateHash());
+            gameState.recordHash(bitBoard.getBoardStateHash());
 
-            // For terminal draw states (e.g., fifty-move rule) skip move generation entirely so
-            // callers observe an empty legal move list.
             if (gameState.isFiftyMoveRule() || gameState.isThreefoldRepetition()) {
-                if (legalMoves == null) {
-                    legalMoves = new MoveList();
-                } else {
-                    legalMoves.clear();
-                }
+                // terminal draw – publish empty move list
+                legalMoves = new MoveList();
                 legalMovesNeedUpdate = false;
                 gameState.setState(GameStateEnum.DRAW);
             } else {
-                generateLegalMoves();
+                generateLegalMovesInternal();
                 gameState.updateState(bitBoard, legalMoves, false);
             }
             notifyPositionChanged();
-        }
+        });
     }
 
+    /**
+     * Creates a lightweight, thread-confined clone for search:
+     * - caching disabled
+     * - no synchronization
+     * - uses an internal scratch list for generation, but always publishes snapshots
+     */
     public Engine createSimulation() {
-        synchronized (boardLock) {
-            // Safe copy
-            return new Engine(this);
-        }
+        return withBoardLock(() -> new Engine(this, false));
     }
 
-    public void startNewGame() {
-        synchronized (boardLock) {
-            bitBoard = new BitBoard();
-            gameState = new GameState(bitBoard);
-            legalMovesNeedUpdate = true;
-            line = new ArrayList<>();
-            redoLine = new ArrayList<>();
-            this.openingBook = OpeningBook.getInstance();
-            legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
-            // Optional: one cleanup to ensure fresh state
-            legalMovesCache.cleanup();
-            notifyPositionChanged();
-        }
-    }
+    // --- Core move generation ---
 
-    private void generateLegalMoves() {
-        synchronized (boardLock) {
-            final long boardStateHash = getBoardStateHash();
+    private void generateLegalMovesInternal() {
+        final long boardStateHash = bitBoard.getBoardStateHash();
 
-            // Use cached result if available
+        // Cache fast-path (only when enabled)
+        if (useMoveCache && legalMovesCache != null) {
             MoveList cached = legalMovesCache.get(boardStateHash);
             if (cached != null) {
-                this.legalMoves = new MoveList(cached);
+                this.legalMoves = new MoveList(cached); // publish fresh instance
                 legalMovesNeedUpdate = false;
                 return;
             }
+        }
 
-            if (gameState.isGameOver()) {
-                this.legalMoves = new MoveList();
-                legalMovesNeedUpdate = false;
-                return;
-            }
-
-            // Generate pseudo-legal moves on the current board
-            MoveList moves = bitBoard.getAllCurrentPossibleMoves();
-
-            // Filter in-place by making/unmaking on the SAME bitBoard (no BitBoard copy)
-            MoveList legal = new MoveList();
-            for (int i = 0; i < moves.size(); i++) {
-                int move = moves.getMove(i);
-
-                bitBoard.performMove(move);
-                // If the mover's king is not left in check, the move is legal
-                if (!bitBoard.isInCheck(MoveHelper.isWhitesMove(move))) {
-                    legal.add(move);
-                }
-                bitBoard.undoMove(move);
-            }
-
-            this.legalMoves = legal;
+        if (gameState.isGameOver()) {
+            this.legalMoves = new MoveList(); // fresh empty
             legalMovesNeedUpdate = false;
-            // Store a clone to keep the cache immutable from callers' perspective.
-            legalMovesCache.put(boardStateHash, new MoveList(legal));
 
+            if (useMoveCache && legalMovesCache != null) {
+                legalMovesCache.put(boardStateHash, new MoveList(this.legalMoves));
+            }
+            return;
+        }
+
+        // Generate pseudo-legal moves
+        MoveList pseudo = bitBoard.getAllCurrentPossibleMoves();
+
+        // Build into a buffer that we DO NOT expose to callers.
+        // When caching is disabled, reuse scratchMoveList to avoid allocations;
+        // otherwise use a new list since we’ll likely cache a snapshot anyway.
+        MoveList target = (useMoveCache ? new MoveList() : scratchMoveList);
+        target.clear();
+
+        for (int i = 0; i < pseudo.size(); i++) {
+            int move = pseudo.getMove(i);
+            bitBoard.performMove(move);
+            if (!bitBoard.isInCheck(MoveHelper.isWhitesMove(move))) {
+                target.add(move);
+            }
+            bitBoard.undoMove(move);
+        }
+
+        // Publish as a fresh per-position list so readers can never see in-place mutations.
+        this.legalMoves = new MoveList(target);
+        legalMovesNeedUpdate = false;
+
+        // Populate cache with an immutable snapshot when enabled.
+        if (useMoveCache && legalMovesCache != null) {
+            legalMovesCache.put(boardStateHash, new MoveList(this.legalMoves));
             int size = legalMovesCache.size();
             if (size > CACHE_CFG.maxSize) {
-                // This should be rare due to eviction, but keep the guard to surface misconfigurations.
                 throw new RuntimeException(String.format(
                         "LegalMovesCache size %s is larger than configured MAX_SIZE %s", size, CACHE_CFG.maxSize));
             }
         }
     }
+
+    // --- Misc helpers used by UI and search ---
 
     public void moveRandomFigure(boolean isWhite) {
         MoveList moves = getAllLegalMoves();
@@ -328,30 +402,22 @@ public class Engine {
     }
 
     public void moveFigure(BitBoard bitBoard, int fromIndex, int toIndex, int promotionPiece) {
-        synchronized (boardLock) {
-            // Determine the piece type and color from the bitboard based on the 'from' position
-            PieceType pieceType = bitBoard.getPieceTypeAtIndex(fromIndex);
-            Color color = bitBoard.getPieceColorAtIndex(fromIndex);
-
-            if (pieceType == null || color == null) {
-                throw new IllegalStateException("No piece at the starting position");
-            }
-
-            // Check if it's the correct player's turn
-            Color pieceColor = bitBoard.getPieceColorAtIndex(fromIndex);
-            if ((pieceColor == Color.WHITE && !bitBoard.whitesTurn) || (pieceColor == Color.BLACK && bitBoard.whitesTurn)) {
-                bitBoard.logBoard();
-                throw new IllegalStateException("It's not " + pieceColor + "'s turn");
-            }
-
-            int move = getMove(fromIndex, toIndex, promotionPiece);
-
-            if (move == -1) {
-                log.warn("Move not legal!");
+        int move = getMove(fromIndex, toIndex, promotionPiece);
+        if (move != -1) {
+            performMove(move);
+        } else {
+            // special case: if it's a promotion, try explicit promotion piece
+            if (promotionPiece != 0) {
+                int promMove = getMove(fromIndex, toIndex, promotionPiece);
+                if (promMove != -1) {
+                    performMove(promMove);
+                } else {
+                    log.warn("No legal move found from {} to {} (promotion {}), ignoring.",
+                            fromIndex, toIndex, promotionPiece);
+                }
             } else {
-                performMove(move);
+                log.warn("No legal move found from {} to {}, ignoring.", fromIndex, toIndex);
             }
-
         }
     }
 
@@ -374,27 +440,21 @@ public class Engine {
     }
 
     public long getBoardStateHash() {
-        synchronized (boardLock) {
-            return bitBoard.getBoardStateHash();
-        }
+        return withBoardLock(() -> bitBoard.getBoardStateHash());
     }
 
     public void logBoard() {
-        synchronized (boardLock) {
-            bitBoard.logBoard();
-        }
+        withBoardLock(bitBoard::logBoard);
     }
 
     public boolean whitesTurn() {
-        synchronized (boardLock) {
-            return bitBoard.whitesTurn;
-        }
+        return withBoardLock(() -> bitBoard.whitesTurn);
     }
 
-    // Engine.java
+    // Null move (search)
+
     public int doNullMoveForSearch() {
-        // Save current en-passant target (0 means none in your codebase)
-        synchronized (boardLock) {
+        return withBoardLock(() -> {
             int previousDoubleStep = bitBoard.getLastMoveDoubleStepPawnIndex();
 
             // EP is not valid across a null move: clear it
@@ -409,12 +469,11 @@ public class Engine {
             gameState.refreshScore(bitBoard);
 
             return previousDoubleStep;
-        }
+        });
     }
 
-    // Engine.java
     public void undoNullMoveForSearch(int previousDoubleStep) {
-        synchronized (boardLock) {
+        withBoardLock(() -> {
             // Flip side back
             bitBoard.flipSideToMove();
 
@@ -425,23 +484,33 @@ public class Engine {
             legalMovesNeedUpdate = true;
 
             gameState.refreshScore(bitBoard);
-        }
+        });
     }
 
     public void undoLastMove() {
-        synchronized (boardLock) {
-            if (line.isEmpty()) throw new IllegalStateException("undoLastMoveWasNotPossible, line is empty");
+        withBoardLock(() -> {
+            if (line.isEmpty()) {
+                if (useMoveCache) {
+                    throw new IllegalStateException("undoLastMoveWasNotPossible, line is empty");
+                } else {
+                    // Simulation mode: be tolerant to mis-paired undo during pruning.
+                    // Just recompute state to keep evaluation consistent and return.
+                    legalMovesNeedUpdate = true;
+                    gameState.refreshScore(bitBoard);
+                    return;
+                }
+            }
 
             Integer undoMove = line.getLast();
 
-            long currentHash = getBoardStateHash();
+            long currentHash = bitBoard.getBoardStateHash();
             gameState.removeHash(currentHash);
 
             // 1) Undo on the board
             this.bitBoard.undoMove(undoMove);
 
             // 2) Recompute legal moves
-            generateLegalMoves();
+            generateLegalMovesInternal();
             gameState.popHalfmoveClock(bitBoard);
             gameState.updateState(bitBoard, legalMoves, false);
             gameState.getScore().undoMove(bitBoard, undoMove, gameState.getState());
@@ -450,12 +519,11 @@ public class Engine {
             redoLine.add(undoMove);
             line.removeLast();
             notifyPositionChanged();
-        }
+        });
     }
 
-
     public void redoMove() {
-        synchronized (boardLock) {
+        withBoardLock(() -> {
             if (!redoLine.isEmpty()) {
                 performMove(redoLine.getLast());
                 redoLine.removeLast();
@@ -463,7 +531,7 @@ public class Engine {
             } else {
                 throw new IllegalStateException("redoLastMoveWasNotPossible, redoLine is empty");
             }
-        }
+        });
     }
 
     public Integer getLastMove() {
@@ -475,14 +543,11 @@ public class Engine {
     }
 
     public FEN translateBoardToFen() {
-        synchronized (boardLock) {
-            return FEN.translateBoardToFEN(bitBoard, gameState);
-        }
+        return withBoardLock(() -> FEN.translateBoardToFEN(bitBoard, gameState));
     }
 
-    // Engine.java
     public Map<String, String> buildRenderBoard() {
-        synchronized (boardLock) {
+        return withBoardLock(() -> {
             Map<String, String> map = new HashMap<>(64);
             for (int i = 0; i < 64; i++) {
                 PieceType t = bitBoard.getPieceTypeAtIndex(i);
@@ -508,13 +573,10 @@ public class Engine {
             }
 
             return map;
-        }
+        });
     }
 
-
     public boolean isEndgame() {
-        synchronized (boardLock) {
-            return bitBoard.isEndgame();
-        }
+        return withBoardLock(() -> bitBoard.isEndgame());
     }
 }
