@@ -41,6 +41,9 @@ MOVE_TIME = float(os.environ.get("BOT_MOVE_TIME", "0.5"))
 # Dedicated lower floor for very fast games (bullet)
 BULLET_MOVE_TIME = float(os.environ.get("BOT_BULLET_MOVE_TIME", "0.4"))
 
+# Enable UCI pondering to keep the engine thinking during the opponent's turn.
+ENABLE_PONDER = os.environ.get("BOT_ENABLE_PONDER", "0") == "1"
+
 
 def _env_float(name: str, default: float) -> float:
     try:
@@ -377,7 +380,10 @@ def start_engine():
     try:
         engine = chess.engine.SimpleEngine.popen_uci(cmd)
         try:
-            engine.configure({"Ponder": False, "MoveOverhead": 150})
+            engine.configure({
+                "Ponder": ENABLE_PONDER,
+                "MoveOverhead": 150,
+            })
         except chess.engine.EngineError:
             pass
     except FileNotFoundError as e:
@@ -389,12 +395,29 @@ def start_engine():
     return engine
 
 
+def _request_engine_stop(engine: Optional[chess.engine.SimpleEngine]) -> None:
+    if engine is None:
+        return
+
+    stop = getattr(engine, "stop", None)
+    if callable(stop):
+        with contextlib.suppress(Exception):
+            stop()
+        return
+
+    protocol = getattr(engine, "protocol", None)
+    loop = getattr(protocol, "loop", None)
+    send_line = getattr(protocol, "send_line", None)
+    if loop and send_line:
+        with contextlib.suppress(Exception):
+            loop.call_soon_threadsafe(send_line, "stop")
+
+
 def shutdown_engine(engine: Optional[chess.engine.SimpleEngine]) -> None:
     if engine is None:
         return
 
-    with contextlib.suppress(Exception):
-        engine.stop()
+    _request_engine_stop(engine)
 
     try:
         engine.quit()
@@ -606,6 +629,7 @@ def play_game(client: berserk.Client,
 
     abort_timer = None
     abort_lock = threading.Lock()
+    pending_ponder_move: Optional[str] = None
 
     def _cancel_abort_timer():
         nonlocal abort_timer
@@ -656,28 +680,41 @@ def play_game(client: berserk.Client,
                 tc_bucket = _estimate_tc_bucket(clock_initial, clock_increment)
                 moves = state.get("moves", "")
                 board = chess.Board()
-                if moves:
-                    for mv in moves.split():
+                moves_list = moves.split() if moves else []
+                if moves_list:
+                    for mv in moves_list:
                         board.push_uci(mv)
-                current_move_count = len(moves.split()) if moves else 0
+                current_move_count = len(moves_list)
                 if current_move_count > 0:
                     _cancel_abort_timer()
 
                 if is_my_turn(board, my_color_is_white) and not board.is_game_over():
+                    if ENABLE_PONDER and pending_ponder_move:
+                        last_move = moves_list[-1] if moves_list else None
+                        if last_move != pending_ponder_move:
+                            _request_engine_stop(engine)
+                        pending_ponder_move = None
                     think_time, min_floor = calc_move_time(state, my_color_is_white, clock_initial, clock_increment)
                     slack = 0.1 if tc_bucket == "bullet" else 0.15
                     try:
                         limit_time = max(min_floor, think_time - slack)
                         limit_time = max(ABSOLUTE_MIN_THINK_TIME, limit_time)
-                        result = engine.play(board, chess.engine.Limit(time=limit_time))
+                        result = engine.play(
+                            board,
+                            chess.engine.Limit(time=limit_time),
+                            ponder=ENABLE_PONDER,
+                        )
                         move_sent = safe_make_move(client, game_id, result.move.uci())
                         if not move_sent:
                             print("[warn] Move send failed, retrying once")
                             safe_make_move(client, game_id, result.move.uci())
+                        if ENABLE_PONDER:
+                            pending_ponder_move = result.ponder.uci() if result.ponder else None
                     except (asyncio.TimeoutError,
                             chess.engine.EngineError,
                             chess.engine.EngineTerminatedError) as e:
                         print(f"[error] engine.play failed: {repr(e)}")
+                        pending_ponder_move = None
                         shutdown_engine(engine)
                         try:
                             engine = start_engine()
@@ -695,10 +732,11 @@ def play_game(client: berserk.Client,
                 state = event
                 moves = state.get("moves", "")
                 board = chess.Board()
-                if moves:
-                    for mv in moves.split():
+                moves_list = moves.split() if moves else []
+                if moves_list:
+                    for mv in moves_list:
                         board.push_uci(mv)
-                current_move_count = len(moves.split()) if moves else 0
+                current_move_count = len(moves_list)
                 if current_move_count > 0:
                     _cancel_abort_timer()
 
@@ -706,6 +744,11 @@ def play_game(client: berserk.Client,
                     continue
 
                 if is_my_turn(board, my_color_is_white):
+                    if ENABLE_PONDER and pending_ponder_move:
+                        last_move = moves_list[-1] if moves_list else None
+                        if last_move != pending_ponder_move:
+                            _request_engine_stop(engine)
+                        pending_ponder_move = None
                     think_time, min_floor = calc_move_time(state, my_color_is_white, clock_initial, clock_increment)
                     if tc_bucket is None and clock_initial is None:
                         key_time = "wtime" if my_color_is_white else "btime"
@@ -723,15 +766,22 @@ def play_game(client: berserk.Client,
                     try:
                         limit_time = max(min_floor, think_time - slack)
                         limit_time = max(ABSOLUTE_MIN_THINK_TIME, limit_time)
-                        result = engine.play(board, chess.engine.Limit(time=limit_time))
+                        result = engine.play(
+                            board,
+                            chess.engine.Limit(time=limit_time),
+                            ponder=ENABLE_PONDER,
+                        )
                         move_sent = safe_make_move(client, game_id, result.move.uci())
                         if not move_sent:
                             print("[warn] Move send failed, retrying once")
                             safe_make_move(client, game_id, result.move.uci())
+                        if ENABLE_PONDER:
+                            pending_ponder_move = result.ponder.uci() if result.ponder else None
                     except (asyncio.TimeoutError,
                             chess.engine.EngineError,
                             chess.engine.EngineTerminatedError) as e:
                         print(f"[error] engine.play failed: {repr(e)}")
+                        pending_ponder_move = None
                         shutdown_engine(engine)
                         try:
                             engine = start_engine()
@@ -749,11 +799,17 @@ def play_game(client: berserk.Client,
                 print(f"[chat] {event.get('username')}: {event.get('text')}")
 
             elif t == "gameFinish":
+                if ENABLE_PONDER:
+                    _request_engine_stop(engine)
+                    pending_ponder_move = None
                 print(f"[*] Game finished: {game_id}")
                 active_counter.dec()   # <- ensure counter decreases here
                 break
     finally:
         _cancel_abort_timer()
+        if ENABLE_PONDER:
+            _request_engine_stop(engine)
+        pending_ponder_move = None
 
     return engine
 
