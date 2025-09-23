@@ -168,9 +168,14 @@ public class Engine {
             this.legalMovesCache = useMoveCache ? new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs) : null;
 
             this.openingBook = other.openingBook;
-            LongConsumer callback = other.onPositionChanged;
-            this.onPositionChanged = (callback != null) ? callback : _ -> {
-            };
+            if (useMoveCache) {
+                LongConsumer callback = other.onPositionChanged;
+                this.onPositionChanged = (callback != null) ? callback : _ -> {
+                };
+            } else {
+                this.onPositionChanged = _ -> {
+                };
+            }
         });
     }
 
