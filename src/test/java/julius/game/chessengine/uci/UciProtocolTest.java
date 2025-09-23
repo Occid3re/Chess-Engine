@@ -100,7 +100,7 @@ public class UciProtocolTest {
         UciHandler handler = new UciHandler(outputs::add, running::get);
 
         handler.handle("position startpos");
-        handler.handle("go ponder wtime 60000 btime 60000");
+        handler.handle("go ponder wtime 1000 btime 1000");
 
         // give the search some time to start
         Thread.sleep(200);

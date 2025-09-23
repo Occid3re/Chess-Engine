@@ -299,7 +299,11 @@ public class UciHandler {
         long timeLeft = whitesTurn ? wtime : btime;
         long inc = whitesTurn ? winc : binc;
         long limit = computeTimeLimit(timeLeft, inc, movetime, movestogo, moveOverheadMs);
-        ai.setTimeLimit(limit);
+        if (ponder && movetime == 0) {
+            ai.setTimeLimit(AI.INFINITE_TIME_LIMIT);
+        } else {
+            ai.setTimeLimit(limit);
+        }
 
         ponderActive = ponder;
         ponderShouldOutputMove = false;
