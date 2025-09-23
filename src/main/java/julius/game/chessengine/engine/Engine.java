@@ -114,6 +114,8 @@ public class Engine {
 
     private final Object boardLock = new Object();
 
+    private final Access access;
+
     @Getter
     private OpeningBook openingBook;
 
@@ -132,10 +134,12 @@ public class Engine {
 
 
     public Engine() {
+        this.access = new Access();
         startNewGame();
     }
 
     public Engine(Engine other) {
+        this.access = new Access();
         synchronized (other.boardLock) {
             this.bitBoard = new BitBoard(other.bitBoard);
             this.gameState = new GameState(other.gameState);
@@ -169,41 +173,22 @@ public class Engine {
     /** Expose BitBoard's SEE to callers (AI). */
     public int see(int move) {
         synchronized (boardLock) {
-            return bitBoard.see(move);
+            return seeUnsafe(move);
         }
     }
 
     public MoveList getAllLegalMoves() {
         synchronized (boardLock) {
-            if (gameState.isGameOver()) {
-                if (legalMoves == null) {
-                    legalMoves = new MoveList();  // Create only if null
-                } else {
-                    legalMoves.clear();  // Clear existing list instead of creating a new one
-                }
-            } else if (legalMovesNeedUpdate) {
-                generateLegalMoves();
-            }
-            return legalMoves;
+            return getAllLegalMovesUnsafe();
         }
     }
 
     public void performMove(int move) {
         synchronized (boardLock) {
-            boolean isOpeningMove = false;
             if (!gameState.isGameOver()) {
-                long boardStateHashBeforeMove = getBoardStateHash();
-                bitBoard.performMove(move);
-                long newHash = getBoardStateHash();
-                gameState.recordHash(newHash);
-                if (openingBook.containsMoveAndBoardStateHash(boardStateHashBeforeMove, move)) {
-                    isOpeningMove = true;
-                }
-                generateLegalMoves();
-                gameState.pushHalfmoveClock();
-                gameState.update(bitBoard, legalMoves, move, isOpeningMove);
-                gameState.getScore().applyMove(bitBoard, move, gameState.getState());
-                line.add(move);
+                long boardStateHashBeforeMove = getBoardStateHashUnsafe();
+                boolean isOpeningMove = openingBook.containsMoveAndBoardStateHash(boardStateHashBeforeMove, move);
+                performMoveUnsafe(move, isOpeningMove);
                 notifyPositionChanged();
             }
         }
@@ -211,33 +196,7 @@ public class Engine {
 
     public void importBoardFromFen(String fen) {
         synchronized (boardLock) {
-            this.bitBoard = FEN.translateFENtoBitBoard(fen);
-            this.gameState = new GameState(bitBoard);
-
-            // Ensure the imported state reflects the parsed half-move/full-move counters and
-            // repetition baseline.  The constructor copies the counters from the bitboard, but
-            // we explicitly reset the historical bookkeeping so future updates start from this
-            // root position.
-            gameState.setHalfmoveClock(bitBoard.getHalfmoveClock());
-            gameState.setFullmoveNumber(bitBoard.getFullmoveNumber());
-            gameState.getHashHistory().clear();
-            gameState.getRepetition().clear();
-            gameState.recordHash(getBoardStateHash());
-
-            // For terminal draw states (e.g., fifty-move rule) skip move generation entirely so
-            // callers observe an empty legal move list.
-            if (gameState.isFiftyMoveRule() || gameState.isThreefoldRepetition()) {
-                if (legalMoves == null) {
-                    legalMoves = new MoveList();
-                } else {
-                    legalMoves.clear();
-                }
-                legalMovesNeedUpdate = false;
-                gameState.setState(GameStateEnum.DRAW);
-            } else {
-                generateLegalMoves();
-                gameState.updateState(bitBoard, legalMoves, false);
-            }
+            importBoardFromFenUnsafe(fen);
             notifyPositionChanged();
         }
     }
@@ -251,64 +210,14 @@ public class Engine {
 
     public void startNewGame() {
         synchronized (boardLock) {
-            bitBoard = new BitBoard();
-            gameState = new GameState(bitBoard);
-            legalMovesNeedUpdate = true;
-            line = new ArrayList<>();
-            redoLine = new ArrayList<>();
-            this.openingBook = OpeningBook.getInstance();
-            legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
-            // Optional: one cleanup to ensure fresh state
-            legalMovesCache.cleanup();
+            startNewGameUnsafe();
             notifyPositionChanged();
         }
     }
 
     private void generateLegalMoves() {
         synchronized (boardLock) {
-            final long boardStateHash = getBoardStateHash();
-
-            // Use cached result if available
-            MoveList cached = legalMovesCache.get(boardStateHash);
-            if (cached != null) {
-                this.legalMoves = new MoveList(cached);
-                legalMovesNeedUpdate = false;
-                return;
-            }
-
-            if (gameState.isGameOver()) {
-                this.legalMoves = new MoveList();
-                legalMovesNeedUpdate = false;
-                return;
-            }
-
-            // Generate pseudo-legal moves on the current board
-            MoveList moves = bitBoard.getAllCurrentPossibleMoves();
-
-            // Filter in-place by making/unmaking on the SAME bitBoard (no BitBoard copy)
-            MoveList legal = new MoveList();
-            for (int i = 0; i < moves.size(); i++) {
-                int move = moves.getMove(i);
-
-                bitBoard.performMove(move);
-                // If the mover's king is not left in check, the move is legal
-                if (!bitBoard.isInCheck(MoveHelper.isWhitesMove(move))) {
-                    legal.add(move);
-                }
-                bitBoard.undoMove(move);
-            }
-
-            this.legalMoves = legal;
-            legalMovesNeedUpdate = false;
-            // Store a clone to keep the cache immutable from callers' perspective.
-            legalMovesCache.put(boardStateHash, new MoveList(legal));
-
-            int size = legalMovesCache.size();
-            if (size > CACHE_CFG.maxSize) {
-                // This should be rare due to eviction, but keep the guard to surface misconfigurations.
-                throw new RuntimeException(String.format(
-                        "LegalMovesCache size %s is larger than configured MAX_SIZE %s", size, CACHE_CFG.maxSize));
-            }
+            generateLegalMovesUnsafe();
         }
     }
 
@@ -375,7 +284,7 @@ public class Engine {
 
     public long getBoardStateHash() {
         synchronized (boardLock) {
-            return bitBoard.getBoardStateHash();
+            return getBoardStateHashUnsafe();
         }
     }
 
@@ -387,7 +296,7 @@ public class Engine {
 
     public boolean whitesTurn() {
         synchronized (boardLock) {
-            return bitBoard.whitesTurn;
+            return whitesTurnUnsafe();
         }
     }
 
@@ -395,60 +304,21 @@ public class Engine {
     public int doNullMoveForSearch() {
         // Save current en-passant target (0 means none in your codebase)
         synchronized (boardLock) {
-            int previousDoubleStep = bitBoard.getLastMoveDoubleStepPawnIndex();
-
-            // EP is not valid across a null move: clear it
-            bitBoard.setLastMoveDoubleStepPawnIndex(0);
-
-            // Flip side to move
-            bitBoard.flipSideToMove();
-
-            // Mark move list stale so the next search ply regenerates for the new side.
-            legalMovesNeedUpdate = true;
-
-            gameState.refreshScore(bitBoard);
-
-            return previousDoubleStep;
+            return doNullMoveForSearchUnsafe();
         }
     }
 
     // Engine.java
     public void undoNullMoveForSearch(int previousDoubleStep) {
         synchronized (boardLock) {
-            // Flip side back
-            bitBoard.flipSideToMove();
-
-            // Restore EP target
-            bitBoard.setLastMoveDoubleStepPawnIndex(previousDoubleStep);
-
-            // Mark stale again so we rebuild for the restored side.
-            legalMovesNeedUpdate = true;
-
-            gameState.refreshScore(bitBoard);
+            undoNullMoveForSearchUnsafe(previousDoubleStep);
         }
     }
 
     public void undoLastMove() {
         synchronized (boardLock) {
             if (line.isEmpty()) throw new IllegalStateException("undoLastMoveWasNotPossible, line is empty");
-
-            Integer undoMove = line.getLast();
-
-            long currentHash = getBoardStateHash();
-            gameState.removeHash(currentHash);
-
-            // 1) Undo on the board
-            this.bitBoard.undoMove(undoMove);
-
-            // 2) Recompute legal moves
-            generateLegalMoves();
-            gameState.popHalfmoveClock(bitBoard);
-            gameState.updateState(bitBoard, legalMoves, false);
-            gameState.getScore().undoMove(bitBoard, undoMove, gameState.getState());
-
-            // 3) Bookkeeping
-            redoLine.add(undoMove);
-            line.removeLast();
+            undoLastMoveUnsafe();
             notifyPositionChanged();
         }
     }
@@ -516,5 +386,213 @@ public class Engine {
         synchronized (boardLock) {
             return bitBoard.isEndgame();
         }
+    }
+
+    public Access access() {
+        return access;
+    }
+
+    public final class Access {
+        private Access() {
+        }
+
+        public MoveList getAllLegalMoves() {
+            return getAllLegalMovesUnsafe();
+        }
+
+        public void performMove(int move) {
+            performMoveUnsafe(move, false);
+        }
+
+        public void undoLastMove() {
+            undoLastMoveUnsafe();
+        }
+
+        public long getBoardStateHash() {
+            return getBoardStateHashUnsafe();
+        }
+
+        public GameState getGameState() {
+            return gameState;
+        }
+
+        public BitBoard getBitBoard() {
+            return bitBoard;
+        }
+
+        public boolean whitesTurn() {
+            return whitesTurnUnsafe();
+        }
+
+        public int see(int move) {
+            return seeUnsafe(move);
+        }
+
+        public int doNullMoveForSearch() {
+            return doNullMoveForSearchUnsafe();
+        }
+
+        public void undoNullMoveForSearch(int previousDoubleStep) {
+            undoNullMoveForSearchUnsafe(previousDoubleStep);
+        }
+
+        public boolean isEndgame() {
+            return bitBoard.isEndgame();
+        }
+    }
+
+    private int seeUnsafe(int move) {
+        return bitBoard.see(move);
+    }
+
+    private MoveList getAllLegalMovesUnsafe() {
+        if (gameState.isGameOver()) {
+            if (legalMoves == null) {
+                legalMoves = new MoveList();
+            } else {
+                legalMoves.clear();
+            }
+        } else if (legalMovesNeedUpdate) {
+            generateLegalMovesUnsafe();
+        }
+        return legalMoves;
+    }
+
+    private void performMoveUnsafe(int move, boolean isOpeningMove) {
+        if (gameState.isGameOver()) {
+            return;
+        }
+        bitBoard.performMove(move);
+        long newHash = getBoardStateHashUnsafe();
+        gameState.recordHash(newHash);
+        performMovePostUpdate(move, isOpeningMove);
+    }
+
+    private void performMovePostUpdate(int move, boolean isOpeningMove) {
+        generateLegalMovesUnsafe();
+        gameState.pushHalfmoveClock();
+        gameState.update(bitBoard, legalMoves, move, isOpeningMove);
+        gameState.getScore().applyMove(bitBoard, move, gameState.getState());
+        line.add(move);
+    }
+
+    private void importBoardFromFenUnsafe(String fen) {
+        this.bitBoard = FEN.translateFENtoBitBoard(fen);
+        this.gameState = new GameState(bitBoard);
+
+        gameState.setHalfmoveClock(bitBoard.getHalfmoveClock());
+        gameState.setFullmoveNumber(bitBoard.getFullmoveNumber());
+        gameState.getHashHistory().clear();
+        gameState.getRepetition().clear();
+        gameState.recordHash(getBoardStateHashUnsafe());
+
+        if (gameState.isFiftyMoveRule() || gameState.isThreefoldRepetition()) {
+            if (legalMoves == null) {
+                legalMoves = new MoveList();
+            } else {
+                legalMoves.clear();
+            }
+            legalMovesNeedUpdate = false;
+            gameState.setState(GameStateEnum.DRAW);
+        } else {
+            generateLegalMovesUnsafe();
+            gameState.updateState(bitBoard, legalMoves, false);
+        }
+    }
+
+    private void startNewGameUnsafe() {
+        bitBoard = new BitBoard();
+        gameState = new GameState(bitBoard);
+        legalMovesNeedUpdate = true;
+        line = new ArrayList<>();
+        redoLine = new ArrayList<>();
+        this.openingBook = OpeningBook.getInstance();
+        legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
+        legalMovesCache.cleanup();
+    }
+
+    private void generateLegalMovesUnsafe() {
+        final long boardStateHash = getBoardStateHashUnsafe();
+
+        MoveList cached = legalMovesCache.get(boardStateHash);
+        if (cached != null) {
+            this.legalMoves = new MoveList(cached);
+            legalMovesNeedUpdate = false;
+            return;
+        }
+
+        if (gameState.isGameOver()) {
+            this.legalMoves = new MoveList();
+            legalMovesNeedUpdate = false;
+            return;
+        }
+
+        MoveList moves = bitBoard.getAllCurrentPossibleMoves();
+
+        MoveList legal = new MoveList();
+        for (int i = 0; i < moves.size(); i++) {
+            int move = moves.getMove(i);
+
+            bitBoard.performMove(move);
+            if (!bitBoard.isInCheck(MoveHelper.isWhitesMove(move))) {
+                legal.add(move);
+            }
+            bitBoard.undoMove(move);
+        }
+
+        this.legalMoves = legal;
+        legalMovesNeedUpdate = false;
+        legalMovesCache.put(boardStateHash, new MoveList(legal));
+
+        int size = legalMovesCache.size();
+        if (size > CACHE_CFG.maxSize) {
+            throw new RuntimeException(String.format(
+                    "LegalMovesCache size %s is larger than configured MAX_SIZE %s", size, CACHE_CFG.maxSize));
+        }
+    }
+
+    private void undoLastMoveUnsafe() {
+        if (line.isEmpty()) {
+            throw new IllegalStateException("undoLastMoveWasNotPossible, line is empty");
+        }
+
+        Integer undoMove = line.getLast();
+
+        long currentHash = getBoardStateHashUnsafe();
+        gameState.removeHash(currentHash);
+
+        this.bitBoard.undoMove(undoMove);
+
+        generateLegalMovesUnsafe();
+        gameState.popHalfmoveClock(bitBoard);
+        gameState.updateState(bitBoard, legalMoves, false);
+        gameState.getScore().undoMove(bitBoard, undoMove, gameState.getState());
+
+        redoLine.add(undoMove);
+        line.removeLast();
+    }
+
+    private long getBoardStateHashUnsafe() {
+        return bitBoard.getBoardStateHash();
+    }
+
+    private boolean whitesTurnUnsafe() {
+        return bitBoard.whitesTurn;
+    }
+
+    private int doNullMoveForSearchUnsafe() {
+        int previousDoubleStep = bitBoard.getLastMoveDoubleStepPawnIndex();
+        bitBoard.setLastMoveDoubleStepPawnIndex(0);
+        bitBoard.flipSideToMove();
+        legalMovesNeedUpdate = true;
+        gameState.refreshScore(bitBoard);
+        return previousDoubleStep;
+    }
+
+    private void undoNullMoveForSearchUnsafe(int previousDoubleStep) {
+        bitBoard.flipSideToMove();
+        bitBoard.setLastMoveDoubleStepPawnIndex(previousDoubleStep);
+        legalMovesNeedUpdate = true;
+        gameState.refreshScore(bitBoard);
     }
 }

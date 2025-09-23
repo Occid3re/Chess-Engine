@@ -754,8 +754,9 @@ public class AI {
     private void performCalculation() {
         try {
             Engine simulatorEngine = mainEngine.createSimulation();
-            long boardStateHash = simulatorEngine.getBoardStateHash();
-            boolean isWhite = simulatorEngine.whitesTurn();
+            Engine.Access access = simulatorEngine.access();
+            long boardStateHash = access.getBoardStateHash();
+            boolean isWhite = access.whitesTurn();
             long deadline = System.nanoTime() + timeLimit * 1_000_000;
             beforeCalculationBoardState = boardStateHash;
 
@@ -855,7 +856,8 @@ public class AI {
     }
 
     private boolean isMoveStillLegal(Engine simulatorEngine, int move) {
-        MoveList legalMoves = simulatorEngine.getAllLegalMoves();
+        Engine.Access access = simulatorEngine.access();
+        MoveList legalMoves = access.getAllLegalMoves();
         for (int i = 0; i < legalMoves.size(); i++) {
             if (legalMoves.getMove(i) == move) {
                 return true;
@@ -916,13 +918,14 @@ public class AI {
                                              double alpha,
                                              double beta,
                                              SplittableRandom rng) {
+        Engine.Access root = simulatorEngine.access();
         if (searchPool == null || abortRequested(deadline)) {
             return getBestMove(simulatorEngine, task.isWhiteToMove(), depth, deadline, alpha, beta, rng);
         }
 
         final boolean isWhitesTurn = task.isWhiteToMove();
-        MoveList legal = simulatorEngine.getAllLegalMoves();
-        MoveList orderedMoves = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
+        MoveList legal = root.getAllLegalMoves();
+        MoveList orderedMoves = sortMovesByEfficiency(legal, depth, root.getBoardStateHash(), -1, simulatorEngine);
         if (orderedMoves.size() == 0) return null;
         maybeRotateRootMoves(orderedMoves, rng);
         SearchInstrumentation instr = instrumentation();
@@ -941,23 +944,23 @@ public class AI {
         if (abortRequested(deadline)) return null;
 
         instr.recordRootMoveExplored();
-        simulatorEngine.performMove(firstMove);
+        root.performMove(firstMove);
         double firstScore;
-        if (simulatorEngine.getGameState().isInStateCheckMate()) {
+        if (root.getGameState().isInStateCheckMate()) {
             firstScore = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
-        } else if (simulatorEngine.getGameState().isInStateDraw()) {
-            firstScore = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, depth);
+        } else if (root.getGameState().isInStateDraw()) {
+            firstScore = evaluateStaticPosition(root.getGameState(), !isWhitesTurn, depth);
             if (isWhitesTurn) {
                 firstScore = -firstScore;
             }
         } else {
             firstScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, firstMove, 1, 0);
             if (firstScore == EXIT_FLAG || abortRequested(deadline)) {
-                simulatorEngine.undoLastMove();
+                root.undoLastMove();
                 return null;
             }
         }
-        simulatorEngine.undoLastMove();
+        root.undoLastMove();
 
         bestMove = firstMove;
         bestScore = firstScore;
@@ -987,7 +990,8 @@ public class AI {
                 Heuristics helperHeuristics = prepareHelperHeuristics(task, depth);
                 try {
                     Engine e = simulatorEngine.createSimulation();
-                    e.performMove(moveInt);
+                    Engine.Access access = e.access();
+                    access.performMove(moveInt);
                     instr.recordRootMoveExplored();
 
                     double currentAlpha = alphaRef.get();
@@ -1002,10 +1006,10 @@ public class AI {
                     }
 
                     double probe;
-                    if (e.getGameState().isInStateCheckMate()) {
+                    if (access.getGameState().isInStateCheckMate()) {
                         probe = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
-                    } else if (e.getGameState().isInStateDraw()) {
-                        probe = evaluateStaticPosition(e.getGameState(), !isWhitesTurn, depth);
+                    } else if (access.getGameState().isInStateDraw()) {
+                        probe = evaluateStaticPosition(access.getGameState(), !isWhitesTurn, depth);
                         if (isWhitesTurn) {
                             probe = -probe;
                         }
@@ -1101,24 +1105,24 @@ public class AI {
 
                 int moveInt = orderedMoves.getMove(idx);
                 instr.recordRootMoveExplored();
-                simulatorEngine.performMove(moveInt);
+                root.performMove(moveInt);
 
                 double score;
-                if (simulatorEngine.getGameState().isInStateCheckMate()) {
+                if (root.getGameState().isInStateCheckMate()) {
                     score = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
-                } else if (simulatorEngine.getGameState().isInStateDraw()) {
-                    score = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, depth);
+                } else if (root.getGameState().isInStateDraw()) {
+                    score = evaluateStaticPosition(root.getGameState(), !isWhitesTurn, depth);
                     if (isWhitesTurn) {
                         score = -score;
                     }
                 } else {
                     score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1, 0);
                     if (score == EXIT_FLAG || abortRequested(deadline)) {
-                        simulatorEngine.undoLastMove();
+                        root.undoLastMove();
                         break;
                     }
                 }
-                simulatorEngine.undoLastMove();
+                root.undoLastMove();
 
                 if (isBetterScore(isWhitesTurn, score, bestScore)) {
                     bestScore = score;
@@ -1152,14 +1156,15 @@ public class AI {
     }
 
     private void fillCalculatedLine(Engine simulation) {
-        long rootHash = simulation.getBoardStateHash();
+        Engine.Access access = simulation.access();
+        long rootHash = access.getBoardStateHash();
         List<MoveAndScore> pv = new ArrayList<>();
         Set<Long> seen = new HashSet<>();
         int movesPerformed = 0;
 
         // Helper to check legality
         java.util.function.IntPredicate isLegalNow = (mv) -> {
-            MoveList legal = simulation.getAllLegalMoves();
+            MoveList legal = access.getAllLegalMoves();
             for (int i = 0; i < legal.size(); i++) {
                 if (legal.getMove(i) == mv) return true;
             }
@@ -1171,7 +1176,7 @@ public class AI {
         int seedMove = -1;
         Double seedScore = null; // nullable to indicate "unknown"
 
-        if (rootEntry != null && rootEntry.bestMove != -1 && MoveHelper.isWhitesMove(rootEntry.bestMove) == simulation.whitesTurn() && isLegalNow.test(rootEntry.bestMove)) {
+        if (rootEntry != null && rootEntry.bestMove != -1 && MoveHelper.isWhitesMove(rootEntry.bestMove) == access.whitesTurn() && isLegalNow.test(rootEntry.bestMove)) {
             // Prefer EXACT; otherwise still accept to seed PV so it's not empty
             seedMove = rootEntry.bestMove;
             if (rootEntry.nodeType == NodeType.EXACT) {
@@ -1179,17 +1184,17 @@ public class AI {
             }
         }
 
-        if (seedMove == -1 && currentBestMove != -1 && MoveHelper.isWhitesMove(currentBestMove) == simulation.whitesTurn() && isLegalNow.test(currentBestMove)) {
+        if (seedMove == -1 && currentBestMove != -1 && MoveHelper.isWhitesMove(currentBestMove) == access.whitesTurn() && isLegalNow.test(currentBestMove)) {
             seedMove = currentBestMove;
             // score unknown; will remain null
         }
 
         if (seedMove == -1) {
             // Fallback: first legal move, if any
-            MoveList legal = simulation.getAllLegalMoves();
+            MoveList legal = access.getAllLegalMoves();
             if (legal.size() > 0) {
                 int mv = legal.getMove(0);
-                if (MoveHelper.isWhitesMove(mv) == simulation.whitesTurn()) {
+                if (MoveHelper.isWhitesMove(mv) == access.whitesTurn()) {
                     seedMove = mv;
                 }
             }
@@ -1203,9 +1208,9 @@ public class AI {
 
         // Play the seed move
         pv.add(new MoveAndScore(seedMove, seedScore != null ? seedScore : 0.0));
-        simulation.performMove(seedMove);
+        access.performMove(seedMove);
         movesPerformed++;
-        long curHash = simulation.getBoardStateHash();
+        long curHash = access.getBoardStateHash();
 
         // 2) Follow ONLY EXACT entries beyond root, with full validation
         while (true) {
@@ -1217,17 +1222,17 @@ public class AI {
             int mv = e.bestMove;
 
             // side-to-move must match and move must be legal now
-            if (MoveHelper.isWhitesMove(mv) != simulation.whitesTurn()) break;
+            if (MoveHelper.isWhitesMove(mv) != access.whitesTurn()) break;
             if (!isLegalNow.test(mv)) break;
 
             pv.add(new MoveAndScore(mv, e.score));
-            simulation.performMove(mv);
+            access.performMove(mv);
             movesPerformed++;
-            curHash = simulation.getBoardStateHash();
+            curHash = access.getBoardStateHash();
         }
 
         // Undo simulation
-        for (int i = 0; i < movesPerformed; i++) simulation.undoLastMove();
+        for (int i = 0; i < movesPerformed; i++) access.undoLastMove();
 
         updatePrincipalVariation(pv);
     }
@@ -1235,11 +1240,12 @@ public class AI {
 
     private MoveAndScore getBestMove(Engine simulatorEngine, boolean isWhitesTurn, int depth, long deadline,
                                      double alpha, double beta, SplittableRandom rng) {
+        Engine.Access search = simulatorEngine.access();
         int bestMove = -1;
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
 
-        MoveList sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth,
-                simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
+        MoveList sortedMoves = sortMovesByEfficiency(search.getAllLegalMoves(), depth,
+                search.getBoardStateHash(), -1, simulatorEngine);
         maybeRotateRootMoves(sortedMoves, rng);
         SearchInstrumentation instr = instrumentation();
         instr.recordRootMovesGenerated(sortedMoves.size());
@@ -1249,23 +1255,23 @@ public class AI {
             if (abortRequested(deadline)) break;
 
             instr.recordRootMoveExplored();
-            simulatorEngine.performMove(moveInt);
+            search.performMove(moveInt);
             double score;
-            if (simulatorEngine.getGameState().isInStateCheckMate()) {
+            if (search.getGameState().isInStateCheckMate()) {
                 score = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
-            } else if (simulatorEngine.getGameState().isInStateDraw()) {
-                score = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, depth);
+            } else if (search.getGameState().isInStateDraw()) {
+                score = evaluateStaticPosition(search.getGameState(), !isWhitesTurn, depth);
                 if (isWhitesTurn) {
                     score = -score;
                 }
             } else {
                 score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1, 0);
                 if (score == EXIT_FLAG || abortRequested(deadline)) {
-                    simulatorEngine.undoLastMove();
+                    search.undoLastMove();
                     break;
                 }
             }
-            simulatorEngine.undoLastMove();
+            search.undoLastMove();
 
             if (isBetterScore(isWhitesTurn, score, bestScore)) {
                 bestScore = score;
@@ -1291,6 +1297,7 @@ public class AI {
     private double alphaBeta(Engine simulatorEngine, int depth, double alpha, double beta,
                              boolean isWhite, long deadline, int prevMove, int plyFromRoot,
                              int extStreak) {
+        Engine.Access search = simulatorEngine.access();
         nodesVisited++;
         SearchInstrumentation instr = instrumentation();
         instr.recordVisitedPly(plyFromRoot);
@@ -1307,12 +1314,12 @@ public class AI {
         boolean inCheck = isSideInCheck(simulatorEngine, isWhite);
 
         // Terminal states first, with distance-to-mate
-        if (simulatorEngine.getGameState().isInStateCheckMate()) {
+        if (search.getGameState().isInStateCheckMate()) {
             double m = CHECKMATE - plyFromRoot;
             return isWhite ? -m : +m; // side-to-move is losing here
         }
-        if (simulatorEngine.getGameState().isInStateDraw()) {
-            double drawScore = evaluateStaticPosition(simulatorEngine.getGameState(), isWhite, plyFromRoot);
+        if (search.getGameState().isInStateDraw()) {
+            double drawScore = evaluateStaticPosition(search.getGameState(), isWhite, plyFromRoot);
             return isWhite ? drawScore : -drawScore;
         }
 
@@ -1328,7 +1335,7 @@ public class AI {
             return eval;
         }
 
-        long boardHash = simulatorEngine.getBoardStateHash();
+        long boardHash = search.getBoardStateHash();
 
         // Transposition table lookup
         instr.recordTranspositionLookup();
@@ -1351,12 +1358,12 @@ public class AI {
         }
 
         // -------- Safer Null-move pruning (same as before, but use depthHere) --------
-        MoveList moves = simulatorEngine.getAllLegalMoves();
+        MoveList moves = search.getAllLegalMoves();
         int mobility = moves.size();
-        BitBoard bitBoard = simulatorEngine.getBitBoard();
+        BitBoard bitBoard = search.getBitBoard();
         boolean allowNullMove = useNullMovePruning
                 && !inCheck
-                && !simulatorEngine.isEndgame()
+                && !search.isEndgame()
                 && prevMove != -1;
 
         if (allowNullMove) {
@@ -1368,11 +1375,11 @@ public class AI {
 
         if (allowNullMove) {
             int reduction = computeNullMoveReduction(bitBoard, depth, isWhite, mobility);
-            int savedEp = simulatorEngine.doNullMoveForSearch();
+            int savedEp = search.doNullMoveForSearch();
             nullMoveCount++;
             instr.recordNullMoveAttempt();
             double nullScore = alphaBeta(simulatorEngine, depth - 1 - reduction, alpha, beta, !isWhite, deadline, -1, plyFromRoot + 1, 0);
-            simulatorEngine.undoNullMoveForSearch(savedEp);
+            search.undoNullMoveForSearch(savedEp);
 
             if (nullScore == EXIT_FLAG) return EXIT_FLAG;
 
@@ -1562,6 +1569,7 @@ public class AI {
                              MoveList moves, long deadline, int prevMove, int plyFromRoot,
                              int extStreak) {
 
+        Engine.Access search = simulatorEngine.access();
         double maxEval = Double.NEGATIVE_INFINITY;
         int bestMoveAtThisNode = -1;
         SearchInstrumentation instr = instrumentation();
@@ -1595,12 +1603,12 @@ public class AI {
             // SEE pruning for losing captures/quiets (keep checks/promotions)
             boolean seePruneCandidate = (!inCheckAtNode && isCapture && !isPromotion) || isQuiet;
             if (seePruneCandidate) {
-                seeGain = seeCache.computeIfAbsent(move, simulatorEngine::see);
+                seeGain = seeCache.computeIfAbsent(move, search::see);
                 seeEvaluated = true;
                 if (seeGain < 0) {
-                    simulatorEngine.performMove(move);
+                    search.performMove(move);
                     boolean givesCheckTmp = isSideInCheck(simulatorEngine, false);
-                    simulatorEngine.undoLastMove();
+                    search.undoLastMove();
                     if (!givesCheckTmp) {
                         continue;
                     }
@@ -1611,7 +1619,7 @@ public class AI {
                 seeWinsMaterial = seeGain > 0;
             }
 
-            BitBoard boardBefore = simulatorEngine.getBitBoard();
+            BitBoard boardBefore = search.getBitBoard();
             long enemyKingBB = boardBefore.getBlackKing();
             int enemyKingSquare = enemyKingBB != 0L ? Long.numberOfTrailingZeros(enemyKingBB) : -1;
             int enemyKingFile = enemyKingSquare >= 0 ? (enemyKingSquare & 7) : -1;
@@ -1627,7 +1635,7 @@ public class AI {
             boolean lmpAttacksKingZone = false;
             int lmpThreshold = 8 + depth * 2;
             if (!inCheckAtNode && !isTactical && depth <= 3 && index > lmpThreshold) {
-                simulatorEngine.performMove(move);
+                search.performMove(move);
                 lmpGivesCheck = isSideInCheck(simulatorEngine, false);
                 lmpAttacksQueen = attacksOpponentQueenNow(simulatorEngine, true);
                 lmpAttacksKingZone = attacksOpponentKingZone(simulatorEngine, true);
@@ -1637,21 +1645,21 @@ public class AI {
                         && !lmpAttacksQueen
                         && !lmpAttacksKingZone
                         && !seeWinsMaterial;
-                simulatorEngine.undoLastMove();
+                search.undoLastMove();
                 if (skipQuiet) {
                     instr.recordLateMovePrune();
                     continue;
                 }
             }
 
-            simulatorEngine.performMove(move);
-            long newBoardHash = simulatorEngine.getBoardStateHash();
+            search.performMove(move);
+            long newBoardHash = search.getBoardStateHash();
 
             boolean givesCheck = lmpPrecomputed ? lmpGivesCheck : isSideInCheck(simulatorEngine, false);
             boolean attacksQueen = lmpPrecomputed ? lmpAttacksQueen : attacksOpponentQueenNow(simulatorEngine, true);
             boolean attacksHeavyPiece = attacksQueen || attacksOpponentRookNow(simulatorEngine, true);
             boolean attacksKingZone = lmpPrecomputed ? lmpAttacksKingZone : attacksOpponentKingZone(simulatorEngine, true);
-            boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
+            boolean opensKingFile = openedFileTowardKing(search.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
 
             int nextDepth = depth - 1;
             boolean forcing = givesCheck || attacksQueen;
@@ -1668,11 +1676,11 @@ public class AI {
                     && !seeWinsMaterial;
 
             if (allowStandPatPrune) {
-                double staticEval = evaluateStaticPosition(simulatorEngine.getGameState(), false, depth);
+                double staticEval = evaluateStaticPosition(search.getGameState(), false, depth);
                 staticEval = -staticEval;
-                double margin = computeStandPatMargin(simulatorEngine.getBitBoard(), depth, nextDepth);
+                double margin = computeStandPatMargin(search.getBitBoard(), depth, nextDepth);
                 if (staticEval + margin <= alpha) {
-                    simulatorEngine.undoLastMove();
+                    search.undoLastMove();
                     instr.recordFutilityPrune();
                     continue;
                 }
@@ -1720,7 +1728,7 @@ public class AI {
                     int reduced = Math.max(1, nextDepth - reduction);
                     eval = alphaBeta(simulatorEngine, reduced, alpha, pBeta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
                     if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
+                        search.undoLastMove();
                         return EXIT_FLAG;
                     }
 
@@ -1729,27 +1737,27 @@ public class AI {
                         eval = alphaBeta(simulatorEngine, nextDepth, alpha, usePvs ? beta : pBeta,
                                 false, deadline, move, plyFromRoot + 1, nextExtStreak);
                         if (eval == EXIT_FLAG || positionChanged()) {
-                            simulatorEngine.undoLastMove();
+                            search.undoLastMove();
                             return EXIT_FLAG;
                         }
                     }
                 } else {
                     eval = alphaBeta(simulatorEngine, nextDepth, alpha, pBeta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
                     if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
+                        search.undoLastMove();
                         return EXIT_FLAG;
                     }
                     if (usePvs && eval > alpha && eval < beta) {
                         eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
                         if (eval == EXIT_FLAG || positionChanged()) {
-                            simulatorEngine.undoLastMove();
+                            search.undoLastMove();
                             return EXIT_FLAG;
                         }
                     }
                 }
             }
 
-            simulatorEngine.undoLastMove();
+            search.undoLastMove();
 
             if (eval > maxEval) {
                 maxEval = eval;
@@ -1786,6 +1794,7 @@ public class AI {
                              MoveList moves, long deadline, int prevMove, int plyFromRoot,
                              int extStreak) {
 
+        Engine.Access search = simulatorEngine.access();
         double minEval = Double.POSITIVE_INFINITY;
         int bestMoveAtThisNode = -1;
         SearchInstrumentation instr = instrumentation();
@@ -1819,12 +1828,12 @@ public class AI {
 
             boolean seePruneCandidate = (!inCheckAtNode && isCapture && !isPromotion) || isQuiet;
             if (seePruneCandidate) {
-                seeGain = seeCache.computeIfAbsent(move, simulatorEngine::see);
+                seeGain = seeCache.computeIfAbsent(move, search::see);
                 seeEvaluated = true;
                 if (seeGain < 0) {
-                    simulatorEngine.performMove(move);
+                    search.performMove(move);
                     boolean givesCheckTmp = isSideInCheck(simulatorEngine, true);
-                    simulatorEngine.undoLastMove();
+                    search.undoLastMove();
                     if (!givesCheckTmp) {
                         continue;
                     }
@@ -1835,7 +1844,7 @@ public class AI {
                 seeWinsMaterial = seeGain > 0;
             }
 
-            BitBoard boardBefore = simulatorEngine.getBitBoard();
+            BitBoard boardBefore = search.getBitBoard();
             long enemyKingBB = boardBefore.getWhiteKing();
             int enemyKingSquare = enemyKingBB != 0L ? Long.numberOfTrailingZeros(enemyKingBB) : -1;
             int enemyKingFile = enemyKingSquare >= 0 ? (enemyKingSquare & 7) : -1;
@@ -1851,7 +1860,7 @@ public class AI {
             boolean lmpAttacksKingZone = false;
             int lmpThreshold = 8 + depth * 2;
             if (!inCheckAtNode && !isTactical && depth <= 3 && index > lmpThreshold) {
-                simulatorEngine.performMove(move);
+                search.performMove(move);
                 lmpGivesCheck = isSideInCheck(simulatorEngine, true);
                 lmpAttacksQueen = attacksOpponentQueenNow(simulatorEngine, false);
                 lmpAttacksKingZone = attacksOpponentKingZone(simulatorEngine, false);
@@ -1861,21 +1870,21 @@ public class AI {
                         && !lmpAttacksQueen
                         && !lmpAttacksKingZone
                         && !seeWinsMaterial;
-                simulatorEngine.undoLastMove();
+                search.undoLastMove();
                 if (skipQuiet) {
                     instr.recordLateMovePrune();
                     continue;
                 }
             }
 
-            simulatorEngine.performMove(move);
-            long newBoardHash = simulatorEngine.getBoardStateHash();
+            search.performMove(move);
+            long newBoardHash = search.getBoardStateHash();
 
             boolean givesCheck = lmpPrecomputed ? lmpGivesCheck : isSideInCheck(simulatorEngine, true);
             boolean attacksQueen = lmpPrecomputed ? lmpAttacksQueen : attacksOpponentQueenNow(simulatorEngine, false);
             boolean attacksHeavyPiece = attacksQueen || attacksOpponentRookNow(simulatorEngine, false);
             boolean attacksKingZone = lmpPrecomputed ? lmpAttacksKingZone : attacksOpponentKingZone(simulatorEngine, false);
-            boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
+            boolean opensKingFile = openedFileTowardKing(search.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
 
             int nextDepth = depth - 1;
             boolean forcing = givesCheck || attacksQueen;
@@ -1892,10 +1901,10 @@ public class AI {
                     && !seeWinsMaterial;
 
             if (allowStandPatPrune) {
-                double staticEval = evaluateStaticPosition(simulatorEngine.getGameState(), true, depth);
-                double margin = computeStandPatMargin(simulatorEngine.getBitBoard(), depth, nextDepth);
+                double staticEval = evaluateStaticPosition(search.getGameState(), true, depth);
+                double margin = computeStandPatMargin(search.getBitBoard(), depth, nextDepth);
                 if (staticEval - margin >= beta) {
-                    simulatorEngine.undoLastMove();
+                    search.undoLastMove();
                     instr.recordFutilityPrune();
                     continue;
                 }
@@ -1943,7 +1952,7 @@ public class AI {
                     int reduced = Math.max(1, nextDepth - reduction);
                     eval = alphaBeta(simulatorEngine, reduced, pAlpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
                     if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
+                        search.undoLastMove();
                         return EXIT_FLAG;
                     }
 
@@ -1952,28 +1961,28 @@ public class AI {
                         eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, beta,
                                 true, deadline, move, plyFromRoot + 1, nextExtStreak);
                         if (eval == EXIT_FLAG || positionChanged()) {
-                            simulatorEngine.undoLastMove();
+                            search.undoLastMove();
                             return EXIT_FLAG;
                         }
                     }
                 } else {
                     eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
                     if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
+                        search.undoLastMove();
                         return EXIT_FLAG;
                     }
 
                     if (usePvs && eval > alpha && eval < beta) {
                         eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
                         if (eval == EXIT_FLAG || positionChanged()) {
-                            simulatorEngine.undoLastMove();
+                            search.undoLastMove();
                             return EXIT_FLAG;
                         }
                     }
                 }
             }
 
-            simulatorEngine.undoLastMove();
+            search.undoLastMove();
 
             if (eval < minEval) {
                 minEval = eval;
@@ -2016,6 +2025,7 @@ public class AI {
      */
     MoveList sortMovesByEfficiency(MoveList moves, int currentDepth, long boardHash, int prevMove,
                                    Engine simulatorEngine) {
+        Engine.Access access = simulatorEngine.access();
         final int[] seeKeys = seeCacheKeys.get();
         final int[] seeVals = seeCacheVals.get();
         Arrays.fill(seeKeys, 0); // 0 = empty
@@ -2087,7 +2097,7 @@ public class AI {
                 if (seeKeys[slot] == moveInt) {
                     seeValue = seeVals[slot];
                 } else {
-                    seeValue = simulatorEngine.see(moveInt);
+                    seeValue = access.see(moveInt);
                     seeKeys[slot] = moveInt;
                     seeVals[slot] = seeValue;
                 }
@@ -2192,13 +2202,14 @@ public class AI {
 
 
     public double evaluateBoard(Engine simulatorEngine, boolean isWhitesTurn, long deadline) {
-        if (simulatorEngine.getGameState().isInStateCheckMate()) {
+        Engine.Access access = simulatorEngine.access();
+        if (access.getGameState().isInStateCheckMate()) {
             // Side to move has no legal moves and is in check → losing for side to move
             return -CHECKMATE; // alphaBeta handles mate distance; this path is rarely hit
         }
 
-        if (simulatorEngine.getGameState().isInStateDraw()) {
-            double scoreDiff = simulatorEngine.getGameState().getScore().getScoreDifference();
+        if (access.getGameState().isInStateDraw()) {
+            double scoreDiff = access.getGameState().getScore().getScoreDifference();
             // stronger bias than ±0.01 to steer away from draws when ahead
             final double DRAW_BIAS = 0.20;
             if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
@@ -2212,7 +2223,7 @@ public class AI {
         double alpha = Double.NEGATIVE_INFINITY;
         double beta = Double.POSITIVE_INFINITY;
 
-        long boardStateHash = simulatorEngine.getBoardStateHash();
+        long boardStateHash = access.getBoardStateHash();
         CaptureTranspositionTableEntry entry = captureTranspositionTable.get(boardStateHash);
 
         // Check if the entry exists and is relevant for the current search
@@ -2232,13 +2243,14 @@ public class AI {
 
     private double quiescenceSearch(Engine simulatorEngine, boolean isWhitesTurn,
                                     double alpha, double beta, long deadline, int depth) {
+        Engine.Access access = simulatorEngine.access();
         if (abortRequested(deadline)) return AI.EXIT_FLAG;
 
         boolean inCheck = isSideInCheck(simulatorEngine, isWhitesTurn);
         SearchInstrumentation instr = instrumentation();
         instr.recordQuiescenceNode(depth);
 
-        double standPat = evaluateStaticPosition(simulatorEngine.getGameState(), isWhitesTurn, depth);
+        double standPat = evaluateStaticPosition(access.getGameState(), isWhitesTurn, depth);
 
         if (!inCheck) {
             if (standPat >= beta) {
@@ -2255,11 +2267,11 @@ public class AI {
             }
         }
 
-        MoveList moves = inCheck ? simulatorEngine.getAllLegalMoves()
+        MoveList moves = inCheck ? access.getAllLegalMoves()
                 : getPossibleCapturesOrPromotions(simulatorEngine);
 
         MoveList ordered = sortMovesByEfficiency(moves, 0,
-                simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
+                access.getBoardStateHash(), -1, simulatorEngine);
 
         for (int i = 0; i < ordered.size(); i++) {
             int m = ordered.getMove(i);
@@ -2275,11 +2287,11 @@ public class AI {
 
             // SEE prune losing captures/quiets unless they give check
             if (!inCheck && !isPromotion || isQuiet) {
-                int see = simulatorEngine.see(m);
+                int see = access.see(m);
                 if (see < 0) {
-                    simulatorEngine.performMove(m);
+                    access.performMove(m);
                     boolean givesCheck = isSideInCheck(simulatorEngine, !isWhitesTurn);
-                    simulatorEngine.undoLastMove();
+                    access.undoLastMove();
                     if (!givesCheck) {
                         instr.recordQuiescenceSeePrune();
                         continue;
@@ -2287,11 +2299,11 @@ public class AI {
                 }
             }
 
-            simulatorEngine.performMove(m);
+            access.performMove(m);
             instr.recordQuiescenceCaptureSearched();
 
             double child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
-            simulatorEngine.undoLastMove();
+            access.undoLastMove();
             if (child == EXIT_FLAG) return EXIT_FLAG;
 
             double score = -child;
@@ -2325,7 +2337,8 @@ public class AI {
     }
 
     private MoveList getPossibleCapturesOrPromotions(Engine simulatorEngine) {
-        MoveList allLegalMoves = simulatorEngine.getAllLegalMoves();
+        Engine.Access access = simulatorEngine.access();
+        MoveList allLegalMoves = access.getAllLegalMoves();
         MoveList capturesAndPromotions = new MoveList();
         for (int i = 0; i < allLegalMoves.size(); i++) {
             int m = allLegalMoves.getMove(i);
