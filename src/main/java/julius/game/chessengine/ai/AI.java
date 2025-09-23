@@ -787,11 +787,17 @@ public class AI {
 
     private void performCalculation() {
         try {
+            long boardStateHash = mainEngine.getBoardStateHash();
             Engine simulatorEngine = mainEngine.createSimulation();
-            long boardStateHash = simulatorEngine.getBoardStateHash();
+            long simulatorHash = simulatorEngine.getBoardStateHash();
+            if (simulatorHash != boardStateHash && log.isDebugEnabled()) {
+                log.debug("Simulation hash {} differed from live hash {}. Using live hash for tracking.",
+                        simulatorHash, boardStateHash);
+            }
             boolean isWhite = simulatorEngine.whitesTurn();
             long deadline = computeDeadlineNanos();
             beforeCalculationBoardState = boardStateHash;
+            currentBoardState = boardStateHash;
 
             int bookMove = mainEngine.getOpeningBook().getRandomMoveForBoardStateHash(boardStateHash);
             if (bookMove != -1) {
