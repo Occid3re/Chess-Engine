@@ -376,17 +376,27 @@ public class UciHandler {
 
         List<MoveAndScore> line = new ArrayList<>(ai.getCalculatedLine());
         long nodes = ai.getNodesVisited();
+        long elapsedMillis = ai.getSearchElapsedMillis();
+        long nps = 0L;
+        if (elapsedMillis > 0L) {
+            double perSecond = (nodes * 1000.0) / elapsedMillis;
+            if (perSecond > 0.0) {
+                nps = (long) perSecond;
+            }
+        }
         StringBuilder builder = new StringBuilder("info");
         if (!line.isEmpty()) {
             builder.append(" depth ").append(line.size());
             builder.append(' ').append(formatScore(line.getFirst().getScore()));
-            builder.append(" nodes ").append(nodes);
+        }
+        builder.append(" nodes ").append(nodes);
+        builder.append(" time ").append(elapsedMillis);
+        builder.append(" nps ").append(nps);
+        if (!line.isEmpty()) {
             String pv = buildPv(line);
             if (!pv.isEmpty()) {
                 builder.append(" pv ").append(pv);
             }
-        } else {
-            builder.append(" nodes ").append(nodes);
         }
         output.accept(builder.toString());
 
