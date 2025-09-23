@@ -2136,7 +2136,11 @@ public class AI {
             beta = Math.min(beta, eval);
             if (alpha >= beta) {
                 updateKillerMoves(depth, move);
-                incrementHistory(move, depth);
+                if (MoveHelper.isCapture(move)) {
+                    recordCaptureHistory(move, depth);
+                } else {
+                    incrementHistory(move, depth);
+                }
                 heuristics.recordCounterMove(prevMove, move);
                 instr.recordBetaCutoff();
                 break;
@@ -2209,6 +2213,7 @@ public class AI {
         final int PROMOTION_ORDER_BONUS = 900;   // strong push for promotions
         final int KILLER0_BONUS = 50;            // distinguish first vs second killer
         final int KILLER1_BONUS = 30;
+        final int CAPTURE_HISTORY_WEIGHT = 4;    // subtle tie-break inside capture buckets
 
         // Hash move (TT) handling — keep your "pin to front" approach
         TranspositionTableEntry ttEntry = transpositionTable.get(boardHash);
@@ -2270,7 +2275,9 @@ public class AI {
                     int cappedSee = Math.max(-512, Math.min(512, seeValue));
                     seeBonus = cappedSee * 16; // modest SEE influence within promotion bucket
                 }
-                score = base + PROMOTION_ORDER_BONUS + seeBonus;
+                int captureHistory = heuristics.getCaptureHistoryScore(moveInt);
+                score = base + PROMOTION_ORDER_BONUS + seeBonus
+                        + (captureHistory * CAPTURE_HISTORY_WEIGHT);
             } else if (isCapture) {
                 // MVV-LVA for captures; classify as good/equal/bad without SEE
                 final int mvvLva = calculateMvvLvaScore(moveInt); // victim - attacker (can be negative)
@@ -2283,7 +2290,9 @@ public class AI {
                 }
                 // Scale captures so bigger victims / smaller attackers bubble up
                 int cappedSee = Math.max(-2048, Math.min(2048, seeValue));
-                score = (mvvLva * 16) + (cappedSee * 32);
+                int captureHistory = heuristics.getCaptureHistoryScore(moveInt);
+                score = (mvvLva * 16) + (cappedSee * 32)
+                        + (captureHistory * CAPTURE_HISTORY_WEIGHT);
                 if (score < 0) {
                     score = 0;
                 }
@@ -2524,10 +2533,15 @@ public class AI {
         threadHeuristics.get().addHistory(move, depth);
     }
 
+    private void recordCaptureHistory(int move, int depth) {
+        threadHeuristics.get().addCaptureHistory(move, depth);
+    }
+
     private void clearHistoryTable() {
         synchronized (heuristicsLock) {
             globalHeuristics.clearHistory();
             globalHeuristics.clearCounter();
+            globalHeuristics.clearCaptureHistory();
         }
     }
 
@@ -2549,10 +2563,13 @@ public class AI {
     private static final class Heuristics {
         private static final int BOARD_SQUARES = 64;
         private static final int HISTORY_SIZE = BOARD_SQUARES * BOARD_SQUARES;
+        private static final int PIECE_TYPE_COUNT = 7; // 0 unused
+        private static final int CAPTURE_HISTORY_SIZE = (PIECE_TYPE_COUNT - 1) * BOARD_SQUARES * BOARD_SQUARES;
 
         private int[][] killers;
         private final int[][] history;
         private final int[][] counter;
+        private final int[][][] captureHistory;
 
         private boolean[] killerDirty;
         private int[] killerDirtyList;
@@ -2568,6 +2585,11 @@ public class AI {
         private final int[] counterDirtyList;
         private int counterDirtyCount;
 
+        private final int[] captureHistoryDelta;
+        private final boolean[] captureHistoryDirty;
+        private final int[] captureHistoryDirtyList;
+        private int captureHistoryDirtyCount;
+
         private long preparedTaskId = Long.MIN_VALUE;
         private int preparedDepth = -1;
 
@@ -2575,6 +2597,7 @@ public class AI {
             this.killers = allocateKillers(Math.max(1, depth));
             this.history = new int[BOARD_SQUARES][BOARD_SQUARES];
             this.counter = new int[BOARD_SQUARES][BOARD_SQUARES];
+            this.captureHistory = new int[PIECE_TYPE_COUNT][BOARD_SQUARES][BOARD_SQUARES];
             for (int f = 0; f < BOARD_SQUARES; f++) {
                 Arrays.fill(counter[f], -1);
             }
@@ -2587,6 +2610,9 @@ public class AI {
             Arrays.fill(counterUpdates, -1);
             this.counterDirty = new boolean[HISTORY_SIZE];
             this.counterDirtyList = new int[HISTORY_SIZE];
+            this.captureHistoryDelta = new int[CAPTURE_HISTORY_SIZE];
+            this.captureHistoryDirty = new boolean[CAPTURE_HISTORY_SIZE];
+            this.captureHistoryDirtyList = new int[CAPTURE_HISTORY_SIZE];
         }
 
         private static int[][] allocateKillers(int depth) {
@@ -2621,6 +2647,9 @@ public class AI {
             for (int f = 0; f < BOARD_SQUARES; f++) {
                 System.arraycopy(base.history[f], 0, history[f], 0, BOARD_SQUARES);
                 System.arraycopy(base.counter[f], 0, counter[f], 0, BOARD_SQUARES);
+                for (int p = 0; p < PIECE_TYPE_COUNT; p++) {
+                    System.arraycopy(base.captureHistory[p][f], 0, captureHistory[p][f], 0, BOARD_SQUARES);
+                }
             }
         }
 
@@ -2652,12 +2681,19 @@ public class AI {
                 counterUpdates[idx] = -1;
             }
             counterDirtyCount = 0;
+            for (int i = 0; i < captureHistoryDirtyCount; i++) {
+                int idx = captureHistoryDirtyList[i];
+                captureHistoryDirty[idx] = false;
+                captureHistoryDelta[idx] = 0;
+            }
+            captureHistoryDirtyCount = 0;
             preparedTaskId = Long.MIN_VALUE;
             preparedDepth = -1;
         }
 
         boolean hasUpdates() {
-            return killerDirtyCount > 0 || historyDirtyCount > 0 || counterDirtyCount > 0;
+            return killerDirtyCount > 0 || historyDirtyCount > 0
+                    || counterDirtyCount > 0 || captureHistoryDirtyCount > 0;
         }
 
         void recordKiller(int depth, int move) {
@@ -2695,6 +2731,26 @@ public class AI {
                 historyDirtyList[historyDirtyCount++] = idx;
             }
             historyDelta[idx] += delta;
+        }
+
+        void addCaptureHistory(int move, int depth) {
+            if (move == -1 || !MoveHelper.isCapture(move)) {
+                return;
+            }
+            int pieceType = MoveHelper.derivePieceTypeBits(move);
+            if (pieceType <= 0 || pieceType >= PIECE_TYPE_COUNT) {
+                return;
+            }
+            int from = move & 0x3F;
+            int to = (move >>> 6) & 0x3F;
+            int idx = captureHistoryIndex(pieceType, from, to);
+            int delta = depth * depth;
+            captureHistory[pieceType][from][to] += delta;
+            if (!captureHistoryDirty[idx]) {
+                captureHistoryDirty[idx] = true;
+                captureHistoryDirtyList[captureHistoryDirtyCount++] = idx;
+            }
+            captureHistoryDelta[idx] += delta;
         }
 
         void recordCounterMove(int prevMove, int move) {
@@ -2735,6 +2791,15 @@ public class AI {
                 int to = idx & 0x3F;
                 target.counter[from][to] = counterUpdates[idx];
             }
+            for (int i = 0; i < captureHistoryDirtyCount; i++) {
+                int idx = captureHistoryDirtyList[i];
+                int pieceOffset = idx / (BOARD_SQUARES * BOARD_SQUARES);
+                int rem = idx % (BOARD_SQUARES * BOARD_SQUARES);
+                int from = rem / BOARD_SQUARES;
+                int to = rem % BOARD_SQUARES;
+                int pieceType = pieceOffset + 1;
+                target.captureHistory[pieceType][from][to] += captureHistoryDelta[idx];
+            }
         }
 
         void insertKiller(int depth, int move) {
@@ -2760,6 +2825,7 @@ public class AI {
                     history[f][t] >>= 1;
                 }
             }
+            decayCaptureHistory();
         }
 
         void clearHistory() {
@@ -2779,6 +2845,48 @@ public class AI {
                 counterUpdates[idx] = -1;
             }
             counterDirtyCount = 0;
+        }
+
+        void clearCaptureHistory() {
+            for (int p = 0; p < PIECE_TYPE_COUNT; p++) {
+                for (int f = 0; f < BOARD_SQUARES; f++) {
+                    Arrays.fill(captureHistory[p][f], 0);
+                }
+            }
+            for (int i = 0; i < captureHistoryDirtyCount; i++) {
+                int idx = captureHistoryDirtyList[i];
+                captureHistoryDirty[idx] = false;
+                captureHistoryDelta[idx] = 0;
+            }
+            captureHistoryDirtyCount = 0;
+        }
+
+        int getCaptureHistoryScore(int move) {
+            if (!MoveHelper.isCapture(move)) {
+                return 0;
+            }
+            int pieceType = MoveHelper.derivePieceTypeBits(move);
+            if (pieceType <= 0 || pieceType >= PIECE_TYPE_COUNT) {
+                return 0;
+            }
+            int from = move & 0x3F;
+            int to = (move >>> 6) & 0x3F;
+            return captureHistory[pieceType][from][to];
+        }
+
+        private static int captureHistoryIndex(int pieceType, int from, int to) {
+            int pieceOffset = pieceType - 1;
+            return (pieceOffset * BOARD_SQUARES + from) * BOARD_SQUARES + to;
+        }
+
+        private void decayCaptureHistory() {
+            for (int p = 1; p < PIECE_TYPE_COUNT; p++) {
+                for (int f = 0; f < BOARD_SQUARES; f++) {
+                    for (int t = 0; t < BOARD_SQUARES; t++) {
+                        captureHistory[p][f][t] >>= 1;
+                    }
+                }
+            }
         }
 
         int[][] snapshotKillers() {
