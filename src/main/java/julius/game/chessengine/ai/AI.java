@@ -677,6 +677,20 @@ public class AI {
     }
 
 
+    /**
+     * Request the currently active search task to stop after its current iteration.
+     * Unlike {@link #stopCalculation()}, this does not tear down the worker threads
+     * or reset the cached best move, allowing callers to obtain the final result
+     * once the workers finish gracefully.
+     */
+    public void requestStop() {
+        SearchTask task = activeSearch.get();
+        if (task != null) {
+            task.requestStop();
+        }
+    }
+
+
     public void startAutoPlay(boolean aiIsWhite, boolean aiIsBlack) {
 
         if (scheduler != null && !scheduler.isShutdown()) {
