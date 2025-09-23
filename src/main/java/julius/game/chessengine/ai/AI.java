@@ -148,6 +148,8 @@ public class AI {
             ThreadLocal.withInitial(() -> new SortBuffers(MAX_MOVE_LIST_SIZE));
     private final ThreadLocal<Map<Integer, Integer>> seeCacheThreadLocal =
             ThreadLocal.withInitial(() -> new HashMap<>(64));
+    private final ThreadLocal<Map<Integer, Integer>> quietMoveTacticalCache =
+            ThreadLocal.withInitial(() -> new HashMap<>(64));
 
     private static final int HISTORY_BUCKETS = 5;
 
@@ -1726,6 +1728,8 @@ public class AI {
         MoveList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
         final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
+        final Map<Integer, Integer> tacticalCache = quietMoveTacticalCache.get();
+        tacticalCache.clear();
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (abortRequested(deadline)) {
                 return EXIT_FLAG;
@@ -1950,6 +1954,8 @@ public class AI {
         MoveList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
         final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
+        final Map<Integer, Integer> tacticalCache = quietMoveTacticalCache.get();
+        tacticalCache.clear();
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
                 return EXIT_FLAG;
@@ -2180,8 +2186,8 @@ public class AI {
         }
         generationHolder[0] = generation;
         final int size = moves.size();
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
-        seeCache.clear();
+        final Map<Integer, Integer> tacticalCache = quietMoveTacticalCache.get();
+        tacticalCache.clear();
 
         if (size == 0) {
             return moves;
@@ -2200,15 +2206,19 @@ public class AI {
         final int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
 
         // Category encoding (higher is earlier):
-        // 7: TT move, 6: promotions, 5: good captures, 4: equal captures,
-        // 3: killer[0], 2: killer[1], 1: quiets (history), 0: bad captures
-        final int CAT_TT = 7, CAT_PROMO = 6, CAT_CAP_GOOD = 5, CAT_CAP_EQUAL = 4,
-                CAT_KILLER0 = 3, CAT_KILLER1 = 2, CAT_QUIET = 1, CAT_CAP_BAD = 0;
+        // 8: TT move, 7: promotions, 6: good captures, 5: equal captures,
+        // 4: killer[0], 3: quiet checks/strong quiets, 2: killer[1], 1: quiets (history), 0: bad captures
+        final int CAT_TT = 8, CAT_PROMO = 7, CAT_CAP_GOOD = 6, CAT_CAP_EQUAL = 5,
+                CAT_KILLER0 = 4, CAT_QUIET_CHECK = 3, CAT_KILLER1 = 2, CAT_QUIET = 1, CAT_CAP_BAD = 0;
 
         // Lightweight bonuses (local so no class changes):
         final int PROMOTION_ORDER_BONUS = 900;   // strong push for promotions
         final int KILLER0_BONUS = 50;            // distinguish first vs second killer
         final int KILLER1_BONUS = 30;
+        final int QUIET_CHECK_BONUS = 400;
+        final int QUIET_ATTACKS_QUEEN_BONUS = 250;
+        final int QUIET_ATTACKS_ROOK_BONUS = 150;
+        final int QUIET_KING_RING_BONUS = 120;
 
         // Hash move (TT) handling — keep your "pin to front" approach
         TranspositionTableEntry ttEntry = transpositionTable.get(boardHash);
@@ -2235,6 +2245,7 @@ public class AI {
             // Compute base features
             final boolean isCapture = MoveHelper.isCapture(moveInt);
             final boolean isPromotion = MoveHelper.isPawnPromotionMove(moveInt);
+            final boolean isQuiet = !isCapture && !isPromotion;
 
             int seeValue = 0;
             boolean hasSee = false;
@@ -2253,6 +2264,39 @@ public class AI {
                     seeGenerations[slot] = generation;
                 }
                 hasSee = true;
+            }
+            boolean givesCheck = false;
+            int quietTacticalBonus = 0;
+            if (isQuiet) {
+                Integer cached = tacticalCache.get(moveInt);
+                if (cached != null) {
+                    givesCheck = (cached & 1) != 0;
+                    quietTacticalBonus = cached >>> 1;
+                } else {
+                    simulatorEngine.performMove(moveInt);
+                    boolean moverIsWhite = MoveHelper.isWhitesMove(moveInt);
+                    boolean checkNow = isSideInCheck(simulatorEngine, !moverIsWhite);
+                    boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, moverIsWhite);
+                    boolean attacksRook = attacksOpponentRookNow(simulatorEngine, moverIsWhite);
+                    boolean kingPressure = attacksOpponentKingZone(simulatorEngine, moverIsWhite);
+                    simulatorEngine.undoLastMove();
+
+                    if (checkNow) {
+                        quietTacticalBonus += QUIET_CHECK_BONUS;
+                    }
+                    if (attacksQueen) {
+                        quietTacticalBonus += QUIET_ATTACKS_QUEEN_BONUS;
+                    }
+                    if (attacksRook) {
+                        quietTacticalBonus += QUIET_ATTACKS_ROOK_BONUS;
+                    }
+                    if (kingPressure) {
+                        quietTacticalBonus += QUIET_KING_RING_BONUS;
+                    }
+
+                    givesCheck = checkNow;
+                    tacticalCache.put(moveInt, (quietTacticalBonus << 1) | (givesCheck ? 1 : 0));
+                }
             }
             int category;
             int score;
@@ -2289,16 +2333,28 @@ public class AI {
                 }
             } else if (moveInt == k0) {
                 category = CAT_KILLER0;
-                score = KILLER_MOVE_SCORE + KILLER0_BONUS;
+                score = KILLER_MOVE_SCORE + KILLER0_BONUS + quietTacticalBonus;
+                if (givesCheck) {
+                    score += QUIET_CHECK_BONUS;
+                }
             } else if (moveInt == k1) {
                 category = CAT_KILLER1;
-                score = KILLER_MOVE_SCORE + KILLER1_BONUS;
+                score = KILLER_MOVE_SCORE + KILLER1_BONUS + quietTacticalBonus;
+                if (givesCheck) {
+                    score += QUIET_CHECK_BONUS;
+                }
+            } else if (isQuiet && givesCheck) {
+                category = CAT_QUIET_CHECK;
+                final int from = moveInt & 0x3F;
+                final int to = (moveInt >>> 6) & 0x3F;
+                score = historyTable[from][to] + quietTacticalBonus;
+                if (moveInt == cm) score += COUNTER_MOVE_BONUS;
             } else {
                 // Quiet with history
                 final int from = moveInt & 0x3F;
                 final int to = (moveInt >>> 6) & 0x3F;
                 category = CAT_QUIET;
-                score = historyTable[from][to]; // butterfly history
+                score = historyTable[from][to] + quietTacticalBonus; // butterfly history
                 if (moveInt == cm) score += COUNTER_MOVE_BONUS;
             }
 
