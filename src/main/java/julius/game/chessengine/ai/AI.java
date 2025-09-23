@@ -176,7 +176,7 @@ public class AI {
             for (int v = 0; v < 16; v++) {
                 int attackerVal = mvvLvaPieceValue(a);
                 int victimVal = mvvLvaPieceValue(v);
-                MVV_LVA[(a << 8) | v] = victimVal - attackerVal;
+                MVV_LVA[(a << 4) | v] = victimVal - attackerVal;
             }
         }
 
@@ -226,10 +226,13 @@ public class AI {
     );
 
     @Getter
-    private long nodesVisited = 0;
-    private volatile long searchStartTimeNanos = 0L;
+    private final java.util.concurrent.atomic.LongAdder nodesVisited = new java.util.concurrent.atomic.LongAdder();
+
     @Getter
-    private long nullMoveCount = 0;
+    private final java.util.concurrent.atomic.LongAdder nullMoveCount = new java.util.concurrent.atomic.LongAdder();
+
+    private volatile long searchStartTimeNanos = 0L;
+
     @Getter
     private volatile SearchDiagnostics lastDiagnostics = SearchDiagnostics.EMPTY;
 
@@ -618,7 +621,8 @@ public class AI {
         searchResultReady = false;
         currentBoardState = -1;
         beforeCalculationBoardState = -2;
-        nodesVisited = 0L;
+        nodesVisited.reset();
+        nullMoveCount.reset();
         searchStartTimeNanos = 0L;
         clearPrincipalVariation();
         mainEngine.startNewGame();
@@ -638,7 +642,8 @@ public class AI {
     }
 
     private void resetSearchCounters() {
-        nodesVisited = 0L;
+        nodesVisited.reset();
+        nullMoveCount.reset();
         searchStartTimeNanos = System.nanoTime();
     }
 
@@ -1323,7 +1328,7 @@ public class AI {
     private double alphaBeta(Engine simulatorEngine, int depth, double alpha, double beta,
                              boolean isWhite, long deadline, int prevMove, int plyFromRoot,
                              int extStreak) {
-        nodesVisited++;
+        nodesVisited.increment();
         SearchInstrumentation instr = instrumentation();
         instr.recordVisitedPly(plyFromRoot);
 
@@ -1401,7 +1406,7 @@ public class AI {
         if (allowNullMove) {
             int reduction = computeNullMoveReduction(bitBoard, depth, isWhite, mobility);
             int savedEp = simulatorEngine.doNullMoveForSearch();
-            nullMoveCount++;
+            nullMoveCount.increment();
             instr.recordNullMoveAttempt();
             double nullScore = alphaBeta(simulatorEngine, depth - 1 - reduction, alpha, beta, !isWhite, deadline, -1, plyFromRoot + 1, 0);
             simulatorEngine.undoNullMoveForSearch(savedEp);
@@ -2442,7 +2447,7 @@ public class AI {
         }
         int victim = MoveHelper.deriveCapturedPieceTypeBits(move) & 0xF;
         int attacker = MoveHelper.derivePieceTypeBits(move) & 0xF;
-        return MVV_LVA[(attacker << 8) | victim];
+        return MVV_LVA[(attacker << 4) | victim];
     }
 
     private static final class Heuristics {

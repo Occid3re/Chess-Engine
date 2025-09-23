@@ -224,8 +224,8 @@ public class BestMoveSearchTest {
 
         AI ai = new AI(engine);
         ai.setTimeLimit(1000L); // milliseconds
-        long startNodes = ai.getNodesVisited();
-        long startNullMoves = ai.getNullMoveCount();
+        long startNodes = ai.getNodesVisited().sum();
+        long startNullMoves = ai.getNullMoveCount().sum();
         long searchStartNanos = System.nanoTime();
 
         boolean whiteToMove = fen.split(" ")[1].equals("w");
@@ -248,8 +248,8 @@ public class BestMoveSearchTest {
         Assertions.assertNotEquals(-1, lastMove, "Engine failed to make a move for FEN: " + fen);
         String moveString = Move.convertIntToMove(lastMove).toString();
         long searchMillis = TimeUnit.NANOSECONDS.toMillis(observedElapsedNanos);
-        long nodesVisited = Math.max(0L, ai.getNodesVisited() - startNodes);
-        long nullMovesTried = Math.max(0L, ai.getNullMoveCount() - startNullMoves);
+        long nodesVisited = Math.max(0L, ai.getNodesVisited().sum() - startNodes);
+        long nullMovesTried = Math.max(0L, ai.getNullMoveCount().sum() - startNullMoves);
         List<MoveAndScore> principalVariation = new ArrayList<>(ai.getCalculatedLine());
         String statistics = compileMoveStatistics(
                 fen,

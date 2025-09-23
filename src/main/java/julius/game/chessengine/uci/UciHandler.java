@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -375,15 +376,21 @@ public class UciHandler {
         lastInfoNanos.set(now);
 
         List<MoveAndScore> line = new ArrayList<>(ai.getCalculatedLine());
-        long nodes = ai.getNodesVisited();
+
+// If AI#getNodesVisited returns LongAdder:
+        LongAdder nodesAdder = ai.getNodesVisited();
+        long nodes = nodesAdder.sum();
+
+        // If you changed AI#getNodesVisited to return long, then just:
+        // long nodes = ai.getNodesVisited();
+
         long elapsedMillis = ai.getSearchElapsedMillis();
         long nps = 0L;
         if (elapsedMillis > 0L) {
             double perSecond = (nodes * 1000.0) / elapsedMillis;
-            if (perSecond > 0.0) {
-                nps = (long) perSecond;
-            }
+            if (perSecond > 0.0) nps = (long) perSecond;
         }
+
         StringBuilder builder = new StringBuilder("info");
         if (!line.isEmpty()) {
             builder.append(" depth ").append(line.size());
@@ -394,10 +401,10 @@ public class UciHandler {
         builder.append(" nps ").append(nps);
         if (!line.isEmpty()) {
             String pv = buildPv(line);
-            if (!pv.isEmpty()) {
-                builder.append(" pv ").append(pv);
-            }
+            if (!pv.isEmpty()) builder.append(" pv ").append(pv);
         }
+        output.accept(builder.toString());
+
         output.accept(builder.toString());
 
         SearchDiagnostics diagnostics = ai.getLastDiagnostics();
