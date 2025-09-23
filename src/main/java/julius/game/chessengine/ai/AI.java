@@ -610,6 +610,16 @@ public class AI {
     public void stopCalculation() {
         keepCalculating = false;
 
+        List<MoveAndScore> preservedLine = null;
+        List<MoveAndScore> currentLine = this.calculatedLine;
+        if (currentLine != null) {
+            synchronized (currentLine) {
+                if (!currentLine.isEmpty()) {
+                    preservedLine = new ArrayList<>(currentLine);
+                }
+            }
+        }
+
         SearchTask task = activeSearch.get();
         if (task != null) task.requestStop();
 
@@ -650,7 +660,11 @@ public class AI {
         }
 
         activeSearch.set(null);
-        calculatedLine = Collections.synchronizedList(new ArrayList<>());
+        if (preservedLine != null) {
+            this.calculatedLine = Collections.synchronizedList(preservedLine);
+        } else {
+            this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
+        }
         currentBestMove = -1;
         bestMoveForHash = -1;
         previousBestMove = -1;
