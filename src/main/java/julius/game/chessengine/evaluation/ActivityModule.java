@@ -123,7 +123,6 @@ public final class ActivityModule implements EvaluationModule {
     private int midgameScoreCache;
     private int endgameScoreCache;
     private boolean dirty = true;
-    private boolean initialized;
 
     public ActivityModule() {
         for (int i = 0; i < activities.length; i++) {
@@ -134,7 +133,6 @@ public final class ActivityModule implements EvaluationModule {
     @Override
     public void initialize(EvaluationContext context) {
         rebuildFromBoard(context.getBoard());
-        initialized = true;
     }
 
     @Override
@@ -147,9 +145,6 @@ public final class ActivityModule implements EvaluationModule {
 
     @Override
     public void applyMove(MoveContext moveContext) {
-        if (!ensureInitialized(moveContext)) {
-            return;
-        }
         boolean forward = isForwardMove(moveContext);
         if (!updateForMove(moveContext.getMove(), forward)) {
             rebuildFromBoard(moveContext.getCurrentContext().getBoard());
@@ -181,18 +176,6 @@ public final class ActivityModule implements EvaluationModule {
         dirty = true;
     }
 
-    private boolean ensureInitialized(MoveContext moveContext) {
-        if (initialized) {
-            return true;
-        }
-        EvaluationContext context = moveContext.getCurrentContext();
-        if (context == null) {
-            return false;
-        }
-        initialize(context);
-        return true;
-    }
-
     private boolean updateForMove(int move, boolean forward) {
         if (forward) {
             return applyForwardMove(move);
@@ -213,20 +196,20 @@ public final class ActivityModule implements EvaluationModule {
         long affectedMask = (1L << from) | (1L << to);
         long excludeMask = 0L;
 
-        if (!removePiece(from)) {
+        if (pieceNotRemoved(from)) {
             return false;
         }
 
         if (capturedPiece != 0) {
             int captureSquare = enPassant ? enPassantCaptureSquare(to, moverColor) : to;
             affectedMask |= 1L << captureSquare;
-            if (!removePiece(captureSquare)) {
+            if (pieceNotRemoved(captureSquare)) {
                 return false;
             }
         }
 
         int resultingPiece = promotion != 0 ? promotion : piece;
-        if (!placePiece(to, moverColor, resultingPiece)) {
+        if (pieceNotPlaced(to, moverColor, resultingPiece)) {
             return false;
         }
         excludeMask |= 1L << to;
@@ -267,7 +250,7 @@ public final class ActivityModule implements EvaluationModule {
         long affectedMask = (1L << from) | (1L << to);
         long excludeMask = 0L;
 
-        if (!removePiece(to)) {
+        if (pieceNotRemoved(to)) {
             return false;
         }
 
@@ -286,7 +269,7 @@ public final class ActivityModule implements EvaluationModule {
         if (capturedPiece != 0) {
             int captureSquare = enPassant ? enPassantCaptureSquare(to, moverColor) : to;
             affectedMask |= 1L << captureSquare;
-            if (!placePiece(captureSquare, opponentColor, capturedPiece)) {
+            if (pieceNotPlaced(captureSquare, opponentColor, capturedPiece)) {
                 return false;
             }
             if (isSlider(capturedPiece)) {
@@ -295,7 +278,7 @@ public final class ActivityModule implements EvaluationModule {
             recalculatePiece(captureSquare);
         }
 
-        if (!placePiece(from, moverColor, piece)) {
+        if (pieceNotPlaced(from, moverColor, piece)) {
             return false;
         }
         excludeMask |= 1L << from;
@@ -336,10 +319,10 @@ public final class ActivityModule implements EvaluationModule {
             }
         }
 
-        if (!removePiece(rookFrom)) {
+        if (pieceNotRemoved(rookFrom)) {
             return null;
         }
-        if (!placePiece(rookTo, color, ROOK)) {
+        if (pieceNotPlaced(rookTo, color, ROOK)) {
             return null;
         }
         return new CastlingUpdate((1L << rookFrom) | (1L << rookTo), rookTo);
@@ -461,18 +444,15 @@ public final class ActivityModule implements EvaluationModule {
         }
     }
 
-    private boolean placePiece(int square, int color, int pieceType) {
+    private boolean pieceNotPlaced(int square, int color, int pieceType) {
         PieceActivity activity = activities[square];
         if (activity.color != -1) {
-            return false;
+            return true;
         }
         activity.color = color;
         activity.pieceType = pieceType;
-        activity.mobilityCount = 0;
-        activity.centerCount = 0;
         activity.midgameScore = 0;
         activity.endgameScore = 0;
-        activity.attackMask = 0L;
 
         long mask = 1L << square;
         if (color == WHITE) {
@@ -484,13 +464,13 @@ public final class ActivityModule implements EvaluationModule {
             sliderSquares |= mask;
         }
         allPieces = whitePieces | blackPieces;
-        return true;
+        return false;
     }
 
-    private boolean removePiece(int square) {
+    private boolean pieceNotRemoved(int square) {
         PieceActivity activity = activities[square];
         if (activity.color == -1) {
-            return false;
+            return true;
         }
         int color = activity.color;
         midgameTotals[color] -= activity.midgameScore;
@@ -508,7 +488,7 @@ public final class ActivityModule implements EvaluationModule {
 
         activity.reset();
         allPieces = whitePieces | blackPieces;
-        return true;
+        return false;
     }
 
     private void recalculatePiece(int square) {
@@ -521,21 +501,15 @@ public final class ActivityModule implements EvaluationModule {
         if (pieceType == PAWN) {
             midgameTotals[activity.color] -= activity.midgameScore;
             endgameTotals[activity.color] -= activity.endgameScore;
-            activity.mobilityCount = 0;
-            activity.centerCount = 0;
             activity.midgameScore = 0;
             activity.endgameScore = 0;
-            activity.attackMask = 0L;
             return;
         }
 
-        long attacks = 0L;
+        long attacks;
         if (pieceType <= 0) {
-            activity.mobilityCount = 0;
-            activity.centerCount = 0;
             activity.midgameScore = 0;
             activity.endgameScore = 0;
-            activity.attackMask = 0L;
             return;
         }
 
@@ -548,11 +522,8 @@ public final class ActivityModule implements EvaluationModule {
                     | ROOK_HELPER.calculateRookMoves(square, allPieces);
             case KING -> attacks = KingHelper.KING_ATTACKS[square];
             default -> {
-                activity.mobilityCount = 0;
-                activity.centerCount = 0;
                 activity.midgameScore = 0;
                 activity.endgameScore = 0;
-                activity.attackMask = 0L;
                 return;
             }
         }
@@ -571,11 +542,8 @@ public final class ActivityModule implements EvaluationModule {
         midgameTotals[activity.color] += midgameContribution - activity.midgameScore;
         endgameTotals[activity.color] += endgameContribution - activity.endgameScore;
 
-        activity.mobilityCount = mobility;
-        activity.centerCount = center;
         activity.midgameScore = midgameContribution;
         activity.endgameScore = endgameContribution;
-        activity.attackMask = legalTargets;
     }
 
     private void updateScoreCache() {
@@ -596,21 +564,16 @@ public final class ActivityModule implements EvaluationModule {
     private static final class PieceActivity {
         private int color = -1;
         private int pieceType;
-        private int mobilityCount;
-        private int centerCount;
         private int midgameScore;
         private int endgameScore;
-        private long attackMask;
 
         private void reset() {
             color = -1;
             pieceType = 0;
-            mobilityCount = 0;
-            centerCount = 0;
             midgameScore = 0;
             endgameScore = 0;
-            attackMask = 0L;
         }
+
     }
 
     private record CastlingUpdate(long affectedMask, int rookDestination) {
