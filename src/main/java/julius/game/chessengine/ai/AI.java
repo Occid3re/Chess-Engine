@@ -200,8 +200,12 @@ public class AI {
 
     private volatile long bestMoveForHash = -1;
 
-    @Getter
     private List<MoveAndScore> calculatedLine = Collections.synchronizedList(new ArrayList<>());
+    private volatile List<MoveAndScore> lastCompletedPrincipalVariation = calculatedLine;
+
+    public List<MoveAndScore> getCalculatedLine() {
+        return lastCompletedPrincipalVariation;
+    }
 
     // Game configuration parameters
 
@@ -234,6 +238,22 @@ public class AI {
         rebuildSearchPool(this.searchThreads);
 
         this.mainEngine.setOnPositionChanged(h -> updateBoardStateHash());
+    }
+
+    private void updatePrincipalVariation(List<MoveAndScore> principalVariation) {
+        List<MoveAndScore> synchronizedPv = Collections.synchronizedList(new ArrayList<>(principalVariation));
+        this.calculatedLine = synchronizedPv;
+        this.lastCompletedPrincipalVariation = synchronizedPv;
+    }
+
+    private void clearPrincipalVariation() {
+        List<MoveAndScore> empty = Collections.synchronizedList(new ArrayList<>());
+        this.calculatedLine = empty;
+        this.lastCompletedPrincipalVariation = empty;
+    }
+
+    private void resetCurrentPrincipalVariation() {
+        this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
     }
 
     private void rebuildTranspositionTables() {
@@ -602,7 +622,7 @@ public class AI {
         searchResultReady = false;
         currentBoardState = -1;
         beforeCalculationBoardState = -2;
-        calculatedLine = Collections.synchronizedList(new ArrayList<>());
+        clearPrincipalVariation();
         mainEngine.startNewGame();
         clearHistoryTable();
     }
@@ -650,7 +670,7 @@ public class AI {
         }
 
         activeSearch.set(null);
-        calculatedLine = Collections.synchronizedList(new ArrayList<>());
+        resetCurrentPrincipalVariation();
         currentBestMove = -1;
         bestMoveForHash = -1;
         previousBestMove = -1;
@@ -769,7 +789,7 @@ public class AI {
                 previousBestMove = bookMove;
                 previousBestMoveHash = boardStateHash;
                 searchResultReady = true;
-                this.calculatedLine = List.of(new MoveAndScore(bookMove, 0.0));
+                updatePrincipalVariation(List.of(new MoveAndScore(bookMove, 0.0)));
                 lastDiagnostics = SearchDiagnostics.EMPTY;
                 return;
             }
@@ -788,7 +808,7 @@ public class AI {
             currentBestMove = -1;
             bestMoveForHash = -1;
             searchResultReady = false;
-            this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
+            resetCurrentPrincipalVariation();
 
             synchronized (calculationLock) {
                 calculationLock.notifyAll();
@@ -852,7 +872,7 @@ public class AI {
         previousBestMove = -1;
         previousBestMoveHash = -1;
         searchResultReady = false;
-        this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
+        clearPrincipalVariation();
         lastDiagnostics = task.getInstrumentation().snapshot(best.depth, best.score);
     }
 
@@ -1201,7 +1221,7 @@ public class AI {
 
         // If still nothing, no PV can be constructed
         if (seedMove == -1) {
-            this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
+            clearPrincipalVariation();
             return;
         }
 
@@ -1233,7 +1253,7 @@ public class AI {
         // Undo simulation
         for (int i = 0; i < movesPerformed; i++) simulation.undoLastMove();
 
-        this.calculatedLine = Collections.synchronizedList(pv);
+        updatePrincipalVariation(pv);
     }
 
 
