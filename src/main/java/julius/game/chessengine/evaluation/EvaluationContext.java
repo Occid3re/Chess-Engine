@@ -4,6 +4,7 @@ import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.figures.PieceType;
+import lombok.Setter;
 
 import java.util.Objects;
 
@@ -125,6 +126,7 @@ public final class EvaluationContext {
      */
     public static final class BoardView {
 
+        @Setter
         private boolean whitesTurn;
         private long whitePawns;
         private long blackPawns;
@@ -141,14 +143,23 @@ public final class EvaluationContext {
         private long whitePieces;
         private long blackPieces;
         private long allPieces;
+        @Setter
         private int lastMoveDoubleStepPawnIndex;
+        @Setter
         private boolean whiteKingMoved;
+        @Setter
         private boolean blackKingMoved;
+        @Setter
         private boolean whiteRookA1Moved;
+        @Setter
         private boolean whiteRookH1Moved;
+        @Setter
         private boolean blackRookA8Moved;
+        @Setter
         private boolean blackRookH8Moved;
+        @Setter
         private boolean whiteKingHasCastled;
+        @Setter
         private boolean blackKingHasCastled;
         private final PieceType[] pieceTypes;
 
@@ -307,10 +318,6 @@ public final class EvaluationContext {
             return pieceTypes[index];
         }
 
-        public boolean whitesTurn() {
-            return whitesTurn;
-        }
-
         public long whitePawns() {
             return whitePawns;
         }
@@ -371,10 +378,6 @@ public final class EvaluationContext {
             return allPieces;
         }
 
-        public int lastMoveDoubleStepPawnIndex() {
-            return lastMoveDoubleStepPawnIndex;
-        }
-
         public boolean whiteKingMoved() {
             return whiteKingMoved;
         }
@@ -405,46 +408,6 @@ public final class EvaluationContext {
 
         public boolean blackKingHasCastled() {
             return blackKingHasCastled;
-        }
-
-        public void setWhitesTurn(boolean whitesTurn) {
-            this.whitesTurn = whitesTurn;
-        }
-
-        public void setLastMoveDoubleStepPawnIndex(int index) {
-            this.lastMoveDoubleStepPawnIndex = index;
-        }
-
-        public void setWhiteKingMoved(boolean moved) {
-            this.whiteKingMoved = moved;
-        }
-
-        public void setBlackKingMoved(boolean moved) {
-            this.blackKingMoved = moved;
-        }
-
-        public void setWhiteRookA1Moved(boolean moved) {
-            this.whiteRookA1Moved = moved;
-        }
-
-        public void setWhiteRookH1Moved(boolean moved) {
-            this.whiteRookH1Moved = moved;
-        }
-
-        public void setBlackRookA8Moved(boolean moved) {
-            this.blackRookA8Moved = moved;
-        }
-
-        public void setBlackRookH8Moved(boolean moved) {
-            this.blackRookH8Moved = moved;
-        }
-
-        public void setWhiteKingHasCastled(boolean castled) {
-            this.whiteKingHasCastled = castled;
-        }
-
-        public void setBlackKingHasCastled(boolean castled) {
-            this.blackKingHasCastled = castled;
         }
 
         public void applyMove(int move) {
