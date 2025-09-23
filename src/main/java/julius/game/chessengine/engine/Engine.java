@@ -155,7 +155,7 @@ public class Engine {
 
             this.openingBook = other.openingBook;
             LongConsumer callback = other.onPositionChanged;
-            this.onPositionChanged = (callback != null) ? callback : h -> {};
+            this.onPositionChanged = (callback != null) ? callback : _ -> {};
         }
     }
 
