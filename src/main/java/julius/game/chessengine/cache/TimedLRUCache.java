@@ -21,6 +21,10 @@ import java.util.function.BiConsumer;
  *       evicts only by LRU when capacity is exceeded.</li>
  *   <li>Eviction happens incrementally on {@link #put(long, Object)}, {@link #get(long)},
  *       and {@link #cleanup()} calls.</li>
+ *   <li>The backing hash map is sized up-front using a default load factor of
+ *       approximately {@value #DEFAULT_LOAD_FACTOR} to avoid repeated rehashes
+ *       during warm-up. Use {@link #TimedLRUCache(int, long, float)} to override
+ *       the load factor if a different density is required.</li>
  * </ul>
  *
  * @param <V> value type
@@ -37,25 +41,46 @@ public class TimedLRUCache<V> {
         }
     }
 
+    private static final float DEFAULT_LOAD_FACTOR = 0.75f;
+
     private final int maxSize;
     private final long maxAgeMs;
 
-    private final Long2ObjectOpenHashMap<Entry<V>> map = new Long2ObjectOpenHashMap<>();
+    private final Long2ObjectOpenHashMap<Entry<V>> map;
     private final LongArrayFIFOQueue keyQueue = new LongArrayFIFOQueue();
     private final LongArrayFIFOQueue timeQueue = new LongArrayFIFOQueue();
     private final Object lock = new Object();
 
     /**
+     * Uses the default load factor of approximately {@value #DEFAULT_LOAD_FACTOR}.
+     *
      * @param maxSize maximum number of entries to retain (LRU when exceeded)
      * @param maxAgeMs maximum age in milliseconds before an entry is considered stale;
      *                 set {@code <= 0} to disable time-based expiry
      */
     public TimedLRUCache(int maxSize, long maxAgeMs) {
+        this(maxSize, maxAgeMs, DEFAULT_LOAD_FACTOR);
+    }
+
+    /**
+     * @param maxSize maximum number of entries to retain (LRU when exceeded)
+     * @param maxAgeMs maximum age in milliseconds before an entry is considered stale;
+     *                 set {@code <= 0} to disable time-based expiry
+     * @param loadFactor desired load factor for the underlying open-addressed hash map;
+     *                   defaults to approximately {@value #DEFAULT_LOAD_FACTOR}
+     */
+    public TimedLRUCache(int maxSize, long maxAgeMs, float loadFactor) {
         if (maxSize <= 0) {
             throw new IllegalArgumentException("maxSize must be > 0");
         }
+        if (!(loadFactor > 0.0f && loadFactor < 1.0f)) {
+            throw new IllegalArgumentException("loadFactor must be within (0, 1)");
+        }
         this.maxSize = maxSize;
         this.maxAgeMs = maxAgeMs;
+        int expectedEntries = sanitizeExpectedSize(maxSize);
+        // fastutil will expand to the nearest power-of-two >= expected/loadFactor.
+        this.map = new Long2ObjectOpenHashMap<>(expectedEntries, loadFactor);
     }
 
     public V get(long key) {
@@ -152,6 +177,11 @@ public class TimedLRUCache<V> {
             keyQueue.clear();
             timeQueue.clear();
         }
+    }
+
+    private static int sanitizeExpectedSize(int maxSize) {
+        long sanitized = Math.max(2L, maxSize);
+        return (int) Math.min(Integer.MAX_VALUE - 8L, sanitized);
     }
 
     public void forEach(BiConsumer<Long, V> action) {
