@@ -4,6 +4,7 @@ import java.util.Arrays;
 
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.figures.PieceType;
+import lombok.Getter;
 
 import static julius.game.chessengine.evaluation.MaterialModule.BISHOP_VALUE;
 import static julius.game.chessengine.evaluation.MaterialModule.KNIGHT_VALUE;
@@ -133,6 +134,7 @@ public final class PieceSquareModule implements EvaluationModule {
 
     private int midgameTotal;
     private int endgameTotal;
+    @Getter
     private int developmentContribution;
     private int castlingContribution;
     private int currentPhase;
@@ -206,10 +208,6 @@ public final class PieceSquareModule implements EvaluationModule {
         return endgameTotal;
     }
 
-    public int getDevelopmentContribution() {
-        return developmentContribution;
-    }
-
     @Override
     public boolean isDirty() {
         return dirty;
@@ -250,13 +248,13 @@ public final class PieceSquareModule implements EvaluationModule {
         boolean enPassant = MoveHelper.isEnPassantMove(move);
         boolean castling = MoveHelper.isCastlingMove(move);
 
-        if (!removePiece(from)) {
+        if (notRemovePiece(from)) {
             return false;
         }
 
         if (capturedPiece != 0) {
             int captureSquare = enPassant ? enPassantCaptureSquare(to, moverColor) : to;
-            if (!removePiece(captureSquare)) {
+            if (notRemovePiece(captureSquare)) {
                 return false;
             }
         }
@@ -267,7 +265,7 @@ public final class PieceSquareModule implements EvaluationModule {
         }
 
         if (castling) {
-            if (!handleCastlingRook(moverColor, to, false)) {
+            if (doNotHandleCastlingRook(moverColor, to, false)) {
                 return false;
             }
         }
@@ -282,17 +280,16 @@ public final class PieceSquareModule implements EvaluationModule {
         int moverColor = MoveHelper.isWhitesMove(move) ? WHITE : BLACK;
         int opponentColor = moverColor ^ 1;
         int piece = MoveHelper.derivePieceTypeBits(move);
-        int promotion = MoveHelper.derivePromotionPieceTypeBits(move);
         int capturedPiece = MoveHelper.deriveCapturedPieceTypeBits(move);
         boolean enPassant = MoveHelper.isEnPassantMove(move);
         boolean castling = MoveHelper.isCastlingMove(move);
 
-        if (!removePiece(to)) {
+        if (notRemovePiece(to)) {
             return false;
         }
 
         if (castling) {
-            if (!handleCastlingRook(moverColor, to, true)) {
+            if (doNotHandleCastlingRook(moverColor, to, true)) {
                 return false;
             }
         }
@@ -308,9 +305,7 @@ public final class PieceSquareModule implements EvaluationModule {
             }
         }
 
-        if (promotion != 0) {
-            // We placed a pawn back on the from-square already; nothing extra required.
-        }
+        // We placed a pawn back on the from-square already; nothing extra required.
 
         developmentDirty = true;
         return true;
@@ -320,7 +315,7 @@ public final class PieceSquareModule implements EvaluationModule {
         return moverColor == WHITE ? to - 8 : to + 8;
     }
 
-    private boolean handleCastlingRook(int color, int kingTo, boolean undo) {
+    private boolean doNotHandleCastlingRook(int color, int kingTo, boolean undo) {
         int rookFrom;
         int rookTo;
         if (color == WHITE) {
@@ -341,16 +336,13 @@ public final class PieceSquareModule implements EvaluationModule {
             }
         }
 
-        if (!undo) {
-            return removePiece(rookFrom) && placePiece(rookTo, color, ROOK);
-        }
-        return removePiece(rookFrom) && placePiece(rookTo, color, ROOK);
+        return notRemovePiece(rookFrom) || !placePiece(rookTo, color, ROOK);
     }
 
-    private boolean removePiece(int square) {
+    private boolean notRemovePiece(int square) {
         int color = occupantColor[square];
         if (color == -1) {
-            return false;
+            return true;
         }
         int pieceType = occupantPiece[square];
         midgameTotal -= midgameContributionBySquare[square];
@@ -361,7 +353,7 @@ public final class PieceSquareModule implements EvaluationModule {
         occupantPiece[square] = 0;
 
         adjustDevelopmentOnLeave(square, color, pieceType);
-        return true;
+        return false;
     }
 
     private boolean placePiece(int square, int color, int pieceType) {
@@ -581,24 +573,7 @@ public final class PieceSquareModule implements EvaluationModule {
         boolean applyPenalty = false;
         if (!hasCastled) {
             int kingIndex = Long.numberOfTrailingZeros(king);
-            long forwardMask;
-            if (white) {
-                forwardMask = king << 8;
-                if ((king & NOT_A_FILE) != 0) {
-                    forwardMask |= (king << 7);
-                }
-                if ((king & NOT_H_FILE) != 0) {
-                    forwardMask |= (king << 9);
-                }
-            } else {
-                forwardMask = king >>> 8;
-                if ((king & NOT_A_FILE) != 0) {
-                    forwardMask |= (king >>> 9);
-                }
-                if ((king & NOT_H_FILE) != 0) {
-                    forwardMask |= (king >>> 7);
-                }
-            }
+            long forwardMask = getForwardMask(king, white);
             boolean missingShield = Long.bitCount(pawns & forwardMask) < 3;
             int fileIndex = kingIndex & 7;
             long fileMask = FileMasks[fileIndex];
@@ -621,6 +596,28 @@ public final class PieceSquareModule implements EvaluationModule {
             }
         }
         return adjustment;
+    }
+
+    private static long getForwardMask(long king, boolean white) {
+        long forwardMask;
+        if (white) {
+            forwardMask = king << 8;
+            if ((king & NOT_A_FILE) != 0) {
+                forwardMask |= (king << 7);
+            }
+            if ((king & NOT_H_FILE) != 0) {
+                forwardMask |= (king << 9);
+            }
+        } else {
+            forwardMask = king >>> 8;
+            if ((king & NOT_A_FILE) != 0) {
+                forwardMask |= (king >>> 9);
+            }
+            if ((king & NOT_H_FILE) != 0) {
+                forwardMask |= (king >>> 7);
+            }
+        }
+        return forwardMask;
     }
 
     private static int computeMaterialBalance(EvaluationContext.BoardView board) {
@@ -700,10 +697,7 @@ public final class PieceSquareModule implements EvaluationModule {
         if (phase < 0) {
             return 0;
         }
-        if (phase > 256) {
-            return 256;
-        }
-        return phase;
+        return Math.min(phase, 256);
     }
 }
 
