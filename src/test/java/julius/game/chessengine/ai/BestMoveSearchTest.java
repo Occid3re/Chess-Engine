@@ -211,7 +211,7 @@ public class BestMoveSearchTest {
 
         List<MoveAndScore> pv = ai.getCalculatedLine();
         Assertions.assertFalse(pv.isEmpty(), "Principal variation should reflect the preserved best move");
-        Assertions.assertEquals(preservedBest, pv.get(0).getMove(),
+        Assertions.assertEquals(preservedBest, pv.getFirst().getMove(),
                 "PV root move should match the preserved best move");
     }
 
@@ -312,13 +312,13 @@ public class BestMoveSearchTest {
         int pvLength = principalVariation != null ? principalVariation.size() : 0;
         int legalMoveCount = evaluations.size();
         int chosenRank = chosenEval != null ? evaluations.indexOf(chosenEval) + 1 : -1;
-        MoveEvaluation topCandidate = evaluations.isEmpty() ? null : evaluations.get(0);
+        MoveEvaluation topCandidate = evaluations.isEmpty() ? null : evaluations.getFirst();
         double deltaVsBest = chosenEval != null && topCandidate != null
                 ? chosenEval.centipawns() - topCandidate.centipawns()
                 : Double.NaN;
         double spread = evaluations.isEmpty()
                 ? Double.NaN
-                : evaluations.get(0).centipawns() - evaluations.get(evaluations.size() - 1).centipawns();
+                : evaluations.getFirst().centipawns() - evaluations.getLast().centipawns();
 
         StringBuilder sb = new StringBuilder();
         sb.append(System.lineSeparator());
@@ -350,7 +350,7 @@ public class BestMoveSearchTest {
                 sb.append("Rank among legal: ").append(chosenRank).append("/").append(legalMoveCount)
                         .append(" (Δ vs top: ").append(formatCentipawns(deltaVsBest)).append(")")
                         .append(System.lineSeparator());
-            } else if (chosenRank != -1) {
+            } else {
                 sb.append("Rank among legal: ").append(chosenRank).append("/").append(legalMoveCount)
                         .append(System.lineSeparator());
             }
@@ -361,7 +361,7 @@ public class BestMoveSearchTest {
         }
 
         // ===== Module-level insight for chosen vs baseline (+ optional top alternative) =====
-        topCandidate = evaluations.isEmpty() ? null : evaluations.get(0);
+        topCandidate = evaluations.isEmpty() ? null : evaluations.getFirst();
         if (chosenEval != null) {
             sb.append(renderModuleInfluence(fen, whiteToMove, chosenEval, topCandidate));
         }
@@ -486,8 +486,6 @@ public class BestMoveSearchTest {
         int chosenTotal = mChosen != null ? mChosen.totalBlended() : baseTotal; // fallback
         int expectedTotal = mExpected.totalBlended();
 
-        int deltaChosen = chosenTotal - baseTotal;
-        int deltaExpected = expectedTotal - baseTotal;
         int headToHead = expectedTotal - chosenTotal;
 
         sb.append(String.format(Locale.US,
@@ -504,11 +502,12 @@ public class BestMoveSearchTest {
         }
 
         // Top-3 module differences baseline->chosen and baseline->expected, then chosen vs expected
-        sb.append(renderTopModuleDiffs("  Biggest improvements (baseline → chosen)", mBase, mChosen, +1));
-        sb.append(renderTopModuleDiffs("  Biggest improvements (baseline → expected)", mBase, mExpected, +1));
-        sb.append(renderHeadToHeadModuleDiffs("  Where chosen beats expected (chosen − expected)", mChosen, mExpected));
+        sb.append(renderTopModuleDiffs("  Biggest improvements (baseline → chosen)", mBase, mChosen));
+        sb.append(renderTopModuleDiffs("  Biggest improvements (baseline → expected)", mBase, mExpected));
+        sb.append(renderHeadToHeadModuleDiffs(mChosen, mExpected));
 
         // Heuristic flags: if expected worsens king safety or gives back material vs chosen, call it out
+        Assertions.assertNotNull(mChosen);
         int chosenKS = getModule(mChosen, "King safety");
         int expectedKS = getModule(mExpected, "King safety");
         int chosenMat = getModule(mChosen, "Material");
@@ -564,8 +563,7 @@ public class BestMoveSearchTest {
     /** Top-3 absolute module gains/losses from 'from' → 'to'. sign=+1 keeps gains first; sign=-1 would invert if needed. */
     private String renderTopModuleDiffs(String heading,
                                         ModuleContributionSummary from,
-                                        ModuleContributionSummary to,
-                                        int sign) {
+                                        ModuleContributionSummary to) {
         if (from == null || to == null) return "";
         Map<String, ModuleContribution> idxFrom = indexByModule(from.contributions());
         Map<String, ModuleContribution> idxTo = indexByModule(to.contributions());
@@ -591,8 +589,7 @@ public class BestMoveSearchTest {
     }
 
     /** Head-to-head module comparison: where chosen outperforms expected. */
-    private String renderHeadToHeadModuleDiffs(String heading,
-                                               ModuleContributionSummary chosen,
+    private String renderHeadToHeadModuleDiffs(ModuleContributionSummary chosen,
                                                ModuleContributionSummary expected) {
         if (chosen == null || expected == null) return "";
         Map<String, ModuleContribution> c = indexByModule(chosen.contributions());
@@ -607,10 +604,10 @@ public class BestMoveSearchTest {
             if (d > 0) better.add(new D(k, d));
         }
         if (better.isEmpty()) return "";
-        better.sort(Comparator.comparingInt((D d) -> d.delta()).reversed());
+        better.sort(Comparator.comparingInt(D::delta).reversed());
         String ls = System.lineSeparator();
         StringBuilder sb = new StringBuilder();
-        sb.append(heading).append(":").append(ls);
+        sb.append("  Where chosen beats expected (chosen − expected)").append(":").append(ls);
         for (int i = 0; i < Math.min(3, better.size()); i++) {
             D d = better.get(i);
             sb.append("    - ").append(d.name).append(": ").append(formatPawns(d.delta)).append(ls);
@@ -730,9 +727,8 @@ public class BestMoveSearchTest {
     }
 
     private static int blendScores(int midgame, int endgame, int phase) {
-        int clamped = Math.max(0, Math.min(BLEND_SCALE, phase));
-        int midgameWeight = BLEND_SCALE - clamped;
-        int endgameWeight = clamped;
+        int endgameWeight = Math.max(0, Math.min(BLEND_SCALE, phase));
+        int midgameWeight = BLEND_SCALE - endgameWeight;
         long blended = (long) midgame * midgameWeight + (long) endgame * endgameWeight;
         return (int) (blended / BLEND_SCALE);
     }
