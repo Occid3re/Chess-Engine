@@ -103,13 +103,6 @@ public final class ThreatModule implements EvaluationModule {
             Arrays.fill(penalties, 0);
         }
 
-        if (board == null) {
-            midgameScoreCache = 0;
-            endgameScoreCache = 0;
-            dirty = false;
-            return;
-        }
-
         long whiteAttacks = context.whiteAttackMap();
         long blackAttacks = context.blackAttackMap();
 
@@ -174,7 +167,7 @@ public final class ThreatModule implements EvaluationModule {
 
     private void updateForMove(MoveContext moveContext) {
         EvaluationContext current = moveContext.currentContext();
-        if (current == null || current.board() == null) {
+        if (current == null) {
             Arrays.fill(totals, 0);
             for (int[] penalties : squarePenalties) {
                 Arrays.fill(penalties, 0);
@@ -185,7 +178,7 @@ public final class ThreatModule implements EvaluationModule {
             return;
         }
         EvaluationContext previous = moveContext.previousContext();
-        if (previous == null || previous.board() == null) {
+        if (previous == null) {
             rebuildFromContext(current);
             return;
         }
@@ -201,7 +194,7 @@ public final class ThreatModule implements EvaluationModule {
         markMoveSquares(moveContext.move(), impactedWhite, impactedBlack);
         markAttackDifferences(previous, current, impactedWhite, impactedBlack);
 
-        if (!hasImpacted(impactedWhite) && !hasImpacted(impactedBlack)) {
+        if (hasNotImpacted(impactedWhite) && hasNotImpacted(impactedBlack)) {
             return;
         }
 
@@ -326,13 +319,13 @@ public final class ThreatModule implements EvaluationModule {
         }
     }
 
-    private static boolean hasImpacted(boolean[] impacted) {
+    private static boolean hasNotImpacted(boolean[] impacted) {
         for (boolean flag : impacted) {
             if (flag) {
-                return true;
+                return false;
             }
         }
-        return false;
+        return true;
     }
 
     private static int materialValueFor(int pieceType) {

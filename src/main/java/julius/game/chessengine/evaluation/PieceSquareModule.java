@@ -573,25 +573,7 @@ public final class PieceSquareModule implements EvaluationModule {
         boolean applyPenalty = false;
         if (!hasCastled) {
             int kingIndex = Long.numberOfTrailingZeros(king);
-            long forwardMask;
-            if (white) {
-                forwardMask = king << 8;
-                if ((king & NOT_A_FILE) != 0) {
-                    forwardMask |= (king << 7);
-                }
-                if ((king & NOT_H_FILE) != 0) {
-                    forwardMask |= (king << 9);
-                }
-            } else {
-                forwardMask = king >>> 8;
-                if ((king & NOT_A_FILE) != 0) {
-                    forwardMask |= (king >>> 9);
-                }
-                if ((king & NOT_H_FILE) != 0) {
-                    forwardMask |= (king >>> 7);
-                }
-            }
-            boolean missingShield = Long.bitCount(pawns & forwardMask) < 3;
+            boolean missingShield = isMissingShield(king, pawns, white);
             int fileIndex = kingIndex & 7;
             long fileMask = FileMasks[fileIndex];
             boolean openOrHalfOpen = (pawns & fileMask) == 0;
@@ -613,6 +595,28 @@ public final class PieceSquareModule implements EvaluationModule {
             }
         }
         return adjustment;
+    }
+
+    private static boolean isMissingShield(long king, long pawns, boolean white) {
+        long forwardMask;
+        if (white) {
+            forwardMask = king << 8;
+            if ((king & NOT_A_FILE) != 0) {
+                forwardMask |= (king << 7);
+            }
+            if ((king & NOT_H_FILE) != 0) {
+                forwardMask |= (king << 9);
+            }
+        } else {
+            forwardMask = king >>> 8;
+            if ((king & NOT_A_FILE) != 0) {
+                forwardMask |= (king >>> 9);
+            }
+            if ((king & NOT_H_FILE) != 0) {
+                forwardMask |= (king >>> 7);
+            }
+        }
+        return Long.bitCount(pawns & forwardMask) < 3;
     }
 
     private static int computeMaterialBalance(EvaluationContext.BoardView board) {

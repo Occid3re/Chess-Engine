@@ -168,7 +168,7 @@ public final class KingSafetyModule implements EvaluationModule {
         }
         EvaluationContext current = moveContext.currentContext();
         EvaluationContext previous = moveContext.previousContext();
-        if (current == null || current.board() == null || previous == null || previous.board() == null) {
+        if (current == null || previous == null) {
             return true;
         }
         boolean isWhite = side == WHITE;
@@ -249,19 +249,7 @@ public final class KingSafetyModule implements EvaluationModule {
             return true;
         }
         long queenAttackMask = friendlyQueens & enemyAttacks;
-        if (queenAttackMask != state.enemyQueenAttackMask) {
-            return true;
-        }
-
-        state.shieldPawns = shieldPawns;
-        state.friendlyPawnOnFile = friendlyPawnOnFile;
-        state.enemyPawnOnFile = enemyPawnOnFile;
-        state.enemyZoneAttacks = enemyZone;
-        state.friendlyZoneAttacks = friendlyZone;
-        state.friendlyBackrankControl = backrankControl;
-        state.enemyQueens = friendlyQueens;
-        state.enemyQueenAttackMask = queenAttackMask;
-        return false;
+        return queenAttackMask != state.enemyQueenAttackMask;
     }
 
     private void rebuildSideState(SideState state, EvaluationContext.BoardView board, boolean isWhite,

@@ -164,14 +164,14 @@ public final class BatteryModule implements EvaluationModule {
             long bit = remaining & -remaining;
             int square = Long.numberOfTrailingZeros(bit);
             updateContribution(board, colorIndex, square, occupancy, friendlyPieces, enemyPieces,
-                    diagonal, true);
+                    diagonal);
             remaining ^= bit;
         }
     }
 
     private void updateContribution(EvaluationContext.BoardView board, int colorIndex, int square,
                                     long occupancy, long friendlyPieces, long enemyPieces,
-                                    boolean diagonal, boolean additive) {
+                                    boolean diagonal) {
         PieceType type = board.getPieceTypeAtIndex(square);
         if (type == null) {
             return;
@@ -187,7 +187,7 @@ public final class BatteryModule implements EvaluationModule {
                 diagonal ? DIAGONAL_DIRECTIONS : ORTHOGONAL_DIRECTIONS,
                 occupancy, friendlyPieces, enemyPieces, diagonal);
 
-        applyContribution(colorIndex, square, contribution, additive);
+        applyContribution(colorIndex, square, contribution);
     }
 
     private BatteryScore computeContribution(EvaluationContext.BoardView board, int square,
@@ -258,14 +258,9 @@ public final class BatteryModule implements EvaluationModule {
         }
     }
 
-    private void applyContribution(int colorIndex, int square, BatteryScore contribution,
-                                   boolean additive) {
+    private void applyContribution(int colorIndex, int square, BatteryScore contribution) {
         int deltaMid = contribution.midgame;
         int deltaEnd = contribution.endgame;
-        if (!additive) {
-            deltaMid = -deltaMid;
-            deltaEnd = -deltaEnd;
-        }
         midgameTotals[colorIndex] += deltaMid;
         endgameTotals[colorIndex] += deltaEnd;
         midgameContributions[colorIndex][square] += deltaMid;
@@ -274,12 +269,12 @@ public final class BatteryModule implements EvaluationModule {
 
     private void updateForMove(MoveContext moveContext) {
         EvaluationContext current = moveContext.currentContext();
-        if (current == null || current.board() == null) {
+        if (current == null) {
             rebuildFromBoard(null);
             return;
         }
         EvaluationContext previous = moveContext.previousContext();
-        if (previous == null || previous.board() == null) {
+        if (previous == null) {
             rebuildFromBoard(current.board());
             return;
         }
@@ -408,12 +403,12 @@ public final class BatteryModule implements EvaluationModule {
         if (isDiagonalSlider(type)) {
             BatteryScore diagonal = computeContribution(board, square, DIAGONAL_DIRECTIONS,
                     occupancy, friendlyPieces, enemyPieces, true);
-            applyContribution(colorIndex, square, diagonal, true);
+            applyContribution(colorIndex, square, diagonal);
         }
         if (isOrthogonalSlider(type)) {
             BatteryScore orthogonal = computeContribution(board, square, ORTHOGONAL_DIRECTIONS,
                     occupancy, friendlyPieces, enemyPieces, false);
-            applyContribution(colorIndex, square, orthogonal, true);
+            applyContribution(colorIndex, square, orthogonal);
         }
     }
 
