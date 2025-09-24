@@ -489,6 +489,7 @@ public class UciHandler {
         lastInfoNanos.set(now);
 
         List<MoveAndScore> line = new ArrayList<>(ai.getCalculatedLine());
+        AI.SearchStatus status = ai.snapshotSearchStatus();
         long nodes = ai.getNodesVisited();
         long elapsedMillis = ai.getSearchElapsedMillis();
         long nps = 0L;
@@ -499,18 +500,30 @@ public class UciHandler {
             }
         }
         StringBuilder builder = new StringBuilder("info");
-        if (!line.isEmpty()) {
-            builder.append(" depth ").append(line.size());
-            builder.append(' ').append(formatScore(line.getFirst().getScore()));
+        int depth = status != null ? status.depth() : 0;
+        if (depth <= 0 && !line.isEmpty()) {
+            depth = line.size();
+        }
+        if (depth > 0) {
+            builder.append(" depth ").append(depth);
+        }
+        double score = (status != null) ? status.score() : Double.NaN;
+        if (Double.isNaN(score) && !line.isEmpty()) {
+            score = line.getFirst().getScore();
+        }
+        if (!Double.isNaN(score)) {
+            builder.append(' ').append(formatScore(score));
         }
         builder.append(" nodes ").append(nodes);
         builder.append(" time ").append(elapsedMillis);
         builder.append(" nps ").append(nps);
-        if (!line.isEmpty()) {
-            String pv = buildPv(line);
-            if (!pv.isEmpty()) {
-                builder.append(" pv ").append(pv);
-            }
+        String pv = buildPv(line);
+        int bestMove = (status != null) ? status.bestMove() : -1;
+        if (pv.isEmpty() && bestMove != -1) {
+            pv = toUci(bestMove);
+        }
+        if (!pv.isEmpty()) {
+            builder.append(" pv ").append(pv);
         }
         output.accept(builder.toString());
 
@@ -519,7 +532,7 @@ public class UciHandler {
             int generated = diagnostics.rootMovesGenerated();
             int explored = diagnostics.rootMovesExplored();
             if (generated > 0 || explored > 0) {
-                int difference = generated - explored;
+                int difference = Math.max(0, generated - explored);
                 output.accept("info string rootmoves generated " + generated
                         + " explored " + explored
                         + " diff " + difference);

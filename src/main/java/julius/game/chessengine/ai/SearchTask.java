@@ -47,6 +47,7 @@ public final class SearchTask {
     boolean isWhiteToMove() { return whiteToMove; }
     long getDeadline() { return deadline; }
     BestMoveDepth getBest() { return best.get(); }
+    int getCurrentIterationDepth() { return iterationDepth.get(); }
 
     void workerDone() { completion.countDown(); }
     void requestStop() { stop.set(true); }

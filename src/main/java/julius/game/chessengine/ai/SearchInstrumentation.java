@@ -91,7 +91,20 @@ final class SearchInstrumentation {
 
     void recordRootMoveExplored() {
         if (!enabled) return;
-        rootMovesExplored.incrementAndGet();
+        rootMovesExplored.updateAndGet(prev -> {
+            int next = prev + 1;
+            int generated = rootMovesGenerated.get();
+            if (generated <= 0) {
+                return next;
+            }
+            return Math.min(next, generated);
+        });
+    }
+
+    void beginRootIteration() {
+        if (!enabled) return;
+        rootMovesGenerated.set(0);
+        rootMovesExplored.set(0);
     }
 
     void recordRootBetaCutoff() {

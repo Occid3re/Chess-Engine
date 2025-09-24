@@ -210,6 +210,9 @@ public class AI {
     @Getter
     private volatile SearchDiagnostics lastDiagnostics = SearchDiagnostics.EMPTY;
 
+    public record SearchStatus(int depth, double score, int bestMove, boolean active) {
+    }
+
     public AI(Engine mainEngine) {
         log.info("### SearchThreads = {}, LazySmpThreads = {}", searchThreads, lazySmpThreads);
         this.mainEngine = mainEngine;
@@ -377,6 +380,30 @@ public class AI {
         return move;
     }
 
+    public SearchStatus snapshotSearchStatus() {
+        SearchTask task = activeSearch.get();
+        if (task != null) {
+            BestMoveDepth best = task.getBest();
+            int iterationDepth = Math.max(0, task.getCurrentIterationDepth());
+            int reportedDepth = Math.max(iterationDepth, best.depth());
+            double score = (best.move() != -1 && Double.isFinite(best.score()))
+                    ? best.score()
+                    : Double.NaN;
+            return new SearchStatus(reportedDepth, score, best.move(), true);
+        }
+
+        SearchDiagnostics diagnostics = lastDiagnostics;
+        int depth = diagnostics != null ? Math.max(0, diagnostics.bestDepth()) : 0;
+        double score = (diagnostics != null && Double.isFinite(diagnostics.bestScore()))
+                ? diagnostics.bestScore()
+                : Double.NaN;
+        int move = -1;
+        if (searchResultReady && bestMoveForHash == mainEngine.getBoardStateHash()) {
+            move = currentBestMove;
+        }
+        return new SearchStatus(depth, score, move, false);
+    }
+
     private void startCalculationThread() {
         keepCalculating = true;
 
@@ -457,6 +484,9 @@ public class AI {
 
             boolean firstAtDepth = task.beginIteration(currentDepth);
             prepareIterationState(task, heuristics, currentDepth, firstAtDepth);
+            if (firstAtDepth) {
+                instr.beginRootIteration();
+            }
 
             MoveAndScore ms = null;
 
