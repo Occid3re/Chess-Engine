@@ -1758,12 +1758,7 @@ public class AI {
                 seeGain = seeCache.computeIfAbsent(move, simulatorEngine::see);
                 seeEvaluated = true;
                 if (seeGain < 0) {
-                    simulatorEngine.performMove(move);
-                    boolean givesCheckTmp = isSideInCheck(simulatorEngine, false);
-                    simulatorEngine.undoLastMove();
-                    if (!givesCheckTmp) {
-                        continue;
-                    }
+                    continue;
                 }
             }
 
