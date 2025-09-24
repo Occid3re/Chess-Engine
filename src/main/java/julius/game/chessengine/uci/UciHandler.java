@@ -7,6 +7,7 @@ import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
+import julius.game.chessengine.engine.search.config.SearchLimits;
 import julius.game.chessengine.utils.Score;
 import julius.game.chessengine.utils.VersionInfo;
 
@@ -132,16 +133,20 @@ public class UciHandler {
     }
 
     private void registerOptions() {
-        options.put("Threads", new UciOption("Threads", "spin", "1", 1, 128,
-                v -> {
-                    int requested = Integer.parseInt(v);
-                    ai.setSearchThreads(requested);
-                    output.accept("info string Threads requested " + requested
-                            + " active " + ai.getSearchThreads());
-                }));
-        options.put("Hash", new UciOption("Hash", "spin", "16",
-                AI.MIN_HASH_SIZE_MB, AI.MAX_HASH_SIZE_MB,
-                v -> ai.setHashSizeMb(Integer.parseInt(v))));
+        ai.getSearchConfig().getUciSpinOptions().forEach((name, opt) ->
+                options.put(name, new UciOption(name, "spin", String.valueOf(opt.defaultValue()),
+                        opt.min(), opt.max(), v -> {
+                            int requested = Integer.parseInt(v);
+                            if ("Threads".equals(name)) {
+                                ai.setSearchThreads(requested);
+                                output.accept("info string Threads requested " + requested
+                                        + " active " + ai.getSearchThreads());
+                            } else if ("Hash".equals(name)) {
+                                ai.setHashSizeMb(requested);
+                            } else {
+                                opt.apply(requested);
+                            }
+                        })));
         options.put("Move Overhead", new UciOption("Move Overhead", "spin", "0", 0, 5000,
                 v -> moveOverheadMs = Integer.parseInt(v)));
     }
@@ -380,11 +385,13 @@ public class UciHandler {
         long timeLeft = whitesTurn ? wtime : btime;
         long inc = whitesTurn ? winc : binc;
         long limit = computeTimeLimit(timeLeft, inc, movetime, movestogo, moveOverheadMs);
-        if (ponder && movetime == 0) {
-            ai.setTimeLimit(AI.INFINITE_TIME_LIMIT);
-        } else {
-            ai.setTimeLimit(limit);
+        SearchLimits.Builder limitsBuilder = SearchLimits.builder()
+                .timeControl(wtime, btime, winc, binc, movestogo)
+                .ponder(ponder);
+        if (!ponder || movetime > 0) {
+            limitsBuilder.moveTimeMillis(limit);
         }
+        ai.setSearchLimits(limitsBuilder.build());
 
         ponderActive = ponder;
         ponderShouldOutputMove = false;

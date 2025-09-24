@@ -4,12 +4,14 @@ import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.Move;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.MoveList;
-import julius.game.chessengine.helper.BishopHelper;
-import julius.game.chessengine.helper.PawnMoveTables;
-import julius.game.chessengine.helper.RookHelper;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
+import julius.game.chessengine.engine.search.config.SearchConfig;
+import julius.game.chessengine.engine.search.config.SearchLimits;
+import julius.game.chessengine.helper.BishopHelper;
+import julius.game.chessengine.helper.PawnMoveTables;
+import julius.game.chessengine.helper.RookHelper;
 import julius.game.chessengine.utils.Score;
 import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
@@ -34,12 +36,7 @@ public class AI {
     @Getter
     private final Engine mainEngine;
 
-    /**
-     * Number of threads used for searching. Defaults to single-threaded search but
-     * can be adjusted at runtime via the UCI "Threads" option.
-     */
-    @Getter
-    private int searchThreads = Integer.getInteger("chessengine.searchThreads", 1);
+    private final SearchConfig searchConfig;
 
     // number of Lazy SMP workers (≥1)
     @Getter
@@ -54,13 +51,7 @@ public class AI {
     private final AtomicReference<SearchTask> activeSearch = new AtomicReference<>();
     private final ThreadLocal<SearchTask> threadSearchTask = new ThreadLocal<>();
     private final AtomicLong searchIdGenerator = new AtomicLong();
-    /**
-     * Requested size of the transposition table in megabytes. The current
-     * implementation does not dynamically resize the table, but the value is
-     * tracked so that future improvements can honour it.
-     */
-    @Getter
-    private int hashSizeMb = 16;
+    private volatile SearchLimits searchLimits = SearchLimits.unlimited();
 
     /**
      * Estimated footprint per stored entry in the main and capture transposition tables.
@@ -85,8 +76,9 @@ public class AI {
     private static final double MAIN_TT_WEIGHT = 2.0;
     private static final double CAPTURE_TT_WEIGHT = 1.0;
 
-    public static final int MIN_HASH_SIZE_MB = 1;
-    public static final int MAX_HASH_SIZE_MB = 4096;
+    public static final int MIN_HASH_SIZE_MB = SearchConfig.MIN_HASH_SIZE_MB;
+    public static final int MAX_HASH_SIZE_MB = SearchConfig.MAX_HASH_SIZE_MB;
+    public static final long INFINITE_TIME_LIMIT = Long.MAX_VALUE;
 
     /**
      * Thread pool for root-split parallel search (created only if searchThreads > 1).
@@ -188,20 +180,6 @@ public class AI {
         return lastCompletedPrincipalVariation;
     }
 
-    // Game configuration parameters
-
-    @Getter
-    private int maxDepth = 64; // Adjust the level of depth according to your requirements
-
-    @Getter
-    private long timeLimit; // milliseconds
-
-    public static final long INFINITE_TIME_LIMIT = Long.MAX_VALUE;
-
-    private final boolean useNullMovePruning = Boolean.parseBoolean(
-            System.getProperty("chessengine.nullMove", "true")
-    );
-
     @Getter
     private long nodesVisited = 0;
     private volatile long searchStartTimeNanos = 0L;
@@ -211,16 +189,46 @@ public class AI {
     private volatile SearchDiagnostics lastDiagnostics = SearchDiagnostics.EMPTY;
 
     public AI(Engine mainEngine) {
-        log.info("### SearchThreads = {}, LazySmpThreads = {}", searchThreads, lazySmpThreads);
+        this(mainEngine, SearchConfig.defaults());
+    }
+
+    public AI(Engine mainEngine, SearchConfig config) {
+        Objects.requireNonNull(mainEngine, "mainEngine");
         this.mainEngine = mainEngine;
-        this.timeLimit = 50;
+        this.searchConfig = config != null ? config : SearchConfig.defaults();
 
-        this.globalHeuristics = new Heuristics(maxDepth);
-        this.threadHeuristics = ThreadLocal.withInitial(() -> new Heuristics(maxDepth));
+        int initialThreads = Integer.getInteger("chessengine.searchThreads", searchConfig.getThreads());
+        searchConfig.setThreads(initialThreads);
 
-        rebuildSearchPool(this.searchThreads);
+        log.info("### SearchThreads = {}, LazySmpThreads = {}", searchConfig.getThreads(), lazySmpThreads);
+
+        int depthCapacity = searchConfig.effectiveMaxDepth();
+        this.globalHeuristics = new Heuristics(depthCapacity);
+        this.threadHeuristics = ThreadLocal.withInitial(() -> new Heuristics(depthCapacity));
+
+        rebuildSearchPool(searchConfig.getThreads());
 
         this.mainEngine.setOnPositionChanged(_ -> updateBoardStateHash());
+    }
+
+    public int getSearchThreads() {
+        return searchConfig.getThreads();
+    }
+
+    public int getHashSizeMb() {
+        return searchConfig.getHashSizeMb();
+    }
+
+    public int getMaxDepth() {
+        return searchConfig.getMaxDepth();
+    }
+
+    public SearchConfig getSearchConfig() {
+        return searchConfig;
+    }
+
+    public SearchLimits getSearchLimits() {
+        return searchLimits;
     }
 
     private void updatePrincipalVariation(List<MoveAndScore> principalVariation) {
@@ -240,16 +248,17 @@ public class AI {
     }
 
     private void rebuildTranspositionTables() {
-        boolean concurrent = Math.max(searchThreads, lazySmpThreads) > 1;
-        long totalBytes = Math.max(1L, (long) hashSizeMb * 1024L * 1024L);
+        int threads = searchConfig.getThreads();
+        boolean concurrent = Math.max(threads, lazySmpThreads) > 1;
+        long totalBytes = Math.max(1L, (long) searchConfig.getHashSizeMb() * 1024L * 1024L);
 
         double totalWeight = MAIN_TT_WEIGHT + CAPTURE_TT_WEIGHT;
         long mainBudget = Math.max(1L, (long) (totalBytes * (MAIN_TT_WEIGHT / totalWeight)));
         long captureBudget = Math.max(1L, totalBytes - mainBudget);
 
-        int mainCapacity = computeTableCapacity(mainBudget, MAIN_TT_ENTRY_BYTES,
+        int mainCapacity = SearchConfig.computeHashCapacity(mainBudget, MAIN_TT_ENTRY_BYTES,
                 MIN_MAIN_TT_ENTRIES, MAX_MAIN_TT_ENTRIES);
-        int captureCapacity = computeTableCapacity(captureBudget, CAPTURE_TT_ENTRY_BYTES,
+        int captureCapacity = SearchConfig.computeHashCapacity(captureBudget, CAPTURE_TT_ENTRY_BYTES,
                 MIN_CAPTURE_TT_ENTRIES, MAX_CAPTURE_TT_ENTRIES);
 
         this.transpositionTableCapacity = mainCapacity;
@@ -264,57 +273,17 @@ public class AI {
                 : new PlainFixedSizeTranspositionTable<>(captureCapacity);
     }
 
-    private static int computeTableCapacity(long budgetBytes, int entryBytes, int minEntries, int maxEntries) {
-        if (entryBytes <= 0) {
-            throw new IllegalArgumentException("Entry byte estimate must be positive");
-        }
-
-        long estimatedEntries = Math.max(1L, budgetBytes / entryBytes);
-        if (estimatedEntries > Integer.MAX_VALUE) {
-            estimatedEntries = Integer.MAX_VALUE;
-        }
-
-        int candidate = (int) estimatedEntries;
-        if (candidate < minEntries) {
-            candidate = minEntries;
-        } else if (candidate > maxEntries) {
-            candidate = maxEntries;
-        }
-
-        int rounded = roundUpToPowerOfTwo(candidate);
-        if (rounded < minEntries) {
-            rounded = minEntries;
-        }
-        while (rounded > maxEntries && rounded > 1) {
-            rounded >>= 1;
-        }
-        return rounded;
-    }
-
-    private static int roundUpToPowerOfTwo(int value) {
-        if (value <= 1) {
-            return 1;
-        }
-        int highest = Integer.highestOneBit(value);
-        if (highest == value) {
-            return value;
-        }
-        if (highest > (1 << 30)) {
-            return 1 << 30;
-        }
-        return highest << 1;
-    }
-
     /**
      * Adjust the requested hash size (in megabytes) and rebuild the transposition tables.
-     * Values outside the supported range are clamped between {@value MIN_HASH_SIZE_MB} MB
-     * and {@value MAX_HASH_SIZE_MB} MB. The resulting table capacities are also limited
-     * to {@value MIN_MAIN_TT_ENTRIES}/{@value MAX_MAIN_TT_ENTRIES} for the main table and
+     * Values outside the supported range are clamped between
+     * {@value julius.game.chessengine.engine.search.config.SearchConfig#MIN_HASH_SIZE_MB} MB
+     * and {@value julius.game.chessengine.engine.search.config.SearchConfig#MAX_HASH_SIZE_MB} MB.
+     * The resulting table capacities are also limited to
+     * {@value MIN_MAIN_TT_ENTRIES}/{@value MAX_MAIN_TT_ENTRIES} for the main table and
      * {@value MIN_CAPTURE_TT_ENTRIES}/{@value MAX_CAPTURE_TT_ENTRIES} for the capture table.
      */
     public synchronized void setHashSizeMb(int hashSizeMb) {
-        int clamped = Math.max(MIN_HASH_SIZE_MB, Math.min(hashSizeMb, MAX_HASH_SIZE_MB));
-        if (clamped == this.hashSizeMb) {
+        if (!searchConfig.setHashSizeMb(hashSizeMb)) {
             return;
         }
 
@@ -325,11 +294,10 @@ public class AI {
             captureTranspositionTable.clear();
         }
 
-        this.hashSizeMb = clamped;
         rebuildTranspositionTables();
 
         log.info("Hash size set to {} MB (main TT capacity: {}, capture TT capacity: {})",
-                this.hashSizeMb, transpositionTableCapacity, captureTranspositionTableCapacity);
+                searchConfig.getHashSizeMb(), transpositionTableCapacity, captureTranspositionTableCapacity);
     }
 
     /**
@@ -338,25 +306,42 @@ public class AI {
      * previous allocation. The requested depth is always respected (minimum 1).
      */
     public synchronized void setMaxDepth(int depth) {
-        int requestedDepth = Math.max(1, depth);
+        searchConfig.setMaxDepth(depth);
+        int requestedDepth = searchConfig.getMaxDepth();
         synchronized (heuristicsLock) {
             globalHeuristics.ensureCapacity(requestedDepth);
         }
         threadHeuristics.get().ensureCapacity(requestedDepth);
-        this.maxDepth = requestedDepth;
     }
 
 
+    public void setSearchLimits(SearchLimits limits) {
+        this.searchLimits = limits != null ? limits : SearchLimits.unlimited();
+    }
+
     public void setTimeLimit(long timeLimitMillis) {
-        if (timeLimitMillis <= 0L) {
-            this.timeLimit = INFINITE_TIME_LIMIT;
+        if (timeLimitMillis <= 0L || timeLimitMillis >= INFINITE_TIME_LIMIT) {
+            setSearchLimits(SearchLimits.unlimited());
             return;
         }
-        if (timeLimitMillis >= INFINITE_TIME_LIMIT) {
-            this.timeLimit = INFINITE_TIME_LIMIT;
-            return;
+        setSearchLimits(SearchLimits.builder().moveTimeMillis(timeLimitMillis).build());
+    }
+
+    public long getTimeLimit() {
+        SearchLimits limits = this.searchLimits;
+        long moveTime = limits.getMoveTimeMillis();
+        if (moveTime > 0L) {
+            return moveTime;
         }
-        this.timeLimit = timeLimitMillis;
+        long hard = limits.getHardDeadlineNanos();
+        if (hard > 0L && hard < Long.MAX_VALUE) {
+            return TimeUnit.NANOSECONDS.toMillis(hard);
+        }
+        long soft = limits.getSoftDeadlineNanos();
+        if (soft > 0L && soft < Long.MAX_VALUE) {
+            return TimeUnit.NANOSECONDS.toMillis(soft);
+        }
+        return INFINITE_TIME_LIMIT;
     }
 
 
@@ -452,7 +437,8 @@ public class AI {
         Heuristics heuristics = threadHeuristics.get();
         SearchInstrumentation instr = task.getInstrumentation();
 
-        for (int currentDepth = 1; currentDepth <= maxDepth; currentDepth++) {
+        int depthLimit = searchConfig.getMaxDepth();
+        for (int currentDepth = 1; currentDepth <= depthLimit; currentDepth++) {
             if (shouldStopCalculating(task.getDeadline())) break;
 
             boolean firstAtDepth = task.beginIteration(currentDepth);
@@ -515,6 +501,7 @@ public class AI {
 
     private void prepareIterationState(SearchTask task, Heuristics heuristics, int currentDepth, boolean firstAtDepth) {
         synchronized (heuristicsLock) {
+            int maxDepth = searchConfig.getMaxDepth();
             globalHeuristics.ensureCapacity(maxDepth);
             if (firstAtDepth) {
                 if (transpositionTable != null) {
@@ -543,8 +530,9 @@ public class AI {
             oldPool.shutdownNow();
         }
 
-        if (searchThreads > 1) {
-            this.searchPool = Executors.newFixedThreadPool(searchThreads, r -> {
+        int threads = searchConfig.getThreads();
+        if (threads > 1) {
+            this.searchPool = Executors.newFixedThreadPool(threads, r -> {
                 Thread t = new Thread(r, "AI-Search-" + System.identityHashCode(r));
                 t.setDaemon(true);
                 return t;
@@ -554,35 +542,29 @@ public class AI {
         }
 
         boolean previousConcurrent = Math.max(previousSearchThreads, lazySmpThreads) > 1;
-        boolean newConcurrent = Math.max(searchThreads, lazySmpThreads) > 1;
+        boolean newConcurrent = Math.max(threads, lazySmpThreads) > 1;
         if (transpositionTable == null || previousConcurrent != newConcurrent) {
             rebuildTranspositionTables();
         }
     }
 
     public void setSearchThreads(int requestedThreads) {
-        int clamped = Math.max(1, requestedThreads);
-        int previous;
-        synchronized (this) {
-            if (clamped == this.searchThreads) {
-                return;
-            }
+        int previous = searchConfig.getThreads();
+        if (!searchConfig.setThreads(requestedThreads)) {
+            return;
         }
 
         stopCalculation();
 
-        synchronized (this) {
-            previous = this.searchThreads;
-            this.searchThreads = clamped;
-        }
         rebuildSearchPool(previous);
-        log.info("Search thread count updated to {}", clamped);
+        log.info("Search thread count updated to {}", searchConfig.getThreads());
     }
 
     private Heuristics prepareHelperHeuristics(SearchTask task, int depth) {
         Heuristics heuristics = threadHeuristics.get();
         if (!heuristics.isPreparedFor(task.getId(), depth)) {
             synchronized (heuristicsLock) {
+                int maxDepth = searchConfig.getMaxDepth();
                 globalHeuristics.ensureCapacity(maxDepth);
                 heuristics.beginIteration(globalHeuristics, maxDepth);
                 heuristics.markPrepared(task.getId(), depth);
@@ -592,7 +574,7 @@ public class AI {
     }
 
     protected MoveAndScore searchRootMoves(Engine sim, SearchTask task, int depth, double alpha, double beta, SplittableRandom rng) {
-        if (searchThreads > 1) {
+        if (searchConfig.getThreads() > 1) {
             return getBestMoveParallel(sim, task, depth, task.getDeadline(), alpha, beta, rng);
         }
         return getBestMove(sim, task.isWhiteToMove(), depth, task.getDeadline(), alpha, beta, rng);
@@ -788,24 +770,8 @@ public class AI {
 
 
     private long computeDeadlineNanos() {
-        if (timeLimit >= INFINITE_TIME_LIMIT) {
-            return Long.MAX_VALUE;
-        }
-        long millis = timeLimit;
-        if (millis <= 0L) {
-            return Long.MAX_VALUE;
-        }
-        long nanos;
-        try {
-            nanos = Math.multiplyExact(millis, 1_000_000L);
-        } catch (ArithmeticException ex) {
-            return Long.MAX_VALUE;
-        }
-        long now = System.nanoTime();
-        if (nanos > 0L && now > Long.MAX_VALUE - nanos) {
-            return Long.MAX_VALUE;
-        }
-        return now + nanos;
+        long start = System.nanoTime();
+        return searchLimits.hardDeadlineNanos(start);
     }
 
     private void performCalculation() {
@@ -1046,7 +1012,7 @@ public class AI {
             return bestMove != -1 ? new MoveAndScore(bestMove, bestScore) : fallback;
         }
 
-        final int fanout = Math.min(Math.min(ROOT_PARALLEL_LIMIT, searchThreads * 2), orderedMoves.size() - 1);
+        final int fanout = Math.min(Math.min(ROOT_PARALLEL_LIMIT, searchConfig.getThreads() * 2), orderedMoves.size() - 1);
         final CompletionService<MoveAndScore> ecs = new ExecutorCompletionService<>(searchPool);
         final List<Future<MoveAndScore>> futures = new ArrayList<>(Math.max(fanout, 0));
         final java.util.concurrent.locks.ReentrantLock fullResLock = new java.util.concurrent.locks.ReentrantLock();
@@ -1293,7 +1259,7 @@ public class AI {
         if (transpositionTable == null) {
             return;
         }
-        int depthForEntry = Math.max(maxDepth, Math.max(0, depthRemaining) + 6);
+        int depthForEntry = Math.max(searchConfig.getMaxDepth(), Math.max(0, depthRemaining) + 6);
         TranspositionTableEntry existing = transpositionTable.get(childHash);
         if (existing != null
                 && existing.nodeType == NodeType.EXACT
@@ -1457,7 +1423,7 @@ public class AI {
 
         if (abortRequested(deadline)) return EXIT_FLAG;
 
-        if (plyFromRoot >= maxDepth + ABS_PLY_LIMIT_MARGIN) {
+        if (plyFromRoot >= searchConfig.getMaxDepth() + ABS_PLY_LIMIT_MARGIN) {
             double eval = evaluateBoard(simulatorEngine, isWhite, deadline);
             if (eval == EXIT_FLAG) return EXIT_FLAG;
             if (!isWhite) eval = -eval;
@@ -1514,7 +1480,7 @@ public class AI {
         MoveList moves = simulatorEngine.getAllLegalMoves();
         int mobility = moves.size();
         BitBoard bitBoard = simulatorEngine.getBitBoard();
-        boolean allowNullMove = useNullMovePruning
+        boolean allowNullMove = searchConfig.isNullMovePruningEnabled()
                 && !inCheck
                 && !simulatorEngine.isEndgame()
                 && prevMove != -1;
