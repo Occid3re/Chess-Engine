@@ -12,6 +12,8 @@ import julius.game.chessengine.engine.search.config.SearchLimits;
 import julius.game.chessengine.helper.BishopHelper;
 import julius.game.chessengine.helper.PawnMoveTables;
 import julius.game.chessengine.helper.RookHelper;
+import julius.game.chessengine.engine.search.context.SearchContext;
+import julius.game.chessengine.engine.search.context.WorkerContext;
 import julius.game.chessengine.utils.Score;
 import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
@@ -93,12 +95,6 @@ public class AI {
 
     public static final double EXIT_FLAG = Double.MAX_VALUE;
 
-    private static final int SEE_CACHE_MASK = 1024 - 1; // power of two
-    private final ThreadLocal<int[]> seeCacheKeys = ThreadLocal.withInitial(() -> new int[SEE_CACHE_MASK + 1]);
-    private final ThreadLocal<int[]> seeCacheVals = ThreadLocal.withInitial(() -> new int[SEE_CACHE_MASK + 1]);
-    private final ThreadLocal<int[]> seeCacheGenerations = ThreadLocal.withInitial(() -> new int[SEE_CACHE_MASK + 1]);
-    private final ThreadLocal<int[]> seeCacheGenerationCounters = ThreadLocal.withInitial(() -> new int[]{0});
-
     private static final BishopHelper BISHOP_HELPER = BishopHelper.getInstance();
     private static final RookHelper ROOK_HELPER = RookHelper.getInstance();
 
@@ -120,42 +116,7 @@ public class AI {
     @Getter
     private int captureTranspositionTableCapacity;
 
-    private static final int NUM_KILLER_MOVES = 2;
-
-    /**
-     * Global heuristic tables shared across searches. Search threads work with
-     * thread-local copies that are periodically merged back into this
-     * structure between iterative-deepening iterations.
-     */
-    private final Heuristics globalHeuristics;
-
-    /**
-     * Per-thread heuristic state used during move ordering. The tables are
-     * initialised from {@link #globalHeuristics} at the beginning of each
-     * iterative-deepening iteration, updated locally during the search and
-     * merged back afterwards.
-     */
-    private final ThreadLocal<Heuristics> threadHeuristics;
-
-    private final Object heuristicsLock = new Object();
-
-    // Buffers used for move ordering. Reused across calls to avoid repeated
-    // allocations when ordering moves.
-    private static final int MAX_MOVE_LIST_SIZE = 218; // maximum legal moves
-
-    private final ThreadLocal<SortBuffers> sortBuffers =
-            ThreadLocal.withInitial(() -> new SortBuffers(MAX_MOVE_LIST_SIZE));
-    private final ThreadLocal<Map<Integer, Integer>> seeCacheThreadLocal =
-            ThreadLocal.withInitial(() -> new HashMap<>(64));
-
-    private static final int HISTORY_BUCKETS = 5;
-
-    static {
-        if (HISTORY_BUCKETS < 1) {
-            throw new IllegalStateException("History bucket count must be positive");
-        }
-
-    }
+    private final SearchContext searchContext;
 
     private ScheduledExecutorService scheduler;
 
@@ -173,20 +134,21 @@ public class AI {
 
     private volatile long bestMoveForHash = -1;
 
-    private List<MoveAndScore> calculatedLine = Collections.synchronizedList(new ArrayList<>());
-    private volatile List<MoveAndScore> lastCompletedPrincipalVariation = calculatedLine;
-
-    public List<MoveAndScore> getCalculatedLine() {
-        return lastCompletedPrincipalVariation;
-    }
-
-    @Getter
-    private long nodesVisited = 0;
     private volatile long searchStartTimeNanos = 0L;
     @Getter
-    private long nullMoveCount = 0;
-    @Getter
     private volatile SearchDiagnostics lastDiagnostics = SearchDiagnostics.EMPTY;
+
+    public List<MoveAndScore> getCalculatedLine() {
+        return searchContext.getLastCompletedPrincipalVariation();
+    }
+
+    public long getNodesVisited() {
+        return searchContext.getNodesVisited();
+    }
+
+    public long getNullMoveCount() {
+        return searchContext.getNullMoveCount();
+    }
 
     public AI(Engine mainEngine) {
         this(mainEngine, SearchConfig.defaults());
@@ -203,8 +165,7 @@ public class AI {
         log.info("### SearchThreads = {}, LazySmpThreads = {}", searchConfig.getThreads(), lazySmpThreads);
 
         int depthCapacity = searchConfig.effectiveMaxDepth();
-        this.globalHeuristics = new Heuristics(depthCapacity);
-        this.threadHeuristics = ThreadLocal.withInitial(() -> new Heuristics(depthCapacity));
+        this.searchContext = new SearchContext(depthCapacity);
 
         rebuildSearchPool(searchConfig.getThreads());
 
@@ -232,19 +193,15 @@ public class AI {
     }
 
     private void updatePrincipalVariation(List<MoveAndScore> principalVariation) {
-        List<MoveAndScore> synchronizedPv = Collections.synchronizedList(new ArrayList<>(principalVariation));
-        this.calculatedLine = synchronizedPv;
-        this.lastCompletedPrincipalVariation = synchronizedPv;
+        searchContext.updatePrincipalVariation(principalVariation);
     }
 
     private void clearPrincipalVariation() {
-        List<MoveAndScore> empty = Collections.synchronizedList(new ArrayList<>());
-        this.calculatedLine = empty;
-        this.lastCompletedPrincipalVariation = empty;
+        searchContext.clearPrincipalVariation();
     }
 
     private void resetCurrentPrincipalVariation() {
-        this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
+        searchContext.resetCurrentPrincipalVariation();
     }
 
     private void rebuildTranspositionTables() {
@@ -308,10 +265,7 @@ public class AI {
     public synchronized void setMaxDepth(int depth) {
         searchConfig.setMaxDepth(depth);
         int requestedDepth = searchConfig.getMaxDepth();
-        synchronized (heuristicsLock) {
-            globalHeuristics.ensureCapacity(requestedDepth);
-        }
-        threadHeuristics.get().ensureCapacity(requestedDepth);
+        searchContext.ensureCapacity(requestedDepth);
     }
 
 
@@ -434,7 +388,8 @@ public class AI {
 
     private void iterativeDeepening(SearchTask task, Engine simulatorEngine, SplittableRandom rng) {
         Double lastIterScore = null;
-        Heuristics heuristics = threadHeuristics.get();
+        WorkerContext worker = searchContext.worker();
+        SearchContext.Heuristics heuristics = worker.heuristics();
         SearchInstrumentation instr = task.getInstrumentation();
 
         int depthLimit = searchConfig.getMaxDepth();
@@ -442,7 +397,7 @@ public class AI {
             if (shouldStopCalculating(task.getDeadline())) break;
 
             boolean firstAtDepth = task.beginIteration(currentDepth);
-            prepareIterationState(task, heuristics, currentDepth, firstAtDepth);
+            prepareIterationState(task, worker, currentDepth, firstAtDepth);
 
             MoveAndScore ms = null;
 
@@ -483,7 +438,7 @@ public class AI {
                 ms = searchRootMoves(simulatorEngine, task, currentDepth, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, rng);
                 if (ms == null) {
                     if (heuristics.hasUpdates()) {
-                        mergeThreadHeuristics(heuristics);
+                        mergeThreadHeuristics(worker);
                     }
                     break;
                 }
@@ -493,35 +448,27 @@ public class AI {
             task.publishBest(ms, currentDepth);
             instr.recordIterationComplete(currentDepth);
             if (heuristics.hasUpdates()) {
-                mergeThreadHeuristics(heuristics);
+                mergeThreadHeuristics(worker);
             }
             if (task.isStopRequested()) break;
         }
     }
 
-    private void prepareIterationState(SearchTask task, Heuristics heuristics, int currentDepth, boolean firstAtDepth) {
-        synchronized (heuristicsLock) {
-            int maxDepth = searchConfig.getMaxDepth();
-            globalHeuristics.ensureCapacity(maxDepth);
-            if (firstAtDepth) {
-                if (transpositionTable != null) {
-                    transpositionTable.advanceAge();
-                }
-                if (captureTranspositionTable != null) {
-                    captureTranspositionTable.advanceAge();
-                }
-                globalHeuristics.decayHistory();
+    private void prepareIterationState(SearchTask task, WorkerContext worker, int currentDepth, boolean firstAtDepth) {
+        int maxDepth = searchConfig.getMaxDepth();
+        if (firstAtDepth) {
+            if (transpositionTable != null) {
+                transpositionTable.advanceAge();
             }
-            heuristics.beginIteration(globalHeuristics, maxDepth);
-            heuristics.markPrepared(task.getId(), currentDepth);
+            if (captureTranspositionTable != null) {
+                captureTranspositionTable.advanceAge();
+            }
         }
+        searchContext.prepareIteration(task.getId(), worker, currentDepth, maxDepth, firstAtDepth);
     }
 
-    private void mergeThreadHeuristics(Heuristics heuristics) {
-        synchronized (heuristicsLock) {
-            heuristics.mergeInto(globalHeuristics);
-        }
-        heuristics.resetUpdates();
+    private void mergeThreadHeuristics(WorkerContext worker) {
+        searchContext.mergeWorkerHeuristics(worker);
     }
 
     private synchronized void rebuildSearchPool(int previousSearchThreads) {
@@ -560,17 +507,11 @@ public class AI {
         log.info("Search thread count updated to {}", searchConfig.getThreads());
     }
 
-    private Heuristics prepareHelperHeuristics(SearchTask task, int depth) {
-        Heuristics heuristics = threadHeuristics.get();
-        if (!heuristics.isPreparedFor(task.getId(), depth)) {
-            synchronized (heuristicsLock) {
-                int maxDepth = searchConfig.getMaxDepth();
-                globalHeuristics.ensureCapacity(maxDepth);
-                heuristics.beginIteration(globalHeuristics, maxDepth);
-                heuristics.markPrepared(task.getId(), depth);
-            }
-        }
-        return heuristics;
+    private WorkerContext prepareHelperHeuristics(SearchTask task, int depth) {
+        WorkerContext worker = searchContext.worker();
+        int maxDepth = searchConfig.getMaxDepth();
+        searchContext.prepareHeuristics(task.getId(), worker, depth, maxDepth);
+        return worker;
     }
 
     protected MoveAndScore searchRootMoves(Engine sim, SearchTask task, int depth, double alpha, double beta, SplittableRandom rng) {
@@ -590,7 +531,7 @@ public class AI {
         searchResultReady = false;
         currentBoardState = -1;
         beforeCalculationBoardState = -2;
-        nodesVisited = 0L;
+        searchContext.resetCounters();
         searchStartTimeNanos = 0L;
         clearPrincipalVariation();
         mainEngine.startNewGame();
@@ -610,7 +551,7 @@ public class AI {
     }
 
     private void resetSearchCounters() {
-        nodesVisited = 0L;
+        searchContext.resetCounters();
         searchStartTimeNanos = System.nanoTime();
     }
 
@@ -798,6 +739,7 @@ public class AI {
             lastDiagnostics = SearchDiagnostics.EMPTY;
             resetSearchCounters();
             SearchTask task = new SearchTask(searchIdGenerator.incrementAndGet(), boardStateHash, isWhite, deadline, lazySmpThreads, instrumentation);
+            searchContext.beginSearch(task.getId(), searchConfig.getMaxDepth());
             activeSearch.set(task);
             if (bestMoveForHash == boardStateHash && currentBestMove != -1) {
                 previousBestMove = currentBestMove;
@@ -1021,7 +963,8 @@ public class AI {
             final int moveInt = orderedMoves.getMove(i);
             futures.add(ecs.submit(() -> {
                 if (stopRef.get() || abortRequested(deadline)) return null;
-                Heuristics helperHeuristics = prepareHelperHeuristics(task, depth);
+                WorkerContext helperWorker = prepareHelperHeuristics(task, depth);
+                SearchContext.Heuristics helperHeuristics = helperWorker.heuristics();
                 try {
                     Engine e = simulatorEngine.createSimulation();
                     e.performMove(moveInt);
@@ -1076,7 +1019,7 @@ public class AI {
                     return new MoveAndScore(moveInt, finalScore);
                 } finally {
                     if (helperHeuristics.hasUpdates()) {
-                        mergeThreadHeuristics(helperHeuristics);
+                        mergeThreadHeuristics(helperWorker);
                     } else {
                         helperHeuristics.resetUpdates();
                     }
@@ -1417,7 +1360,7 @@ public class AI {
     private double alphaBeta(Engine simulatorEngine, int depth, double alpha, double beta,
                              boolean isWhite, long deadline, int prevMove, int plyFromRoot,
                              int extStreak) {
-        nodesVisited++;
+        searchContext.incrementNodesVisited();
         SearchInstrumentation instr = instrumentation();
         instr.recordVisitedPly(plyFromRoot);
 
@@ -1495,7 +1438,7 @@ public class AI {
         if (allowNullMove) {
             int reduction = computeNullMoveReduction(bitBoard, depth, isWhite, mobility);
             int savedEp = simulatorEngine.doNullMoveForSearch();
-            nullMoveCount++;
+            searchContext.incrementNullMoveCount();
             instr.recordNullMoveAttempt();
             double nullScore = alphaBeta(simulatorEngine, depth - 1 - reduction, alpha, beta, !isWhite, deadline, -1, plyFromRoot + 1, 0);
             simulatorEngine.undoNullMoveForSearch(savedEp);
@@ -1693,11 +1636,12 @@ public class AI {
         SearchInstrumentation instr = instrumentation();
 
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, true);
-        final Heuristics heuristics = threadHeuristics.get();
+        final WorkerContext worker = searchContext.worker();
+        final SearchContext.Heuristics heuristics = worker.heuristics();
         final int[][] historyTable = heuristics.history;
 
         MoveList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
+        final Map<Integer, Integer> seeCache = worker.seeCache();
         seeCache.clear();
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (abortRequested(deadline)) {
@@ -1917,11 +1861,12 @@ public class AI {
         SearchInstrumentation instr = instrumentation();
 
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, false);
-        final Heuristics heuristics = threadHeuristics.get();
+        final WorkerContext worker = searchContext.worker();
+        final SearchContext.Heuristics heuristics = worker.heuristics();
         final int[][] historyTable = heuristics.history;
 
         MoveList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
+        final Map<Integer, Integer> seeCache = worker.seeCache();
         seeCache.clear();
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
@@ -2142,10 +2087,11 @@ public class AI {
      */
     MoveList sortMovesByEfficiency(MoveList moves, int currentDepth, long boardHash, int prevMove,
                                    Engine simulatorEngine) {
-        final int[] seeKeys = seeCacheKeys.get();
-        final int[] seeVals = seeCacheVals.get();
-        final int[] seeGenerations = seeCacheGenerations.get();
-        final int[] generationHolder = seeCacheGenerationCounters.get();
+        WorkerContext worker = searchContext.worker();
+        final int[] seeKeys = worker.seeKeys();
+        final int[] seeVals = worker.seeVals();
+        final int[] seeGenerations = worker.seeGenerations();
+        final int[] generationHolder = worker.seeGenerationCounter();
         int generation = generationHolder[0] + 1;
         if (generation == 0) {
             Arrays.fill(seeGenerations, 0);
@@ -2153,19 +2099,18 @@ public class AI {
         }
         generationHolder[0] = generation;
         final int size = moves.size();
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
+        final Map<Integer, Integer> seeCache = worker.seeCache();
         seeCache.clear();
 
         if (size == 0) {
             return moves;
         }
 
-        final SortBuffers buffers = sortBuffers.get();
-        final int[] moveBuffer = buffers.moveBuffer;
-        final int[] scoreBuffer = buffers.scoreBuffer;
-        final long[] sortKeys = buffers.sortKeyBuffer;
+        final int[] moveBuffer = worker.moveBuffer();
+        final int[] scoreBuffer = worker.scoreBuffer();
+        final long[] sortKeys = worker.sortKeyBuffer();
 
-        final Heuristics heuristics = threadHeuristics.get();
+        final SearchContext.Heuristics heuristics = worker.heuristics();
         final int[][] killerMoves = heuristics.killers;
         final int[][] historyTable = heuristics.history;
         final int[][] counterMove = heuristics.counter;
@@ -2230,7 +2175,7 @@ public class AI {
             boolean hasSee = false;
             if (isCapture) {
                 int slot = (int) (Integer.toUnsignedLong(moveInt) * 2654435761L);
-                slot &= SEE_CACHE_MASK;
+                slot &= SearchContext.SEE_CACHE_MASK;
                 if (slot == 0) {
                     slot = 1;
                 }
@@ -2627,26 +2572,21 @@ public class AI {
     }
 
     private void updateKillerMoves(int depth, int move) {
-        threadHeuristics.get().recordKiller(depth, move);
+        searchContext.worker().heuristics().recordKiller(depth, move);
     }
 
     private void incrementHistory(int prevMove, int move, int depth) {
-        Heuristics heuristics = threadHeuristics.get();
+        SearchContext.Heuristics heuristics = searchContext.worker().heuristics();
         heuristics.addHistory(move, depth);
         heuristics.addContinuation(prevMove, move, depth);
     }
 
     private void clearHistoryTable() {
-        synchronized (heuristicsLock) {
-            globalHeuristics.clearHistory();
-            globalHeuristics.clearCounter();
-        }
+        searchContext.clearHistoryTables();
     }
 
     int[][] snapshotKillerMoves() {
-        synchronized (heuristicsLock) {
-            return globalHeuristics.snapshotKillers();
-        }
+        return searchContext.snapshotKillers();
     }
 
     private int calculateMvvLvaScore(int move) {
@@ -2658,292 +2598,5 @@ public class AI {
         return victimValue - attackerValue;
     }
 
-    private static final class Heuristics {
-        private static final int BOARD_SQUARES = 64;
-        private static final int HISTORY_SIZE = BOARD_SQUARES * BOARD_SQUARES;
 
-        private int[][] killers;
-        private final int[][] history;
-        private final int[][] continuation;
-        private final int[][] counter;
-
-        private boolean[] killerDirty;
-        private int[] killerDirtyList;
-        private int killerDirtyCount;
-
-        private final int[] historyDelta;
-        private final boolean[] historyDirty;
-        private final int[] historyDirtyList;
-        private int historyDirtyCount;
-
-        private final int[] continuationDelta;
-        private final boolean[] continuationDirty;
-        private final int[] continuationDirtyList;
-        private int continuationDirtyCount;
-
-        private final int[] counterUpdates;
-        private final boolean[] counterDirty;
-        private final int[] counterDirtyList;
-        private int counterDirtyCount;
-
-        private long preparedTaskId = Long.MIN_VALUE;
-        private int preparedDepth = -1;
-
-        Heuristics(int depth) {
-            this.killers = allocateKillers(Math.max(1, depth));
-            this.history = new int[BOARD_SQUARES][BOARD_SQUARES];
-            this.continuation = new int[BOARD_SQUARES][BOARD_SQUARES];
-            this.counter = new int[BOARD_SQUARES][BOARD_SQUARES];
-            for (int f = 0; f < BOARD_SQUARES; f++) {
-                Arrays.fill(counter[f], -1);
-            }
-            this.killerDirty = new boolean[Math.max(1, depth)];
-            this.killerDirtyList = new int[Math.max(1, depth)];
-            this.historyDelta = new int[HISTORY_SIZE];
-            this.historyDirty = new boolean[HISTORY_SIZE];
-            this.historyDirtyList = new int[HISTORY_SIZE];
-            this.continuationDelta = new int[HISTORY_SIZE];
-            this.continuationDirty = new boolean[HISTORY_SIZE];
-            this.continuationDirtyList = new int[HISTORY_SIZE];
-            this.counterUpdates = new int[HISTORY_SIZE];
-            Arrays.fill(counterUpdates, -1);
-            this.counterDirty = new boolean[HISTORY_SIZE];
-            this.counterDirtyList = new int[HISTORY_SIZE];
-        }
-
-        private static int[][] allocateKillers(int depth) {
-            int[][] table = new int[depth][NUM_KILLER_MOVES];
-            for (int i = 0; i < depth; i++) {
-                Arrays.fill(table[i], -1);
-            }
-            return table;
-        }
-
-        void ensureCapacity(int depth) {
-            if (depth <= killers.length) {
-                return;
-            }
-            int[][] expanded = allocateKillers(depth);
-            for (int i = 0; i < killers.length; i++) {
-                System.arraycopy(killers[i], 0, expanded[i], 0, killers[i].length);
-            }
-            killers = expanded;
-            killerDirty = Arrays.copyOf(killerDirty, depth);
-            killerDirtyList = Arrays.copyOf(killerDirtyList, depth);
-        }
-
-        void beginIteration(Heuristics base, int requiredDepth) {
-            resetUpdates();
-            ensureCapacity(requiredDepth);
-            base.ensureCapacity(requiredDepth);
-            int limit = Math.min(requiredDepth, base.killers.length);
-            for (int d = 0; d < limit; d++) {
-                System.arraycopy(base.killers[d], 0, killers[d], 0, NUM_KILLER_MOVES);
-            }
-            for (int f = 0; f < BOARD_SQUARES; f++) {
-                System.arraycopy(base.history[f], 0, history[f], 0, BOARD_SQUARES);
-                System.arraycopy(base.continuation[f], 0, continuation[f], 0, BOARD_SQUARES);
-                System.arraycopy(base.counter[f], 0, counter[f], 0, BOARD_SQUARES);
-            }
-        }
-
-        boolean isPreparedFor(long taskId, int depth) {
-            return preparedTaskId == taskId && preparedDepth == depth;
-        }
-
-        void markPrepared(long taskId, int depth) {
-            this.preparedTaskId = taskId;
-            this.preparedDepth = depth;
-        }
-
-        void resetUpdates() {
-            for (int i = 0; i < killerDirtyCount; i++) {
-                killerDirty[killerDirtyList[i]] = false;
-            }
-            killerDirtyCount = 0;
-
-            for (int i = 0; i < historyDirtyCount; i++) {
-                int idx = historyDirtyList[i];
-                historyDirty[idx] = false;
-                historyDelta[idx] = 0;
-            }
-            historyDirtyCount = 0;
-
-            for (int i = 0; i < continuationDirtyCount; i++) {
-                int idx = continuationDirtyList[i];
-                continuationDirty[idx] = false;
-                continuationDelta[idx] = 0;
-            }
-            continuationDirtyCount = 0;
-
-            for (int i = 0; i < counterDirtyCount; i++) {
-                int idx = counterDirtyList[i];
-                counterDirty[idx] = false;
-                counterUpdates[idx] = -1;
-            }
-            counterDirtyCount = 0;
-            preparedTaskId = Long.MIN_VALUE;
-            preparedDepth = -1;
-        }
-
-        boolean hasUpdates() {
-            return killerDirtyCount > 0 || historyDirtyCount > 0 || continuationDirtyCount > 0 || counterDirtyCount > 0;
-        }
-
-        void recordKiller(int depth, int move) {
-            if (move == -1) {
-                return;
-            }
-            int depthIndex = Math.max(0, Math.min(depth, killers.length - 1));
-            int[] row = killers[depthIndex];
-            for (int j : row) {
-                if (j == move) {
-                    return;
-                }
-            }
-            for (int i = row.length - 1; i > 0; i--) {
-                row[i] = row[i - 1];
-            }
-            row[0] = move;
-            if (!killerDirty[depthIndex]) {
-                killerDirty[depthIndex] = true;
-                killerDirtyList[killerDirtyCount++] = depthIndex;
-            }
-        }
-
-        void addHistory(int move, int depth) {
-            if (move == -1 || MoveHelper.isCapture(move)) {
-                return;
-            }
-            int from = move & 0x3F;
-            int to = (move >>> 6) & 0x3F;
-            int delta = depth * depth;
-            history[from][to] += delta;
-            int idx = (from << 6) | to;
-            if (!historyDirty[idx]) {
-                historyDirty[idx] = true;
-                historyDirtyList[historyDirtyCount++] = idx;
-            }
-            historyDelta[idx] += delta;
-        }
-
-        void addContinuation(int prevMove, int move, int depth) {
-            if (move == -1 || prevMove < 0) {
-                return;
-            }
-            if (MoveHelper.isCapture(move) || MoveHelper.isPawnPromotionMove(move)) {
-                return;
-            }
-            int prevTo = (prevMove >>> 6) & 0x3F;
-            int to = (move >>> 6) & 0x3F;
-            int delta = depth * depth;
-            continuation[prevTo][to] += delta;
-            int idx = (prevTo << 6) | to;
-            if (!continuationDirty[idx]) {
-                continuationDirty[idx] = true;
-                continuationDirtyList[continuationDirtyCount++] = idx;
-            }
-            continuationDelta[idx] += delta;
-        }
-
-        void recordCounterMove(int prevMove, int move) {
-            if (prevMove < 0) {
-                return;
-            }
-            int pf = prevMove & 0x3F;
-            int pt = (prevMove >>> 6) & 0x3F;
-            counter[pf][pt] = move;
-            int idx = (pf << 6) | pt;
-            if (!counterDirty[idx]) {
-                counterDirty[idx] = true;
-                counterDirtyList[counterDirtyCount++] = idx;
-            }
-            counterUpdates[idx] = move;
-        }
-
-        void mergeInto(Heuristics target) {
-            for (int i = 0; i < killerDirtyCount; i++) {
-                int depth = killerDirtyList[i];
-                target.ensureCapacity(depth + 1);
-                int[] row = killers[depth];
-                for (int move : row) {
-                    if (move != -1) {
-                        target.insertKiller(depth, move);
-                    }
-                }
-            }
-            for (int i = 0; i < historyDirtyCount; i++) {
-                int idx = historyDirtyList[i];
-                int from = idx >>> 6;
-                int to = idx & 0x3F;
-                target.history[from][to] += historyDelta[idx];
-            }
-            for (int i = 0; i < continuationDirtyCount; i++) {
-                int idx = continuationDirtyList[i];
-                int from = idx >>> 6;
-                int to = idx & 0x3F;
-                target.continuation[from][to] += continuationDelta[idx];
-            }
-            for (int i = 0; i < counterDirtyCount; i++) {
-                int idx = counterDirtyList[i];
-                int from = idx >>> 6;
-                int to = idx & 0x3F;
-                target.counter[from][to] = counterUpdates[idx];
-            }
-        }
-
-        void insertKiller(int depth, int move) {
-            if (move == -1) {
-                return;
-            }
-            int depthIndex = Math.max(0, Math.min(depth, killers.length - 1));
-            int[] row = killers[depthIndex];
-            for (int j : row) {
-                if (j == move) {
-                    return;
-                }
-            }
-            for (int i = row.length - 1; i > 0; i--) {
-                row[i] = row[i - 1];
-            }
-            row[0] = move;
-        }
-
-        void decayHistory() {
-            for (int f = 0; f < BOARD_SQUARES; f++) {
-                for (int t = 0; t < BOARD_SQUARES; t++) {
-                    history[f][t] >>= 1;
-                    continuation[f][t] >>= 1;
-                }
-            }
-        }
-
-        void clearHistory() {
-            for (int f = 0; f < BOARD_SQUARES; f++) {
-                Arrays.fill(history[f], 0);
-                Arrays.fill(continuation[f], 0);
-            }
-            resetUpdates();
-        }
-
-        void clearCounter() {
-            for (int f = 0; f < BOARD_SQUARES; f++) {
-                Arrays.fill(counter[f], -1);
-            }
-            for (int i = 0; i < counterDirtyCount; i++) {
-                int idx = counterDirtyList[i];
-                counterDirty[idx] = false;
-                counterUpdates[idx] = -1;
-            }
-            counterDirtyCount = 0;
-        }
-
-        int[][] snapshotKillers() {
-            int[][] snapshot = new int[killers.length][];
-            for (int i = 0; i < killers.length; i++) {
-                snapshot[i] = Arrays.copyOf(killers[i], killers[i].length);
-            }
-            return snapshot;
-        }
-    }
 }
