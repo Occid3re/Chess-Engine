@@ -2,8 +2,8 @@ package julius.game.chessengine.uci;
 
 import julius.game.chessengine.ai.AI;
 import julius.game.chessengine.ai.MoveAndScore;
-import julius.game.chessengine.ai.SearchDiagnostics;
 import julius.game.chessengine.board.MoveHelper;
+import julius.game.chessengine.engine.search.engine.SearchResult;
 import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
@@ -484,6 +484,7 @@ public class UciHandler {
         }
     }
 
+
     private void publishSearchInfo() {
         if (!Boolean.TRUE.equals(running.get())) {
             return;
@@ -495,75 +496,18 @@ public class UciHandler {
         }
         lastInfoNanos.set(now);
 
-        List<MoveAndScore> line = new ArrayList<>(ai.getCalculatedLine());
-        long nodes = ai.getNodesVisited();
-        long elapsedMillis = ai.getSearchElapsedMillis();
-        long nps = 0L;
-        if (elapsedMillis > 0L) {
-            double perSecond = (nodes * 1000.0) / elapsedMillis;
-            if (perSecond > 0.0) {
-                nps = (long) perSecond;
-            }
+        SearchResult result = ai.getLastResult();
+        if (result == null) {
+            result = SearchResult.EMPTY;
         }
-        StringBuilder builder = new StringBuilder("info");
-        if (!line.isEmpty()) {
-            builder.append(" depth ").append(line.size());
-            builder.append(' ').append(formatScore(line.getFirst().getScore()));
-        }
-        builder.append(" nodes ").append(nodes);
-        builder.append(" time ").append(elapsedMillis);
-        builder.append(" nps ").append(nps);
-        if (!line.isEmpty()) {
-            String pv = buildPv(line);
-            if (!pv.isEmpty()) {
-                builder.append(" pv ").append(pv);
-            }
-        }
-        output.accept(builder.toString());
-
-        SearchDiagnostics diagnostics = ai.getLastDiagnostics();
-        if (diagnostics != null) {
-            int generated = diagnostics.rootMovesGenerated();
-            int explored = diagnostics.rootMovesExplored();
-            if (generated > 0 || explored > 0) {
-                int difference = generated - explored;
-                output.accept("info string rootmoves generated " + generated
-                        + " explored " + explored
-                        + " diff " + difference);
-            }
-        }
-
-        GameState gameState = ai.getMainEngine().getGameState();
-        if (gameState != null && gameState.getState() != null) {
-            output.accept("info string gamestate " + gameState.getState());
-        }
-    }
-
-    private String formatScore(double score) {
-        double abs = Math.abs(score);
-        if (abs >= Score.CHECKMATE - 1000) {
-            int mate = (int) Math.max(1, Math.round((Score.CHECKMATE - abs) / 100.0));
-            if (score < 0) {
-                mate = -mate;
-            }
-            return "score mate " + mate;
-        }
-        int cp = (int) Math.round(score * 100.0);
-        return "score cp " + cp;
-    }
-
-    private String buildPv(List<MoveAndScore> line) {
-        StringBuilder pv = new StringBuilder();
-        for (MoveAndScore moveAndScore : line) {
-            if (moveAndScore == null) {
+        for (String line : result.getInfoLines()) {
+            if (line == null || line.isEmpty()) {
                 continue;
             }
-            if (!pv.isEmpty()) {
-                pv.append(' ');
-            }
-            pv.append(toUci(moveAndScore.getMove()));
+            output.accept(line);
         }
-        return pv.toString();
     }
+
 }
+
 
