@@ -7,6 +7,9 @@ import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
+import julius.game.chessengine.helper.BishopHelper;
+import julius.game.chessengine.helper.KnightHelper;
+import julius.game.chessengine.helper.RookHelper;
 import julius.game.chessengine.utils.Score;
 import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
@@ -148,6 +151,9 @@ public class AI {
             ThreadLocal.withInitial(() -> new SortBuffers(MAX_MOVE_LIST_SIZE));
     private final ThreadLocal<Map<Integer, Integer>> seeCacheThreadLocal =
             ThreadLocal.withInitial(() -> new HashMap<>(64));
+
+    private static final BishopHelper BISHOP_HELPER = BishopHelper.getInstance();
+    private static final RookHelper ROOK_HELPER = RookHelper.getInstance();
 
     private static final int HISTORY_BUCKETS = 5;
 
@@ -2197,13 +2203,20 @@ public class AI {
         final int[][] historyTable = heuristics.history;
         final int[][] counterMove = heuristics.counter;
 
+        final BitBoard bitBoard = simulatorEngine.getBitBoard();
+        final boolean moverIsWhite = bitBoard.isWhitesTurn();
+        final long allPieces = bitBoard.getAllPieces();
+        final long enemyKingBitboard = moverIsWhite ? bitBoard.getBlackKing() : bitBoard.getWhiteKing();
+
         final int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
 
         // Category encoding (higher is earlier):
-        // 7: TT move, 6: promotions, 5: good captures, 4: equal captures,
-        // 3: killer[0], 2: killer[1], 1: quiets (history), 0: bad captures
-        final int CAT_TT = 7, CAT_PROMO = 6, CAT_CAP_GOOD = 5, CAT_CAP_EQUAL = 4,
-                CAT_KILLER0 = 3, CAT_KILLER1 = 2, CAT_QUIET = 1, CAT_CAP_BAD = 0;
+        // 9: TT move, 8: promotions, 7: good captures, 6: equal captures,
+        // 5: quiet checks, 4: killer[0], 3: killer[1], 2: counter-moves,
+        // 1: quiets (history), 0: bad captures
+        final int CAT_TT = 9, CAT_PROMO = 8, CAT_CAP_GOOD = 7, CAT_CAP_EQUAL = 6,
+                CAT_QUIET_CHECK = 5, CAT_KILLER0 = 4, CAT_KILLER1 = 3,
+                CAT_COUNTER = 2, CAT_QUIET = 1, CAT_CAP_BAD = 0;
 
         // Lightweight bonuses (local so no class changes):
         final int PROMOTION_ORDER_BONUS = 900;   // strong push for promotions
@@ -2223,6 +2236,7 @@ public class AI {
         final int prevTo = (prevMove >= 0) ? ((prevMove >>> 6) & 0x3F) : -1;
         final int cm = (prevFrom >= 0) ? counterMove[prevFrom][prevTo] : -1;
         final int COUNTER_MOVE_BONUS = 400;
+        final int CHECK_ORDER_BONUS = 350;
         final int CONTINUATION_HISTORY_DIVISOR = 8;
 
         for (int i = 0; i < size; i++) {
@@ -2295,16 +2309,31 @@ public class AI {
                 category = CAT_KILLER1;
                 score = KILLER_MOVE_SCORE + KILLER1_BONUS;
             } else {
-                // Quiet with history
+                // Quiet move ordering
                 final int from = moveInt & 0x3F;
                 final int to = (moveInt >>> 6) & 0x3F;
-                category = CAT_QUIET;
                 score = historyTable[from][to]; // butterfly history
                 if (prevTo >= 0) {
                     int continuationScore = heuristics.continuation[prevTo][to];
                     score += continuationScore / CONTINUATION_HISTORY_DIVISOR;
                 }
-                if (moveInt == cm) score += COUNTER_MOVE_BONUS;
+
+                boolean isCounter = moveInt == cm;
+                if (isCounter) {
+                    score += COUNTER_MOVE_BONUS;
+                }
+
+                boolean quietChecks = enemyKingBitboard != 0L
+                        && quietMoveChecksEnemyKing(moveInt, moverIsWhite, enemyKingBitboard, allPieces);
+
+                if (quietChecks) {
+                    category = CAT_QUIET_CHECK;
+                    score += CHECK_ORDER_BONUS;
+                } else if (isCounter) {
+                    category = CAT_COUNTER;
+                } else {
+                    category = CAT_QUIET;
+                }
             }
 
             // Persist (kept for compatibility with your buffers)
@@ -2354,6 +2383,45 @@ public class AI {
         }
 
         return moves;
+    }
+
+    private boolean quietMoveChecksEnemyKing(int moveInt, boolean moverIsWhite,
+                                             long enemyKingBitboard, long allPieces) {
+        if (enemyKingBitboard == 0L) {
+            return false;
+        }
+
+        int from = moveInt & 0x3F;
+        int to = (moveInt >>> 6) & 0x3F;
+        long toMask = 1L << to;
+        long fromMask = 1L << from;
+        long occupancyAfter = (allPieces & ~fromMask) | toMask;
+        int pieceBits = MoveHelper.derivePieceTypeBits(moveInt);
+
+        return switch (pieceBits) {
+            case 1 -> { // pawn
+                long attacks = moverIsWhite
+                        ? (((toMask & ~FileMasks[0]) << 7) | ((toMask & ~FileMasks[7]) << 9))
+                        : (((toMask & ~FileMasks[7]) >>> 7) | ((toMask & ~FileMasks[0]) >>> 9));
+                yield (attacks & enemyKingBitboard) != 0;
+            }
+            case 2 -> (KnightHelper.knightMoveTable[to] & enemyKingBitboard) != 0;
+            case 3 -> {
+                long attacks = BISHOP_HELPER.calculateBishopMoves(to, occupancyAfter);
+                yield (attacks & enemyKingBitboard) != 0;
+            }
+            case 4 -> {
+                long attacks = ROOK_HELPER.calculateRookMoves(to, occupancyAfter);
+                yield (attacks & enemyKingBitboard) != 0;
+            }
+            case 5 -> {
+                long bishopAttacks = BISHOP_HELPER.calculateBishopMoves(to, occupancyAfter);
+                long rookAttacks = ROOK_HELPER.calculateRookMoves(to, occupancyAfter);
+                yield ((bishopAttacks | rookAttacks) & enemyKingBitboard) != 0;
+            }
+            case 6 -> (KING_ATTACKS[to] & enemyKingBitboard) != 0;
+            default -> false;
+        };
     }
 
 
