@@ -9,10 +9,10 @@ final class Heuristics {
     private static final int HISTORY_SIZE = BOARD_SQUARES * BOARD_SQUARES;
     private static final int NUM_KILLER_MOVES = 2;
 
-    private int[][] killers;
-    private final int[][] history;
-    private final int[][] continuation;
-    private final int[][] counter;
+    int[][] killers;
+    final int[][] history;
+    final int[][] continuation;
+    final int[][] counter;
 
     private boolean[] killerDirty;
     private int[] killerDirtyList;
