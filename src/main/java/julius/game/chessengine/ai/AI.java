@@ -4,6 +4,9 @@ import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.Move;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.MoveList;
+import julius.game.chessengine.helper.BishopHelper;
+import julius.game.chessengine.helper.PawnMoveTables;
+import julius.game.chessengine.helper.RookHelper;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
@@ -21,6 +24,7 @@ import java.util.concurrent.*;
 
 import static julius.game.chessengine.helper.BitHelper.FileMasks;
 import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
+import static julius.game.chessengine.helper.KnightHelper.knightMoveTable;
 import static julius.game.chessengine.utils.Score.*;
 
 @Log4j2
@@ -102,6 +106,9 @@ public class AI {
     private final ThreadLocal<int[]> seeCacheVals = ThreadLocal.withInitial(() -> new int[SEE_CACHE_MASK + 1]);
     private final ThreadLocal<int[]> seeCacheGenerations = ThreadLocal.withInitial(() -> new int[SEE_CACHE_MASK + 1]);
     private final ThreadLocal<int[]> seeCacheGenerationCounters = ThreadLocal.withInitial(() -> new int[]{0});
+
+    private static final BishopHelper BISHOP_HELPER = BishopHelper.getInstance();
+    private static final RookHelper ROOK_HELPER = RookHelper.getInstance();
 
 
     /**
@@ -2200,15 +2207,17 @@ public class AI {
         final int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
 
         // Category encoding (higher is earlier):
-        // 7: TT move, 6: promotions, 5: good captures, 4: equal captures,
-        // 3: killer[0], 2: killer[1], 1: quiets (history), 0: bad captures
-        final int CAT_TT = 7, CAT_PROMO = 6, CAT_CAP_GOOD = 5, CAT_CAP_EQUAL = 4,
-                CAT_KILLER0 = 3, CAT_KILLER1 = 2, CAT_QUIET = 1, CAT_CAP_BAD = 0;
+        // 8: TT move, 7: promotions, 6: good captures, 5: checking quiets,
+        // 4: equal captures, 3: killer[0], 2: killer[1], 1: quiets (history), 0: bad captures
+        final int CAT_TT = 8, CAT_PROMO = 7, CAT_CAP_GOOD = 6, CAT_CHECK_QUIET = 5,
+                CAT_CAP_EQUAL = 4, CAT_KILLER0 = 3, CAT_KILLER1 = 2, CAT_QUIET = 1, CAT_CAP_BAD = 0;
 
         // Lightweight bonuses (local so no class changes):
         final int PROMOTION_ORDER_BONUS = 900;   // strong push for promotions
         final int KILLER0_BONUS = 50;            // distinguish first vs second killer
         final int KILLER1_BONUS = 30;
+        final int CHECK_CAPTURE_BONUS = 256;
+        final int CHECK_QUIET_BONUS = 600;
 
         // Hash move (TT) handling — keep your "pin to front" approach
         TranspositionTableEntry ttEntry = transpositionTable.get(boardHash);
@@ -2225,6 +2234,8 @@ public class AI {
         final int COUNTER_MOVE_BONUS = 400;
         final int CONTINUATION_HISTORY_DIVISOR = 8;
 
+        final BitBoard boardSnapshot = simulatorEngine.getBitBoard();
+
         for (int i = 0; i < size; i++) {
             final int moveInt = moves.getMove(i);
 
@@ -2236,6 +2247,9 @@ public class AI {
             // Compute base features
             final boolean isCapture = MoveHelper.isCapture(moveInt);
             final boolean isPromotion = MoveHelper.isPawnPromotionMove(moveInt);
+            final int from = moveInt & 0x3F;
+            final int to = (moveInt >>> 6) & 0x3F;
+            final boolean givesCheck = moveGivesCheck(boardSnapshot, moveInt);
 
             int seeValue = 0;
             boolean hasSee = false;
@@ -2288,16 +2302,27 @@ public class AI {
                 if (score < 0) {
                     score = 0;
                 }
+                if (givesCheck) {
+                    score += CHECK_CAPTURE_BONUS;
+                }
+            } else if (givesCheck) {
+                category = CAT_CHECK_QUIET;
+                score = historyTable[from][to] + CHECK_QUIET_BONUS;
+                if (prevTo >= 0) {
+                    int continuationScore = heuristics.continuation[prevTo][to];
+                    score += continuationScore / CONTINUATION_HISTORY_DIVISOR;
+                }
+                if (moveInt == cm) {
+                    score += COUNTER_MOVE_BONUS / 2;
+                }
             } else if (moveInt == k0) {
                 category = CAT_KILLER0;
-                score = KILLER_MOVE_SCORE + KILLER0_BONUS;
+                score = historyTable[from][to] + KILLER0_BONUS;
             } else if (moveInt == k1) {
                 category = CAT_KILLER1;
-                score = KILLER_MOVE_SCORE + KILLER1_BONUS;
+                score = historyTable[from][to] + KILLER1_BONUS;
             } else {
                 // Quiet with history
-                final int from = moveInt & 0x3F;
-                final int to = (moveInt >>> 6) & 0x3F;
                 category = CAT_QUIET;
                 score = historyTable[from][to]; // butterfly history
                 if (prevTo >= 0) {
@@ -2354,6 +2379,93 @@ public class AI {
         }
 
         return moves;
+    }
+
+    private boolean moveGivesCheck(BitBoard board, int move) {
+        long enemyKing = MoveHelper.isWhitesMove(move) ? board.getBlackKing() : board.getWhiteKing();
+        if (enemyKing == 0L) {
+            return false;
+        }
+        int kingSquare = Long.numberOfTrailingZeros(enemyKing);
+        int from = MoveHelper.deriveFromIndex(move);
+        int to = MoveHelper.deriveToIndex(move);
+        int pieceBits = MoveHelper.derivePieceTypeBits(move);
+        int promotionBits = MoveHelper.derivePromotionPieceTypeBits(move);
+        if (promotionBits != 0) {
+            pieceBits = promotionBits;
+        }
+
+        boolean whiteMove = MoveHelper.isWhitesMove(move);
+        long occupancy = board.getAllPieces();
+        long fromMask = 1L << from;
+        long toMask = 1L << to;
+        occupancy &= ~fromMask;
+        occupancy &= ~toMask;
+        occupancy |= toMask;
+
+        if (MoveHelper.isEnPassantMove(move)) {
+            int capturedPawnSquare = whiteMove ? (to - 8) : (to + 8);
+            if (capturedPawnSquare >= 0 && capturedPawnSquare < 64) {
+                occupancy &= ~(1L << capturedPawnSquare);
+            }
+        }
+
+        int rookTo = -1;
+        if (MoveHelper.isCastlingMove(move)) {
+            boolean kingSide = to > from;
+            int rookFrom;
+            if (whiteMove) {
+                if (kingSide) {
+                    rookFrom = 7;
+                    rookTo = 5;
+                } else {
+                    rookFrom = 0;
+                    rookTo = 3;
+                }
+            } else {
+                if (kingSide) {
+                    rookFrom = 63;
+                    rookTo = 61;
+                } else {
+                    rookFrom = 56;
+                    rookTo = 59;
+                }
+            }
+            occupancy &= ~(1L << rookFrom);
+            occupancy |= 1L << rookTo;
+        }
+
+        if (pieceAttacksSquare(pieceBits, to, occupancy, whiteMove, kingSquare)) {
+            return true;
+        }
+
+        if (rookTo != -1) {
+            long rookAttacks = ROOK_HELPER.calculateRookMoves(rookTo, occupancy);
+            long kingMask = 1L << kingSquare;
+            if ((rookAttacks & kingMask) != 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private boolean pieceAttacksSquare(int pieceBits, int square, long occupancy,
+                                       boolean whiteMove, int targetSquare) {
+        long targetMask = 1L << targetSquare;
+        return switch (pieceBits) {
+            case 1 -> (PawnMoveTables.PAWN_ATTACKS[whiteMove ? 0 : 1][square] & targetMask) != 0;
+            case 2 -> (knightMoveTable[square] & targetMask) != 0;
+            case 3 -> (BISHOP_HELPER.calculateBishopMoves(square, occupancy) & targetMask) != 0;
+            case 4 -> (ROOK_HELPER.calculateRookMoves(square, occupancy) & targetMask) != 0;
+            case 5 -> {
+                long attacks = BISHOP_HELPER.calculateBishopMoves(square, occupancy)
+                        | ROOK_HELPER.calculateRookMoves(square, occupancy);
+                yield (attacks & targetMask) != 0;
+            }
+            case 6 -> (KING_ATTACKS[square] & targetMask) != 0;
+            default -> false;
+        };
     }
 
 
