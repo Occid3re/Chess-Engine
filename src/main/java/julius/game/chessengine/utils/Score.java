@@ -189,6 +189,7 @@ public class Score {
 
     public static int getPieceValue(int pieceTypeBits) {
         return switch (pieceTypeBits) {
+            case 0 -> 0; // No piece on the square / undefined piece type.
             case 1 -> MaterialModule.PAWN_VALUE / 100;
             case 2 -> MaterialModule.KNIGHT_VALUE / 100;
             case 3 -> MaterialModule.BISHOP_VALUE / 100;
