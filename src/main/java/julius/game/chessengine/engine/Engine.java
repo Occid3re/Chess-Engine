@@ -245,7 +245,9 @@ public class Engine {
     public Engine createSimulation() {
         synchronized (boardLock) {
             // Safe copy
-            return new Engine(this);
+            Engine simulation = new Engine(this);
+            simulation.setOnPositionChanged(null);
+            return simulation;
         }
     }
 

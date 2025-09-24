@@ -86,7 +86,9 @@ final class SearchInstrumentation {
 
     void recordRootMovesGenerated(int count) {
         if (!enabled) return;
-        rootMovesGenerated.set(Math.max(0, count));
+        int sanitized = Math.max(0, count);
+        rootMovesGenerated.set(sanitized);
+        rootMovesExplored.set(0);
     }
 
     void recordRootMoveExplored() {

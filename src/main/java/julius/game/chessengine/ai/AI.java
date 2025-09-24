@@ -504,7 +504,11 @@ public class AI {
             }
 
             lastIterScore = ms.score;
-            task.publishBest(ms, currentDepth);
+            boolean published = task.publishBest(ms, currentDepth);
+            if (published) {
+                List<MoveAndScore> pv = buildPrincipalVariation(simulatorEngine, ms.move, ms.score);
+                updatePrincipalVariation(pv);
+            }
             instr.recordIterationComplete(currentDepth);
             if (heuristics.hasUpdates()) {
                 mergeThreadHeuristics(heuristics);
@@ -1311,13 +1315,12 @@ public class AI {
         return abortRequested(deadline);
     }
 
-    private void fillCalculatedLine(Engine simulation) {
+    private List<MoveAndScore> buildPrincipalVariation(Engine simulation, int preferredMove, Double preferredScore) {
         long rootHash = simulation.getBoardStateHash();
         List<MoveAndScore> pv = new ArrayList<>();
         Set<Long> seen = new HashSet<>();
         int movesPerformed = 0;
 
-        // Helper to check legality
         java.util.function.IntPredicate isLegalNow = (mv) -> {
             MoveList legal = simulation.getAllLegalMoves();
             for (int i = 0; i < legal.size(); i++) {
@@ -1326,26 +1329,36 @@ public class AI {
             return false;
         };
 
-        // 1) Try to get a ROOT move (prefer EXACT, else accept LOWER/UPPER), else use currentBestMove, else first legal.
-        TranspositionTableEntry rootEntry = transpositionTable.get(rootHash);
         int seedMove = -1;
-        Double seedScore = null; // nullable to indicate "unknown"
+        Double seedScore = null;
 
-        if (rootEntry != null && rootEntry.bestMove != -1 && MoveHelper.isWhitesMove(rootEntry.bestMove) == simulation.whitesTurn() && isLegalNow.test(rootEntry.bestMove)) {
-            // Prefer EXACT; otherwise still accept to seed PV so it's not empty
-            seedMove = rootEntry.bestMove;
-            if (rootEntry.nodeType == NodeType.EXACT) {
-                seedScore = rootEntry.score;
+        if (preferredMove != -1
+                && MoveHelper.isWhitesMove(preferredMove) == simulation.whitesTurn()
+                && isLegalNow.test(preferredMove)) {
+            seedMove = preferredMove;
+            seedScore = preferredScore;
+        }
+
+        if (seedMove == -1 && transpositionTable != null) {
+            TranspositionTableEntry rootEntry = transpositionTable.get(rootHash);
+            if (rootEntry != null
+                    && rootEntry.bestMove != -1
+                    && MoveHelper.isWhitesMove(rootEntry.bestMove) == simulation.whitesTurn()
+                    && isLegalNow.test(rootEntry.bestMove)) {
+                seedMove = rootEntry.bestMove;
+                if (rootEntry.nodeType == NodeType.EXACT) {
+                    seedScore = rootEntry.score;
+                }
             }
         }
 
-        if (seedMove == -1 && currentBestMove != -1 && MoveHelper.isWhitesMove(currentBestMove) == simulation.whitesTurn() && isLegalNow.test(currentBestMove)) {
+        if (seedMove == -1 && currentBestMove != -1
+                && MoveHelper.isWhitesMove(currentBestMove) == simulation.whitesTurn()
+                && isLegalNow.test(currentBestMove)) {
             seedMove = currentBestMove;
-            // score unknown; will remain null
         }
 
         if (seedMove == -1) {
-            // Fallback: first legal move, if any
             MoveList legal = simulation.getAllLegalMoves();
             if (legal.size() > 0) {
                 int mv = legal.getMove(0);
@@ -1355,41 +1368,40 @@ public class AI {
             }
         }
 
-        // If still nothing, no PV can be constructed
         if (seedMove == -1) {
-            clearPrincipalVariation();
-            return;
+            return pv;
         }
 
-        // Play the seed move
         pv.add(new MoveAndScore(seedMove, seedScore != null ? seedScore : 0.0));
         simulation.performMove(seedMove);
         movesPerformed++;
         long curHash = simulation.getBoardStateHash();
 
-        // 2) Follow ONLY EXACT entries beyond root, with full validation
-        while (true) {
-            if (!seen.add(curHash)) break;
+        if (transpositionTable != null) {
+            while (true) {
+                if (!seen.add(curHash)) break;
 
-            TranspositionTableEntry e = transpositionTable.get(curHash);
-            if (e == null || e.bestMove == -1 || e.nodeType != NodeType.EXACT) break;
+                TranspositionTableEntry e = transpositionTable.get(curHash);
+                if (e == null || e.bestMove == -1 || e.nodeType != NodeType.EXACT) break;
 
-            int mv = e.bestMove;
+                int mv = e.bestMove;
+                if (MoveHelper.isWhitesMove(mv) != simulation.whitesTurn()) break;
+                if (!isLegalNow.test(mv)) break;
 
-            // side-to-move must match and move must be legal now
-            if (MoveHelper.isWhitesMove(mv) != simulation.whitesTurn()) break;
-            if (!isLegalNow.test(mv)) break;
-
-            pv.add(new MoveAndScore(mv, e.score));
-            simulation.performMove(mv);
-            movesPerformed++;
-            curHash = simulation.getBoardStateHash();
+                pv.add(new MoveAndScore(mv, e.score));
+                simulation.performMove(mv);
+                movesPerformed++;
+                curHash = simulation.getBoardStateHash();
+            }
         }
 
-        // Undo simulation
         for (int i = 0; i < movesPerformed; i++) simulation.undoLastMove();
 
-        updatePrincipalVariation(pv);
+        return pv;
+    }
+
+    private void fillCalculatedLine(Engine simulation) {
+        updatePrincipalVariation(buildPrincipalVariation(simulation, -1, null));
     }
 
 
