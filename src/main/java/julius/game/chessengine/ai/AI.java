@@ -906,8 +906,60 @@ public class AI {
         previousBestMove = -1;
         previousBestMoveHash = -1;
         searchResultReady = false;
+
+        MoveAndScore staticFallback = selectStaticFallbackMove(simulatorEngine, task.isWhiteToMove());
+        if (staticFallback != null) {
+            currentBestMove = staticFallback.getMove();
+            bestMoveForHash = task.getBoardHash();
+            previousBestMove = staticFallback.getMove();
+            previousBestMoveHash = task.getBoardHash();
+            searchResultReady = true;
+            updatePrincipalVariation(List.of(staticFallback));
+            lastDiagnostics = task.getInstrumentation().snapshot(0, staticFallback.getScore());
+            return;
+        }
+
         clearPrincipalVariation();
         lastDiagnostics = task.getInstrumentation().snapshot(best.depth(), best.score());
+    }
+
+    private MoveAndScore selectStaticFallbackMove(Engine simulatorEngine, boolean isWhitesTurn) {
+        MoveList legalMoves = simulatorEngine.getAllLegalMoves();
+        if (legalMoves == null || legalMoves.size() == 0) {
+            return null;
+        }
+
+        double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
+        int bestMove = -1;
+
+        for (int i = 0; i < legalMoves.size(); i++) {
+            int move = legalMoves.getMove(i);
+            simulatorEngine.performMove(move);
+
+            double score;
+            if (simulatorEngine.getGameState().isInStateCheckMate()) {
+                score = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
+            } else if (simulatorEngine.getGameState().isInStateDraw()) {
+                score = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, 0);
+                if (isWhitesTurn) {
+                    score = -score;
+                }
+            } else {
+                score = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, 0);
+                if (isWhitesTurn) {
+                    score = -score;
+                }
+            }
+
+            simulatorEngine.undoLastMove();
+
+            if (isBetterScore(isWhitesTurn, score, bestScore)) {
+                bestScore = score;
+                bestMove = move;
+            }
+        }
+
+        return bestMove == -1 ? null : new MoveAndScore(bestMove, bestScore);
     }
 
     private boolean isMoveStillLegal(Engine simulatorEngine, int move) {
