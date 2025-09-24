@@ -923,44 +923,66 @@ public class AI {
         lastDiagnostics = task.getInstrumentation().snapshot(best.depth(), best.score());
     }
 
-    private MoveAndScore selectStaticFallbackMove(Engine simulatorEngine, boolean isWhitesTurn) {
-        MoveList legalMoves = simulatorEngine.getAllLegalMoves();
-        if (legalMoves == null || legalMoves.size() == 0) {
-            return null;
-        }
+    private MoveAndScore selectStaticFallbackMove(Engine e, boolean isWhitesTurn) {
+        MoveList legal = e.getAllLegalMoves();
+        if (legal == null || legal.size() == 0) return null;
 
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
         int bestMove = -1;
 
-        for (int i = 0; i < legalMoves.size(); i++) {
-            int move = legalMoves.getMove(i);
-            simulatorEngine.performMove(move);
+        // First pass: try good/tactical moves (SEE >= 0, or gives check), scored by quick qsearch.
+        for (int i = 0; i < legal.size(); i++) {
+            int m = legal.getMove(i);
 
-            double score;
-            if (simulatorEngine.getGameState().isInStateCheckMate()) {
-                score = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
-            } else if (simulatorEngine.getGameState().isInStateDraw()) {
-                score = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, 0);
-                if (isWhitesTurn) {
-                    score = -score;
-                }
-            } else {
-                score = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, 0);
-                if (isWhitesTurn) {
-                    score = -score;
-                }
+            // Prefer safe captures/promotions or checking moves
+            boolean capOrPromo = MoveHelper.isCapture(m) || MoveHelper.isPawnPromotionMove(m);
+            int see = capOrPromo ? e.see(m) : 0;
+
+            boolean goodTactical = capOrPromo && see >= 0;
+            if (!goodTactical) {
+                // quick “gives check” probe
+                e.performMove(m);
+                boolean givesCheck = isSideInCheck(e, !isWhitesTurn);
+                e.undoLastMove();
+                if (!givesCheck) continue;
             }
 
-            simulatorEngine.undoLastMove();
+            // Quiescence eval is usually fast and avoids obvious tactics
+            e.performMove(m);
+            double score = evaluateBoard(e, !isWhitesTurn, System.nanoTime() + 1_000_000L); // ~1ms soft budget
+            if (score != EXIT_FLAG && isWhitesTurn) score = -score;
+            e.undoLastMove();
 
+            if (score == EXIT_FLAG) continue;
             if (isBetterScore(isWhitesTurn, score, bestScore)) {
                 bestScore = score;
-                bestMove = move;
+                bestMove = m;
+            }
+        }
+
+        // If nothing tactical looked good, fall back to static one-ply scan (your original idea).
+        if (bestMove == -1) {
+            for (int i = 0; i < legal.size(); i++) {
+                int m = legal.getMove(i);
+                e.performMove(m);
+                double score;
+                if (e.getGameState().isInStateCheckMate()) {
+                    score = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
+                } else {
+                    score = evaluateStaticPosition(e.getGameState(), !isWhitesTurn, 0);
+                    if (isWhitesTurn) score = -score;
+                }
+                e.undoLastMove();
+                if (isBetterScore(isWhitesTurn, score, bestScore)) {
+                    bestScore = score;
+                    bestMove = m;
+                }
             }
         }
 
         return bestMove == -1 ? null : new MoveAndScore(bestMove, bestScore);
     }
+
 
     private boolean isMoveStillLegal(Engine simulatorEngine, int move) {
         MoveList legalMoves = simulatorEngine.getAllLegalMoves();
