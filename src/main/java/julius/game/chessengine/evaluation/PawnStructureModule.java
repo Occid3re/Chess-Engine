@@ -121,26 +121,32 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         PhaseScore blackPassed = PhaseScore.constant(
                 calculatePassedPawnBonus(blackPawns, whitePawns, allPieces, blackKing, false));
 
+        int whiteAdvanceBase = calculatePawnAdvanceBase(whitePawns, allPieces, blackAttacks, true);
         PhaseScore whiteAdvance = PhaseScore.of(
-                calculatePawnAdvanceBonus(whitePawns, allPieces, blackAttacks, true, 0),
-                calculatePawnAdvanceBonus(whitePawns, allPieces, blackAttacks, true, 256));
+                scaleByPhase(whiteAdvanceBase, 0),
+                scaleByPhase(whiteAdvanceBase, 256));
+        int blackAdvanceBase = calculatePawnAdvanceBase(blackPawns, allPieces, whiteAttacks, false);
         PhaseScore blackAdvance = PhaseScore.of(
-                calculatePawnAdvanceBonus(blackPawns, allPieces, whiteAttacks, false, 0),
-                calculatePawnAdvanceBonus(blackPawns, allPieces, whiteAttacks, false, 256));
+                scaleByPhase(blackAdvanceBase, 0),
+                scaleByPhase(blackAdvanceBase, 256));
 
+        int whiteBlockedBase = calculateBlockedPawnPenaltyBase(whitePawns, allPieces, true);
         PhaseScore whiteBlocked = PhaseScore.of(
-                calculateBlockedPawnPenalty(whitePawns, allPieces, true, 0),
-                calculateBlockedPawnPenalty(whitePawns, allPieces, true, 256));
+                scaleByPhase(whiteBlockedBase, 0),
+                scaleByPhase(whiteBlockedBase, 256));
+        int blackBlockedBase = calculateBlockedPawnPenaltyBase(blackPawns, allPieces, false);
         PhaseScore blackBlocked = PhaseScore.of(
-                calculateBlockedPawnPenalty(blackPawns, allPieces, false, 0),
-                calculateBlockedPawnPenalty(blackPawns, allPieces, false, 256));
+                scaleByPhase(blackBlockedBase, 0),
+                scaleByPhase(blackBlockedBase, 256));
 
+        int whiteBackwardBase = calculateBackwardPawnPenaltyBase(whitePawns, blackPawns, allPieces, true);
         PhaseScore whiteBackward = PhaseScore.of(
-                calculateBackwardPawnPenalty(whitePawns, blackPawns, allPieces, true, 0),
-                calculateBackwardPawnPenalty(whitePawns, blackPawns, allPieces, true, 256));
+                scaleByPhase(whiteBackwardBase, 0),
+                scaleByPhase(whiteBackwardBase, 256));
+        int blackBackwardBase = calculateBackwardPawnPenaltyBase(blackPawns, whitePawns, allPieces, false);
         PhaseScore blackBackward = PhaseScore.of(
-                calculateBackwardPawnPenalty(blackPawns, whitePawns, allPieces, false, 0),
-                calculateBackwardPawnPenalty(blackPawns, whitePawns, allPieces, false, 256));
+                scaleByPhase(blackBackwardBase, 0),
+                scaleByPhase(blackBackwardBase, 256));
 
         PhaseScore[] whiteComponents = new PhaseScore[]{
                 whiteCenter,
@@ -371,7 +377,7 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         return STRUCTURE_CACHE.computeIfAbsent(key, _ -> new CachedStructure(whitePawns, blackPawns));
     }
 
-    private static int calculatePawnAdvanceBonus(long pawns, long allPieces, long enemyAttacks, boolean isWhite, int phase) {
+    private static int calculatePawnAdvanceBase(long pawns, long allPieces, long enemyAttacks, boolean isWhite) {
         int bonus = 0;
         long advancedRanks = isWhite
                 ? (RankMasks[3] | RankMasks[4] | RankMasks[5] | RankMasks[6])
@@ -387,10 +393,10 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
             }
             advancedPawns &= advancedPawns - 1;
         }
-        return scaleByPhase(bonus, phase);
+        return bonus;
     }
 
-    private static int calculateBlockedPawnPenalty(long pawns, long allPieces, boolean isWhite, int phase) {
+    private static int calculateBlockedPawnPenaltyBase(long pawns, long allPieces, boolean isWhite) {
         int penalty = 0;
         long remaining = pawns;
         while (remaining != 0) {
@@ -401,10 +407,10 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
             }
             remaining &= remaining - 1;
         }
-        return scaleByPhase(penalty, phase);
+        return penalty;
     }
 
-    private static int calculateBackwardPawnPenalty(long pawns, long enemyPawns, long allPieces, boolean isWhite, int phase) {
+    private static int calculateBackwardPawnPenaltyBase(long pawns, long enemyPawns, long allPieces, boolean isWhite) {
         int penalty = 0;
         long remaining = pawns;
         while (remaining != 0) {
@@ -419,7 +425,7 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
             }
             remaining &= remaining - 1;
         }
-        return scaleByPhase(penalty, phase);
+        return penalty;
     }
 
     private static int sumMidgame(PhaseScore... scores) {

@@ -166,58 +166,102 @@ public final class KingSafetyModule implements EvaluationModule {
         if (state.kingSquare < 0) {
             return true;
         }
-        EvaluationContext previous = moveContext.previousContext();
         EvaluationContext current = moveContext.currentContext();
-        if (previous == null) {
+        EvaluationContext previous = moveContext.previousContext();
+        if (current == null || current.board() == null || previous == null || previous.board() == null) {
             return true;
         }
-        long prevEnemyAttacks = side == WHITE ? previous.blackAttackMap() : previous.whiteAttackMap();
-        long currEnemyAttacks = side == WHITE ? current.blackAttackMap() : current.whiteAttackMap();
-        long prevFriendlyAttacks = side == WHITE ? previous.whiteAttackMap() : previous.blackAttackMap();
-        long currFriendlyAttacks = side == WHITE ? current.whiteAttackMap() : current.blackAttackMap();
-        long zoneDiff = (prevEnemyAttacks ^ currEnemyAttacks) & state.kingZone;
-        if (zoneDiff != 0) {
+        boolean isWhite = side == WHITE;
+        EvaluationContext.BoardView board = current.board();
+        long kingBits = isWhite ? board.whiteKing() : board.blackKing();
+        if (kingBits == 0) {
             return true;
         }
+        int kingSquare = Long.numberOfTrailingZeros(kingBits);
+        if (kingSquare != state.kingSquare) {
+            return true;
+        }
+
         int move = moveContext.move();
         int from = MoveHelper.deriveFromIndex(move);
         int to = MoveHelper.deriveToIndex(move);
-        long moveMask = (1L << from) | (1L << to);
-        if ((moveMask & (state.kingZone | state.shieldMask | state.fileMask)) != 0) {
+        long affectedMask = (1L << from) | (1L << to);
+        int capturedPiece = MoveHelper.deriveCapturedPieceTypeBits(move);
+        if (capturedPiece != 0) {
+            int captureSquare = MoveHelper.isEnPassantMove(move)
+                    ? (MoveHelper.isWhitesMove(move) ? to - 8 : to + 8)
+                    : to;
+            affectedMask |= 1L << captureSquare;
+        }
+        long criticalMask = state.kingZone | state.shieldMask | state.fileMask | state.backrankMask;
+        if ((affectedMask & criticalMask) != 0) {
             return true;
         }
+
         int movedPiece = MoveHelper.derivePieceTypeBits(move);
         if (movedPiece == PAWN) {
             if (((1L << from) & state.fileMask) != 0 || ((1L << to) & state.fileMask) != 0) {
                 return true;
             }
         }
-        int capturedPiece = MoveHelper.deriveCapturedPieceTypeBits(move);
         if (capturedPiece == PAWN) {
-            long captureMask = 1L << to;
-            if (MoveHelper.isEnPassantMove(move)) {
-                captureMask = side == WHITE ? (1L << (to - 8)) : (1L << (to + 8));
-            }
-            if ((captureMask & (state.shieldMask | state.fileMask)) != 0) {
+            int captureSquare = MoveHelper.isEnPassantMove(move)
+                    ? (MoveHelper.isWhitesMove(move) ? to - 8 : to + 8)
+                    : to;
+            if (((1L << captureSquare) & (state.shieldMask | state.fileMask)) != 0) {
                 return true;
             }
         }
-        EvaluationContext.BoardView previousBoard = previous.board();
-        EvaluationContext.BoardView currentBoard = current.board();
-        long prevQueens = side == WHITE ? previousBoard.whiteQueens() : previousBoard.blackQueens();
-        long currQueens = side == WHITE ? currentBoard.whiteQueens() : currentBoard.blackQueens();
-        if (prevQueens != currQueens) {
+
+        long friendlyPawns = isWhite ? board.whitePawns() : board.blackPawns();
+        long enemyPawns = isWhite ? board.blackPawns() : board.whitePawns();
+        long shieldPawns = friendlyPawns & state.shieldMask;
+        if (shieldPawns != state.shieldPawns) {
             return true;
         }
-        long queenMask = currQueens;
-        while (queenMask != 0) {
-            long q = queenMask & -queenMask;
-            if (((prevEnemyAttacks ^ currEnemyAttacks) & q) != 0) {
-                return true;
-            }
-            queenMask ^= q;
+        boolean friendlyPawnOnFile = (friendlyPawns & state.fileMask) != 0;
+        if (friendlyPawnOnFile != state.friendlyPawnOnFile) {
+            return true;
         }
-        return state.backrankMask != 0 && ((prevFriendlyAttacks ^ currFriendlyAttacks) & state.backrankMask) != 0;
+        boolean enemyPawnOnFile = (enemyPawns & state.fileMask) != 0;
+        if (enemyPawnOnFile != state.enemyPawnOnFile) {
+            return true;
+        }
+
+        long friendlyAttacks = isWhite ? current.whiteAttackMap() : current.blackAttackMap();
+        long enemyAttacks = isWhite ? current.blackAttackMap() : current.whiteAttackMap();
+        long enemyZone = enemyAttacks & state.kingZone;
+        if (enemyZone != state.enemyZoneAttacks) {
+            return true;
+        }
+        long friendlyZone = friendlyAttacks & state.kingZone;
+        if (friendlyZone != state.friendlyZoneAttacks) {
+            return true;
+        }
+
+        long backrankControl = state.backrankMask == 0 ? 0L : (friendlyAttacks & state.backrankMask);
+        if (backrankControl != state.friendlyBackrankControl) {
+            return true;
+        }
+
+        long enemyQueens = isWhite ? board.blackQueens() : board.whiteQueens();
+        if (enemyQueens != state.enemyQueens) {
+            return true;
+        }
+        long queenAttackMask = enemyQueens & enemyAttacks;
+        if (queenAttackMask != state.enemyQueenAttackMask) {
+            return true;
+        }
+
+        state.shieldPawns = shieldPawns;
+        state.friendlyPawnOnFile = friendlyPawnOnFile;
+        state.enemyPawnOnFile = enemyPawnOnFile;
+        state.enemyZoneAttacks = enemyZone;
+        state.friendlyZoneAttacks = friendlyZone;
+        state.friendlyBackrankControl = backrankControl;
+        state.enemyQueens = enemyQueens;
+        state.enemyQueenAttackMask = queenAttackMask;
+        return false;
     }
 
     private void rebuildSideState(SideState state, EvaluationContext.BoardView board, boolean isWhite,
@@ -241,15 +285,18 @@ public final class KingSafetyModule implements EvaluationModule {
         long friendlyPawns = isWhite ? board.whitePawns() : board.blackPawns();
         long enemyPawns = isWhite ? board.blackPawns() : board.whitePawns();
 
-        int shieldCount = Long.bitCount(friendlyPawns & state.shieldMask);
+        state.shieldPawns = friendlyPawns & state.shieldMask;
+        int shieldCount = Long.bitCount(state.shieldPawns);
         state.missingShield = Math.max(0, 3 - shieldCount);
 
-        boolean friendlyPawnOnFile = (friendlyPawns & state.fileMask) != 0;
-        if (!friendlyPawnOnFile) {
-            state.filePenalty = (enemyPawns & state.fileMask) != 0 ? HALF_OPEN_FILE_PENALTY : OPEN_FILE_PENALTY;
+        state.friendlyPawnOnFile = (friendlyPawns & state.fileMask) != 0;
+        state.enemyPawnOnFile = (enemyPawns & state.fileMask) != 0;
+        if (!state.friendlyPawnOnFile) {
+            state.filePenalty = state.enemyPawnOnFile ? HALF_OPEN_FILE_PENALTY : OPEN_FILE_PENALTY;
         }
 
-        state.defenderCount = Long.bitCount(friendlyAttacks & state.kingZone);
+        state.friendlyZoneAttacks = friendlyAttacks & state.kingZone;
+        state.defenderCount = Long.bitCount(state.friendlyZoneAttacks);
 
         long allPieces = board.allPieces();
         accumulatePawnAttacks(state, enemyPawns, !isWhite);
@@ -266,11 +313,13 @@ public final class KingSafetyModule implements EvaluationModule {
             zone &= zone - 1;
         }
         state.totalAttackWeight = total;
+        state.enemyZoneAttacks = enemyAttacks & state.kingZone;
 
         int shieldPenalty = state.missingShield * MISSING_PAWN_SHIELD_PENALTY;
         int attackPenalty = -state.totalAttackWeight;
         int defenderBonus = state.defenderCount * DEFENDER_BONUS;
         computeBackrankWeaknessPenalty(state, board, isWhite);
+        state.friendlyBackrankControl = state.backrankMask == 0 ? 0L : (friendlyAttacks & state.backrankMask);
         int baseMidgame = shieldPenalty + state.filePenalty + attackPenalty + defenderBonus;
         state.midgameKingSafety = baseMidgame + state.backrankWeaknessMidgame;
         state.endgameKingSafety = baseMidgame / 2 + state.backrankWeaknessEndgame;
@@ -289,6 +338,8 @@ public final class KingSafetyModule implements EvaluationModule {
         }
         state.midgameQueenPenalty = queenMid;
         state.endgameQueenPenalty = queenEnd;
+        state.enemyQueens = queens;
+        state.enemyQueenAttackMask = queens & enemyAttacks;
     }
 
     private void computeBackrankWeaknessPenalty(SideState state, EvaluationContext.BoardView board, boolean isWhite) {
@@ -582,6 +633,14 @@ public final class KingSafetyModule implements EvaluationModule {
         private int backrankWeaknessEndgame;
         private final int[] zoneAttackWeights = new int[64];
         private long backrankMask;
+        private long shieldPawns;
+        private boolean friendlyPawnOnFile;
+        private boolean enemyPawnOnFile;
+        private long enemyZoneAttacks;
+        private long friendlyZoneAttacks;
+        private long enemyQueens;
+        private long enemyQueenAttackMask;
+        private long friendlyBackrankControl;
 
         private void reset() {
             kingSquare = -1;
@@ -599,6 +658,14 @@ public final class KingSafetyModule implements EvaluationModule {
             backrankWeaknessMidgame = 0;
             backrankWeaknessEndgame = 0;
             backrankMask = 0L;
+            shieldPawns = 0L;
+            friendlyPawnOnFile = false;
+            enemyPawnOnFile = false;
+            enemyZoneAttacks = 0L;
+            friendlyZoneAttacks = 0L;
+            enemyQueens = 0L;
+            enemyQueenAttackMask = 0L;
+            friendlyBackrankControl = 0L;
             Arrays.fill(zoneAttackWeights, 0);
         }
     }

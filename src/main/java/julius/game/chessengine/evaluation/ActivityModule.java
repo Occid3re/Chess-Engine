@@ -43,6 +43,8 @@ public final class ActivityModule implements EvaluationModule {
     private static final int SOUTH_WEST = 7;
 
     private static final long[][] DIRECTION_RAYS = new long[8][64];
+    private static final int[] RANK_DELTAS = {1, -1, 0, 0, 1, 1, -1, -1};
+    private static final int[] FILE_DELTAS = {0, 0, 1, -1, 1, -1, 1, -1};
 
     private static final BishopHelper BISHOP_HELPER = BishopHelper.getInstance();
     private static final RookHelper ROOK_HELPER = RookHelper.getInstance();
@@ -343,37 +345,11 @@ public final class ActivityModule implements EvaluationModule {
                 continue;
             }
 
-            long rayMask = sliderRayMask(activity.pieceType, square);
-            if ((rayMask & affectedMask) != 0) {
+            long relevantMask = activity.attackMask | activity.blockerMask;
+            if ((relevantMask & affectedMask) != 0) {
                 recalculatePiece(square);
             }
         }
-    }
-
-    private long sliderRayMask(int pieceType, int square) {
-        if (pieceType <= 0) {
-            return 0L;
-        }
-        PieceType type = MoveHelper.intToPieceType(pieceType);
-        return switch (type) {
-            case BISHOP -> DIRECTION_RAYS[NORTH_EAST][square]
-                    | DIRECTION_RAYS[NORTH_WEST][square]
-                    | DIRECTION_RAYS[SOUTH_EAST][square]
-                    | DIRECTION_RAYS[SOUTH_WEST][square];
-            case ROOK -> DIRECTION_RAYS[NORTH][square]
-                    | DIRECTION_RAYS[SOUTH][square]
-                    | DIRECTION_RAYS[EAST][square]
-                    | DIRECTION_RAYS[WEST][square];
-            case QUEEN -> DIRECTION_RAYS[NORTH][square]
-                    | DIRECTION_RAYS[SOUTH][square]
-                    | DIRECTION_RAYS[EAST][square]
-                    | DIRECTION_RAYS[WEST][square]
-                    | DIRECTION_RAYS[NORTH_EAST][square]
-                    | DIRECTION_RAYS[NORTH_WEST][square]
-                    | DIRECTION_RAYS[SOUTH_EAST][square]
-                    | DIRECTION_RAYS[SOUTH_WEST][square];
-            default -> 0L;
-        };
     }
 
     private boolean isSlider(int pieceType) {
@@ -453,6 +429,8 @@ public final class ActivityModule implements EvaluationModule {
         activity.pieceType = pieceType;
         activity.midgameScore = 0;
         activity.endgameScore = 0;
+        activity.attackMask = 0L;
+        activity.blockerMask = 0L;
 
         long mask = 1L << square;
         if (color == WHITE) {
@@ -475,6 +453,8 @@ public final class ActivityModule implements EvaluationModule {
         int color = activity.color;
         midgameTotals[color] -= activity.midgameScore;
         endgameTotals[color] -= activity.endgameScore;
+        activity.attackMask = 0L;
+        activity.blockerMask = 0L;
 
         long mask = 1L << square;
         if (color == WHITE) {
@@ -503,6 +483,8 @@ public final class ActivityModule implements EvaluationModule {
             endgameTotals[activity.color] -= activity.endgameScore;
             activity.midgameScore = 0;
             activity.endgameScore = 0;
+            activity.attackMask = 0L;
+            activity.blockerMask = 0L;
             return;
         }
 
@@ -510,6 +492,8 @@ public final class ActivityModule implements EvaluationModule {
         if (pieceType <= 0) {
             activity.midgameScore = 0;
             activity.endgameScore = 0;
+            activity.attackMask = 0L;
+            activity.blockerMask = 0L;
             return;
         }
 
@@ -524,9 +508,14 @@ public final class ActivityModule implements EvaluationModule {
             default -> {
                 activity.midgameScore = 0;
                 activity.endgameScore = 0;
+                activity.attackMask = 0L;
+                activity.blockerMask = 0L;
                 return;
             }
         }
+
+        activity.attackMask = attacks;
+        activity.blockerMask = computeBlockerMask(square, type, allPieces);
 
         long friendlyPieces = activity.color == WHITE ? whitePieces : blackPieces;
         long legalTargets = attacks & ~friendlyPieces;
@@ -544,6 +533,42 @@ public final class ActivityModule implements EvaluationModule {
 
         activity.midgameScore = midgameContribution;
         activity.endgameScore = endgameContribution;
+    }
+
+    private long computeBlockerMask(int square, PieceType type, long occupancy) {
+        if (type != PieceType.BISHOP && type != PieceType.ROOK && type != PieceType.QUEEN) {
+            return 0L;
+        }
+        long blockers = 0L;
+        if (type == PieceType.BISHOP || type == PieceType.QUEEN) {
+            blockers |= firstBlocker(square, NORTH_EAST, occupancy);
+            blockers |= firstBlocker(square, NORTH_WEST, occupancy);
+            blockers |= firstBlocker(square, SOUTH_EAST, occupancy);
+            blockers |= firstBlocker(square, SOUTH_WEST, occupancy);
+        }
+        if (type == PieceType.ROOK || type == PieceType.QUEEN) {
+            blockers |= firstBlocker(square, NORTH, occupancy);
+            blockers |= firstBlocker(square, SOUTH, occupancy);
+            blockers |= firstBlocker(square, EAST, occupancy);
+            blockers |= firstBlocker(square, WEST, occupancy);
+        }
+        return blockers;
+    }
+
+    private long firstBlocker(int square, int directionIndex, long occupancy) {
+        int rankDelta = RANK_DELTAS[directionIndex];
+        int fileDelta = FILE_DELTAS[directionIndex];
+        int r = square / 8 + rankDelta;
+        int f = square % 8 + fileDelta;
+        while (r >= 0 && r < 8 && f >= 0 && f < 8) {
+            int target = r * 8 + f;
+            if (((occupancy >>> target) & 1L) != 0) {
+                return 1L << target;
+            }
+            r += rankDelta;
+            f += fileDelta;
+        }
+        return 0L;
     }
 
     private void updateScoreCache() {
@@ -566,12 +591,16 @@ public final class ActivityModule implements EvaluationModule {
         private int pieceType;
         private int midgameScore;
         private int endgameScore;
+        private long attackMask;
+        private long blockerMask;
 
         private void reset() {
             color = -1;
             pieceType = 0;
             midgameScore = 0;
             endgameScore = 0;
+            attackMask = 0L;
+            blockerMask = 0L;
         }
 
     }
