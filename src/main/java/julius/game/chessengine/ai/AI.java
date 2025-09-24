@@ -2216,8 +2216,17 @@ public class AI {
         final int PROMOTION_ORDER_BONUS = 900;   // strong push for promotions
         final int KILLER0_BONUS = 50;            // distinguish first vs second killer
         final int KILLER1_BONUS = 30;
-        final int CHECK_CAPTURE_BONUS = 256;
+        final int CHECK_CAPTURE_BONUS = 180;
         final int CHECK_QUIET_BONUS = 600;
+        final int[] CHECK_PRIORITY_BY_PIECE = {
+                0,   // unused (0)
+                120, // pawn checks
+                200, // knight checks
+                260, // bishop checks
+                340, // rook checks
+                420, // queen checks
+                160  // king checks
+        };
 
         // Hash move (TT) handling — keep your "pin to front" approach
         TranspositionTableEntry ttEntry = transpositionTable.get(boardHash);
@@ -2271,6 +2280,20 @@ public class AI {
             }
             int category;
             int score;
+            int checkPriorityBonus = 0;
+            if (givesCheck) {
+                int checkingPieceBits = MoveHelper.derivePromotionPieceTypeBits(moveInt);
+                if (checkingPieceBits == 0) {
+                    checkingPieceBits = MoveHelper.derivePieceTypeBits(moveInt);
+                    if (checkingPieceBits == 6 && MoveHelper.isCastlingMove(moveInt)) {
+                        checkingPieceBits = 4; // castling checks are delivered by the rook
+                    }
+                }
+                if (checkingPieceBits < 0 || checkingPieceBits >= CHECK_PRIORITY_BY_PIECE.length) {
+                    checkingPieceBits = 0;
+                }
+                checkPriorityBonus = CHECK_PRIORITY_BY_PIECE[checkingPieceBits];
+            }
 
             if (moveInt == ttMove) {
                 // TT move gets the top category; score acts as tie-breaker only
@@ -2286,6 +2309,10 @@ public class AI {
                     seeBonus = cappedSee * 16; // modest SEE influence within promotion bucket
                 }
                 score = base + PROMOTION_ORDER_BONUS + seeBonus;
+                if (givesCheck) {
+                    int baseCheckBonus = isCapture ? CHECK_CAPTURE_BONUS : CHECK_QUIET_BONUS;
+                    score += baseCheckBonus + checkPriorityBonus;
+                }
             } else if (isCapture) {
                 // MVV-LVA for captures; classify as good/equal/bad without SEE
                 final int mvvLva = calculateMvvLvaScore(moveInt); // victim - attacker (can be negative)
@@ -2303,11 +2330,11 @@ public class AI {
                     score = 0;
                 }
                 if (givesCheck) {
-                    score += CHECK_CAPTURE_BONUS;
+                    score += CHECK_CAPTURE_BONUS + checkPriorityBonus;
                 }
             } else if (givesCheck) {
                 category = CAT_CHECK_QUIET;
-                score = historyTable[from][to] + CHECK_QUIET_BONUS;
+                score = historyTable[from][to] + CHECK_QUIET_BONUS + checkPriorityBonus;
                 if (prevTo >= 0) {
                     int continuationScore = heuristics.continuation[prevTo][to];
                     score += continuationScore / CONTINUATION_HISTORY_DIVISOR;
