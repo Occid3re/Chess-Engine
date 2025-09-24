@@ -85,11 +85,9 @@ public final class SearchConfig {
 
     private boolean updateThreads(int requestedThreads) {
         int clamped = Math.max(1, requestedThreads);
-        if (clamped == this.threads) {
-            return false;
-        }
+        boolean changed = clamped != this.threads;
         this.threads = clamped;
-        return true;
+        return changed || requestedThreads < 1;
     }
 
     public synchronized boolean setHashSizeMb(int requestedMb) {
