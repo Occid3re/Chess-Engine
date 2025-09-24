@@ -26,8 +26,8 @@ final class SearchInstrumentation {
     private final AtomicInteger deepestPlyVisited = new AtomicInteger();
     private final AtomicInteger deepestQuiescencePly = new AtomicInteger();
 
-    private final AtomicInteger rootMovesGenerated = new AtomicInteger();
-    private final AtomicInteger rootMovesExplored = new AtomicInteger();
+    private final LongAdder rootMovesGenerated = new LongAdder();
+    private final LongAdder rootMovesExplored = new LongAdder();
     private final LongAdder rootBetaCutoffs = new LongAdder();
     private final LongAdder iterationsCompleted = new LongAdder();
 
@@ -86,12 +86,13 @@ final class SearchInstrumentation {
 
     void recordRootMovesGenerated(int count) {
         if (!enabled) return;
-        rootMovesGenerated.set(Math.max(0, count));
+        if (count <= 0) return;
+        rootMovesGenerated.add(count);
     }
 
     void recordRootMoveExplored() {
         if (!enabled) return;
-        rootMovesExplored.incrementAndGet();
+        rootMovesExplored.increment();
     }
 
     void recordRootBetaCutoff() {
@@ -103,6 +104,31 @@ final class SearchInstrumentation {
         if (!enabled) return;
         if (ply < 0) return;
         deepestPlyVisited.accumulateAndGet(ply, Math::max);
+    }
+
+    int currentBestDepth() {
+        if (!enabled) return 0;
+        return bestDepth.get();
+    }
+
+    int currentDeepestPlyVisited() {
+        if (!enabled) return 0;
+        return deepestPlyVisited.get();
+    }
+
+    int currentDeepestQuiescencePly() {
+        if (!enabled) return 0;
+        return deepestQuiescencePly.get();
+    }
+
+    long currentRootMovesGenerated() {
+        if (!enabled) return 0L;
+        return rootMovesGenerated.sum();
+    }
+
+    long currentRootMovesExplored() {
+        if (!enabled) return 0L;
+        return rootMovesExplored.sum();
     }
 
     void recordQuiescenceNode(int depth) {
@@ -204,8 +230,8 @@ final class SearchInstrumentation {
                 bestScore,
                 deepestPlyVisited.get(),
                 deepestQuiescencePly.get(),
-                rootMovesGenerated.get(),
-                rootMovesExplored.get(),
+                clampToInt(rootMovesGenerated.sum()),
+                clampToInt(rootMovesExplored.sum()),
                 rootBetaCutoffs.sum(),
                 iterationsCompleted.sum(),
                 aspirationFailHighs.sum(),
@@ -231,5 +257,11 @@ final class SearchInstrumentation {
                 quiescenceSeePrunes.sum(),
                 quiescenceCaptures.sum()
         );
+    }
+
+    private static int clampToInt(long value) {
+        if (value > Integer.MAX_VALUE) return Integer.MAX_VALUE;
+        if (value < Integer.MIN_VALUE) return Integer.MIN_VALUE;
+        return (int) value;
     }
 }

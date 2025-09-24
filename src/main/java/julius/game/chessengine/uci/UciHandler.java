@@ -499,9 +499,27 @@ public class UciHandler {
             }
         }
         StringBuilder builder = new StringBuilder("info");
+        int depth = ai.getCurrentSearchDepth();
+        if (depth > 0) {
+            builder.append(" depth ").append(depth);
+        }
+        int selDepth = ai.getCurrentSelectiveDepth();
+        if (selDepth > 0) {
+            builder.append(" seldepth ").append(selDepth);
+        }
+
+        double score = Double.NaN;
         if (!line.isEmpty()) {
-            builder.append(" depth ").append(line.size());
-            builder.append(' ').append(formatScore(line.getFirst().getScore()));
+            MoveAndScore head = line.getFirst();
+            if (head != null) {
+                score = head.getScore();
+            }
+        }
+        if (Double.isNaN(score)) {
+            score = ai.getCurrentSearchScore();
+        }
+        if (!Double.isNaN(score)) {
+            builder.append(' ').append(formatScore(score));
         }
         builder.append(" nodes ").append(nodes);
         builder.append(" time ").append(elapsedMillis);
@@ -519,7 +537,7 @@ public class UciHandler {
             int generated = diagnostics.rootMovesGenerated();
             int explored = diagnostics.rootMovesExplored();
             if (generated > 0 || explored > 0) {
-                int difference = generated - explored;
+                int difference = Math.max(0, generated - explored);
                 output.accept("info string rootmoves generated " + generated
                         + " explored " + explored
                         + " diff " + difference);
