@@ -7,6 +7,9 @@ import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
+import julius.game.chessengine.helper.BishopHelper;
+import julius.game.chessengine.helper.PawnMoveTables;
+import julius.game.chessengine.helper.RookHelper;
 import julius.game.chessengine.utils.Score;
 import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
@@ -21,6 +24,7 @@ import java.util.concurrent.*;
 
 import static julius.game.chessengine.helper.BitHelper.FileMasks;
 import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
+import static julius.game.chessengine.helper.KnightHelper.knightMoveTable;
 import static julius.game.chessengine.utils.Score.*;
 
 @Log4j2
@@ -150,6 +154,9 @@ public class AI {
             ThreadLocal.withInitial(() -> new HashMap<>(64));
 
     private static final int HISTORY_BUCKETS = 5;
+
+    private static final BishopHelper BISHOP_HELPER = BishopHelper.getInstance();
+    private static final RookHelper ROOK_HELPER = RookHelper.getInstance();
 
     static {
         if (HISTORY_BUCKETS < 1) {
@@ -2182,6 +2189,7 @@ public class AI {
         final int size = moves.size();
         final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
+        final BitBoard board = simulatorEngine.getBitBoard();
 
         if (size == 0) {
             return moves;
@@ -2200,15 +2208,18 @@ public class AI {
         final int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
 
         // Category encoding (higher is earlier):
-        // 7: TT move, 6: promotions, 5: good captures, 4: equal captures,
-        // 3: killer[0], 2: killer[1], 1: quiets (history), 0: bad captures
-        final int CAT_TT = 7, CAT_PROMO = 6, CAT_CAP_GOOD = 5, CAT_CAP_EQUAL = 4,
-                CAT_KILLER0 = 3, CAT_KILLER1 = 2, CAT_QUIET = 1, CAT_CAP_BAD = 0;
+        // 9: TT move, 8: promotions, 7: winning captures, 6: equal captures,
+        // 5: killer[0], 4: quiet checks, 3: counter moves, 2: killer[1],
+        // 1: other quiets (history), 0: losing captures
+        final int CAT_TT = 9, CAT_PROMO = 8, CAT_CAP_GOOD = 7, CAT_CAP_EQUAL = 6,
+                CAT_KILLER0 = 5, CAT_QUIET_CHECK = 4, CAT_COUNTER = 3, CAT_KILLER1 = 2,
+                CAT_QUIET = 1, CAT_CAP_BAD = 0;
 
         // Lightweight bonuses (local so no class changes):
         final int PROMOTION_ORDER_BONUS = 900;   // strong push for promotions
         final int KILLER0_BONUS = 50;            // distinguish first vs second killer
         final int KILLER1_BONUS = 30;
+        final int QUIET_CHECK_BONUS = 600;
 
         // Hash move (TT) handling — keep your "pin to front" approach
         TranspositionTableEntry ttEntry = transpositionTable.get(boardHash);
@@ -2236,6 +2247,7 @@ public class AI {
             // Compute base features
             final boolean isCapture = MoveHelper.isCapture(moveInt);
             final boolean isPromotion = MoveHelper.isPawnPromotionMove(moveInt);
+            final boolean isQuiet = !isCapture && !isPromotion;
 
             int seeValue = 0;
             boolean hasSee = false;
@@ -2304,7 +2316,14 @@ public class AI {
                     int continuationScore = heuristics.continuation[prevTo][to];
                     score += continuationScore / CONTINUATION_HISTORY_DIVISOR;
                 }
-                if (moveInt == cm) score += COUNTER_MOVE_BONUS;
+                if (isQuiet && moveDeliversCheck(moveInt, board)) {
+                    category = CAT_QUIET_CHECK;
+                    score += QUIET_CHECK_BONUS;
+                }
+                if (moveInt == cm) {
+                    category = Math.max(category, CAT_COUNTER);
+                    score += COUNTER_MOVE_BONUS;
+                }
             }
 
             // Persist (kept for compatibility with your buffers)
@@ -2354,6 +2373,64 @@ public class AI {
         }
 
         return moves;
+    }
+
+
+    private boolean moveDeliversCheck(int moveInt, BitBoard board) {
+        boolean moverIsWhite = MoveHelper.isWhitesMove(moveInt);
+        long enemyKing = moverIsWhite ? board.getBlackKing() : board.getWhiteKing();
+        if (enemyKing == 0L) {
+            return false;
+        }
+
+        int kingSquare = Long.numberOfTrailingZeros(enemyKing);
+        int from = MoveHelper.deriveFromIndex(moveInt);
+        int to = MoveHelper.deriveToIndex(moveInt);
+
+        long occupancy = board.getAllPieces();
+        long fromMask = 1L << from;
+        long toMask = 1L << to;
+        occupancy &= ~fromMask;
+
+        if (MoveHelper.isCapture(moveInt)) {
+            if (MoveHelper.isEnPassantMove(moveInt)) {
+                int capturedPawn = moverIsWhite ? to - 8 : to + 8;
+                if (capturedPawn >= 0 && capturedPawn < 64) {
+                    occupancy &= ~(1L << capturedPawn);
+                }
+            } else {
+                occupancy &= ~toMask;
+            }
+        }
+
+        occupancy |= toMask;
+
+        int pieceType = MoveHelper.isPawnPromotionMove(moveInt)
+                ? MoveHelper.derivePromotionPieceTypeBits(moveInt)
+                : MoveHelper.derivePieceTypeBits(moveInt);
+
+        long attacks;
+        switch (pieceType) {
+            case 1 -> {
+                int colorIndex = moverIsWhite ? 0 : 1;
+                attacks = PawnMoveTables.PAWN_ATTACKS[colorIndex][to];
+            }
+            case 2 -> attacks = knightMoveTable[to];
+            case 3 -> attacks = BISHOP_HELPER.calculateBishopMoves(to, occupancy);
+            case 4 -> attacks = ROOK_HELPER.calculateRookMoves(to, occupancy);
+            case 5 -> {
+                long bishopAttacks = BISHOP_HELPER.calculateBishopMoves(to, occupancy);
+                long rookAttacks = ROOK_HELPER.calculateRookMoves(to, occupancy);
+                attacks = bishopAttacks | rookAttacks;
+            }
+            case 6 -> attacks = KING_ATTACKS[to];
+            default -> {
+                return false;
+            }
+        }
+
+        long kingMask = 1L << kingSquare;
+        return (attacks & kingMask) != 0L;
     }
 
 
