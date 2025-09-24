@@ -188,6 +188,79 @@ public class AI {
         return lastCompletedPrincipalVariation;
     }
 
+    public int getCurrentSearchDepth() {
+        SearchTask task = activeSearch.get();
+        if (task != null) {
+            int iterationDepth = task.getIterationDepth();
+            BestMoveDepth best = task.getBest();
+            if (best != null) {
+                iterationDepth = Math.max(iterationDepth, best.depth());
+            }
+            if (iterationDepth > 0) {
+                return iterationDepth;
+            }
+        }
+
+        SearchDiagnostics diagnostics = lastDiagnostics;
+        if (diagnostics != null) {
+            int depth = diagnostics.bestDepth();
+            if (depth > 0) {
+                return depth;
+            }
+        }
+        return 0;
+    }
+
+    public int getCurrentSelectiveDepth() {
+        SearchTask task = activeSearch.get();
+        if (task != null) {
+            SearchInstrumentation instr = task.getInstrumentation();
+            if (instr != null) {
+                int ply = Math.max(instr.currentDeepestPlyVisited(), instr.currentDeepestQuiescencePly());
+                if (ply > 0) {
+                    return ply;
+                }
+            }
+        }
+
+        SearchDiagnostics diagnostics = lastDiagnostics;
+        if (diagnostics != null) {
+            return Math.max(diagnostics.deepestPlyVisited(), diagnostics.deepestQuiescencePly());
+        }
+        return 0;
+    }
+
+    public double getCurrentSearchScore() {
+        SearchTask task = activeSearch.get();
+        if (task != null) {
+            BestMoveDepth best = task.getBest();
+            if (best != null && best.move() != -1) {
+                return best.score();
+            }
+        }
+
+        SearchDiagnostics diagnostics = lastDiagnostics;
+        if (diagnostics != null) {
+            double score = diagnostics.bestScore();
+            if (!Double.isNaN(score)) {
+                return score;
+            }
+        }
+
+        List<MoveAndScore> pv = lastCompletedPrincipalVariation;
+        if (pv != null) {
+            synchronized (pv) {
+                if (!pv.isEmpty()) {
+                    MoveAndScore head = pv.getFirst();
+                    if (head != null) {
+                        return head.getScore();
+                    }
+                }
+            }
+        }
+        return Double.NaN;
+    }
+
     // Game configuration parameters
 
     @Getter
