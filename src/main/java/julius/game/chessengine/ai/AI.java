@@ -1752,18 +1752,13 @@ public class AI {
             boolean seeEvaluated = false;
             boolean seeWinsMaterial = false;
 
-            // SEE pruning for losing captures/quiets (keep checks/promotions)
+            // SEE pruning for losing captures/quiets
             boolean seePruneCandidate = (!inCheckAtNode && isCapture && !isPromotion) || isQuiet;
             if (seePruneCandidate) {
                 seeGain = seeCache.computeIfAbsent(move, simulatorEngine::see);
                 seeEvaluated = true;
                 if (seeGain < 0) {
-                    simulatorEngine.performMove(move);
-                    boolean givesCheckTmp = isSideInCheck(simulatorEngine, false);
-                    simulatorEngine.undoLastMove();
-                    if (!givesCheckTmp) {
-                        continue;
-                    }
+                    continue;
                 }
             }
 
@@ -2551,17 +2546,12 @@ public class AI {
             // Skip non-capture promotions when not in check; too noisy here
             if (!inCheck && isPromotion && !isCapture) continue;
 
-            // SEE prune losing captures/quiets unless they give check
-            if (!inCheck && !isPromotion || isQuiet) {
+            // SEE prune losing captures/quiets
+            if ((!inCheck && !isPromotion) || isQuiet) {
                 int see = simulatorEngine.see(m);
                 if (see < 0) {
-                    simulatorEngine.performMove(m);
-                    boolean givesCheck = isSideInCheck(simulatorEngine, !isWhitesTurn);
-                    simulatorEngine.undoLastMove();
-                    if (!givesCheck) {
-                        instr.recordQuiescenceSeePrune();
-                        continue;
-                    }
+                    instr.recordQuiescenceSeePrune();
+                    continue;
                 }
             }
 
