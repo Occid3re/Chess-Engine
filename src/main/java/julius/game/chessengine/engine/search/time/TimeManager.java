@@ -17,13 +17,13 @@ import java.util.function.LongSupplier;
  */
 public final class TimeManager {
 
-    private static final int MAX_ASPIRATION_SHIFT = 30;
+    private static final int MAX_ASPIRATION_ATTEMPTS = 10;
 
     private final LongSupplier nanoSource;
     private final AtomicBoolean stopRequested = new AtomicBoolean(false);
 
     private volatile SearchLimits limits = SearchLimits.unlimited();
-    private volatile long searchStartTimeNanos = 0L;
+    private volatile long searchStartTimeNanos = -1L;
     private volatile long softDeadlineNanos = Long.MAX_VALUE;
     private volatile long hardDeadlineNanos = Long.MAX_VALUE;
 
@@ -49,7 +49,7 @@ public final class TimeManager {
 
     private void computeDeadlines() {
         long start = searchStartTimeNanos;
-        if (start <= 0L) {
+        if (start < 0L) {
             softDeadlineNanos = Long.MAX_VALUE;
             hardDeadlineNanos = Long.MAX_VALUE;
             return;
@@ -148,8 +148,12 @@ public final class TimeManager {
             return hard;
         }
 
+        if (attemptIndex >= MAX_ASPIRATION_ATTEMPTS) {
+            return hard;
+        }
+
         long slack = hard - soft;
-        int shift = Math.min(attemptIndex, MAX_ASPIRATION_SHIFT);
+        int shift = attemptIndex;
         long remainder = slack >>> shift; // geometric decay: 1/2^attempt
         long delta = slack - remainder;
         return Math.min(hard, saturatingAdd(soft, delta, hard));
@@ -162,7 +166,7 @@ public final class TimeManager {
      */
     public long getSearchElapsedMillis() {
         long start = searchStartTimeNanos;
-        if (start <= 0L) {
+        if (start < 0L) {
             return 0L;
         }
         long now = nanoSource.getAsLong();
@@ -187,7 +191,7 @@ public final class TimeManager {
     public synchronized void reset() {
         stopRequested.set(false);
         limits = SearchLimits.unlimited();
-        searchStartTimeNanos = 0L;
+        searchStartTimeNanos = -1L;
         softDeadlineNanos = Long.MAX_VALUE;
         hardDeadlineNanos = Long.MAX_VALUE;
     }
