@@ -1,5 +1,8 @@
 package julius.game.chessengine.engine.search.config;
 
+import lombok.Getter;
+import lombok.Setter;
+
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -18,21 +21,38 @@ public final class SearchConfig {
     public static final int MIN_HASH_SIZE_MB = 1;
     public static final int MAX_HASH_SIZE_MB = 4096;
 
+    @Getter
     private volatile int maxDepth = 64;
+    @Getter
     private volatile int hashSizeMb = 16;
+    @Getter
     private volatile int threads = 1;
+    @Setter
+    @Getter
     private volatile boolean aspirationEnabled = true;
+    @Setter
+    @Getter
     private volatile boolean nullMovePruningEnabled = Boolean.parseBoolean(
             System.getProperty("chessengine.nullMove", "true"));
+    @Setter
+    @Getter
     private volatile boolean lateMoveReductionsEnabled = true;
+    @Setter
+    @Getter
     private volatile boolean internalIterativeReductionsEnabled = true;
+    @Setter
+    @Getter
     private volatile boolean futilityPruningEnabled = true;
+    @Setter
+    @Getter
     private volatile double contempt = 0.0;
     private volatile boolean ttConcurrency = true;
+    @Getter
     private volatile int ttBucketsPerSet = 1;
 
     private final Map<String, Double> evalParams = new ConcurrentHashMap<>();
 
+    @Getter
     private final Map<String, UciSpinOption> uciSpinOptions;
 
     public SearchConfig() {
@@ -55,10 +75,6 @@ public final class SearchConfig {
         return true;
     }
 
-    public int getMaxDepth() {
-        return maxDepth;
-    }
-
     public int effectiveMaxDepth() {
         return Math.max(1, maxDepth);
     }
@@ -76,10 +92,6 @@ public final class SearchConfig {
         return true;
     }
 
-    public int getThreads() {
-        return threads;
-    }
-
     public synchronized boolean setHashSizeMb(int requestedMb) {
         return updateHashSizeMb(requestedMb);
     }
@@ -93,68 +105,12 @@ public final class SearchConfig {
         return true;
     }
 
-    public int getHashSizeMb() {
-        return hashSizeMb;
-    }
-
-    public boolean isAspirationEnabled() {
-        return aspirationEnabled;
-    }
-
-    public void setAspirationEnabled(boolean aspirationEnabled) {
-        this.aspirationEnabled = aspirationEnabled;
-    }
-
-    public boolean isNullMovePruningEnabled() {
-        return nullMovePruningEnabled;
-    }
-
-    public void setNullMovePruningEnabled(boolean nullMovePruningEnabled) {
-        this.nullMovePruningEnabled = nullMovePruningEnabled;
-    }
-
-    public boolean isLateMoveReductionsEnabled() {
-        return lateMoveReductionsEnabled;
-    }
-
-    public void setLateMoveReductionsEnabled(boolean lateMoveReductionsEnabled) {
-        this.lateMoveReductionsEnabled = lateMoveReductionsEnabled;
-    }
-
-    public boolean isInternalIterativeReductionsEnabled() {
-        return internalIterativeReductionsEnabled;
-    }
-
-    public void setInternalIterativeReductionsEnabled(boolean internalIterativeReductionsEnabled) {
-        this.internalIterativeReductionsEnabled = internalIterativeReductionsEnabled;
-    }
-
-    public boolean isFutilityPruningEnabled() {
-        return futilityPruningEnabled;
-    }
-
-    public void setFutilityPruningEnabled(boolean futilityPruningEnabled) {
-        this.futilityPruningEnabled = futilityPruningEnabled;
-    }
-
-    public double getContempt() {
-        return contempt;
-    }
-
-    public void setContempt(double contempt) {
-        this.contempt = contempt;
-    }
-
     public boolean isTtConcurrencyEnabled() {
         return ttConcurrency;
     }
 
     public void setTtConcurrencyEnabled(boolean ttConcurrency) {
         this.ttConcurrency = ttConcurrency;
-    }
-
-    public int getTtBucketsPerSet() {
-        return ttBucketsPerSet;
     }
 
     public void setTtBucketsPerSet(int ttBucketsPerSet) {
@@ -174,10 +130,6 @@ public final class SearchConfig {
         if (key != null) {
             evalParams.remove(key);
         }
-    }
-
-    public Map<String, UciSpinOption> getUciSpinOptions() {
-        return uciSpinOptions;
     }
 
     public static int computeHashCapacity(long budgetBytes, int entryBytes, int minEntries, int maxEntries) {
@@ -204,7 +156,7 @@ public final class SearchConfig {
         if (rounded < minEntries) {
             rounded = minEntries;
         }
-        while (rounded > maxEntries && rounded > 1) {
+        while (rounded > maxEntries) {
             rounded >>= 1;
         }
         return rounded;
@@ -224,38 +176,21 @@ public final class SearchConfig {
         return highest << 1;
     }
 
-    public static final class UciSpinOption {
-        private final int defaultValue;
-        private final int min;
-        private final int max;
-        private final IntConsumer updater;
-
-        private UciSpinOption(int defaultValue, int min, int max, IntConsumer updater) {
-            this.defaultValue = defaultValue;
-            this.min = min;
-            this.max = max;
-            this.updater = Objects.requireNonNull(updater, "updater");
-        }
-
-        public int defaultValue() {
-            return defaultValue;
-        }
-
-        public int min() {
-            return min;
-        }
-
-        public int max() {
-            return max;
-        }
-
-        public void apply(int value) {
-            if (value < min) {
-                value = min;
-            } else if (value > max) {
-                value = max;
+    public record UciSpinOption(int defaultValue, int min, int max, IntConsumer updater) {
+            public UciSpinOption(int defaultValue, int min, int max, IntConsumer updater) {
+                this.defaultValue = defaultValue;
+                this.min = min;
+                this.max = max;
+                this.updater = Objects.requireNonNull(updater, "updater");
             }
-            updater.accept(value);
+
+            public void apply(int value) {
+                if (value < min) {
+                    value = min;
+                } else if (value > max) {
+                    value = max;
+                }
+                updater.accept(value);
+            }
         }
-    }
 }

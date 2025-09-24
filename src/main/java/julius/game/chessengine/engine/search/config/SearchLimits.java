@@ -1,11 +1,14 @@
 package julius.game.chessengine.engine.search.config;
 
+import lombok.Getter;
+
 import java.util.concurrent.TimeUnit;
 
 /**
  * Per-search limits that control when the search should stop.  The limits are immutable
  * so callers can safely share instances across threads.
  */
+@Getter
 public final class SearchLimits {
 
     private final TimeControl timeControl;
@@ -34,34 +37,6 @@ public final class SearchLimits {
         return new Builder();
     }
 
-    public TimeControl getTimeControl() {
-        return timeControl;
-    }
-
-    public int getFixedDepth() {
-        return fixedDepth;
-    }
-
-    public long getNodesLimit() {
-        return nodesLimit;
-    }
-
-    public long getMoveTimeMillis() {
-        return moveTimeMillis;
-    }
-
-    public boolean isPonder() {
-        return ponder;
-    }
-
-    public long getSoftDeadlineNanos() {
-        return softDeadlineNanos;
-    }
-
-    public long getHardDeadlineNanos() {
-        return hardDeadlineNanos;
-    }
-
     public boolean hasTimeLimit() {
         if (moveTimeMillis > 0) {
             return true;
@@ -86,7 +61,7 @@ public final class SearchLimits {
         if (limit <= 0) {
             return Long.MAX_VALUE;
         }
-        if (limit >= Long.MAX_VALUE) {
+        if (limit == Long.MAX_VALUE) {
             return Long.MAX_VALUE;
         }
         try {
@@ -122,11 +97,7 @@ public final class SearchLimits {
         }
 
         public Builder fixedDepth(int depth) {
-            if (depth > 0) {
-                this.fixedDepth = Math.max(1, depth);
-            } else {
-                this.fixedDepth = 0;
-            }
+            this.fixedDepth = Math.max(depth, 0);
             return this;
         }
 
@@ -175,43 +146,18 @@ public final class SearchLimits {
         }
     }
 
-    public static final class TimeControl {
-        private final long whiteTimeMillis;
-        private final long blackTimeMillis;
-        private final long whiteIncrementMillis;
-        private final long blackIncrementMillis;
-        private final int movesToGo;
+    public record TimeControl(long whiteTimeMillis, long blackTimeMillis, long whiteIncrementMillis,
+                              long blackIncrementMillis, int movesToGo) {
+            public TimeControl(long whiteTimeMillis, long blackTimeMillis, long whiteIncrementMillis, long blackIncrementMillis, int movesToGo) {
+                this.whiteTimeMillis = clampNonNegative(whiteTimeMillis);
+                this.blackTimeMillis = clampNonNegative(blackTimeMillis);
+                this.whiteIncrementMillis = clampNonNegative(whiteIncrementMillis);
+                this.blackIncrementMillis = clampNonNegative(blackIncrementMillis);
+                this.movesToGo = Math.max(0, movesToGo);
+            }
 
-        private TimeControl(long wtime, long btime, long winc, long binc, int movesToGo) {
-            this.whiteTimeMillis = clampNonNegative(wtime);
-            this.blackTimeMillis = clampNonNegative(btime);
-            this.whiteIncrementMillis = clampNonNegative(winc);
-            this.blackIncrementMillis = clampNonNegative(binc);
-            this.movesToGo = Math.max(0, movesToGo);
+            private long clampNonNegative(long value) {
+                return Math.max(0L, value);
+            }
         }
-
-        public long whiteTimeMillis() {
-            return whiteTimeMillis;
-        }
-
-        public long blackTimeMillis() {
-            return blackTimeMillis;
-        }
-
-        public long whiteIncrementMillis() {
-            return whiteIncrementMillis;
-        }
-
-        public long blackIncrementMillis() {
-            return blackIncrementMillis;
-        }
-
-        public int movesToGo() {
-            return movesToGo;
-        }
-
-        private long clampNonNegative(long value) {
-            return Math.max(0L, value);
-        }
-    }
 }
