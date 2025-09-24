@@ -244,11 +244,11 @@ public final class KingSafetyModule implements EvaluationModule {
             return true;
         }
 
-        long enemyQueens = isWhite ? board.blackQueens() : board.whiteQueens();
-        if (enemyQueens != state.enemyQueens) {
+        long friendlyQueens = isWhite ? board.whiteQueens() : board.blackQueens();
+        if (friendlyQueens != state.enemyQueens) {
             return true;
         }
-        long queenAttackMask = enemyQueens & enemyAttacks;
+        long queenAttackMask = friendlyQueens & enemyAttacks;
         if (queenAttackMask != state.enemyQueenAttackMask) {
             return true;
         }
@@ -259,7 +259,7 @@ public final class KingSafetyModule implements EvaluationModule {
         state.enemyZoneAttacks = enemyZone;
         state.friendlyZoneAttacks = friendlyZone;
         state.friendlyBackrankControl = backrankControl;
-        state.enemyQueens = enemyQueens;
+        state.enemyQueens = friendlyQueens;
         state.enemyQueenAttackMask = queenAttackMask;
         return false;
     }
