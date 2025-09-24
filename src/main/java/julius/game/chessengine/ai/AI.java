@@ -1538,6 +1538,9 @@ public class AI {
             double mateBand = CHECKMATE - (plyFromRoot + 2);  // stay away from mate scores
             if (alpha > -mateBand && beta < mateBand) {       // not in mate race
                 double st = evaluateStaticPosition(simulatorEngine.getGameState(), isWhite, plyFromRoot);
+                if (!isWhite) {
+                    st = -st;
+                }
                 double razorMargin = (depth == 1) ? 150.0 : 250.0;
                 if (st + razorMargin <= alpha) {
                     double q = evaluateBoard(simulatorEngine, isWhite, deadline);
