@@ -7,6 +7,8 @@ import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
+import julius.game.chessengine.helper.BishopHelper;
+import julius.game.chessengine.helper.RookHelper;
 import julius.game.chessengine.utils.Score;
 import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
@@ -21,6 +23,8 @@ import java.util.concurrent.*;
 
 import static julius.game.chessengine.helper.BitHelper.FileMasks;
 import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
+import static julius.game.chessengine.helper.KnightHelper.knightMoveTable;
+import static julius.game.chessengine.helper.PawnMoveTables.PAWN_ATTACKS;
 import static julius.game.chessengine.utils.Score.*;
 
 @Log4j2
@@ -102,6 +106,9 @@ public class AI {
     private final ThreadLocal<int[]> seeCacheVals = ThreadLocal.withInitial(() -> new int[SEE_CACHE_MASK + 1]);
     private final ThreadLocal<int[]> seeCacheGenerations = ThreadLocal.withInitial(() -> new int[SEE_CACHE_MASK + 1]);
     private final ThreadLocal<int[]> seeCacheGenerationCounters = ThreadLocal.withInitial(() -> new int[]{0});
+
+    private static final BishopHelper BISHOP_HELPER = BishopHelper.getInstance();
+    private static final RookHelper ROOK_HELPER = RookHelper.getInstance();
 
 
     /**
@@ -2199,16 +2206,20 @@ public class AI {
 
         final int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
 
+        final BitBoard board = simulatorEngine.getBitBoard();
+
         // Category encoding (higher is earlier):
-        // 7: TT move, 6: promotions, 5: good captures, 4: equal captures,
-        // 3: killer[0], 2: killer[1], 1: quiets (history), 0: bad captures
-        final int CAT_TT = 7, CAT_PROMO = 6, CAT_CAP_GOOD = 5, CAT_CAP_EQUAL = 4,
-                CAT_KILLER0 = 3, CAT_KILLER1 = 2, CAT_QUIET = 1, CAT_CAP_BAD = 0;
+        // 8: TT move, 7: promotions, 6: good captures, 5: equal captures,
+        // 4: checking quiets, 3: killer[0], 2: killer[1], 1: quiets (history), 0: bad captures
+        final int CAT_TT = 8, CAT_PROMO = 7, CAT_CAP_GOOD = 6, CAT_CAP_EQUAL = 5,
+                CAT_CHECK = 4, CAT_KILLER0 = 3, CAT_KILLER1 = 2, CAT_QUIET = 1, CAT_CAP_BAD = 0;
 
         // Lightweight bonuses (local so no class changes):
         final int PROMOTION_ORDER_BONUS = 900;   // strong push for promotions
         final int KILLER0_BONUS = 50;            // distinguish first vs second killer
         final int KILLER1_BONUS = 30;
+        final int QUIET_CHECK_BONUS = 600;
+        final int CHECK_BAD_CAPTURE_BONUS = 320;
 
         // Hash move (TT) handling — keep your "pin to front" approach
         TranspositionTableEntry ttEntry = transpositionTable.get(boardHash);
@@ -2307,6 +2318,18 @@ public class AI {
                 if (moveInt == cm) score += COUNTER_MOVE_BONUS;
             }
 
+            if (category == CAT_CAP_BAD || category == CAT_QUIET || category == CAT_KILLER0 || category == CAT_KILLER1) {
+                if (board != null && moveGivesCheck(board, moveInt)) {
+                    if (category == CAT_CAP_BAD) {
+                        category = CAT_CAP_EQUAL;
+                        score += CHECK_BAD_CAPTURE_BONUS;
+                    } else {
+                        category = CAT_CHECK;
+                        score += QUIET_CHECK_BONUS;
+                    }
+                }
+            }
+
             // Persist (kept for compatibility with your buffers)
             moveBuffer[i] = moveInt;
             scoreBuffer[i] = score;
@@ -2354,6 +2377,211 @@ public class AI {
         }
 
         return moves;
+    }
+
+
+    private boolean moveGivesCheck(BitBoard board, int move) {
+        if (board == null) {
+            return false;
+        }
+
+        final boolean whiteMove = MoveHelper.isWhitesMove(move);
+        final long enemyKingBb = whiteMove ? board.getBlackKing() : board.getWhiteKing();
+        if (enemyKingBb == 0L) {
+            return false;
+        }
+
+        final int from = MoveHelper.deriveFromIndex(move);
+        final int to = MoveHelper.deriveToIndex(move);
+        final long fromMask = 1L << from;
+        final long toMask = 1L << to;
+        final boolean isCapture = MoveHelper.isCapture(move);
+        final boolean isEnPassant = MoveHelper.isEnPassantMove(move);
+        final boolean isCastling = MoveHelper.isCastlingMove(move);
+        final int promoBits = MoveHelper.derivePromotionPieceTypeBits(move);
+        final int moverBits = MoveHelper.derivePieceTypeBits(move);
+
+        long occ = board.getAllPieces();
+        occ &= ~fromMask;
+
+        long whitePawns = board.getWhitePawns();
+        long whiteKnights = board.getWhiteKnights();
+        long whiteBishops = board.getWhiteBishops();
+        long whiteRooks = board.getWhiteRooks();
+        long whiteQueens = board.getWhiteQueens();
+        long whiteKing = board.getWhiteKing();
+
+        long blackPawns = board.getBlackPawns();
+        long blackKnights = board.getBlackKnights();
+        long blackBishops = board.getBlackBishops();
+        long blackRooks = board.getBlackRooks();
+        long blackQueens = board.getBlackQueens();
+        long blackKing = board.getBlackKing();
+
+        if (whiteMove) {
+            switch (moverBits) {
+                case 1 -> whitePawns &= ~fromMask;
+                case 2 -> whiteKnights &= ~fromMask;
+                case 3 -> whiteBishops &= ~fromMask;
+                case 4 -> whiteRooks &= ~fromMask;
+                case 5 -> whiteQueens &= ~fromMask;
+                case 6 -> whiteKing &= ~fromMask;
+                default -> {
+                }
+            }
+        } else {
+            switch (moverBits) {
+                case 1 -> blackPawns &= ~fromMask;
+                case 2 -> blackKnights &= ~fromMask;
+                case 3 -> blackBishops &= ~fromMask;
+                case 4 -> blackRooks &= ~fromMask;
+                case 5 -> blackQueens &= ~fromMask;
+                case 6 -> blackKing &= ~fromMask;
+                default -> {
+                }
+            }
+        }
+
+        if (isCapture) {
+            int capturedSquare = isEnPassant ? (whiteMove ? to - 8 : to + 8) : to;
+            long captureMask = 1L << capturedSquare;
+            occ &= ~captureMask;
+            int capturedBits = MoveHelper.deriveCapturedPieceTypeBits(move);
+            if (capturedBits >= 1 && capturedBits <= 6) {
+                if (whiteMove) {
+                    switch (capturedBits) {
+                        case 1 -> blackPawns &= ~captureMask;
+                        case 2 -> blackKnights &= ~captureMask;
+                        case 3 -> blackBishops &= ~captureMask;
+                        case 4 -> blackRooks &= ~captureMask;
+                        case 5 -> blackQueens &= ~captureMask;
+                        case 6 -> blackKing &= ~captureMask;
+                        default -> {
+                        }
+                    }
+                } else {
+                    switch (capturedBits) {
+                        case 1 -> whitePawns &= ~captureMask;
+                        case 2 -> whiteKnights &= ~captureMask;
+                        case 3 -> whiteBishops &= ~captureMask;
+                        case 4 -> whiteRooks &= ~captureMask;
+                        case 5 -> whiteQueens &= ~captureMask;
+                        case 6 -> whiteKing &= ~captureMask;
+                        default -> {
+                        }
+                    }
+                }
+            }
+        }
+
+        occ |= toMask;
+
+        final int placedBits = (promoBits != 0) ? promoBits : moverBits;
+        if (whiteMove) {
+            switch (placedBits) {
+                case 1 -> whitePawns |= toMask;
+                case 2 -> whiteKnights |= toMask;
+                case 3 -> whiteBishops |= toMask;
+                case 4 -> whiteRooks |= toMask;
+                case 5 -> whiteQueens |= toMask;
+                case 6 -> whiteKing |= toMask;
+                default -> {
+                }
+            }
+        } else {
+            switch (placedBits) {
+                case 1 -> blackPawns |= toMask;
+                case 2 -> blackKnights |= toMask;
+                case 3 -> blackBishops |= toMask;
+                case 4 -> blackRooks |= toMask;
+                case 5 -> blackQueens |= toMask;
+                case 6 -> blackKing |= toMask;
+                default -> {
+                }
+            }
+        }
+
+        if (isCastling) {
+            boolean kingSide = to > from;
+            int rookFrom = whiteMove ? (kingSide ? 7 : 0) : (kingSide ? 63 : 56);
+            int rookTo = kingSide ? (rookFrom - 2) : (rookFrom + 3);
+            long rookFromMask = 1L << rookFrom;
+            long rookToMask = 1L << rookTo;
+            occ &= ~rookFromMask;
+            occ |= rookToMask;
+            if (whiteMove) {
+                whiteRooks &= ~rookFromMask;
+                whiteRooks |= rookToMask;
+            } else {
+                blackRooks &= ~rookFromMask;
+                blackRooks |= rookToMask;
+            }
+        }
+
+        long attacks;
+        if (whiteMove) {
+            attacks = computeAttacks(true, whitePawns, whiteKnights, whiteBishops, whiteRooks, whiteQueens, whiteKing, occ);
+        } else {
+            attacks = computeAttacks(false, blackPawns, blackKnights, blackBishops, blackRooks, blackQueens, blackKing, occ);
+        }
+
+        return (attacks & enemyKingBb) != 0L;
+    }
+
+    private static long computeAttacks(boolean white,
+                                       long pawns,
+                                       long knights,
+                                       long bishops,
+                                       long rooks,
+                                       long queens,
+                                       long king,
+                                       long occ) {
+        long attacks = 0L;
+        int colorIndex = white ? 0 : 1;
+
+        long p = pawns;
+        while (p != 0L) {
+            int sq = Long.numberOfTrailingZeros(p);
+            attacks |= PAWN_ATTACKS[colorIndex][sq];
+            p &= p - 1;
+        }
+
+        long n = knights;
+        while (n != 0L) {
+            int sq = Long.numberOfTrailingZeros(n);
+            attacks |= knightMoveTable[sq];
+            n &= n - 1;
+        }
+
+        long b = bishops;
+        while (b != 0L) {
+            int sq = Long.numberOfTrailingZeros(b);
+            attacks |= BISHOP_HELPER.calculateBishopMoves(sq, occ);
+            b &= b - 1;
+        }
+
+        long r = rooks;
+        while (r != 0L) {
+            int sq = Long.numberOfTrailingZeros(r);
+            attacks |= ROOK_HELPER.calculateRookMoves(sq, occ);
+            r &= r - 1;
+        }
+
+        long q = queens;
+        while (q != 0L) {
+            int sq = Long.numberOfTrailingZeros(q);
+            long diag = BISHOP_HELPER.calculateBishopMoves(sq, occ);
+            long straight = ROOK_HELPER.calculateRookMoves(sq, occ);
+            attacks |= (diag | straight);
+            q &= q - 1;
+        }
+
+        if (king != 0L) {
+            int sq = Long.numberOfTrailingZeros(king);
+            attacks |= KING_ATTACKS[sq];
+        }
+
+        return attacks;
     }
 
 
