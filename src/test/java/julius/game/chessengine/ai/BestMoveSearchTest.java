@@ -874,7 +874,7 @@ public class BestMoveSearchTest {
     }
 
     private static double orientScoreForMover(boolean whiteToMove, double scoreDifference) {
-        return whiteToMove ? scoreDifference : -scoreDifference;
+        return scoreDifference;
     }
 
     private static String formatCentipawns(double centipawns) {

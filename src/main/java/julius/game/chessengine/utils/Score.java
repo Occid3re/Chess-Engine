@@ -163,7 +163,16 @@ public class Score {
         if (!evaluationPipeline.isInitialized()) {
             return 0.0;
         }
-        return evaluationPipeline.getScoreDifference();
+        // Normalise the blended evaluation so that a positive value always
+        // indicates an advantage for the side to move.  This keeps the search
+        // logic (which evaluates positions from the mover's perspective) and
+        // heuristic fallbacks aligned with the evaluation pipeline.
+        double diff = evaluationPipeline.getScoreDifference();
+        EvaluationContext context = this.evaluationContext;
+        if (context != null && !context.whiteToMove()) {
+            diff = -diff;
+        }
+        return diff;
     }
 
     public int getMidgameScore() {

@@ -21,15 +21,17 @@ class DrawScoreOrientationTest {
         Engine engine = new Engine();
         AI ai = new AI(engine);
 
-        GameState drawState = new GameState(engine.getGameState());
-        stubDrawState(drawState, 320.0);
-
         Method evaluateStatic = AI.class.getDeclaredMethod(
                 "evaluateStaticPosition", GameState.class, boolean.class, int.class);
         evaluateStatic.setAccessible(true);
 
-        double whiteToMoveScore = (double) evaluateStatic.invoke(ai, drawState, true, 0);
-        double blackToMoveScore = (double) evaluateStatic.invoke(ai, drawState, false, 0);
+        GameState whiteDrawState = new GameState(engine.getGameState());
+        stubDrawState(whiteDrawState, 320.0);
+        double whiteToMoveScore = (double) evaluateStatic.invoke(ai, whiteDrawState, true, 0);
+
+        GameState blackDrawState = new GameState(engine.getGameState());
+        stubDrawState(blackDrawState, -320.0);
+        double blackToMoveScore = (double) evaluateStatic.invoke(ai, blackDrawState, false, 0);
 
         assertTrue(whiteToMoveScore < Score.DRAW,
                 "White should dislike accepting a draw while ahead.");

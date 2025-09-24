@@ -2472,11 +2472,10 @@ public class AI {
 
         if (simulatorEngine.getGameState().isInStateDraw()) {
             double scoreDiff = simulatorEngine.getGameState().getScore().getScoreDifference();
-            // stronger bias than ±0.01 to steer away from draws when ahead
             final double DRAW_BIAS = 0.20;
-            if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
+            if (scoreDiff > 0) {
                 return DRAW - DRAW_BIAS; // discourage draws when ahead
-            } else if ((isWhitesTurn && scoreDiff < 0) || (!isWhitesTurn && scoreDiff > 0)) {
+            } else if (scoreDiff < 0) {
                 return DRAW + DRAW_BIAS; // prefer draws when behind
             }
             return DRAW;
@@ -2600,18 +2599,15 @@ public class AI {
         }
         if (gameState.isInStateDraw()) {
             double scoreDiff = gameState.getScore().getScoreDifference();
-            // stronger bias than ±0.01 to steer decisively
             final double DRAW_BIAS = 0.20;
-            if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
+            if (scoreDiff > 0) {
                 return DRAW - DRAW_BIAS; // avoid draws when ahead
-            } else if ((isWhitesTurn && scoreDiff < 0) || (!isWhitesTurn && scoreDiff > 0)) {
+            } else if (scoreDiff < 0) {
                 return DRAW + DRAW_BIAS; // accept draws when behind
             }
             return DRAW;
         }
-        double scoreDifference = gameState.getScore().getScoreDifference();
-
-        return isWhitesTurn ? scoreDifference : -scoreDifference;
+        return gameState.getScore().getScoreDifference();
     }
 
     private MoveList getPossibleCapturesOrPromotions(Engine simulatorEngine) {
