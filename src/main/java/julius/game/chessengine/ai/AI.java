@@ -1638,7 +1638,7 @@ public class AI {
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, true);
         final WorkerContext worker = searchContext.worker();
         final SearchContext.Heuristics heuristics = worker.heuristics();
-        final int[][] historyTable = heuristics.history;
+        final int[][] historyTable = heuristics.history();
 
         MoveList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
         final Map<Integer, Integer> seeCache = worker.seeCache();
@@ -1863,7 +1863,7 @@ public class AI {
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, false);
         final WorkerContext worker = searchContext.worker();
         final SearchContext.Heuristics heuristics = worker.heuristics();
-        final int[][] historyTable = heuristics.history;
+        final int[][] historyTable = heuristics.history();
 
         MoveList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
         final Map<Integer, Integer> seeCache = worker.seeCache();
@@ -2111,9 +2111,10 @@ public class AI {
         final long[] sortKeys = worker.sortKeyBuffer();
 
         final SearchContext.Heuristics heuristics = worker.heuristics();
-        final int[][] killerMoves = heuristics.killers;
-        final int[][] historyTable = heuristics.history;
-        final int[][] counterMove = heuristics.counter;
+        final int[][] killerMoves = heuristics.killers();
+        final int[][] historyTable = heuristics.history();
+        final int[][] counterMove = heuristics.counter();
+        final int[][] continuationTable = heuristics.continuation();
 
         final int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
 
@@ -2247,7 +2248,7 @@ public class AI {
                 category = CAT_CHECK_QUIET;
                 score = historyTable[from][to] + CHECK_QUIET_BONUS + checkPriorityBonus;
                 if (prevTo >= 0) {
-                    int continuationScore = heuristics.continuation[prevTo][to];
+                    int continuationScore = continuationTable[prevTo][to];
                     score += continuationScore / CONTINUATION_HISTORY_DIVISOR;
                 }
                 if (moveInt == cm) {
@@ -2264,7 +2265,7 @@ public class AI {
                 category = CAT_QUIET;
                 score = historyTable[from][to]; // butterfly history
                 if (prevTo >= 0) {
-                    int continuationScore = heuristics.continuation[prevTo][to];
+                    int continuationScore = continuationTable[prevTo][to];
                     score += continuationScore / CONTINUATION_HISTORY_DIVISOR;
                 }
                 if (moveInt == cm) score += COUNTER_MOVE_BONUS;
