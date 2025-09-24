@@ -37,6 +37,7 @@ import java.util.stream.Stream;
  * positions within a small time budget. Similar in spirit to
  * {@link MateSearchTest} but checks the single move chosen by the engine
  * instead of the game result.
+ * -Xms8g -Xmx8g -XX:+UseG1GC -XX:MaxGCPauseMillis=20 -XX:+AlwaysPreTouch -XX:+UseNUMA -XX:ActiveProcessorCount=24 -Dchessengine.tt.mb=256 -Dchessengine.searchThreads=16 -Dchessengine.lazySmpThreads=8 -Dchessengine.rootParallelLimit=48
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class BestMoveSearchTest {

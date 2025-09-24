@@ -461,7 +461,7 @@ public class AI {
 
             double alpha, beta;
             if (lastIterScore != null && currentDepth >= 3) {
-                double window = 80.0;
+                double window = 40.0;
                 if (rng != null) window = Math.max(10.0, window + rng.nextDouble(-10.0, 10.0));
                 alpha = lastIterScore - window;
                 beta = lastIterScore + window;
@@ -484,7 +484,7 @@ public class AI {
                         instr.recordAspirationFailHigh();
                         window *= 2.0;
                         beta = ms.score + window;
-                        if (++retries > 3) {
+                        if (++retries > 1) {
                             instr.recordAspirationReset();
                         } else continue;
                     }
@@ -1206,18 +1206,18 @@ public class AI {
     }
 
     private void applyRootScore(boolean isWhitesTurn,
-                                 int move,
-                                 double score,
-                                 long childHash,
-                                 int depthRemaining,
-                                 AtomicReference<Double> alphaRef,
-                                 AtomicReference<Double> betaRef,
-                                 java.util.concurrent.atomic.AtomicInteger bestMoveRef,
-                                 AtomicReference<Double> bestScoreRef,
-                                 AtomicReference<MoveAndScore> fallbackMateRef,
-                                 Set<Integer> refutedRootMoves,
-                                 AtomicBoolean mateWinFound,
-                                 AtomicBoolean stopRef) {
+                                int move,
+                                double score,
+                                long childHash,
+                                int depthRemaining,
+                                AtomicReference<Double> alphaRef,
+                                AtomicReference<Double> betaRef,
+                                java.util.concurrent.atomic.AtomicInteger bestMoveRef,
+                                AtomicReference<Double> bestScoreRef,
+                                AtomicReference<MoveAndScore> fallbackMateRef,
+                                Set<Integer> refutedRootMoves,
+                                AtomicBoolean mateWinFound,
+                                AtomicBoolean stopRef) {
         if (isWinningMateForUs(isWhitesTurn, score)) {
             publishExactMateToTT(childHash, score, depthRemaining);
             mateWinFound.set(true);
@@ -1302,7 +1302,6 @@ public class AI {
     }
 
 
-
     private boolean shouldStopCalculating(long deadline) {
         return abortRequested(deadline);
     }
@@ -1334,7 +1333,8 @@ public class AI {
         int played = 0;
 
         pv.add(new MoveAndScore(seed, seedScore != null ? seedScore : 0.0));
-        sim.performMove(seed); played++;
+        sim.performMove(seed);
+        played++;
 
         // Walk EXACT TT entries up to maxDepth, stopping if anything looks fishy.
         for (int i = 0; i < maxDepth; i++) {
@@ -1346,7 +1346,8 @@ public class AI {
             if (!isMoveLegal(sim, mv)) break;
 
             pv.add(new MoveAndScore(mv, e.score));
-            sim.performMove(mv); played++;
+            sim.performMove(mv);
+            played++;
         }
 
         while (played-- > 0) sim.undoLastMove();
@@ -1456,6 +1457,23 @@ public class AI {
             return eval;
         }
 
+        // --- Razor pruning (d=1–2), safe guards ---
+        if (!inCheck && depth <= 2 &&
+                alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY) {
+
+            double mateBand = CHECKMATE - (plyFromRoot + 2);  // stay away from mate scores
+            if (alpha > -mateBand && beta < mateBand) {       // not in mate race
+                double st = evaluateStaticPosition(simulatorEngine.getGameState(), isWhite, plyFromRoot);
+                double razorMargin = (depth == 1) ? 150.0 : 250.0;
+                if (st + razorMargin <= alpha) {
+                    double q = evaluateBoard(simulatorEngine, isWhite, deadline);
+                    if (q == EXIT_FLAG) return EXIT_FLAG;
+                    if (!isWhite) q = -q;
+                    if (q <= alpha) return q;
+                }
+            }
+        }
+
         long boardHash = simulatorEngine.getBoardStateHash();
 
         // Transposition table lookup
@@ -1496,6 +1514,7 @@ public class AI {
 
         if (allowNullMove) {
             int reduction = computeNullMoveReduction(bitBoard, depth, isWhite, mobility);
+            if (depth <= 5) reduction = Math.min(reduction, 2);
             int savedEp = simulatorEngine.doNullMoveForSearch();
             nullMoveCount++;
             instr.recordNullMoveAttempt();
@@ -1614,16 +1633,16 @@ public class AI {
         double materialFactor = Math.min(nonPawnMaterial, 12) / 12.0;
         double mobilityFactor = Math.min(Math.max(mobility, 0), 30) / 30.0;
 
-        double reductionEstimate = 1.25
-                + (depthFactor * 1.5)
-                + (materialFactor * 0.75)
-                + (mobilityFactor * 0.5);
+        double reductionEstimate = 1.6
+                + (depthFactor * 1.6)
+                + (materialFactor * 0.9)
+                + (mobilityFactor * 0.6);
 
         if (nonPawnMaterial <= 2 || mobility <= 4) {
-            reductionEstimate -= 0.75;
+            reductionEstimate -= 0.4; // was 0.75
         }
         if (mobility <= 2) {
-            reductionEstimate -= 0.5;
+            reductionEstimate -= 0.25;
         }
         return reductionEstimate;
     }
@@ -1658,16 +1677,16 @@ public class AI {
         // Base from depth and lateness
         double d = Math.log1p(depth);             // 1.. ~2.6
         double m = Math.log1p(moveIndex + 1);     // 0… ~5.0 for very late moves
-        double base = 0.35 * d * m;               // gentle scale
+        double base = 0.42 * d * m;           // gentle scale
 
         // History cuts reduction (good history => reduce less)
         int h = Math.max(0, Math.min(historyScore, LMR_HISTORY_MAX));
         double hist = (LMR_HISTORY_MAX == 0) ? 0.0 : (double) h / LMR_HISTORY_MAX;
-        double penalty = 0.8 * hist;              // up to -0.8 ply
+        double penalty = 0.7 * hist;             // up to -0.8 ply
 
         int r = (int) Math.floor(base - penalty);
 
-        if (r > 2 && depth < 8) r = 2;            // don’t over-reduce shallow levels
+        if (r > 2 && depth < 10) r = 2;            // don’t over-reduce shallow levels
         if (r > depth - 1) r = depth - 1;
         return Math.max(r, 1);
     }
@@ -1680,9 +1699,9 @@ public class AI {
         double materialFactor = Math.min(1.0, nonPawnCount / 16.0);
         int depthForMargin = Math.max(1, Math.min(4, Math.max(depthRemaining, nextDepth)));
 
-        double base = 60.0;
-        double depthBonus = depthForMargin * 35.0;
-        double materialBonus = materialFactor * 70.0;
+        double base = 80.0;            // was 60
+        double depthBonus = depthForMargin * 45.0; // was 35
+        double materialBonus = materialFactor * 80.0; // was 70
         return base + depthBonus + materialBonus;
     }
 
@@ -1721,8 +1740,9 @@ public class AI {
             boolean seeEvaluated = false;
             boolean seeWinsMaterial = false;
 
-            // SEE pruning for losing captures/quiets (keep checks/promotions)
-            boolean seePruneCandidate = (!inCheckAtNode && isCapture && !isPromotion) || isQuiet;
+            // SEE pruning for losing captures/quiets (keep checks/promotions).
+            // Only consider when NOT in check.
+            boolean seePruneCandidate = !inCheckAtNode && !isPromotion;
             if (seePruneCandidate) {
                 seeGain = seeCache.computeIfAbsent(move, simulatorEngine::see);
                 seeEvaluated = true;
@@ -1754,7 +1774,7 @@ public class AI {
             boolean lmpGivesCheck = false;
             boolean lmpAttacksQueen = false;
             boolean lmpAttacksKingZone = false;
-            int lmpThreshold = 8 + depth * 2;
+            int lmpThreshold = 4 + depth;
             if (!inCheckAtNode && !isTactical && depth <= 3 && index > lmpThreshold) {
                 simulatorEngine.performMove(move);
                 lmpGivesCheck = isSideInCheck(simulatorEngine, false);
@@ -1946,7 +1966,9 @@ public class AI {
             boolean seeEvaluated = false;
             boolean seeWinsMaterial = false;
 
-            boolean seePruneCandidate = (!inCheckAtNode && isCapture && !isPromotion) || isQuiet;
+            // SEE pruning for losing captures/quiets (keep checks/promotions).
+            // Only consider when NOT in check.
+            boolean seePruneCandidate = !inCheckAtNode && !isPromotion;
             if (seePruneCandidate) {
                 seeGain = seeCache.computeIfAbsent(move, simulatorEngine::see);
                 seeEvaluated = true;
@@ -1978,7 +2000,7 @@ public class AI {
             boolean lmpGivesCheck = false;
             boolean lmpAttacksQueen = false;
             boolean lmpAttacksKingZone = false;
-            int lmpThreshold = 8 + depth * 2;
+            int lmpThreshold = 4 + depth;
             if (!inCheckAtNode && !isTactical && depth <= 3 && index > lmpThreshold) {
                 simulatorEngine.performMove(move);
                 lmpGivesCheck = isSideInCheck(simulatorEngine, true);
@@ -2136,20 +2158,20 @@ public class AI {
 
     /**
      * Orders moves with staged buckets:
-     *  TT move (pinned first) >
-     *  promotions >
-     *  good captures (SEE>0) >
-     *  equal captures (SEE==0) >
-     *  killer[0] >
-     *  killer[1] >
-     *  counter move >
-     *  quiets (history + continuation) >
-     *  bad captures (SEE<0).
+     * TT move (pinned first) >
+     * promotions >
+     * good captures (SEE>0) >
+     * equal captures (SEE==0) >
+     * killer[0] >
+     * killer[1] >
+     * counter move >
+     * quiets (history + continuation) >
+     * bad captures (SEE<0).
      * <p>
      * Notes:
-     *  - SEE is computed only for captures (fast path w/ per-call cache).
-     *  - Checks are used as a small tiebreaker inside the bucket, not to re-bucket.
-     *  - TT move stays at index 0 (not included in the sort range).
+     * - SEE is computed only for captures (fast path w/ per-call cache).
+     * - Checks are used as a small tiebreaker inside the bucket, not to re-bucket.
+     * - TT move stays at index 0 (not included in the sort range).
      */
     MoveList sortMovesByEfficiency(MoveList moves, int currentDepth, long boardHash, int prevMove,
                                    Engine simulatorEngine) {
@@ -2171,25 +2193,26 @@ public class AI {
         final int k1 = killers[depthIndex][1];
 
         final int prevFrom = (prevMove >= 0) ? (prevMove & 0x3F) : -1;
-        final int prevTo   = (prevMove >= 0) ? ((prevMove >>> 6) & 0x3F) : -1;
-        final int cm       = (prevFrom >= 0) ? counter[prevFrom][prevTo] : -1;
+        final int prevTo = (prevMove >= 0) ? ((prevMove >>> 6) & 0x3F) : -1;
+        final int cm = (prevFrom >= 0) ? counter[prevFrom][prevTo] : -1;
 
         // small bonuses (keep conservative so buckets dominate)
-        final int PROMO_BONUS       = 800;
-        final int KILLER0_BONUS     = 50;
-        final int KILLER1_BONUS     = 30;
-        final int COUNTER_BONUS     = 120;
-        final int CHECK_TIEBREAK    = 40;   // small, just to break ties
-        final int CONT_DIVISOR      = 8;    // continuation scaling
+        final int PROMO_BONUS = 800;
+        final int KILLER0_BONUS = 50;
+        final int KILLER1_BONUS = 30;
+        final int COUNTER_BONUS = 120;
+        final int CHECK_TIEBREAK = 40;   // small, just to break ties
+        final int CHECK_TIEBREAK_LIMIT = 6;
+        final int CONT_DIVISOR = 8;    // continuation scaling
 
         // Category (higher = earlier)
-        final int CAT_TT      = 6;
-        final int CAT_PROMO   = 5;
-        final int CAT_CAP     = 4;  // single bucket for captures (SEE not used here)
+        final int CAT_TT = 6;
+        final int CAT_PROMO = 5;
+        final int CAT_CAP = 4;  // single bucket for captures (SEE not used here)
         final int CAT_KILLER0 = 3;
         final int CAT_KILLER1 = 2;
         final int CAT_COUNTER = 1;
-        final int CAT_QUIET   = 0;
+        final int CAT_QUIET = 0;
 
         // Hash move (TT) pinned to front (index 0); we sort [start…size)
         final TranspositionTableEntry tt = (transpositionTable != null) ? transpositionTable.get(boardHash) : null;
@@ -2204,13 +2227,13 @@ public class AI {
             final int m = moves.getMove(i);
             if (m == ttMove) ttIdx = i;
 
-            final boolean isCap   = MoveHelper.isCapture(m);
+            final boolean isCap = MoveHelper.isCapture(m);
             final boolean isPromo = MoveHelper.isPawnPromotionMove(m);
             final int from = m & 0x3F;
-            final int to   = (m >>> 6) & 0x3F;
+            final int to = (m >>> 6) & 0x3F;
 
             // very cheap "check" tiebreaker
-            final boolean givesCheck = moveGivesCheck(bb, m);
+            final boolean givesCheck = (i < CHECK_TIEBREAK_LIMIT) && moveGivesCheck(bb, m);
             int checkTie = givesCheck ? CHECK_TIEBREAK : 0;
 
             int cat;
@@ -2248,7 +2271,7 @@ public class AI {
             if (score < 0) score = 0;
             if (score > 0x00FFFFFF) score = 0x00FFFFFF;
 
-            sortKeys[i] = (((long)cat) << 56) | (((long)score) << 32) | (m & 0xFFFFFFFFL);
+            sortKeys[i] = (((long) cat) << 56) | (((long) score) << 32) | (m & 0xFFFFFFFFL);
         }
 
         // Pin TT move at front; sort the rest ascending by key, then read back descending
@@ -2270,11 +2293,11 @@ public class AI {
         if (ttIdx >= 0) {
             moves.setMove(out++, ttMovePinned);
             for (int i = size - 1; i >= 1; i--) {
-                moves.setMove(out++, (int)(sortKeys[i] & 0xFFFFFFFFL));
+                moves.setMove(out++, (int) (sortKeys[i] & 0xFFFFFFFFL));
             }
         } else {
             for (int i = size - 1; i >= 0; i--) {
-                moves.setMove(out++, (int)(sortKeys[i] & 0xFFFFFFFFL));
+                moves.setMove(out++, (int) (sortKeys[i] & 0xFFFFFFFFL));
             }
         }
         return moves;
@@ -2447,7 +2470,7 @@ public class AI {
             if (!inCheck && isPromotion && !isCapture) continue;
 
             // SEE prune losing captures/quiets unless they give check
-            if (!inCheck && !isPromotion || isQuiet) {
+            if (!inCheck && !isPromotion) {
                 int see = simulatorEngine.see(m);
                 if (see < 0) {
                     simulatorEngine.performMove(m);
@@ -2482,7 +2505,10 @@ public class AI {
             int bestScore = Integer.MIN_VALUE;
             for (int j = i; j < all.size(); j++) {
                 int s = calculateMvvLvaScore(all.getMove(j));
-                if (s > bestScore) { bestScore = s; best = j; }
+                if (s > bestScore) {
+                    bestScore = s;
+                    best = j;
+                }
             }
             int tmp = all.getMove(i);
             all.setMove(i, all.getMove(best));
