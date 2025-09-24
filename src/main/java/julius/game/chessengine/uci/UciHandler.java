@@ -7,6 +7,7 @@ import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
+import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.utils.Score;
 import julius.game.chessengine.utils.VersionInfo;
 
@@ -39,6 +40,7 @@ public class UciHandler {
     private final Map<String, UciOption> options = new LinkedHashMap<>();
     private int moveOverheadMs = 0;
     private final AtomicLong lastInfoNanos = new AtomicLong(0L);
+    private volatile GameStateEnum lastGameStateSent = null;
 
     public UciHandler() {
         this(System.out::println, () -> true, null);
@@ -184,6 +186,7 @@ public class UciHandler {
         // therefore we only reset the AI/engine state here and leave the board
         // untouched.
         ai.reset();
+        lastGameStateSent = null;
     }
 
     private void setPosition(String[] tokens) {
@@ -203,6 +206,7 @@ public class UciHandler {
             }
             engine.importBoardFromFen(fen.toString().trim());
         }
+        lastGameStateSent = null;
         if (idx < tokens.length && "moves".equals(tokens[idx])) {
             idx++;
             while (idx < tokens.length) {
@@ -489,6 +493,28 @@ public class UciHandler {
         lastInfoNanos.set(now);
 
         List<MoveAndScore> line = new ArrayList<>(ai.getCalculatedLine());
+        SearchDiagnostics diagnostics = ai.getLastDiagnostics();
+        int depth = 0;
+        int selDepth = 0;
+        double score = Double.NaN;
+        if (diagnostics != null) {
+            depth = Math.max(depth, diagnostics.bestDepth());
+            score = diagnostics.bestScore();
+            selDepth = Math.max(selDepthFromDiagnostics(diagnostics), selDepth);
+        }
+        if (depth <= 0 && !line.isEmpty()) {
+            depth = line.size();
+        }
+        if (Double.isNaN(score) && !line.isEmpty()) {
+            score = line.getFirst().getScore();
+        }
+        if (selDepth <= 0 && diagnostics != null) {
+            selDepth = selDepthFallback(diagnostics, depth);
+        }
+        if (selDepth <= 0 && depth > 0) {
+            selDepth = depth;
+        }
+
         long nodes = ai.getNodesVisited();
         long elapsedMillis = ai.getSearchElapsedMillis();
         long nps = 0L;
@@ -498,10 +524,16 @@ public class UciHandler {
                 nps = (long) perSecond;
             }
         }
+
         StringBuilder builder = new StringBuilder("info");
-        if (!line.isEmpty()) {
-            builder.append(" depth ").append(line.size());
-            builder.append(' ').append(formatScore(line.getFirst().getScore()));
+        if (depth > 0) {
+            builder.append(" depth ").append(depth);
+        }
+        if (selDepth > 0) {
+            builder.append(" seldepth ").append(selDepth);
+        }
+        if (!Double.isNaN(score)) {
+            builder.append(' ').append(formatScore(score));
         }
         builder.append(" nodes ").append(nodes);
         builder.append(" time ").append(elapsedMillis);
@@ -514,12 +546,11 @@ public class UciHandler {
         }
         output.accept(builder.toString());
 
-        SearchDiagnostics diagnostics = ai.getLastDiagnostics();
         if (diagnostics != null) {
             int generated = diagnostics.rootMovesGenerated();
             int explored = diagnostics.rootMovesExplored();
             if (generated > 0 || explored > 0) {
-                int difference = generated - explored;
+                int difference = Math.max(0, generated - explored);
                 output.accept("info string rootmoves generated " + generated
                         + " explored " + explored
                         + " diff " + difference);
@@ -527,9 +558,25 @@ public class UciHandler {
         }
 
         GameState gameState = ai.getMainEngine().getGameState();
-        if (gameState != null && gameState.getState() != null) {
-            output.accept("info string gamestate " + gameState.getState());
+        if (gameState != null) {
+            GameStateEnum state = gameState.getState();
+            if (state != null && state != lastGameStateSent) {
+                output.accept("info string gamestate " + state);
+                lastGameStateSent = state;
+            }
         }
+    }
+
+    private int selDepthFromDiagnostics(SearchDiagnostics diagnostics) {
+        return Math.max(diagnostics.deepestPlyVisited(), diagnostics.deepestQuiescencePly());
+    }
+
+    private int selDepthFallback(SearchDiagnostics diagnostics, int reportedDepth) {
+        int sel = selDepthFromDiagnostics(diagnostics);
+        if (sel <= 0) {
+            sel = reportedDepth;
+        }
+        return sel;
     }
 
     private String formatScore(double score) {
