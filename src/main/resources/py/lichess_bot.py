@@ -207,27 +207,37 @@ def build_engine_cmd() -> List[str]:
     if not jar:
         fail(f"[-] No chess-engine-*-uci.jar found in {JAR_DIR}")
 
-    # ---- Tunables via env ----
-    xms = os.environ.get("JAVA_XMS", "2048m")
-    xmx = os.environ.get("JAVA_XMX", xms)  # keep heap fixed to avoid resize pauses
-    # JDK 25: prefer G1 by default (let ergonomics pick it); allow opt-in Parallel
-    gc_pref = os.environ.get("JAVA_GC", "").lower()  # "", "g1", "parallel", "serial", "shenandoah", "zgc"
-    active_procs = os.environ.get("JAVA_ACTIVE_PROCESSORS")  # e.g., "6"
-    appcds_file = os.environ.get("JAVA_APPCDS", "")          # e.g., r"C:\path\appcds.jsa"
-    share_mode = os.environ.get("JAVA_XSHARE", "auto")       # "auto" (JDK default), "on", or "off"
+    # ---- Tunables via env (defaults match your requested flags) ----
+    xms = os.environ.get("JAVA_XMS", "8g")           # -Xms8g
+    xmx = os.environ.get("JAVA_XMX", xms)            # -Xmx8g (kept fixed)
+    gc_pref = os.environ.get("JAVA_GC", "g1").lower()  # default g1
+    active_procs = os.environ.get("JAVA_ACTIVE_PROCESSORS", "24")  # -XX:ActiveProcessorCount=24
+    appcds_file = os.environ.get("JAVA_APPCDS", "")
+    share_mode = os.environ.get("JAVA_XSHARE", "auto")
     extra_vm = shlex.split(os.environ.get("JAVA_EXTRA_OPTS", ""))
+
+    # Transposition table size default (can override with CHESSENGINE_TT_MB)
+    tt_mb = os.environ.get("CHESSENGINE_TT_MB", "256")
 
     java_opts = [
         f"-Xms{xms}",
         f"-Xmx{xmx}",
+        # GC & memory behavior
+        "-XX:+AlwaysPreTouch",
+        "-XX:+UseNUMA",
+        "-XX:MaxGCPauseMillis=20",
+        f"-Xshare:{share_mode}",
+
+        # Engine threading & limits
         f"-Dchessengine.searchThreads={SEARCH_THREADS}",
         f"-Dchessengine.lazySmpThreads={LAZY_SMP_THREADS}",
         f"-Dchessengine.rootParallelLimit={ROOT_PAR_LIMIT}",
+        f"-Dchessengine.tt.mb={tt_mb}",
+
         "-Dlogging.level.root=INFO",
-        f"-Xshare:{share_mode}",
     ]
 
-    # Optional GC override (default: let JDK 25 pick G1)
+    # GC selection (enforce G1 by default; env can switch it)
     gc_map = {
         "g1": "-XX:+UseG1GC",
         "parallel": "-XX:+UseParallelGC",
@@ -235,8 +245,7 @@ def build_engine_cmd() -> List[str]:
         "shenandoah": "-XX:+UseShenandoahGC",
         "zgc": "-XX:+UseZGC",
     }
-    if gc_pref in gc_map:
-        java_opts.append(gc_map[gc_pref])
+    java_opts.append(gc_map.get(gc_pref, "-XX:+UseG1GC"))
 
     if active_procs:
         java_opts.append(f"-XX:ActiveProcessorCount={active_procs}")
@@ -244,9 +253,11 @@ def build_engine_cmd() -> List[str]:
     if appcds_file:
         java_opts.append(f"-XX:SharedArchiveFile={appcds_file}")
 
+    # user-provided extras last (so they can override if desired)
     java_opts.extend(extra_vm)
 
     return [JAVA_EXE, *java_opts, "-jar", str(jar)]
+
 
 
 
