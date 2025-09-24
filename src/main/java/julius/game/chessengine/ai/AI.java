@@ -2595,23 +2595,30 @@ public class AI {
     private double evaluateStaticPosition(GameState gameState, boolean isWhitesTurn, int depthOrPly) {
         instrumentation().recordStaticEvalCall();
 
-        if (gameState.isInStateCheckMate()) {
-            return -(CHECKMATE - depthOrPly);
-        }
-        if (gameState.isInStateDraw()) {
-            double scoreDiff = gameState.getScore().getScoreDifference();
-            // stronger bias than ±0.01 to steer decisively
-            final double DRAW_BIAS = 0.20;
-            if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
-                return DRAW - DRAW_BIAS; // avoid draws when ahead
-            } else if ((isWhitesTurn && scoreDiff < 0) || (!isWhitesTurn && scoreDiff > 0)) {
-                return DRAW + DRAW_BIAS; // accept draws when behind
-            }
-            return DRAW;
-        }
-        double scoreDifference = gameState.getScore().getScoreDifference();
+        double whitePerspective;
 
-        return isWhitesTurn ? scoreDifference : -scoreDifference;
+        if (gameState.isInStateCheckMate()) {
+            double mateScore = CHECKMATE - depthOrPly;
+            whitePerspective = switch (gameState.getState()) {
+                case WHITE_WON -> mateScore;
+                case BLACK_WON -> -mateScore;
+                default -> -mateScore; // fallback: side to move has no moves and loses
+            };
+        } else if (gameState.isInStateDraw()) {
+            double scoreDiff = gameState.getScore().getScoreDifference();
+            final double DRAW_BIAS = 0.20; // stronger bias than ±0.01 to steer decisively
+            if (scoreDiff > 0) {
+                whitePerspective = DRAW - DRAW_BIAS; // white is ahead, avoid the draw
+            } else if (scoreDiff < 0) {
+                whitePerspective = DRAW + DRAW_BIAS; // white is behind, take the draw
+            } else {
+                whitePerspective = DRAW;
+            }
+        } else {
+            whitePerspective = gameState.getScore().getScoreDifference();
+        }
+
+        return isWhitesTurn ? whitePerspective : -whitePerspective;
     }
 
     private MoveList getPossibleCapturesOrPromotions(Engine simulatorEngine) {
