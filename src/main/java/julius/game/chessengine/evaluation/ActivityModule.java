@@ -343,8 +343,11 @@ public final class ActivityModule implements EvaluationModule {
                 continue;
             }
 
-            long rayMask = sliderRayMask(activity.pieceType, square);
-            if ((rayMask & affectedMask) != 0) {
+            long dependency = activity.dependencyMask;
+            if (dependency == 0L) {
+                dependency = sliderRayMask(activity.pieceType, square);
+            }
+            if ((dependency & affectedMask) != 0) {
                 recalculatePiece(square);
             }
         }
@@ -453,6 +456,7 @@ public final class ActivityModule implements EvaluationModule {
         activity.pieceType = pieceType;
         activity.midgameScore = 0;
         activity.endgameScore = 0;
+        activity.dependencyMask = 0L;
 
         long mask = 1L << square;
         if (color == WHITE) {
@@ -524,6 +528,7 @@ public final class ActivityModule implements EvaluationModule {
             default -> {
                 activity.midgameScore = 0;
                 activity.endgameScore = 0;
+                activity.dependencyMask = 0L;
                 return;
             }
         }
@@ -544,6 +549,11 @@ public final class ActivityModule implements EvaluationModule {
 
         activity.midgameScore = midgameContribution;
         activity.endgameScore = endgameContribution;
+        if (isSlider(pieceType)) {
+            activity.dependencyMask = computeSliderDependency(square, type, allPieces);
+        } else {
+            activity.dependencyMask = 0L;
+        }
     }
 
     private void updateScoreCache() {
@@ -566,17 +576,52 @@ public final class ActivityModule implements EvaluationModule {
         private int pieceType;
         private int midgameScore;
         private int endgameScore;
+        private long dependencyMask;
 
         private void reset() {
             color = -1;
             pieceType = 0;
             midgameScore = 0;
             endgameScore = 0;
+            dependencyMask = 0L;
         }
 
     }
 
     private record CastlingUpdate(long affectedMask, int rookDestination) {
+    }
+
+    private long computeSliderDependency(int square, PieceType type, long occupancy) {
+        long mask = 0L;
+        if (type == PieceType.BISHOP || type == PieceType.QUEEN) {
+            mask |= traceDirection(square, 1, 1, occupancy);
+            mask |= traceDirection(square, 1, -1, occupancy);
+            mask |= traceDirection(square, -1, 1, occupancy);
+            mask |= traceDirection(square, -1, -1, occupancy);
+        }
+        if (type == PieceType.ROOK || type == PieceType.QUEEN) {
+            mask |= traceDirection(square, 1, 0, occupancy);
+            mask |= traceDirection(square, -1, 0, occupancy);
+            mask |= traceDirection(square, 0, 1, occupancy);
+            mask |= traceDirection(square, 0, -1, occupancy);
+        }
+        return mask;
+    }
+
+    private long traceDirection(int square, int rankDelta, int fileDelta, long occupancy) {
+        long mask = 0L;
+        int rank = square / 8 + rankDelta;
+        int file = square % 8 + fileDelta;
+        while (rank >= 0 && rank < 8 && file >= 0 && file < 8) {
+            int target = rank * 8 + file;
+            mask |= 1L << target;
+            if (((occupancy >>> target) & 1L) != 0) {
+                break;
+            }
+            rank += rankDelta;
+            file += fileDelta;
+        }
+        return mask;
     }
 }
 

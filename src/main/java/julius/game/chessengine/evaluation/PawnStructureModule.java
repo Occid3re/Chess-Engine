@@ -121,26 +121,29 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         PhaseScore blackPassed = PhaseScore.constant(
                 calculatePassedPawnBonus(blackPawns, whitePawns, allPieces, blackKing, false));
 
+        DynamicPawnStats whiteStats = computeDynamicStats(whitePawns, blackPawns, allPieces, blackAttacks, true);
+        DynamicPawnStats blackStats = computeDynamicStats(blackPawns, whitePawns, allPieces, whiteAttacks, false);
+
         PhaseScore whiteAdvance = PhaseScore.of(
-                calculatePawnAdvanceBonus(whitePawns, allPieces, blackAttacks, true, 0),
-                calculatePawnAdvanceBonus(whitePawns, allPieces, blackAttacks, true, 256));
+                scaleByPhase(whiteStats.advanceBase(), 0),
+                scaleByPhase(whiteStats.advanceBase(), 256));
         PhaseScore blackAdvance = PhaseScore.of(
-                calculatePawnAdvanceBonus(blackPawns, allPieces, whiteAttacks, false, 0),
-                calculatePawnAdvanceBonus(blackPawns, allPieces, whiteAttacks, false, 256));
+                scaleByPhase(blackStats.advanceBase(), 0),
+                scaleByPhase(blackStats.advanceBase(), 256));
 
         PhaseScore whiteBlocked = PhaseScore.of(
-                calculateBlockedPawnPenalty(whitePawns, allPieces, true, 0),
-                calculateBlockedPawnPenalty(whitePawns, allPieces, true, 256));
+                scaleByPhase(whiteStats.blockedBase(), 0),
+                scaleByPhase(whiteStats.blockedBase(), 256));
         PhaseScore blackBlocked = PhaseScore.of(
-                calculateBlockedPawnPenalty(blackPawns, allPieces, false, 0),
-                calculateBlockedPawnPenalty(blackPawns, allPieces, false, 256));
+                scaleByPhase(blackStats.blockedBase(), 0),
+                scaleByPhase(blackStats.blockedBase(), 256));
 
         PhaseScore whiteBackward = PhaseScore.of(
-                calculateBackwardPawnPenalty(whitePawns, blackPawns, allPieces, true, 0),
-                calculateBackwardPawnPenalty(whitePawns, blackPawns, allPieces, true, 256));
+                scaleByPhase(whiteStats.backwardBase(), 0),
+                scaleByPhase(whiteStats.backwardBase(), 256));
         PhaseScore blackBackward = PhaseScore.of(
-                calculateBackwardPawnPenalty(blackPawns, whitePawns, allPieces, false, 0),
-                calculateBackwardPawnPenalty(blackPawns, whitePawns, allPieces, false, 256));
+                scaleByPhase(blackStats.backwardBase(), 0),
+                scaleByPhase(blackStats.backwardBase(), 256));
 
         PhaseScore[] whiteComponents = new PhaseScore[]{
                 whiteCenter,
@@ -371,55 +374,44 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         return STRUCTURE_CACHE.computeIfAbsent(key, _ -> new CachedStructure(whitePawns, blackPawns));
     }
 
-    private static int calculatePawnAdvanceBonus(long pawns, long allPieces, long enemyAttacks, boolean isWhite, int phase) {
-        int bonus = 0;
+    private static DynamicPawnStats computeDynamicStats(long pawns, long enemyPawns, long allPieces,
+                                                        long enemyAttacks, boolean isWhite) {
+        int advance = 0;
+        int blocked = 0;
+        int backward = 0;
+        if (pawns == 0) {
+            return new DynamicPawnStats(advance, blocked, backward);
+        }
         long advancedRanks = isWhite
                 ? (RankMasks[3] | RankMasks[4] | RankMasks[5] | RankMasks[6])
                 : (RankMasks[4] | RankMasks[3] | RankMasks[2] | RankMasks[1]);
-        long advancedPawns = pawns & advancedRanks;
-        while (advancedPawns != 0) {
-            int square = Long.numberOfTrailingZeros(advancedPawns);
-            long forward = PAWN_PUSHES[isWhite ? WHITE : BLACK][square];
-            if ((forward & (allPieces | enemyAttacks)) == 0) {
-                int rank = square / 8 + 1;
-                int rankBonus = isWhite ? (rank - 3) : (6 - rank);
-                bonus += ADVANCED_PAWN_BONUS * rankBonus;
-            }
-            advancedPawns &= advancedPawns - 1;
-        }
-        return scaleByPhase(bonus, phase);
-    }
-
-    private static int calculateBlockedPawnPenalty(long pawns, long allPieces, boolean isWhite, int phase) {
-        int penalty = 0;
+        int color = isWhite ? WHITE : BLACK;
         long remaining = pawns;
         while (remaining != 0) {
-            int square = Long.numberOfTrailingZeros(remaining);
-            long forward = PAWN_PUSHES[isWhite ? WHITE : BLACK][square];
-            if ((forward & allPieces) != 0) {
-                penalty += BLOCKED_PAWN_PENALTY;
-            }
-            remaining &= remaining - 1;
-        }
-        return scaleByPhase(penalty, phase);
-    }
-
-    private static int calculateBackwardPawnPenalty(long pawns, long enemyPawns, long allPieces, boolean isWhite, int phase) {
-        int penalty = 0;
-        long remaining = pawns;
-        while (remaining != 0) {
-            int square = Long.numberOfTrailingZeros(remaining);
-            long forward = PAWN_PUSHES[isWhite ? WHITE : BLACK][square];
-            if ((forward & allPieces) == 0) {
-                int forwardIndex = Long.numberOfTrailingZeros(forward);
-                long enemyAttack = PAWN_ATTACKS[isWhite ? WHITE : BLACK][forwardIndex] & enemyPawns;
-                if (enemyAttack != 0) {
-                    penalty += BACKWARD_PAWN_PENALTY;
+            long bit = remaining & -remaining;
+            int square = Long.numberOfTrailingZeros(bit);
+            long forward = PAWN_PUSHES[color][square];
+            if (forward != 0) {
+                if ((forward & allPieces) != 0) {
+                    blocked += BLOCKED_PAWN_PENALTY;
+                } else {
+                    if ((bit & advancedRanks) != 0 && (forward & enemyAttacks) == 0) {
+                        int rank = square / 8 + 1;
+                        int rankBonus = isWhite ? (rank - 3) : (6 - rank);
+                        if (rankBonus > 0) {
+                            advance += ADVANCED_PAWN_BONUS * rankBonus;
+                        }
+                    }
+                    int forwardIndex = Long.numberOfTrailingZeros(forward);
+                    long enemyAttack = PAWN_ATTACKS[color][forwardIndex] & enemyPawns;
+                    if (enemyAttack != 0) {
+                        backward += BACKWARD_PAWN_PENALTY;
+                    }
                 }
             }
-            remaining &= remaining - 1;
+            remaining ^= bit;
         }
-        return scaleByPhase(penalty, phase);
+        return new DynamicPawnStats(advance, blocked, backward);
     }
 
     private static int sumMidgame(PhaseScore... scores) {
@@ -508,6 +500,9 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
     private static int scaleByPhase(int value, int phase) {
         int clamped = Math.max(0, Math.min(256, phase));
         return value * (256 + clamped) / 256;
+    }
+
+    private record DynamicPawnStats(int advanceBase, int blockedBase, int backwardBase) {
     }
 
     private record PawnStructureKey(long white, long black) { }

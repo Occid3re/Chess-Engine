@@ -3,12 +3,17 @@ package julius.game.chessengine.evaluation;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.figures.PieceType;
 
+import java.util.Arrays;
+
 /**
  * Rewards coordinated long-range pieces that form batteries (stacked along the same ray) and
  * penalizes the opponent when the battery directly targets valuable pieces. The module only
  * recomputes its contribution when marked dirty.
  */
 public final class BatteryModule implements EvaluationModule {
+
+    private static final int WHITE = 0;
+    private static final int BLACK = 1;
 
     private static final int PAWN = MoveHelper.pieceTypeToInt(PieceType.PAWN);
     private static final int KNIGHT = MoveHelper.pieceTypeToInt(PieceType.KNIGHT);
@@ -26,13 +31,24 @@ public final class BatteryModule implements EvaluationModule {
     private static final int[] BATTERY_ATTACK_ENDGAME = new int[7];
 
     private static final Direction[] DIAGONAL_DIRECTIONS = {
-            new Direction(1, 1),   // north-east
-            new Direction(1, -1)   // north-west
+            new Direction(1, 1),
+            new Direction(1, -1)
     };
 
     private static final Direction[] ORTHOGONAL_DIRECTIONS = {
-            new Direction(1, 0),   // north
-            new Direction(0, 1)    // east
+            new Direction(1, 0),
+            new Direction(0, 1)
+    };
+
+    private static final Direction[] ALL_DIRECTIONS = {
+            new Direction(1, 0),
+            new Direction(-1, 0),
+            new Direction(0, 1),
+            new Direction(0, -1),
+            new Direction(1, 1),
+            new Direction(1, -1),
+            new Direction(-1, 1),
+            new Direction(-1, -1)
     };
 
     static {
@@ -55,6 +71,11 @@ public final class BatteryModule implements EvaluationModule {
         BATTERY_ATTACK_ENDGAME[KING] = 28;
     }
 
+    private final int[][] perSquareMidgame = new int[2][64];
+    private final int[][] perSquareEndgame = new int[2][64];
+    private final int[] midgameTotals = new int[2];
+    private final int[] endgameTotals = new int[2];
+
     private int midgameScoreCache;
     private int endgameScoreCache;
     private boolean dirty = true;
@@ -69,30 +90,22 @@ public final class BatteryModule implements EvaluationModule {
         if (!dirty) {
             return;
         }
-        if (context == null) {
-            midgameScoreCache = 0;
-            endgameScoreCache = 0;
-            dirty = false;
-            return;
-        }
-        EvaluationContext.BoardView board = context.board();
-
-        BatteryScore white = evaluateSide(board, true);
-        BatteryScore black = evaluateSide(board, false);
-
-        midgameScoreCache = white.midgame - black.midgame;
-        endgameScoreCache = white.endgame - black.endgame;
-        dirty = false;
+        EvaluationContext.BoardView board = context == null ? null : context.board();
+        rebuildFromBoard(board);
     }
 
     @Override
     public void applyMove(MoveContext moveContext) {
-        dirty = true;
+        if (!updateForMove(moveContext)) {
+            EvaluationContext current = moveContext.currentContext();
+            EvaluationContext.BoardView board = current == null ? null : current.board();
+            rebuildFromBoard(board);
+        }
     }
 
     @Override
     public void undoMove(MoveContext moveContext) {
-        dirty = true;
+        applyMove(moveContext);
     }
 
     @Override
@@ -115,37 +128,152 @@ public final class BatteryModule implements EvaluationModule {
         dirty = true;
     }
 
-    private BatteryScore evaluateSide(EvaluationContext.BoardView board, boolean isWhite) {
+    private void rebuildFromBoard(EvaluationContext.BoardView board) {
+        Arrays.fill(midgameTotals, 0);
+        Arrays.fill(endgameTotals, 0);
+        for (int[] cache : perSquareMidgame) {
+            Arrays.fill(cache, 0);
+        }
+        for (int[] cache : perSquareEndgame) {
+            Arrays.fill(cache, 0);
+        }
+
+        if (board == null) {
+            updateScoreCache();
+            dirty = false;
+            return;
+        }
+
+        rebuildSide(board, true);
+        rebuildSide(board, false);
+        updateScoreCache();
+        dirty = false;
+    }
+
+    private boolean updateForMove(MoveContext moveContext) {
+        EvaluationContext current = moveContext.currentContext();
+        EvaluationContext previous = moveContext.previousContext();
+        EvaluationContext.BoardView currentBoard = current == null ? null : current.board();
+        if (currentBoard == null) {
+            Arrays.fill(midgameTotals, 0);
+            Arrays.fill(endgameTotals, 0);
+            updateScoreCache();
+            dirty = false;
+            return true;
+        }
+        if (previous == null) {
+            rebuildFromBoard(currentBoard);
+            return true;
+        }
+
+        EvaluationContext.BoardView previousBoard = previous.board();
+        long impacted = collectAnchorSquares(moveContext.move());
+        impacted |= collectSliderSquares(previousBoard, impacted);
+        impacted |= collectSliderSquares(currentBoard, impacted);
+
+        if (impacted == 0) {
+            dirty = false;
+            return true;
+        }
+
+        long removed = impacted;
+        while (removed != 0) {
+            int square = Long.numberOfTrailingZeros(removed);
+            removed &= removed - 1;
+            removeContribution(square, WHITE);
+            removeContribution(square, BLACK);
+        }
+
+        long toUpdate = impacted;
+        while (toUpdate != 0) {
+            int square = Long.numberOfTrailingZeros(toUpdate);
+            toUpdate &= toUpdate - 1;
+            addContribution(currentBoard, square, true);
+            addContribution(currentBoard, square, false);
+        }
+
+        updateScoreCache();
+        dirty = false;
+        return true;
+    }
+
+    private void rebuildSide(EvaluationContext.BoardView board, boolean isWhite) {
+        long candidates = 0L;
+        if (isWhite) {
+            candidates |= board.whiteBishops();
+            candidates |= board.whiteRooks();
+            candidates |= board.whiteQueens();
+        } else {
+            candidates |= board.blackBishops();
+            candidates |= board.blackRooks();
+            candidates |= board.blackQueens();
+        }
+        int colorIndex = isWhite ? WHITE : BLACK;
+        while (candidates != 0) {
+            long bit = candidates & -candidates;
+            int square = Long.numberOfTrailingZeros(bit);
+            BatteryScore score = evaluateSquare(board, isWhite, square);
+            perSquareMidgame[colorIndex][square] = score.midgame;
+            perSquareEndgame[colorIndex][square] = score.endgame;
+            midgameTotals[colorIndex] += score.midgame;
+            endgameTotals[colorIndex] += score.endgame;
+            candidates ^= bit;
+        }
+    }
+
+    private void addContribution(EvaluationContext.BoardView board, int square, boolean white) {
+        int colorIndex = white ? WHITE : BLACK;
+        PieceType type = board.getPieceTypeAtIndex(square);
+        if (type == null) {
+            return;
+        }
+        long mask = 1L << square;
+        long pieces = white ? board.whitePieces() : board.blackPieces();
+        if ((pieces & mask) == 0) {
+            return;
+        }
+        if (!isSlider(type)) {
+            return;
+        }
+        BatteryScore score = evaluateSquare(board, white, square);
+        perSquareMidgame[colorIndex][square] = score.midgame;
+        perSquareEndgame[colorIndex][square] = score.endgame;
+        midgameTotals[colorIndex] += score.midgame;
+        endgameTotals[colorIndex] += score.endgame;
+    }
+
+    private void removeContribution(int square, int colorIndex) {
+        int mid = perSquareMidgame[colorIndex][square];
+        int end = perSquareEndgame[colorIndex][square];
+        if (mid == 0 && end == 0) {
+            return;
+        }
+        midgameTotals[colorIndex] -= mid;
+        endgameTotals[colorIndex] -= end;
+        perSquareMidgame[colorIndex][square] = 0;
+        perSquareEndgame[colorIndex][square] = 0;
+    }
+
+    private BatteryScore evaluateSquare(EvaluationContext.BoardView board, boolean isWhite, int square) {
         BatteryScore score = new BatteryScore();
+        PieceType type = board.getPieceTypeAtIndex(square);
+        if (type == null) {
+            return score;
+        }
+
         long occupancy = board.allPieces();
         long friendlyPieces = isWhite ? board.whitePieces() : board.blackPieces();
         long enemyPieces = isWhite ? board.blackPieces() : board.whitePieces();
 
-        long l = isWhite ? board.whiteQueens() : board.blackQueens();
-        long diagonalCandidates = (isWhite ? board.whiteBishops() : board.blackBishops())
-                | l;
-        accumulateBatteries(board, diagonalCandidates, DIAGONAL_DIRECTIONS, occupancy,
-                friendlyPieces, enemyPieces, true, score);
-
-        long orthogonalCandidates = (isWhite ? board.whiteRooks() : board.blackRooks())
-                | l;
-        accumulateBatteries(board, orthogonalCandidates, ORTHOGONAL_DIRECTIONS, occupancy,
-                friendlyPieces, enemyPieces, false, score);
-
-        return score;
-    }
-
-    private void accumulateBatteries(EvaluationContext.BoardView board, long candidates,
-                                     Direction[] directions, long occupancy, long friendlyPieces,
-                                     long enemyPieces, boolean diagonal, BatteryScore score) {
-        long remaining = candidates;
-        while (remaining != 0) {
-            long bit = remaining & -remaining;
-            int square = Long.numberOfTrailingZeros(bit);
-            accumulateFromSquare(board, square, directions, occupancy, friendlyPieces,
-                    enemyPieces, diagonal, score);
-            remaining ^= bit;
+        if (supportsDirection(type, true)) {
+            accumulateFromSquare(board, square, DIAGONAL_DIRECTIONS, occupancy, friendlyPieces,
+                    enemyPieces, true, score);
         }
+        if (supportsDirection(type, false)) {
+            accumulateFromSquare(board, square, ORTHOGONAL_DIRECTIONS, occupancy, friendlyPieces,
+                    enemyPieces, false, score);
+        }
+        return score;
     }
 
     private void accumulateFromSquare(EvaluationContext.BoardView board, int square,
@@ -211,6 +339,72 @@ public final class BatteryModule implements EvaluationModule {
             r += direction.rankDelta;
             f += direction.fileDelta;
         }
+    }
+
+    private long collectAnchorSquares(int move) {
+        int from = MoveHelper.deriveFromIndex(move);
+        int to = MoveHelper.deriveToIndex(move);
+        long anchors = (1L << from) | (1L << to);
+        if (MoveHelper.isEnPassantMove(move)) {
+            int capture = MoveHelper.isWhitesMove(move) ? to - 8 : to + 8;
+            anchors |= 1L << capture;
+        }
+        return anchors;
+    }
+
+    private long collectSliderSquares(EvaluationContext.BoardView board, long anchors) {
+        if (board == null) {
+            return 0L;
+        }
+        long impacted = 0L;
+        long remaining = anchors;
+        while (remaining != 0) {
+            int square = Long.numberOfTrailingZeros(remaining);
+            impacted |= slidersAlongDirections(board, square);
+            remaining &= remaining - 1;
+        }
+        return impacted;
+    }
+
+    private long slidersAlongDirections(EvaluationContext.BoardView board, int square) {
+        long impacted = 0L;
+        for (Direction direction : ALL_DIRECTIONS) {
+            int rank = square / 8 + direction.rankDelta;
+            int file = square % 8 + direction.fileDelta;
+            while (rank >= 0 && rank < 8 && file >= 0 && file < 8) {
+                int target = rank * 8 + file;
+                PieceType type = board.getPieceTypeAtIndex(target);
+                if (type != null) {
+                    if (isSliderInDirection(type, direction)) {
+                        impacted |= 1L << target;
+                    }
+                    break;
+                }
+                rank += direction.rankDelta;
+                file += direction.fileDelta;
+            }
+        }
+        return impacted;
+    }
+
+    private boolean isSlider(PieceType type) {
+        return type == PieceType.BISHOP || type == PieceType.ROOK || type == PieceType.QUEEN;
+    }
+
+    private boolean isSliderInDirection(PieceType type, Direction direction) {
+        if (!isSlider(type)) {
+            return false;
+        }
+        boolean diagonal = Math.abs(direction.rankDelta) == Math.abs(direction.fileDelta);
+        if (diagonal) {
+            return type == PieceType.BISHOP || type == PieceType.QUEEN;
+        }
+        return type == PieceType.ROOK || type == PieceType.QUEEN;
+    }
+
+    private void updateScoreCache() {
+        midgameScoreCache = midgameTotals[WHITE] - midgameTotals[BLACK];
+        endgameScoreCache = endgameTotals[WHITE] - endgameTotals[BLACK];
     }
 
     private static boolean supportsDirection(PieceType type, boolean diagonal) {

@@ -79,10 +79,14 @@ public final class KingSafetyModule implements EvaluationModule {
 
     @Override
     public void applyMove(MoveContext moveContext) {
-        EvaluationContext previous = moveContext.previousContext();
         EvaluationContext current = moveContext.currentContext();
+        EvaluationContext previous = moveContext.previousContext();
         if (previous == null) {
             rebuildFromContext(current);
+            return;
+        }
+        if (current == null) {
+            rebuildFromContext(null);
             return;
         }
         int move = moveContext.move();
@@ -92,11 +96,27 @@ public final class KingSafetyModule implements EvaluationModule {
             rebuildFromContext(current);
             return;
         }
-        boolean updateWhite = sideNeedsUpdate(WHITE, moveContext);
-        boolean updateBlack = sideNeedsUpdate(BLACK, moveContext);
-        if (updateWhite || updateBlack) {
-            rebuildFromContext(current);
+        EvaluationContext.BoardView board = current.board();
+        if (board == null) {
+            rebuildFromContext(null);
+            return;
         }
+        boolean updateWhite = sideNeedsUpdate(WHITE, board, current.whiteAttackMap(), current.blackAttackMap());
+        boolean updateBlack = sideNeedsUpdate(BLACK, board, current.blackAttackMap(), current.whiteAttackMap());
+        if (!updateWhite && !updateBlack) {
+            dirty = false;
+            return;
+        }
+        if (updateWhite) {
+            sideStates[WHITE].reset();
+            rebuildSideState(sideStates[WHITE], board, true, current.whiteAttackMap(), current.blackAttackMap());
+        }
+        if (updateBlack) {
+            sideStates[BLACK].reset();
+            rebuildSideState(sideStates[BLACK], board, false, current.blackAttackMap(), current.whiteAttackMap());
+        }
+        refreshScoreCaches();
+        dirty = false;
     }
 
     @Override
@@ -161,63 +181,49 @@ public final class KingSafetyModule implements EvaluationModule {
         dirty = false;
     }
 
-    private boolean sideNeedsUpdate(int side, MoveContext moveContext) {
+    private boolean sideNeedsUpdate(int side, EvaluationContext.BoardView board,
+                                    long friendlyAttacks, long enemyAttacks) {
         SideState state = sideStates[side];
-        if (state.kingSquare < 0) {
+        if (state.kingSquare < 0 || board == null) {
             return true;
         }
-        EvaluationContext previous = moveContext.previousContext();
-        EvaluationContext current = moveContext.currentContext();
-        if (previous == null) {
+        boolean isWhite = side == WHITE;
+        long friendlyPawns = isWhite ? board.whitePawns() : board.blackPawns();
+        long enemyPawns = isWhite ? board.blackPawns() : board.whitePawns();
+
+        long shield = friendlyPawns & state.shieldMask;
+        if (shield != state.cachedShield) {
             return true;
         }
-        long prevEnemyAttacks = side == WHITE ? previous.blackAttackMap() : previous.whiteAttackMap();
-        long currEnemyAttacks = side == WHITE ? current.blackAttackMap() : current.whiteAttackMap();
-        long prevFriendlyAttacks = side == WHITE ? previous.whiteAttackMap() : previous.blackAttackMap();
-        long currFriendlyAttacks = side == WHITE ? current.whiteAttackMap() : current.blackAttackMap();
-        long zoneDiff = (prevEnemyAttacks ^ currEnemyAttacks) & state.kingZone;
-        if (zoneDiff != 0) {
+        long file = friendlyPawns & state.fileMask;
+        if (file != state.cachedFile) {
             return true;
         }
-        int move = moveContext.move();
-        int from = MoveHelper.deriveFromIndex(move);
-        int to = MoveHelper.deriveToIndex(move);
-        long moveMask = (1L << from) | (1L << to);
-        if ((moveMask & (state.kingZone | state.shieldMask | state.fileMask)) != 0) {
+        long enemyFile = enemyPawns & state.fileMask;
+        if (enemyFile != state.cachedEnemyFile) {
             return true;
         }
-        int movedPiece = MoveHelper.derivePieceTypeBits(move);
-        if (movedPiece == PAWN) {
-            if (((1L << from) & state.fileMask) != 0 || ((1L << to) & state.fileMask) != 0) {
-                return true;
-            }
-        }
-        int capturedPiece = MoveHelper.deriveCapturedPieceTypeBits(move);
-        if (capturedPiece == PAWN) {
-            long captureMask = 1L << to;
-            if (MoveHelper.isEnPassantMove(move)) {
-                captureMask = side == WHITE ? (1L << (to - 8)) : (1L << (to + 8));
-            }
-            if ((captureMask & (state.shieldMask | state.fileMask)) != 0) {
-                return true;
-            }
-        }
-        EvaluationContext.BoardView previousBoard = previous.board();
-        EvaluationContext.BoardView currentBoard = current.board();
-        long prevQueens = side == WHITE ? previousBoard.whiteQueens() : previousBoard.blackQueens();
-        long currQueens = side == WHITE ? currentBoard.whiteQueens() : currentBoard.blackQueens();
-        if (prevQueens != currQueens) {
+
+        long enemyZone = enemyAttacks & state.kingZone;
+        if (enemyZone != state.cachedEnemyZoneAttacks) {
             return true;
         }
-        long queenMask = currQueens;
-        while (queenMask != 0) {
-            long q = queenMask & -queenMask;
-            if (((prevEnemyAttacks ^ currEnemyAttacks) & q) != 0) {
-                return true;
-            }
-            queenMask ^= q;
+        long friendlyZone = friendlyAttacks & state.kingZone;
+        if (friendlyZone != state.cachedFriendlyZoneAttacks) {
+            return true;
         }
-        return state.backrankMask != 0 && ((prevFriendlyAttacks ^ currFriendlyAttacks) & state.backrankMask) != 0;
+
+        long friendlyBackrank = state.backrankMask == 0L ? 0L : (friendlyAttacks & state.backrankMask);
+        if (friendlyBackrank != state.cachedFriendlyBackrankAttacks) {
+            return true;
+        }
+
+        long queens = isWhite ? board.whiteQueens() : board.blackQueens();
+        if (queens != state.cachedQueens) {
+            return true;
+        }
+        long queenThreats = enemyAttacks & queens;
+        return queenThreats != state.cachedQueenThreats;
     }
 
     private void rebuildSideState(SideState state, EvaluationContext.BoardView board, boolean isWhite,
@@ -249,7 +255,8 @@ public final class KingSafetyModule implements EvaluationModule {
             state.filePenalty = (enemyPawns & state.fileMask) != 0 ? HALF_OPEN_FILE_PENALTY : OPEN_FILE_PENALTY;
         }
 
-        state.defenderCount = Long.bitCount(friendlyAttacks & state.kingZone);
+        long friendlyZone = friendlyAttacks & state.kingZone;
+        state.defenderCount = Long.bitCount(friendlyZone);
 
         long allPieces = board.allPieces();
         accumulatePawnAttacks(state, enemyPawns, !isWhite);
@@ -289,6 +296,17 @@ public final class KingSafetyModule implements EvaluationModule {
         }
         state.midgameQueenPenalty = queenMid;
         state.endgameQueenPenalty = queenEnd;
+
+        state.cachedShield = friendlyPawns & state.shieldMask;
+        state.cachedFile = friendlyPawns & state.fileMask;
+        state.cachedEnemyFile = enemyPawns & state.fileMask;
+        state.cachedEnemyZoneAttacks = enemyAttacks & state.kingZone;
+        state.cachedFriendlyZoneAttacks = friendlyZone;
+        state.cachedFriendlyBackrankAttacks = state.backrankMask == 0L
+                ? 0L
+                : (friendlyAttacks & state.backrankMask);
+        state.cachedQueens = isWhite ? board.whiteQueens() : board.blackQueens();
+        state.cachedQueenThreats = enemyAttacks & state.cachedQueens;
     }
 
     private void computeBackrankWeaknessPenalty(SideState state, EvaluationContext.BoardView board, boolean isWhite) {
@@ -582,6 +600,14 @@ public final class KingSafetyModule implements EvaluationModule {
         private int backrankWeaknessEndgame;
         private final int[] zoneAttackWeights = new int[64];
         private long backrankMask;
+        private long cachedShield;
+        private long cachedFile;
+        private long cachedEnemyFile;
+        private long cachedEnemyZoneAttacks;
+        private long cachedFriendlyZoneAttacks;
+        private long cachedFriendlyBackrankAttacks;
+        private long cachedQueens;
+        private long cachedQueenThreats;
 
         private void reset() {
             kingSquare = -1;
@@ -599,6 +625,14 @@ public final class KingSafetyModule implements EvaluationModule {
             backrankWeaknessMidgame = 0;
             backrankWeaknessEndgame = 0;
             backrankMask = 0L;
+            cachedShield = 0L;
+            cachedFile = 0L;
+            cachedEnemyFile = 0L;
+            cachedEnemyZoneAttacks = 0L;
+            cachedFriendlyZoneAttacks = 0L;
+            cachedFriendlyBackrankAttacks = 0L;
+            cachedQueens = 0L;
+            cachedQueenThreats = 0L;
             Arrays.fill(zoneAttackWeights, 0);
         }
     }
