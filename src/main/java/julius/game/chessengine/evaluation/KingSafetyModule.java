@@ -183,13 +183,15 @@ public final class KingSafetyModule implements EvaluationModule {
         int from = MoveHelper.deriveFromIndex(move);
         int to = MoveHelper.deriveToIndex(move);
         long moveMask = (1L << from) | (1L << to);
-        if ((moveMask & (state.kingZone | state.shieldMask | state.fileMask)) != 0) {
+        if ((moveMask & (state.kingZone | state.shieldMask)) != 0) {
             return true;
         }
         int movedPiece = MoveHelper.derivePieceTypeBits(move);
+        boolean isWhiteSide = side == WHITE;
         if (movedPiece == PAWN) {
-            if (((1L << from) & state.fileMask) != 0 || ((1L << to) & state.fileMask) != 0) {
-                return true;
+            long fileMask = state.fileMask;
+            if (fileMask != 0 && (((1L << from) | (1L << to)) & fileMask) != 0) {
+                return fileOccupancyChanged(state, previous.board(), current.board(), isWhiteSide);
             }
         }
         int capturedPiece = MoveHelper.deriveCapturedPieceTypeBits(move);
@@ -198,8 +200,11 @@ public final class KingSafetyModule implements EvaluationModule {
             if (MoveHelper.isEnPassantMove(move)) {
                 captureMask = side == WHITE ? (1L << (to - 8)) : (1L << (to + 8));
             }
-            if ((captureMask & (state.shieldMask | state.fileMask)) != 0) {
+            if ((captureMask & state.shieldMask) != 0) {
                 return true;
+            }
+            if ((captureMask & state.fileMask) != 0) {
+                return fileOccupancyChanged(state, previous.board(), current.board(), isWhiteSide);
             }
         }
         EvaluationContext.BoardView previousBoard = previous.board();
@@ -218,6 +223,27 @@ public final class KingSafetyModule implements EvaluationModule {
             queenMask ^= q;
         }
         return state.backrankMask != 0 && ((prevFriendlyAttacks ^ currFriendlyAttacks) & state.backrankMask) != 0;
+    }
+
+    private boolean fileOccupancyChanged(SideState state,
+                                         EvaluationContext.BoardView previousBoard,
+                                         EvaluationContext.BoardView currentBoard,
+                                         boolean sideIsWhite) {
+        if (previousBoard == null || currentBoard == null) {
+            return true;
+        }
+        long fileMask = state.fileMask;
+        if (fileMask == 0) {
+            return false;
+        }
+        long prevFriendly = sideIsWhite ? previousBoard.whitePawns() : previousBoard.blackPawns();
+        long currFriendly = sideIsWhite ? currentBoard.whitePawns() : currentBoard.blackPawns();
+        if (Long.bitCount(prevFriendly & fileMask) != Long.bitCount(currFriendly & fileMask)) {
+            return true;
+        }
+        long prevEnemy = sideIsWhite ? previousBoard.blackPawns() : previousBoard.whitePawns();
+        long currEnemy = sideIsWhite ? currentBoard.blackPawns() : currentBoard.whitePawns();
+        return Long.bitCount(prevEnemy & fileMask) != Long.bitCount(currEnemy & fileMask);
     }
 
     private void rebuildSideState(SideState state, EvaluationContext.BoardView board, boolean isWhite,

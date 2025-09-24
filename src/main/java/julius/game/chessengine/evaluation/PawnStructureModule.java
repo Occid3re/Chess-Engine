@@ -371,6 +371,52 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         return STRUCTURE_CACHE.computeIfAbsent(key, _ -> new CachedStructure(whitePawns, blackPawns));
     }
 
+    private static int[] computeFileCounts(long pawns) {
+        int[] counts = new int[8];
+        for (int file = 0; file < 8; file++) {
+            counts[file] = Long.bitCount(pawns & FileMasks[file]);
+        }
+        return counts;
+    }
+
+    private static int countDoubled(int[] counts) {
+        int doubled = 0;
+        for (int file = 0; file < counts.length; file++) {
+            if (counts[file] > 1) {
+                doubled++;
+            }
+        }
+        return doubled;
+    }
+
+    private static int countIsolated(int[] counts) {
+        int isolated = 0;
+        for (int file = 0; file < counts.length; file++) {
+            if (counts[file] == 0) {
+                continue;
+            }
+            boolean leftEmpty = file == 0 || counts[file - 1] == 0;
+            boolean rightEmpty = file == counts.length - 1 || counts[file + 1] == 0;
+            if (leftEmpty && rightEmpty) {
+                isolated++;
+            }
+        }
+        return isolated;
+    }
+
+    private static int countIslands(int[] counts) {
+        int islands = 0;
+        boolean previousHasPawn = false;
+        for (int file = 0; file < counts.length; file++) {
+            boolean hasPawn = counts[file] > 0;
+            if (hasPawn && !previousHasPawn) {
+                islands++;
+            }
+            previousHasPawn = hasPawn;
+        }
+        return islands;
+    }
+
     private static int calculatePawnAdvanceBonus(long pawns, long allPieces, long enemyAttacks, boolean isWhite, int phase) {
         int bonus = 0;
         long advancedRanks = isWhite
@@ -525,16 +571,18 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         private final int blackPawnIslandPenalty;
 
         private CachedStructure(long whitePawns, long blackPawns) {
+            int[] whiteCounts = computeFileCounts(whitePawns);
+            int[] blackCounts = computeFileCounts(blackPawns);
             this.whiteCenterPawnBonus = PawnHelper.countCenterPawns(whitePawns) * CENTER_PAWN_BONUS;
             this.blackCenterPawnBonus = PawnHelper.countCenterPawns(blackPawns) * CENTER_PAWN_BONUS;
-            this.whiteDoubledPawnPenalty = PawnHelper.countDoubledPawns(whitePawns) * DOUBLED_PAWN_PENALTY;
-            this.blackDoubledPawnPenalty = PawnHelper.countDoubledPawns(blackPawns) * DOUBLED_PAWN_PENALTY;
-            this.whiteIsolatedPawnPenalty = PawnHelper.countIsolatedPawns(whitePawns) * ISOLATED_PAWN_PENALTY;
-            this.blackIsolatedPawnPenalty = PawnHelper.countIsolatedPawns(blackPawns) * ISOLATED_PAWN_PENALTY;
+            this.whiteDoubledPawnPenalty = countDoubled(whiteCounts) * DOUBLED_PAWN_PENALTY;
+            this.blackDoubledPawnPenalty = countDoubled(blackCounts) * DOUBLED_PAWN_PENALTY;
+            this.whiteIsolatedPawnPenalty = countIsolated(whiteCounts) * ISOLATED_PAWN_PENALTY;
+            this.blackIsolatedPawnPenalty = countIsolated(blackCounts) * ISOLATED_PAWN_PENALTY;
             this.whiteConnectedPawnBonus = PawnHelper.countConnectedPawns(whitePawns) * CONNECTED_PAWN_BONUS;
             this.blackConnectedPawnBonus = PawnHelper.countConnectedPawns(blackPawns) * CONNECTED_PAWN_BONUS;
-            this.whitePawnIslandPenalty = Math.max(0, PawnHelper.countPawnIslands(whitePawns) - 1) * PAWN_ISLAND_PENALTY;
-            this.blackPawnIslandPenalty = Math.max(0, PawnHelper.countPawnIslands(blackPawns) - 1) * PAWN_ISLAND_PENALTY;
+            this.whitePawnIslandPenalty = Math.max(0, countIslands(whiteCounts) - 1) * PAWN_ISLAND_PENALTY;
+            this.blackPawnIslandPenalty = Math.max(0, countIslands(blackCounts) - 1) * PAWN_ISLAND_PENALTY;
         }
     }
 

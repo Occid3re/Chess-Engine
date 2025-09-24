@@ -5,6 +5,7 @@ import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.helper.BishopHelper;
 import julius.game.chessengine.helper.RookHelper;
 
+import java.util.Arrays;
 import java.util.Objects;
 
 import static julius.game.chessengine.helper.PawnMoveTables.PAWN_ATTACKS;
@@ -12,8 +13,8 @@ import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
 
 /**
  * Evaluates tactical vulnerabilities such as hanging pieces and pawn attacks on higher valued
- * pieces. The module recomputes its contribution when marked dirty rather than maintaining
- * incremental state.
+ * pieces. The module keeps per-piece caches so it can adjust only the squares whose tactical
+ * status changes after a move.
  */
 public final class ThreatModule implements EvaluationModule {
 
@@ -46,13 +47,18 @@ public final class ThreatModule implements EvaluationModule {
         PAWN_THREAT_PENALTIES[QUEEN] = -25;
     }
 
+    private final int[][] squarePenalties = new int[2][64];
+    private final int[] sideTotals = new int[2];
+    private final boolean[] whiteTouched = new boolean[64];
+    private final boolean[] blackTouched = new boolean[64];
+
     private int midgameScoreCache;
     private int endgameScoreCache;
     private boolean dirty = true;
 
     @Override
     public void initialize(EvaluationContext context) {
-        evaluate(context);
+        rebuildFromContext(context);
     }
 
     @Override
@@ -60,34 +66,19 @@ public final class ThreatModule implements EvaluationModule {
         if (!dirty) {
             return;
         }
-        Objects.requireNonNull(context, "context");
-        EvaluationContext.BoardView board = context.board();
-        if (board == null) {
-            midgameScoreCache = 0;
-            endgameScoreCache = 0;
-            dirty = false;
-            return;
-        }
-
-        long whiteAttacks = context.whiteAttackMap();
-        long blackAttacks = context.blackAttackMap();
-
-        int whitePenalty = evaluateSide(board, true, whiteAttacks, blackAttacks);
-        int blackPenalty = evaluateSide(board, false, blackAttacks, whiteAttacks);
-
-        midgameScoreCache = whitePenalty - blackPenalty;
-        endgameScoreCache = midgameScoreCache;
-        dirty = false;
+        rebuildFromContext(Objects.requireNonNull(context, "context"));
     }
 
     @Override
     public void applyMove(MoveContext moveContext) {
-        dirty = true;
+        if (!handleMove(moveContext)) {
+            rebuildFromContext(moveContext.currentContext());
+        }
     }
 
     @Override
     public void undoMove(MoveContext moveContext) {
-        dirty = true;
+        applyMove(moveContext);
     }
 
     @Override
@@ -110,48 +101,191 @@ public final class ThreatModule implements EvaluationModule {
         dirty = true;
     }
 
-    private int evaluateSide(EvaluationContext.BoardView board, boolean isWhite, long friendlyAttacks, long enemyAttacks) {
+    private void rebuildFromContext(EvaluationContext context) {
+        if (context == null) {
+            resetState();
+            dirty = false;
+            return;
+        }
+        rebuildFromSnapshot(context.board(), context.whiteAttackMap(), context.blackAttackMap());
+    }
+
+    private void rebuildFromSnapshot(EvaluationContext.BoardView board, long whiteAttacks, long blackAttacks) {
+        resetState();
+        if (board == null) {
+            dirty = false;
+            return;
+        }
+        applyFullSide(board, true, whiteAttacks, blackAttacks);
+        applyFullSide(board, false, blackAttacks, whiteAttacks);
+        refreshScoreCaches();
+        dirty = false;
+    }
+
+    private void resetState() {
+        for (int side = 0; side < squarePenalties.length; side++) {
+            Arrays.fill(squarePenalties[side], 0);
+            sideTotals[side] = 0;
+        }
+        midgameScoreCache = 0;
+        endgameScoreCache = 0;
+    }
+
+    private boolean handleMove(MoveContext moveContext) {
+        EvaluationContext current = moveContext.currentContext();
+        if (current == null) {
+            resetState();
+            dirty = false;
+            return true;
+        }
+        EvaluationContext previous = moveContext.previousContext();
+        if (previous == null) {
+            rebuildFromContext(current);
+            return true;
+        }
+        EvaluationContext.BoardView currentBoard = current.board();
+        EvaluationContext.BoardView previousBoard = previous.board();
+        if (currentBoard == null || previousBoard == null) {
+            rebuildFromContext(current);
+            return true;
+        }
+
+        Arrays.fill(whiteTouched, false);
+        Arrays.fill(blackTouched, false);
+
+        markSideChanges(true, previous, current);
+        markSideChanges(false, previous, current);
+
+        long whiteAttacks = current.whiteAttackMap();
+        long blackAttacks = current.blackAttackMap();
+        applySideUpdates(currentBoard, true, whiteAttacks, blackAttacks, whiteTouched);
+        applySideUpdates(currentBoard, false, blackAttacks, whiteAttacks, blackTouched);
+        refreshScoreCaches();
+        dirty = false;
+        return true;
+    }
+
+    private void markSideChanges(boolean whiteSide, EvaluationContext previous, EvaluationContext current) {
+        EvaluationContext.BoardView previousBoard = previous.board();
+        EvaluationContext.BoardView currentBoard = current.board();
+        if (previousBoard == null || currentBoard == null) {
+            return;
+        }
+        boolean[] touched = whiteSide ? whiteTouched : blackTouched;
+        long prevPieces = whiteSide ? previousBoard.whitePieces() : previousBoard.blackPieces();
+        long currPieces = whiteSide ? currentBoard.whitePieces() : currentBoard.blackPieces();
+        long movedSquares = prevPieces ^ currPieces;
+        markBits(movedSquares, touched);
+
+        long enemyPrevAttacks = whiteSide ? previous.blackAttackMap() : previous.whiteAttackMap();
+        long enemyCurrAttacks = whiteSide ? current.blackAttackMap() : current.whiteAttackMap();
+        long friendlyPrevAttacks = whiteSide ? previous.whiteAttackMap() : previous.blackAttackMap();
+        long friendlyCurrAttacks = whiteSide ? current.whiteAttackMap() : current.blackAttackMap();
+
+        long piecesNow = currPieces;
+        markBits((enemyPrevAttacks ^ enemyCurrAttacks) & piecesNow, touched);
+        markBits((friendlyPrevAttacks ^ friendlyCurrAttacks) & piecesNow, touched);
+    }
+
+    private void markBits(long bitboard, boolean[] touched) {
+        while (bitboard != 0) {
+            int square = Long.numberOfTrailingZeros(bitboard);
+            touched[square] = true;
+            bitboard &= bitboard - 1;
+        }
+    }
+
+    private void applySideUpdates(EvaluationContext.BoardView board,
+                                  boolean isWhite,
+                                  long friendlyAttacks,
+                                  long enemyAttacks,
+                                  boolean[] touchedSquares) {
+        int side = isWhite ? WHITE : BLACK;
         long pieces = isWhite ? board.whitePieces() : board.blackPieces();
         long enemyPawns = isWhite ? board.blackPawns() : board.whitePawns();
-        int enemyPawnColor = isWhite ? BLACK : WHITE;
-        long enemyPawnAttacks = computePawnAttackMask(enemyPawns, enemyPawnColor);
+        long enemyPawnAttacks = computePawnAttackMask(enemyPawns, isWhite ? BLACK : WHITE);
+        for (int square = 0; square < touchedSquares.length; square++) {
+            if (!touchedSquares[square]) {
+                continue;
+            }
+            sideTotals[side] -= squarePenalties[side][square];
+            squarePenalties[side][square] = 0;
+            long mask = 1L << square;
+            if ((pieces & mask) == 0) {
+                continue;
+            }
+            PieceType type = board.getPieceTypeAtIndex(square);
+            if (type == null) {
+                continue;
+            }
+            int penalty = evaluateSquare(board, isWhite, square, type,
+                    friendlyAttacks, enemyAttacks, enemyPawnAttacks);
+            squarePenalties[side][square] = penalty;
+            sideTotals[side] += penalty;
+        }
+    }
 
-        int penalty = 0;
+    private void applyFullSide(EvaluationContext.BoardView board,
+                               boolean isWhite,
+                               long friendlyAttacks,
+                               long enemyAttacks) {
+        int side = isWhite ? WHITE : BLACK;
+        long pieces = isWhite ? board.whitePieces() : board.blackPieces();
+        long enemyPawns = isWhite ? board.blackPawns() : board.whitePawns();
+        long enemyPawnAttacks = computePawnAttackMask(enemyPawns, isWhite ? BLACK : WHITE);
         long remaining = pieces;
         while (remaining != 0) {
             long bit = remaining & -remaining;
             int square = Long.numberOfTrailingZeros(bit);
             PieceType type = board.getPieceTypeAtIndex(square);
-            if (type == null) {
-                remaining ^= bit;
-                continue;
-            }
-            int typeBits = MoveHelper.pieceTypeToInt(type);
-            if (typeBits == KING) {
-                remaining ^= bit;
-                continue;
-            }
-            long mask = 1L << square;
-            if ((enemyAttacks & mask) == 0) {
-                remaining ^= bit;
-                continue;
-            }
-            boolean defended = (friendlyAttacks & mask) != 0;
-            if (!defended) {
-                penalty += HANGING_PENALTIES[typeBits];
-            }
-            if (typeBits > PAWN && (enemyPawnAttacks & mask) != 0) {
-                int defenderValue = defended
-                        ? leastValuableDefenderValue(board, isWhite, square)
-                        : materialValueFor(typeBits);
-                if (defenderValue <= 0) {
-                    defenderValue = materialValueFor(typeBits);
-                }
-                penalty += scalePawnThreatPenalty(typeBits, defenderValue);
+            if (type != null) {
+                int penalty = evaluateSquare(board, isWhite, square, type,
+                        friendlyAttacks, enemyAttacks, enemyPawnAttacks);
+                squarePenalties[side][square] = penalty;
+                sideTotals[side] += penalty;
             }
             remaining ^= bit;
         }
+    }
+
+    private int evaluateSquare(EvaluationContext.BoardView board,
+                               boolean isWhite,
+                               int square,
+                               PieceType type,
+                               long friendlyAttacks,
+                               long enemyAttacks,
+                               long enemyPawnAttacks) {
+        if (type == null) {
+            return 0;
+        }
+        int typeBits = MoveHelper.pieceTypeToInt(type);
+        if (typeBits == KING) {
+            return 0;
+        }
+        long mask = 1L << square;
+        if ((enemyAttacks & mask) == 0) {
+            return 0;
+        }
+        boolean defended = (friendlyAttacks & mask) != 0;
+        int penalty = 0;
+        if (!defended) {
+            penalty += HANGING_PENALTIES[typeBits];
+        }
+        if (typeBits > PAWN && (enemyPawnAttacks & mask) != 0) {
+            int defenderValue = defended
+                    ? leastValuableDefenderValue(board, isWhite, square)
+                    : materialValueFor(typeBits);
+            if (defenderValue <= 0) {
+                defenderValue = materialValueFor(typeBits);
+            }
+            penalty += scalePawnThreatPenalty(typeBits, defenderValue);
+        }
         return penalty;
+    }
+
+    private void refreshScoreCaches() {
+        midgameScoreCache = sideTotals[WHITE] - sideTotals[BLACK];
+        endgameScoreCache = midgameScoreCache;
     }
 
     private static int materialValueFor(int pieceType) {

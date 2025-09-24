@@ -43,6 +43,8 @@ public final class ActivityModule implements EvaluationModule {
     private static final int SOUTH_WEST = 7;
 
     private static final long[][] DIRECTION_RAYS = new long[8][64];
+    private static final int[] DIRECTION_RANK_DELTAS = {1, -1, 0, 0, 1, 1, -1, -1};
+    private static final int[] DIRECTION_FILE_DELTAS = {0, 0, 1, -1, 1, -1, 1, -1};
 
     private static final BishopHelper BISHOP_HELPER = BishopHelper.getInstance();
     private static final RookHelper ROOK_HELPER = RookHelper.getInstance();
@@ -329,25 +331,51 @@ public final class ActivityModule implements EvaluationModule {
     }
 
     private void recalculateAffectedSliders(long affectedMask, long excludeMask) {
-        long sliders = sliderSquares;
-        while (sliders != 0) {
-            int square = Long.numberOfTrailingZeros(sliders);
-            sliders &= sliders - 1;
-
-            if (((excludeMask >>> square) & 1L) != 0) {
-                continue;
-            }
-
+        long slidersToUpdate = collectAffectedSliders(affectedMask) & sliderSquares & ~excludeMask;
+        while (slidersToUpdate != 0) {
+            int square = Long.numberOfTrailingZeros(slidersToUpdate);
+            slidersToUpdate &= slidersToUpdate - 1;
             PieceActivity activity = activities[square];
             if (activity.color < 0) {
                 continue;
             }
+            recalculatePiece(square);
+        }
+    }
 
-            long rayMask = sliderRayMask(activity.pieceType, square);
-            if ((rayMask & affectedMask) != 0) {
-                recalculatePiece(square);
+    private long collectAffectedSliders(long affectedMask) {
+        long sliders = 0L;
+        long mask = affectedMask;
+        while (mask != 0) {
+            int square = Long.numberOfTrailingZeros(mask);
+            mask &= mask - 1;
+            sliders |= (sliderSquares & (1L << square));
+            for (int direction = 0; direction < DIRECTION_RAYS.length; direction++) {
+                sliders |= firstSliderInDirection(square, direction);
             }
         }
+        return sliders;
+    }
+
+    private long firstSliderInDirection(int square, int direction) {
+        int rankDelta = DIRECTION_RANK_DELTAS[direction];
+        int fileDelta = DIRECTION_FILE_DELTAS[direction];
+        int rank = square / 8 + rankDelta;
+        int file = square % 8 + fileDelta;
+        while (rank >= 0 && rank < 8 && file >= 0 && file < 8) {
+            int target = rank * 8 + file;
+            long mask = 1L << target;
+            if ((allPieces & mask) != 0) {
+                PieceActivity activity = activities[target];
+                if (activity.color >= 0 && isSlider(activity.pieceType)) {
+                    return mask;
+                }
+                break;
+            }
+            rank += rankDelta;
+            file += fileDelta;
+        }
+        return 0L;
     }
 
     private long sliderRayMask(int pieceType, int square) {
