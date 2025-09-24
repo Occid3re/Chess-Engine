@@ -63,11 +63,11 @@ public class BestMoveSearchTest {
                 },
                 new Object[]{
                         "3r2k1/pppq1ppp/2n2n2/1N2P3/5Qb1/5N2/PPP1PPPP/2K2B1R w - - 5 15",
-                        List.of("Nc3")
+                        List.of("Nc3", "Nd6")
                 },
                 new Object[]{
                         "3r2k1/pp3p2/3B1b2/3p1p1p/8/2P5/PP3PPP/3R2K1 w - - 2 27",
-                        List.of("Bc5")
+                        List.of("Bc5", "Bc7")
                 },
                 new Object[]{
                         "r5k1/pb1p2pp/2pP1r2/4Qp2/2p5/q1B2P2/P1P2PPP/1R1R2K1 b - - 7 21",
@@ -76,6 +76,10 @@ public class BestMoveSearchTest {
                 new Object[]{
                         "rnb1k2r/2bp3p/3qpp1n/P5p1/Q1P3P1/PN6/4BPNP/R4RK1 w - - 1 24",
                         List.of("f4")
+                },
+                new Object[]{
+                        "rnb1k2r/2bp3p/3qpp1n/P5p1/Q1P3P1/PN5P/4BPN1/R4RK1 b - - 0 24",
+                        List.of("Qh2")
                 },
                 new Object[]{
                         "2k5/p1p4p/2p1p3/8/8/8/P1Pr1PPP/1R4K1 w - - 3 23",
@@ -88,9 +92,99 @@ public class BestMoveSearchTest {
                 new Object[]{
                         "r1bqkb1r/pppppppp/2n2n2/8/2PP4/2N5/PP2PPPP/R1BQKBNR b KQkq - 2 3",
                         List.of("e5", "d5")
+                },
+                new Object[]{
+                        "3rk2r/1bqpbppp/p1n1p3/1p2P3/5Bn1/2NQ1N2/PPP1BPPP/R2R2K1 w k - 5 14",
+                        List.of("Ne4")
+                },
+                new Object[]{
+                        "2r1k2r/ppPb1ppp/4n3/3N4/2P1P3/2PB4/5PPP/4K2R w K - 3 24",
+                        List.of("O-O", "e2", "f4")
+                },
+                new Object[]{
+                        "2r1k2r/ppPb1ppp/4nN2/8/2P1P3/2PB4/5PPP/4K2R b K - 4 24",
+                        List.of("gxf6")
+                },
+                new Object[]{
+                        "2r1k2r/ppPb1p1p/4np2/8/2P1P3/2PB4/5PPP/4K2R w K - 0 25",
+                        List.of("Kd2", "O-O")
+                },
+                new Object[]{
+                        "r1bqk2r/ppp2ppp/2p2n2/2b3B1/4P3/3P4/PPP2PPP/RN1QKB1R b KQkq - 2 6",
+                        List.of("Nxe4")
+                },
+                new Object[]{
+                        "8/1p6/2k2P1p/P2p4/3p4/2p1n3/2P3P1/6K1 b - - 0 38",
+                        List.of("Kd6", "Kd7", "d3")
+                },
+                new Object[]{
+                        "1k1r2r1/ppp2ppp/5n2/P1b1p3/R6P/1P2p1P1/2PBNq2/Q2K3R b - - 1 20",
+                        List.of("Rxd2")
+                },
+                new Object[]{
+                        "1k1r4/ppp2p1p/6p1/P1Pq4/6QP/4p1P1/2PpN3/3K2R1 b - - 0 30",
+                        List.of("Qa2")
+                },
+                new Object[]{
+                        "r3kb1r/2p1pppp/2nq4/p2p1b2/B2P4/2P1BN2/2P2PPP/R2Q1RK1 b kq - 0 12",
+                        List.of("Bd7")
+                },
+                new Object[]{
+                        "r3kb1r/2p1pppp/2n4B/p2p1b2/B2P4/2P2N2/2P2PPP/R2Q1RK1 b kq - 0 13",
+                        List.of("Bd7")
+                },
+                new Object[]{
+                        "2r3k1/pQ1R1ppp/4p3/8/8/2P5/P4PPP/4R1K1 b - - 2 25",
+                        List.of("Rf8")
+                },
+                new Object[]{
+                        "6r1/1pk2p1p/p3p3/b3P1p1/P1p5/1q6/8/K1Br4 b - - 13 38",
+                        List.of("Rxc1", "Bc3")
+                },
+                new Object[]{
+                        "1r4k1/5p2/3p2p1/P2q4/6Q1/2R1PR1P/2P3KP/1r6 w - - 2 36",
+                        List.of("Rc8")
+                },
+                new Object[]{
+                        "r2qkb1r/1b1n1pp1/p2p1n2/1pp3N1/3BP2p/2NB4/PPP1QPPP/R4RK1 w kq - 0 14",
+                        List.of("e5")
+                },
+                new Object[]{
+                        "r2q1rk1/ppp1bppp/4b3/4p3/1nP1N3/P2P2P1/4PPBP/1RBQ1RK1 b - - 0 14",
+                        List.of("Nc6")
+                },
+                new Object[]{
+                        "1r4k1/p5pp/2n4q/5Q2/P6P/2B2P2/1PP1R1K1/r7 b - - 0 32",
+                        List.of("Rd1", "Qg6")
+                },
+                new Object[]{
+                        "rn2kb1r/pp2pppp/5q2/1p6/2b3Q1/4B2P/PP3PP1/RN2K1NR b KQkq - 1 12",
+                        List.of("Nc6", "e6")
+                },
+                new Object[]{
+                        "r1b3kr/2b2p2/2p1q2p/pp4pN/6P1/2Q1pP1P/4B1K1/3R4 b - - 5 34",
+                        List.of("Qe5", "f6", "Rh7")
+                },
+                new Object[]{
+                        "r2q1knr/2p2ppp/2B1p3/3p4/3P3P/b3PPB1/1PP2PK1/R2Q1R2 w - - 1 17",
+                        List.of("Bxa8")
+                },
+                new Object[]{
+                        "r4rk1/ppp2ppp/2nbpq2/1B6/3P4/2P1P3/PB1NQPbP/R3K1R1 b Q - 1 13",
+                        List.of("Bh3")
+                },
+                new Object[]{
+                        "r4rk1/ppp2ppp/2nbp3/1B6/3P3q/2P1P3/PB1NQPRP/2KR4 b - - 2 15",
+                        List.of("Ne7", "g6", "a6","Qd8")
+                },
+                new Object[]{
+                        "r1b2rk1/ppqp2p1/1p2p2p/4nnNQ/8/P2B4/1PP2PPP/R1B1R1K1 w - - 0 17",
+                        List.of("Bf4", "Ne4")
+                },
+                new Object[]{
+                        "2kr3r/2p1qp1p/2p1pnpP/pN1p4/3P4/7P/PPPQPP2/R3KB1R w KQ - 0 14",
+                        List.of("Nc3")
                 }
-
-
         );
     }
 

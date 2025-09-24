@@ -16,40 +16,40 @@ public class BishopHelper {
 
     public static final int[] BISHOP_MIDGAME_POSITIONAL_VALUES = {
             // R1
-            -20,-10,-10,-10,-10,-10,-10,-20,
+            -20, -10, -10, -5, -5, -10, -10, -20,
             // R2
-            -10,  0,  0,  0,  0,  0,  0,-10,
+            -5, 5, 0, 10, 10, 0, 5, -5,
             // R3
-            -10,  0,  5, 10, 10,  5,  0,-10,
+            -5, 0, 10, 15, 15, 10, 0, -5,
             // R4
-            -10,  5,  5, 10, 10,  5,  5,-10,
+            -5, 5, 15, 20, 20, 15, 5, -5,
             // R5
-            -10,  0, 10, 10, 10, 10,  0,-10,
+            -5, 10, 15, 20, 20, 15, 10, -5,
             // R6
-            -10, 10, 10, 10, 10, 10, 10,-10,
+            -5, 0, 15, 15, 15, 15, 0, -5,
             // R7
-            -10,  5,  0,  0,  0,  0,  5,-10,
+            -5, 5, 0, 10, 10, 0, 5, -5,
             // R8
-            -20,-10,-10,-10,-10,-10,-10,-20
+            -20, -10, -10, -5, -5, -10, -10, -20
     };
 
     public static final int[] BISHOP_ENDGAME_POSITIONAL_VALUES = {
             // R1
-            -20,-10,-10,-10,-10,-10,-10,-20,
+            -15, -10, -5, -5, -5, -5, -10, -15,
             // R2
-            -10,  0,  0,  0,  0,  0,  0,-10,
+            -5, 0, 10, 10, 10, 10, 0, -5,
             // R3
-            -10,  0,  5, 10, 10,  5,  0,-10,
+            -5, 10, 15, 20, 20, 15, 10, -5,
             // R4
-            -10,  5,  5, 10, 10,  5,  5,-10,
+            -5, 10, 20, 25, 25, 20, 10, -5,
             // R5
-            -10,  0, 10, 10, 10, 10,  0,-10,
+            -5, 10, 20, 25, 25, 20, 10, -5,
             // R6
-            -10, 10, 10, 10, 10, 10, 10,-10,
+            -5, 10, 15, 20, 20, 15, 10, -5,
             // R7
-            -10,  5,  0,  0,  0,  0,  5,-10,
+            -5, 0, 10, 10, 10, 10, 0, -5,
             // R8
-            -20,-10,-10,-10,-10,-10,-10,-20
+            -15, -10, -5, -5, -5, -5, -10, -15
     };
 
     // Bishop directions
@@ -286,12 +286,7 @@ public class BishopHelper {
         }
 
         // If we get here, the current in-memory table should match; rebuild if size differs.
-        if (bishopAttacks[square] == null || bishopAttacks[square].length != size) {
-            bishopAttacks[square] = trial;
-        } else {
-            // Ensure table aligns; if not, replace to avoid false negatives in tests.
-            bishopAttacks[square] = trial;
-        }
+        bishopAttacks[square] = trial;
         return true;
     }
 
