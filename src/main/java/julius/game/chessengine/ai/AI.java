@@ -217,7 +217,8 @@ public class AI {
         this.threadHeuristics = ThreadLocal.withInitial(() -> new Heuristics(maxDepth));
 
         rebuildSearchPool(this.searchThreads);
-
+        int ttMbProp = Integer.getInteger("chessengine.tt.mb", hashSizeMb);
+        setHashSizeMb(ttMbProp);
         this.mainEngine.setOnPositionChanged(_ -> updateBoardStateHash());
     }
 

@@ -207,15 +207,47 @@ def build_engine_cmd() -> List[str]:
     if not jar:
         fail(f"[-] No chess-engine-*-uci.jar found in {JAR_DIR}")
 
+    # ---- Tunables via env ----
+    xms = os.environ.get("JAVA_XMS", "2048m")
+    xmx = os.environ.get("JAVA_XMX", xms)  # keep heap fixed to avoid resize pauses
+    # JDK 25: prefer G1 by default (let ergonomics pick it); allow opt-in Parallel
+    gc_pref = os.environ.get("JAVA_GC", "").lower()  # "", "g1", "parallel", "serial", "shenandoah", "zgc"
+    active_procs = os.environ.get("JAVA_ACTIVE_PROCESSORS")  # e.g., "6"
+    appcds_file = os.environ.get("JAVA_APPCDS", "")          # e.g., r"C:\path\appcds.jsa"
+    share_mode = os.environ.get("JAVA_XSHARE", "auto")       # "auto" (JDK default), "on", or "off"
+    extra_vm = shlex.split(os.environ.get("JAVA_EXTRA_OPTS", ""))
+
     java_opts = [
+        f"-Xms{xms}",
+        f"-Xmx{xmx}",
         f"-Dchessengine.searchThreads={SEARCH_THREADS}",
         f"-Dchessengine.lazySmpThreads={LAZY_SMP_THREADS}",
         f"-Dchessengine.rootParallelLimit={ROOT_PAR_LIMIT}",
         "-Dlogging.level.root=INFO",
+        f"-Xshare:{share_mode}",
     ]
 
-    # Note: with -jar the main class argument is ignored; drop it.
+    # Optional GC override (default: let JDK 25 pick G1)
+    gc_map = {
+        "g1": "-XX:+UseG1GC",
+        "parallel": "-XX:+UseParallelGC",
+        "serial": "-XX:+UseSerialGC",
+        "shenandoah": "-XX:+UseShenandoahGC",
+        "zgc": "-XX:+UseZGC",
+    }
+    if gc_pref in gc_map:
+        java_opts.append(gc_map[gc_pref])
+
+    if active_procs:
+        java_opts.append(f"-XX:ActiveProcessorCount={active_procs}")
+
+    if appcds_file:
+        java_opts.append(f"-XX:SharedArchiveFile={appcds_file}")
+
+    java_opts.extend(extra_vm)
+
     return [JAVA_EXE, *java_opts, "-jar", str(jar)]
+
 
 
 def _make_retry():
