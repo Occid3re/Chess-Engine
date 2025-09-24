@@ -1817,10 +1817,12 @@ public class AI {
             // SEE pruning for losing captures/quiets (keep checks/promotions).
             // Only consider when NOT in check.
             boolean seePruneCandidate = !inCheckAtNode && !isPromotion;
+            boolean isRecapture = isCapture && prevMove >= 0
+                    && MoveHelper.deriveToIndex(prevMove) == to;
             if (seePruneCandidate) {
                 seeGain = seeCache.computeIfAbsent(move, simulatorEngine::see);
                 seeEvaluated = true;
-                if (seeGain < 0) {
+                if (seeGain < 0 && !isRecapture) {
                     simulatorEngine.performMove(move);
                     boolean givesCheckTmp = isSideInCheck(simulatorEngine, false);
                     simulatorEngine.undoLastMove();
@@ -2043,10 +2045,12 @@ public class AI {
             // SEE pruning for losing captures/quiets (keep checks/promotions).
             // Only consider when NOT in check.
             boolean seePruneCandidate = !inCheckAtNode && !isPromotion;
+            boolean isRecapture = isCapture && prevMove >= 0
+                    && MoveHelper.deriveToIndex(prevMove) == to;
             if (seePruneCandidate) {
                 seeGain = seeCache.computeIfAbsent(move, simulatorEngine::see);
                 seeEvaluated = true;
-                if (seeGain < 0) {
+                if (seeGain < 0 && !isRecapture) {
                     simulatorEngine.performMove(move);
                     boolean givesCheckTmp = isSideInCheck(simulatorEngine, true);
                     simulatorEngine.undoLastMove();
