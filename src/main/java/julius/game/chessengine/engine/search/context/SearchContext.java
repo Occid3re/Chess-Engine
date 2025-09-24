@@ -24,7 +24,7 @@ import java.util.Arrays;
 public final class SearchContext {
 
     static final int SEE_CACHE_SIZE = 1 << 10; // 1024 entries
-    static final int SEE_CACHE_MASK = SEE_CACHE_SIZE - 1;
+    public static final int SEE_CACHE_MASK = SEE_CACHE_SIZE - 1;
 
     static final int NUM_KILLER_MOVES = 2;
     static final int MAX_MOVE_LIST_SIZE = 218; // legal move upper bound
@@ -488,6 +488,22 @@ public final class SearchContext {
                 snapshot[i] = Arrays.copyOf(killers[i], killers[i].length);
             }
             return snapshot;
+        }
+
+        public int[][] killers() {
+            return killers;
+        }
+
+        public int[][] history() {
+            return history;
+        }
+
+        public int[][] continuation() {
+            return continuation;
+        }
+
+        public int[][] counter() {
+            return counter;
         }
     }
 }
