@@ -32,6 +32,7 @@ public class UciHandler {
     private final AI ai;
     private final Consumer<String> output;
     private final Supplier<Boolean> running;
+    private final UciLogger logger;
     private Thread searchThread;
     private volatile boolean ponderActive = false;
     private volatile boolean ponderShouldOutputMove = false;
@@ -40,14 +41,19 @@ public class UciHandler {
     private final AtomicLong lastInfoNanos = new AtomicLong(0L);
 
     public UciHandler() {
-        this(System.out::println, () -> true);
+        this(System.out::println, () -> true, null);
     }
 
     public UciHandler(Consumer<String> output, Supplier<Boolean> running) {
+        this(output, running, null);
+    }
+
+    public UciHandler(Consumer<String> output, Supplier<Boolean> running, UciLogger logger) {
         this.engine = new Engine();
         this.ai = new AI(engine);
         this.output = Objects.requireNonNull(output, "output");
         this.running = Objects.requireNonNull(running, "running");
+        this.logger = logger;
         registerOptions();
     }
 
@@ -59,26 +65,51 @@ public class UciHandler {
         if (line == null || line.isEmpty()) {
             return true;
         }
+        logEvent("received: " + line);
         String[] tokens = line.trim().split("\\s+");
         String cmd = tokens[0];
         switch (cmd) {
-            case "uci" -> sendId();
+            case "uci" -> {
+                logEvent("command: uci");
+                sendId();
+            }
             case "isready" -> {
+                logEvent("command: isready");
                 stop();
                 output.accept("readyok");
             }
-            case "ucinewgame" -> newGame();
-            case "position" -> setPosition(tokens);
-            case "go" -> go(tokens);
-            case "stop" -> stop();
-            case "ponderhit" -> ponderHit();
-            case "setoption" -> setOption(tokens);
+            case "ucinewgame" -> {
+                logEvent("command: ucinewgame");
+                newGame();
+            }
+            case "position" -> {
+                logEvent("command: position");
+                setPosition(tokens);
+            }
+            case "go" -> {
+                logEvent("command: go");
+                go(tokens);
+            }
+            case "stop" -> {
+                logEvent("command: stop");
+                stop();
+            }
+            case "ponderhit" -> {
+                logEvent("command: ponderhit");
+                ponderHit();
+            }
+            case "setoption" -> {
+                logEvent("command: setoption");
+                setOption(tokens);
+            }
             case "quit" -> {
                 stop();
+                logEvent("command: quit");
                 return false;
             }
             default -> {
                 // Unknown commands are ignored for now
+                logEvent("command: unknown - " + cmd);
             }
         }
         return true;
@@ -92,6 +123,12 @@ public class UciHandler {
                     opt.name, opt.type, opt.defaultValue, opt.min, opt.max));
         }
         output.accept("uciok");
+    }
+
+    private void logEvent(String message) {
+        if (logger != null) {
+            logger.logEvent(message);
+        }
     }
 
     private void registerOptions() {
