@@ -65,6 +65,19 @@ public class MoveList {
         isStringRepresentationStale = true;
     }
 
+    public void copyFrom(MoveList source) {
+        if (source == null) {
+            clear();
+            return;
+        }
+        if (this == source) {
+            return;
+        }
+        this.moveCount = source.moveCount;
+        System.arraycopy(source.moves, 0, this.moves, 0, source.moveCount);
+        isStringRepresentationStale = true;
+    }
+
     /**
      * Replace the move at the given index.
      * Marks the cached string representation as stale.

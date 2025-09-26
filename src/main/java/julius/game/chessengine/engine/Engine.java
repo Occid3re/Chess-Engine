@@ -121,6 +121,7 @@ public class Engine {
 
     private boolean legalMovesNeedUpdate = true;
     private MoveList legalMoves;
+    private final MoveList cacheSnapshotBuffer = new MoveList();
 
     @Getter
     private ArrayList<Integer> line = new ArrayList<>();
@@ -165,6 +166,13 @@ public class Engine {
         onPositionChanged.accept(getBoardStateHash());
     }
 
+    private MoveList ensureLegalMovesBuffer() {
+        if (legalMoves == null) {
+            legalMoves = new MoveList();
+        }
+        return legalMoves;
+    }
+
     /** Expose BitBoard's SEE to callers (AI). */
     public int see(int move) {
         synchronized (boardLock) {
@@ -178,12 +186,10 @@ public class Engine {
 
     public MoveList getAllLegalMoves() {
         synchronized (boardLock) {
+            MoveList buffer = ensureLegalMovesBuffer();
             if (gameState.isGameOver()) {
-                if (legalMoves == null) {
-                    legalMoves = new MoveList();  // Create only if null
-                } else {
-                    legalMoves.clear();  // Clear existing list instead of creating a new one
-                }
+                buffer.clear();
+                legalMovesNeedUpdate = false;
             } else if (legalMovesNeedUpdate) {
                 generateLegalMoves();
             }
@@ -236,11 +242,7 @@ public class Engine {
             // For terminal draw states (e.g., fifty-move rule) skip move generation entirely so
             // callers observe an empty legal move list.
             if (gameState.isFiftyMoveRule() || gameState.isThreefoldRepetition()) {
-                if (legalMoves == null) {
-                    legalMoves = new MoveList();
-                } else {
-                    legalMoves.clear();
-                }
+                ensureLegalMovesBuffer().clear();
                 legalMovesNeedUpdate = false;
                 gameState.setState(GameStateEnum.DRAW);
             } else {
@@ -279,14 +281,15 @@ public class Engine {
 
             // Use cached result if available
             MoveList cached = legalMovesCache.get(boardStateHash);
+            MoveList buffer = ensureLegalMovesBuffer();
+            buffer.clear();
             if (cached != null) {
-                this.legalMoves = new MoveList(cached);
+                buffer.copyFrom(cached);
                 legalMovesNeedUpdate = false;
                 return;
             }
 
             if (gameState.isGameOver()) {
-                this.legalMoves = new MoveList();
                 legalMovesNeedUpdate = false;
                 return;
             }
@@ -295,22 +298,21 @@ public class Engine {
             MoveList moves = bitBoard.getAllCurrentPossibleMoves();
 
             // Filter in-place by making/unmaking on the SAME bitBoard (no BitBoard copy)
-            MoveList legal = new MoveList();
             for (int i = 0; i < moves.size(); i++) {
                 int move = moves.getMove(i);
 
                 bitBoard.performMove(move);
                 // If the mover's king is not left in check, the move is legal
                 if (!bitBoard.isInCheck(MoveHelper.isWhitesMove(move))) {
-                    legal.add(move);
+                    buffer.add(move);
                 }
                 bitBoard.undoMove(move);
             }
 
-            this.legalMoves = legal;
             legalMovesNeedUpdate = false;
             // Store a clone to keep the cache immutable from callers' perspective.
-            legalMovesCache.put(boardStateHash, new MoveList(legal));
+            cacheSnapshotBuffer.copyFrom(buffer);
+            legalMovesCache.put(boardStateHash, new MoveList(cacheSnapshotBuffer));
 
             int size = legalMovesCache.size();
             if (size > CACHE_CFG.maxSize) {
