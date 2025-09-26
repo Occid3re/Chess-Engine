@@ -4,6 +4,8 @@ param(
     [int]$MoveTimeMs = 2000,
     [int]$PlyCount = 80,
     [string]$JfrDuration = "180s",
+    [int]$EngineStartupTimeoutMs = 60000,
+    [int]$ReadyOkTimeoutMs = 15000,
     [switch]$EchoEngine,   # show engine stdout live
     [switch]$DryRun        # just print the computed java command and exit
 )
@@ -72,6 +74,8 @@ $profileFullPath = Resolve-FullPath -PathValue $ProfileDir
 
 if ($MoveTimeMs -le 0) { throw "MoveTimeMs must be greater than zero." }
 if ($PlyCount   -le 0) { throw "PlyCount must be greater than zero." }
+if ($EngineStartupTimeoutMs -le 0) { throw "EngineStartupTimeoutMs must be greater than zero." }
+if ($ReadyOkTimeoutMs -le 0) { throw "ReadyOkTimeoutMs must be greater than zero." }
 
 $timestamp   = Get-Date -Format 'yyyyMMdd-HHmmss'
 $jfrFile     = Join-Path $profileFullPath "uci-$timestamp.jfr"
@@ -103,6 +107,8 @@ Write-Host "  Engine jar    : $jarFullPath"
 Write-Host "  JFR duration  : $JfrDuration"
 Write-Host "  Move time (ms): $MoveTimeMs"
 Write-Host "  Ply count     : $PlyCount"
+Write-Host "  Startup wait  : $EngineStartupTimeoutMs ms"
+Write-Host "  Ready wait    : $ReadyOkTimeoutMs ms"
 Write-Host "  Profile dir   : $profileFullPath"
 Write-Host "  Log file      : $logFile"
 
@@ -257,19 +263,37 @@ try {
     $process.BeginErrorReadLine()
 
     # ---- Handshake using async queue ----
-    Send-UciCommand -Command 'uci'
-    if (-not (Wait-ForRegexWithTimeout -Pattern '^uciok$' -Context 'uci handshake' -TimeoutMs 10000)) {
-        throw "Timeout waiting for uciok."
+    $startupTimeout = [Math]::Max($EngineStartupTimeoutMs, 1000)
+    $startupWatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $lastUciSentAt = -1000
+    $uciOkResult = $null
+
+    while ($startupWatch.ElapsedMilliseconds -lt $startupTimeout) {
+        if ($startupWatch.ElapsedMilliseconds - $lastUciSentAt -ge 1000) {
+            Send-UciCommand -Command 'uci'
+            $lastUciSentAt = $startupWatch.ElapsedMilliseconds
+        }
+
+        $remaining = $startupTimeout - $startupWatch.ElapsedMilliseconds
+        if ($remaining -le 0) { break }
+
+        $sliceTimeout = [Math]::Min(1000, $remaining)
+        $uciOkResult = Wait-ForRegexWithTimeout -Pattern '^uciok$' -Context 'uci handshake' -TimeoutMs $sliceTimeout
+        if ($uciOkResult) { break }
+    }
+
+    if (-not $uciOkResult) {
+        throw "Timeout waiting for uciok after $EngineStartupTimeoutMs ms."
     }
 
     Send-UciCommand -Command 'isready'
-    if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context 'engine readiness' -TimeoutMs 10000)) {
+    if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context 'engine readiness' -TimeoutMs $ReadyOkTimeoutMs)) {
         throw "Timeout waiting for readyok."
     }
 
     Send-UciCommand -Command 'ucinewgame'
     Send-UciCommand -Command 'isready'
-    if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context 'new game readiness' -TimeoutMs 10000)) {
+    if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context 'new game readiness' -TimeoutMs $ReadyOkTimeoutMs)) {
         throw "Timeout waiting for readyok after ucinewgame."
     }
 
@@ -308,7 +332,7 @@ try {
         $moveHistory.Add($bestMove)
 
         Send-UciCommand -Command 'isready'
-        if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context ("post-move readiness for ply $ply") -TimeoutMs 10000)) {
+        if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context ("post-move readiness for ply $ply") -TimeoutMs $ReadyOkTimeoutMs)) {
             throw "Timeout waiting for readyok after ply $ply."
         }
     }
