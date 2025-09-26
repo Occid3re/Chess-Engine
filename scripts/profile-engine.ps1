@@ -1,10 +1,6 @@
 param(
-    [Parameter(Mandatory = $true)]
     [string]$JarPath,
-
-    [Parameter(Mandatory = $true)]
     [string]$ProfileDir,
-
     [int]$MoveTimeMs = 2000,
     [int]$PlyCount = 80,
     [string]$JfrDuration = "180s"
@@ -16,6 +12,50 @@ $ErrorActionPreference = 'Stop'
 function Resolve-FullPath {
     param([string]$PathValue)
     return [System.IO.Path]::GetFullPath((Resolve-Path -LiteralPath $PathValue).ProviderPath)
+}
+
+function Resolve-DefaultPaths {
+    $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).ProviderPath
+    $targetDir   = Join-Path $projectRoot 'target'
+    $profilesDir = Join-Path $projectRoot 'profiles'
+
+    return [PSCustomObject]@{
+        ProjectRoot = $projectRoot
+        TargetDir   = $targetDir
+        ProfilesDir = $profilesDir
+    }
+}
+
+function Get-LatestUciJar {
+    param([string]$TargetDir)
+
+    $regex = [regex]'chess-engine-(\d+(?:\.\d+)*)-uci\.jar$'
+    $candidates = Get-ChildItem -LiteralPath $TargetDir -Filter 'chess-engine-*-uci.jar' -File -ErrorAction SilentlyContinue
+    if (-not $candidates) { return $null }
+
+    $sorted = $candidates | Sort-Object -Property @{ Expression = {
+            $match = $regex.Match($_.Name)
+            if ($match.Success) {
+                try { return [version]$match.Groups[1].Value } catch { return [version]'0.0.0.0' }
+            }
+            return [version]'0.0.0.0'
+        } }, @{ Expression = { $_.LastWriteTimeUtc } }
+
+    return $sorted[-1].FullName
+}
+
+$defaults = Resolve-DefaultPaths
+
+if (-not $JarPath -or [string]::IsNullOrWhiteSpace($JarPath)) {
+    $latestJar = Get-LatestUciJar -TargetDir $defaults.TargetDir
+    if (-not $latestJar) {
+        throw "No chess-engine-*-uci.jar found in '$($defaults.TargetDir)'. Build the project before running the profiler."
+    }
+    $JarPath = $latestJar
+}
+
+if (-not $ProfileDir -or [string]::IsNullOrWhiteSpace($ProfileDir)) {
+    $ProfileDir = $defaults.ProfilesDir
 }
 
 if (-not (Test-Path -LiteralPath $JarPath)) {
@@ -44,14 +84,76 @@ Write-Host "  Engine jar    : $jarFullPath"
 Write-Host "  JFR duration  : $JfrDuration"
 Write-Host "  Move time (ms): $MoveTimeMs"
 Write-Host "  Ply count     : $PlyCount"
+Write-Host "  Profile dir   : $profileFullPath"
 
 # Robustes JFR-Argument mit korrekt gequoteter Filename-Komponente
 $startFlightRecording = ('-XX:StartFlightRecording=name=uci,settings=profile,duration={0},filename="{1}"' -f $JfrDuration, $jfrFile)
 
 # ----> WICHTIG: In Windows PowerShell 5.1 .Arguments als String setzen (kein .ArgumentList vorhanden)
+$javaXms              = if ($env:JAVA_XMS) { $env:JAVA_XMS } else { '8g' }
+$javaXmx              = if ($env:JAVA_XMX) { $env:JAVA_XMX } else { '8g' }
+$javaGc               = if ($env:JAVA_GC)  { $env:JAVA_GC }  else { 'g1' }
+$javaActiveProcessors = if ($env:JAVA_ACTIVE_PROCESSORS) { $env:JAVA_ACTIVE_PROCESSORS } else { '24' }
+$javaExtraOpts        = if ($env:JAVA_EXTRA_OPTS) { $env:JAVA_EXTRA_OPTS } else { '-XX:MaxGCPauseMillis=20 -XX:+AlwaysPreTouch -XX:+UseNUMA -Dchessengine.tt.mb=256 -Dchessengine.uci.info.minIntervalMs=120 -Dchessengine.uci.info.maxPvLen=12' }
+
+$chessThreads   = if ($env:CHESSENGINE_THREADS) { $env:CHESSENGINE_THREADS } else { '24' }
+$lazyThreads    = if ($env:CHESSENGINE_LAZY_THREADS) { $env:CHESSENGINE_LAZY_THREADS } else { '8' }
+$rootParLimit   = if ($env:CHESSENGINE_ROOT_PAR_LIMIT) { $env:CHESSENGINE_ROOT_PAR_LIMIT } else { '48' }
+
+Write-Host "  Search threads: $chessThreads"
+Write-Host "  Lazy threads  : $lazyThreads"
+Write-Host "  Root fanout   : $rootParLimit"
+
+function Split-OptionString {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return @() }
+    return $Value -split '\s+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+}
+
+function Convert-GcOption {
+    param([string]$Value)
+    switch -Regex ($Value) {
+        '^g1$'         { return '-XX:+UseG1GC' }
+        '^shenandoah$' { return '-XX:+UseShenandoahGC' }
+        '^zgc$'        { return '-XX:+UseZGC' }
+        default        { return $Value }
+    }
+}
+
+$javaOpts = @()
+$javaOpts += "-Xms$javaXms"
+$javaOpts += "-Xmx$javaXmx"
+if (-not [string]::IsNullOrWhiteSpace($javaGc)) {
+    $javaOpts += (Convert-GcOption -Value $javaGc)
+}
+if (-not [string]::IsNullOrWhiteSpace($javaActiveProcessors)) {
+    $javaOpts += "-XX:ActiveProcessorCount=$javaActiveProcessors"
+}
+$javaOpts += Split-OptionString -Value $javaExtraOpts
+$javaOpts += "-Dchessengine.searchThreads=$chessThreads"
+$javaOpts += "-Dchessengine.lazySmpThreads=$lazyThreads"
+$javaOpts += "-Dchessengine.rootParallelLimit=$rootParLimit"
+$javaOpts += '-Dlogging.level.root=INFO'
+
+function Join-Arguments {
+    param([string[]]$Arguments)
+    return ($Arguments | ForEach-Object {
+            if ($_ -match '[\s\"]') {
+                '"' + ($_ -replace '"', '""') + '"'
+            }
+            else { $_ }
+        }) -join ' '
+}
+
+$allArgs = @()
+$allArgs += $javaOpts
+$allArgs += $startFlightRecording
+$allArgs += '-jar'
+$allArgs += $jarFullPath
+
 $processStartInfo = New-Object System.Diagnostics.ProcessStartInfo
 $processStartInfo.FileName = 'java'
-$processStartInfo.Arguments = "$startFlightRecording -jar `"$jarFullPath`""
+$processStartInfo.Arguments = Join-Arguments -Arguments $allArgs
 $processStartInfo.RedirectStandardInput  = $true
 $processStartInfo.RedirectStandardOutput = $true
 $processStartInfo.RedirectStandardError  = $true
