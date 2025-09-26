@@ -23,8 +23,9 @@ public final class SearchTask {
     private final AtomicBoolean stop = new AtomicBoolean(false);
     private final AtomicReference<BestMoveDepth> best;
     private final AtomicInteger iterationDepth = new AtomicInteger(0);
+    private final Engine rootSnapshot;
 
-    SearchTask(long id, long boardHash, boolean whiteToMove, long deadline, int threadCount) {
+    SearchTask(long id, long boardHash, boolean whiteToMove, long deadline, int threadCount, Engine rootSnapshot) {
         this.id = id;
         this.boardHash = boardHash;
         this.whiteToMove = whiteToMove;
@@ -32,6 +33,7 @@ public final class SearchTask {
         this.completion = new CountDownLatch(Math.max(1, threadCount));
         double initialScore = whiteToMove ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
         this.best = new AtomicReference<>(new BestMoveDepth(-1, initialScore, 0));
+        this.rootSnapshot = rootSnapshot;
     }
 
     long getId() { return id; }
@@ -39,6 +41,7 @@ public final class SearchTask {
     boolean isWhiteToMove() { return whiteToMove; }
     long getDeadline() { return deadline; }
     BestMoveDepth getBest() { return best.get(); }
+    Engine getRootSnapshot() { return rootSnapshot; }
 
     void workerDone() { completion.countDown(); }
     void requestStop() { stop.set(true); }

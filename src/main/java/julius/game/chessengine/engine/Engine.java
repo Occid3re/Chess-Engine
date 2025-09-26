@@ -258,6 +258,22 @@ public class Engine {
         }
     }
 
+    public void copyFrom(Engine other) {
+        Objects.requireNonNull(other, "other engine");
+        synchronized (boardLock) {
+            synchronized (other.boardLock) {
+                this.bitBoard = new BitBoard(other.bitBoard);
+                this.gameState = new GameState(other.gameState);
+                this.line = new ArrayList<>(other.line);
+                this.redoLine = new ArrayList<>(other.redoLine);
+                this.legalMoves = null;
+                this.legalMovesNeedUpdate = true;
+                this.legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
+                this.openingBook = other.openingBook;
+            }
+        }
+    }
+
     public void startNewGame() {
         synchronized (boardLock) {
             bitBoard = new BitBoard();
