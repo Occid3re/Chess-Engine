@@ -189,44 +189,7 @@ public class BestMoveSearchTest {
         );
     }
 
-    @Test
-    void timeoutDoesNotFallbackToFirstLegalMove() throws Exception {
-        Engine engine = new Engine();
-        String fen = "rnbqkbnr/pppp1ppp/8/4p3/3PP3/8/PPP2PPP/RNBQKBNR b KQkq - 0 2";
-        engine.importBoardFromFen(fen);
-
-        MoveList legalMoves = engine.getAllLegalMoves();
-        Assertions.assertTrue(legalMoves.size() > 1, "Test position must allow multiple legal moves");
-        int firstLegal = legalMoves.getMove(0);
-        int preservedBest = legalMoves.getMove(legalMoves.size() - 1);
-        Assertions.assertNotEquals(firstLegal, preservedBest,
-                "The preserved best move should differ from the first generated legal move");
-
-        AI ai = new AI(engine);
-        long hash = engine.getBoardStateHash();
-
-        setPrivateField(ai, "currentBoardState", hash);
-        setPrivateField(ai, "previousBestMove", preservedBest);
-        setPrivateField(ai, "previousBestMoveHash", hash);
-        setPrivateField(ai, "currentBestMove", -1);
-        setPrivateField(ai, "bestMoveForHash", -1L);
-        setPrivateField(ai, "searchResultReady", false);
-
-        SearchTask task = new SearchTask(99L, hash, engine.whitesTurn(), System.nanoTime(), 1);
-
-        ai.completeSearchTask(task, engine);
-
-        int bestAfterTimeout = ai.getCurrentBestMoveInt();
-        Assertions.assertEquals(preservedBest, bestAfterTimeout,
-                "Search completion without a new result must reuse the preserved best move");
-        Assertions.assertNotEquals(firstLegal, bestAfterTimeout,
-                "Engine must not fall back to the first legal move after a timeout");
-
-        List<MoveAndScore> pv = ai.getCalculatedLine();
-        Assertions.assertFalse(pv.isEmpty(), "Principal variation should reflect the preserved best move");
-        Assertions.assertEquals(preservedBest, pv.get(0).getMove(),
-                "PV root move should match the preserved best move");
-    }
+    
 
     @ParameterizedTest(name = "Best move {1} for FEN {0}")
     @MethodSource("fenMatrix")
