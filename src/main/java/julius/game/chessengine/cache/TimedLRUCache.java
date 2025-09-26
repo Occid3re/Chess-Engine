@@ -5,9 +5,11 @@ import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
 
 import java.util.AbstractMap;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 /**
  * A lightweight LRU cache with optional time-based eviction. Keys are
@@ -44,6 +46,7 @@ public class TimedLRUCache<V> {
     private final LongArrayFIFOQueue keyQueue = new LongArrayFIFOQueue();
     private final LongArrayFIFOQueue timeQueue = new LongArrayFIFOQueue();
     private final Object lock = new Object();
+    private volatile Consumer<V> evictionListener = v -> {};
 
     /**
      * @param maxSize maximum number of entries to retain (LRU when exceeded)
@@ -59,6 +62,8 @@ public class TimedLRUCache<V> {
     }
 
     public V get(long key) {
+        List<V> evicted = Collections.emptyList();
+        V value;
         synchronized (lock) {
             Entry<V> entry = map.get(key);
             if (entry == null) {
@@ -68,19 +73,27 @@ public class TimedLRUCache<V> {
             entry.time = now;               // touch (refresh recency)
             keyQueue.enqueue(key);
             timeQueue.enqueue(now);
-            evictLocked(now);
-            return entry.value;
+            evicted = evictLocked(now);
+            value = entry.value;
         }
+        notifyEvicted(evicted);
+        return value;
     }
 
     public void put(long key, V value) {
         long now = System.currentTimeMillis();
+        Entry<V> previous;
+        List<V> evicted = Collections.emptyList();
         synchronized (lock) {
-            map.put(key, new Entry<>(value, now));
+            previous = map.put(key, new Entry<>(value, now));
             keyQueue.enqueue(key);
             timeQueue.enqueue(now);
-            evictLocked(now);
+            evicted = evictLocked(now);
         }
+        if (previous != null) {
+            notifyEvicted(previous.value);
+        }
+        notifyEvicted(evicted);
     }
 
     public boolean containsKey(long key) {
@@ -97,9 +110,11 @@ public class TimedLRUCache<V> {
 
     /** Manually trigger eviction pass (e.g., on timers in higher layers). */
     public void cleanup() {
+        List<V> evicted;
         synchronized (lock) {
-            evictLocked(System.currentTimeMillis());
+            evicted = evictLocked(System.currentTimeMillis());
         }
+        notifyEvicted(evicted);
     }
 
     /** Remove all entries. */
@@ -119,7 +134,8 @@ public class TimedLRUCache<V> {
         return maxAgeMs;
     }
 
-    private void evictLocked(long now) {
+    private List<V> evictLocked(long now) {
+        List<V> evicted = Collections.emptyList();
         // Ensure both queues contain data before accessing their heads to avoid
         // NoSuchElementException when they become unsynchronized.
         while (!keyQueue.isEmpty() && !timeQueue.isEmpty()) {
@@ -141,6 +157,12 @@ public class TimedLRUCache<V> {
                 map.remove(k);
                 keyQueue.dequeueLong();
                 timeQueue.dequeueLong();
+                if (entry != null) {
+                    if (evicted.isEmpty()) {
+                        evicted = new ArrayList<>();
+                    }
+                    evicted.add(entry.value);
+                }
             } else {
                 // Head is current and not expired; LRU is satisfied.
                 break;
@@ -152,6 +174,37 @@ public class TimedLRUCache<V> {
             keyQueue.clear();
             timeQueue.clear();
         }
+        return evicted;
+    }
+
+    private void notifyEvicted(List<V> evicted) {
+        if (evicted == null || evicted.isEmpty()) {
+            return;
+        }
+        Consumer<V> listener = evictionListener;
+        for (V value : evicted) {
+            try {
+                listener.accept(value);
+            } catch (RuntimeException ignored) {
+                // Listener exceptions should not break cache behaviour.
+            }
+        }
+    }
+
+    private void notifyEvicted(V value) {
+        if (value == null) {
+            return;
+        }
+        Consumer<V> listener = evictionListener;
+        try {
+            listener.accept(value);
+        } catch (RuntimeException ignored) {
+            // Listener exceptions should not break cache behaviour.
+        }
+    }
+
+    public void setEvictionListener(Consumer<V> evictionListener) {
+        this.evictionListener = (evictionListener != null) ? evictionListener : v -> {};
     }
 
     public void forEach(BiConsumer<Long, V> action) {
