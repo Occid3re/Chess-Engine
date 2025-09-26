@@ -184,9 +184,10 @@ if ($DryRun) {
 
 # ---------- Globals for process + async queues ----------
 $process = $null
-$stdoutSubscription = $null
-$stderrSubscription = $null
+$stdoutHandler = $null
+$stderrHandler = $null
 $script:stdoutQueue = $null
+$script:stdoutSignal = $null
 
 # ---------- Async wait helper ----------
 function Wait-ForRegexWithTimeout {
@@ -201,11 +202,24 @@ function Wait-ForRegexWithTimeout {
             if ($m.Success) { return [PSCustomObject]@{ Line = $line; Match = $m } }
             continue
         }
+
         if ($TimeoutMs -gt 0 -and $sw.ElapsedMilliseconds -ge $TimeoutMs) { return $null }
         if ($process -and $process.HasExited) {
             throw "Engine terminated unexpectedly while waiting for $Context ($Pattern)."
         }
-        Start-Sleep -Milliseconds 10
+
+        $waitMs = 50
+        if ($TimeoutMs -gt 0) {
+            $remaining = $TimeoutMs - [int]$sw.ElapsedMilliseconds
+            if ($remaining -le 0) { return $null }
+            $waitMs = [Math]::Min($waitMs, $remaining)
+        }
+
+        if ($script:stdoutSignal) {
+            $null = $script:stdoutSignal.WaitOne($waitMs)
+        } else {
+            Start-Sleep -Milliseconds $waitMs
+        }
     }
 }
 
@@ -237,21 +251,27 @@ try {
 
     # Wire up async handlers for stdout/stderr
     $script:stdoutQueue = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
+    $script:stdoutSignal = [System.Threading.AutoResetEvent]::new($false)
 
-    $stdoutSubscription = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -Action {
+    $stdoutHandler = [System.Diagnostics.DataReceivedEventHandler]{
         param($sender,$eventArgs)
         $line = $eventArgs.Data
         if ($null -eq $line) { return }
         $script:stdoutQueue.Enqueue($line) | Out-Null
+        if ($script:stdoutSignal) { $null = $script:stdoutSignal.Set() }
         Write-LogAndMaybeConsole -Channel 'stdout' -Message $line
     }
 
-    $stderrSubscription = Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived -Action {
+    $stderrHandler = [System.Diagnostics.DataReceivedEventHandler]{
         param($sender,$eventArgs)
         $line = $eventArgs.Data
         if ($null -eq $line) { return }
         Write-LogAndMaybeConsole -Channel 'stderr' -Message $line
     }
+
+    $process.EnableRaisingEvents = $true
+    $process.add_OutputDataReceived($stdoutHandler)
+    $process.add_ErrorDataReceived($stderrHandler)
 
     $process.BeginOutputReadLine()
     $process.BeginErrorReadLine()
@@ -347,17 +367,12 @@ finally {
     try { if ($process) { $process.CancelOutputRead() } } catch {}
     try { if ($process) { $process.CancelErrorRead() } } catch {}
     try {
-        if ($stdoutSubscription) {
-            Unregister-Event -SubscriptionId $stdoutSubscription.Id -ErrorAction SilentlyContinue
-            Remove-Event -SourceIdentifier $stdoutSubscription.SourceIdentifier -ErrorAction SilentlyContinue
-        }
+        if ($process -and $stdoutHandler) { $process.remove_OutputDataReceived($stdoutHandler) }
     } catch {}
     try {
-        if ($stderrSubscription) {
-            Unregister-Event -SubscriptionId $stderrSubscription.Id -ErrorAction SilentlyContinue
-            Remove-Event -SourceIdentifier $stderrSubscription.SourceIdentifier -ErrorAction SilentlyContinue
-        }
+        if ($process -and $stderrHandler) { $process.remove_ErrorDataReceived($stderrHandler) }
     } catch {}
+    if ($script:stdoutSignal) { $script:stdoutSignal.Dispose(); $script:stdoutSignal = $null }
     $logWriter.Dispose()
 }
 
