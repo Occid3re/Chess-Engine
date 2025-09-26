@@ -10,6 +10,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:mainThreadId = [System.Threading.Thread]::CurrentThread.ManagedThreadId
 
 function Resolve-FullPath {
     param([string]$PathValue)
@@ -88,14 +89,39 @@ function Write-Log {
     $logWriter.WriteLine(("[{0}] {1}" -f @($Channel, $Message)))
 }
 
+function Write-ConsoleLine {
+    param(
+        [string]$Message,
+        [switch]$ErrorStream
+    )
+
+    $currentThreadId = [System.Threading.Thread]::CurrentThread.ManagedThreadId
+    $isMainThread    = ($currentThreadId -eq $script:mainThreadId)
+
+    if ($ErrorStream) {
+        if ($isMainThread) {
+            Write-Warning $Message
+        } else {
+            [Console]::Error.WriteLine($Message)
+        }
+    }
+    else {
+        if ($isMainThread) {
+            Write-Host $Message
+        } else {
+            [Console]::WriteLine($Message)
+        }
+    }
+}
+
 function Write-LogAndMaybeConsole {
     param([string]$Channel,[string]$Message)
     Write-Log -Channel $Channel -Message $Message
     # Always echo UCI traffic by default (less surprising)
-    if ($Channel -eq 'stderr') { Write-Warning $Message; return }
-    if ($Channel -eq 'stdout') { Write-Host    $Message; return }
-    if ($Channel -eq 'stdin')  { Write-Host    $Message; return }
-    if ($EchoEngine) { Write-Host $Message }
+    if ($Channel -eq 'stderr') { Write-ConsoleLine -Message $Message -ErrorStream; return }
+    if ($Channel -eq 'stdout') { Write-ConsoleLine -Message $Message; return }
+    if ($Channel -eq 'stdin')  { Write-ConsoleLine -Message $Message; return }
+    if ($EchoEngine) { Write-ConsoleLine -Message $Message }
 }
 
 Write-Host "Launching engine for profiling..."
