@@ -182,10 +182,9 @@ if ($DryRun) {
     return
 }
 
-# ---------- Globals for threads/queues ----------
+# ---------- Globals for async handlers/queues ----------
 $process = $null
 $stderrThread = $null
-$stdoutThread = $null
 $script:outQueue = $null
 
 # ---------- Handshake (synchronous, reliable) ----------
@@ -297,21 +296,16 @@ try {
         throw "Timeout waiting for readyok after ucinewgame (sync handshake)."
     }
 
-    # ---- Switch to threaded STDOUT for the long-running loop ----
+    # ---- Switch to async STDOUT handler for the long-running loop ----
     $script:outQueue = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
-    $stdoutThread = [System.Threading.Thread]::new([System.Threading.ThreadStart]{
-        try {
-            while (-not $process.StandardOutput.EndOfStream) {
-                $line = $process.StandardOutput.ReadLine()
-                if ($null -ne $line) {
-                    Write-LogAndMaybeConsole -Channel 'stdout' -Message $line
-                    $script:outQueue.Enqueue($line) | Out-Null
-                }
-            }
-        } catch {}
+    $null = $process.add_OutputDataReceived({
+        param($sender, $args)
+        if ($null -ne $args.Data) {
+            Write-LogAndMaybeConsole -Channel 'stdout' -Message $args.Data
+            $script:outQueue.Enqueue($args.Data)
+        }
     })
-    $stdoutThread.IsBackground = $true
-    $stdoutThread.Start()
+    $process.BeginOutputReadLine()
 
     # ---- Self-play loop ----
     for ($ply = 1; $ply -le $PlyCount; $ply++) {
@@ -385,7 +379,7 @@ catch {
 }
 finally {
     try { if ($stderrThread -and $stderrThread.IsAlive) { $stderrThread.Join() } } catch {}
-    try { if ($stdoutThread -and $stdoutThread.IsAlive) { $stdoutThread.Join() } } catch {}
+    try { if ($process) { $process.CancelOutputRead() } } catch {}
     $logWriter.Dispose()
 }
 
