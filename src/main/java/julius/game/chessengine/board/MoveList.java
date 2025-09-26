@@ -3,6 +3,7 @@ package julius.game.chessengine.board;
 import lombok.extern.log4j.Log4j2;
 
 import java.util.Arrays;
+import java.util.Objects;
 
 @Log4j2
 public class MoveList {
@@ -62,6 +63,25 @@ public class MoveList {
 
     public void clear() {
         moveCount = 0;
+        isStringRepresentationStale = true;
+    }
+
+    /**
+     * Copy the contents of {@code src} into this list in-place.
+     *
+     * <p>The backing array is reused, avoiding an additional allocation. The
+     * string representation cache is invalidated so callers see the updated
+     * state on the next {@link #toString()} call.</p>
+     *
+     * @param src source list to copy from
+     */
+    public void copyFrom(MoveList src) {
+        Objects.requireNonNull(src, "src");
+        if (src == this) {
+            return;
+        }
+        this.moveCount = src.moveCount;
+        System.arraycopy(src.moves, 0, this.moves, 0, src.moveCount);
         isStringRepresentationStale = true;
     }
 
