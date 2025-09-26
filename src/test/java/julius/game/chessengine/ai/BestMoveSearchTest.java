@@ -185,11 +185,15 @@ public class BestMoveSearchTest {
                 new Object[]{
                         "2kr3r/2p1qp1p/2p1pnpP/pN1p4/3P4/7P/PPPQPP2/R3KB1R w KQ - 0 14",
                         List.of("Nc3")
+                },
+                new Object[]{
+                        "r2q2kr/pppb1ppp/4p3/1P1pNn2/4n3/2PBP2P/P2P1PP1/RN1QK2R b KQ - 0 11",
+                        List.of("Be8")
                 }
         );
     }
 
-    
+
 
     @ParameterizedTest(name = "Best move {1} for FEN {0}")
     @MethodSource("fenMatrix")
