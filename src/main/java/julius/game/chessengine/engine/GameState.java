@@ -1,6 +1,7 @@
 package julius.game.chessengine.engine;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.MoveList;
@@ -11,7 +12,6 @@ import lombok.extern.log4j.Log4j2;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
-import java.util.HashMap;
 
 
 @Data
@@ -19,7 +19,7 @@ import java.util.HashMap;
 public class GameState {
 
     private final Deque<Long> hashHistory = new ArrayDeque<>(256);
-    private final HashMap<Long, Integer> repetition = new HashMap<>();
+    private final Long2IntOpenHashMap repetition;
     private final IntArrayList halfmoveStack = new IntArrayList();
     private final IntArrayList fullmoveStack = new IntArrayList();
 
@@ -34,6 +34,7 @@ public class GameState {
     private long lastZobrist = 0L;          // last committed root hash
 
     public GameState(BitBoard bitBoard) {
+        this.repetition = createRepetitionMap();
         state = GameStateEnum.PLAY;
         score = Score.initializeScore(bitBoard);
         this.halfmoveClock = bitBoard.getHalfmoveClock();
@@ -42,13 +43,13 @@ public class GameState {
     }
 
     public GameState(GameState other) {
+        this.repetition = copyRepetitionMap(other.repetition);
         this.state = other.state; // Enum, so a direct copy is fine
         this.score = new Score(other.score);
         this.halfmoveClock = other.halfmoveClock;
         this.fullmoveNumber = other.fullmoveNumber;
         this.lastZobrist = other.lastZobrist;
         this.hashHistory.addAll(other.hashHistory);
-        this.repetition.putAll(other.repetition);
         this.halfmoveStack.addAll(other.halfmoveStack);
         this.fullmoveStack.addAll(other.fullmoveStack);
     }
@@ -155,16 +156,16 @@ public class GameState {
      */
     public void recordHash(long zKey) {
         hashHistory.addLast(zKey);
-        repetition.merge(zKey, 1, Integer::sum);
+        repetition.addTo(zKey, 1);
         lastZobrist = zKey;
     }
 
     public void removeHash(long zKey) {
         // Called on undo at the current head
-        Integer c = repetition.get(zKey);
-        if (c != null) {
-            if (c <= 1) repetition.remove(zKey);
-            else repetition.put(zKey, c - 1);
+        int count = repetition.get(zKey);
+        if (count > 0) {
+            if (count <= 1) repetition.remove(zKey);
+            else repetition.put(zKey, count - 1);
         }
         // We only ever remove the most recent
         if (!hashHistory.isEmpty()) hashHistory.removeLast();
@@ -172,7 +173,7 @@ public class GameState {
     }
 
     public boolean isThreefoldRepetition() {
-        return repetition.getOrDefault(lastZobrist, 0) >= 3;
+        return repetition.get(lastZobrist) >= 3;
     }
 
     public void resetHalfmoveClock() { halfmoveClock = 0; }
@@ -204,5 +205,17 @@ public class GameState {
                 "\n  Score Difference: " + score.getScoreDifference() +
                 "\n  Repetition Count: " + repetition +
                 "\n}";
+    }
+
+    private static Long2IntOpenHashMap createRepetitionMap() {
+        Long2IntOpenHashMap map = new Long2IntOpenHashMap(256);
+        map.defaultReturnValue(0);
+        return map;
+    }
+
+    private static Long2IntOpenHashMap copyRepetitionMap(Long2IntOpenHashMap other) {
+        Long2IntOpenHashMap map = new Long2IntOpenHashMap(other);
+        map.defaultReturnValue(other.defaultReturnValue());
+        return map;
     }
 }
