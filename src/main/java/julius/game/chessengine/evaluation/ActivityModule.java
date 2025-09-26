@@ -1,7 +1,7 @@
 package julius.game.chessengine.evaluation;
 
-import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
+import julius.game.chessengine.board.ImmutableBoardView;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.helper.BishopHelper;
 import julius.game.chessengine.helper.KingHelper;
@@ -9,6 +9,7 @@ import julius.game.chessengine.helper.KnightHelper;
 import julius.game.chessengine.helper.RookHelper;
 
 import java.util.Arrays;
+import java.util.Objects;
 
 /**
  * Tracks piece activity (mobility plus center control) with separate midgame/endgame
@@ -134,7 +135,7 @@ public final class ActivityModule implements EvaluationModule {
 
     @Override
     public void initialize(EvaluationContext context) {
-        rebuildFromBoard(context.getBoard());
+        rebuildFromBoard(Objects.requireNonNull(context, "context").getBoardView());
         initialized = true;
     }
 
@@ -143,7 +144,7 @@ public final class ActivityModule implements EvaluationModule {
         if (!dirty) {
             return;
         }
-        rebuildFromBoard(context.getBoard());
+        rebuildFromBoard(Objects.requireNonNull(context, "context").getBoardView());
     }
 
     @Override
@@ -153,7 +154,7 @@ public final class ActivityModule implements EvaluationModule {
         }
         boolean forward = isForwardMove(moveContext);
         if (!updateForMove(moveContext.getMove(), forward)) {
-            rebuildFromBoard(moveContext.getCurrentContext().getBoard());
+            rebuildFromBoard(moveContext.getCurrentContext().getBoardView());
         }
     }
 
@@ -398,7 +399,7 @@ public final class ActivityModule implements EvaluationModule {
         return pieceType == BISHOP || pieceType == ROOK || pieceType == QUEEN;
     }
 
-    private void rebuildFromBoard(BitBoard board) {
+    private void rebuildFromBoard(ImmutableBoardView board) {
         Arrays.fill(midgameTotals, 0);
         Arrays.fill(endgameTotals, 0);
         for (PieceActivity activity : activities) {

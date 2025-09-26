@@ -1,7 +1,7 @@
 package julius.game.chessengine.evaluation;
 
-import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
+import julius.game.chessengine.board.ImmutableBoardView;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.helper.BishopHelper;
 import julius.game.chessengine.helper.RookHelper;
@@ -138,10 +138,11 @@ public final class KingSafetyModule implements EvaluationModule {
             dirty = false;
             return currentView;
         }
-        long whiteAttacks = board.getAttackBitboard(true);
-        long blackAttacks = board.getAttackBitboard(false);
-        rebuildSideState(sideStates[WHITE], board, true, whiteAttacks, blackAttacks);
-        rebuildSideState(sideStates[BLACK], board, false, blackAttacks, whiteAttacks);
+        ImmutableBoardView view = ImmutableBoardView.from(board);
+        long whiteAttacks = view.getWhiteAttackMap();
+        long blackAttacks = view.getBlackAttackMap();
+        rebuildSideState(sideStates[WHITE], view, true, whiteAttacks, blackAttacks);
+        rebuildSideState(sideStates[BLACK], view, false, blackAttacks, whiteAttacks);
         refreshScoreCaches();
         dirty = false;
         return currentView;
@@ -152,7 +153,7 @@ public final class KingSafetyModule implements EvaluationModule {
     }
 
     private void rebuildFromContext(EvaluationContext context) {
-        BitBoard board = context.getBoard();
+        ImmutableBoardView board = Objects.requireNonNull(context, "context").getBoardView();
         long whiteAttacks = context.getWhiteAttackMap();
         long blackAttacks = context.getBlackAttackMap();
         rebuildSideState(sideStates[WHITE], board, true, whiteAttacks, blackAttacks);
@@ -214,8 +215,8 @@ public final class KingSafetyModule implements EvaluationModule {
                 return true;
             }
         }
-        BitBoard previousBoard = previous.getBoard();
-        BitBoard currentBoard = current.getBoard();
+        ImmutableBoardView previousBoard = previous.getBoardView();
+        ImmutableBoardView currentBoard = current.getBoardView();
         long prevQueens = side == WHITE ? previousBoard.getWhiteQueens() : previousBoard.getBlackQueens();
         long currQueens = side == WHITE ? currentBoard.getWhiteQueens() : currentBoard.getBlackQueens();
         if (prevQueens != currQueens) {
@@ -235,7 +236,8 @@ public final class KingSafetyModule implements EvaluationModule {
         return false;
     }
 
-    private void rebuildSideState(SideState state, BitBoard board, boolean isWhite, long friendlyAttacks, long enemyAttacks) {
+    private void rebuildSideState(SideState state, ImmutableBoardView board, boolean isWhite,
+                                  long friendlyAttacks, long enemyAttacks) {
         state.reset();
         long kingBits = isWhite ? board.getWhiteKing() : board.getBlackKing();
         if (kingBits == 0) {
@@ -305,7 +307,7 @@ public final class KingSafetyModule implements EvaluationModule {
         state.endgameQueenPenalty = queenEnd;
     }
 
-    private void computeBackrankWeaknessPenalty(SideState state, BitBoard board, boolean isWhite) {
+    private void computeBackrankWeaknessPenalty(SideState state, ImmutableBoardView board, boolean isWhite) {
         state.backrankWeaknessMidgame = 0;
         state.backrankWeaknessEndgame = 0;
         if (state.kingSquare < 0) {
@@ -371,7 +373,7 @@ public final class KingSafetyModule implements EvaluationModule {
         return mask;
     }
 
-    private long computeFriendlyNonKingAttacks(BitBoard board, boolean isWhite) {
+    private long computeFriendlyNonKingAttacks(ImmutableBoardView board, boolean isWhite) {
         long attacks = 0L;
         long occupancy = board.getAllPieces();
 

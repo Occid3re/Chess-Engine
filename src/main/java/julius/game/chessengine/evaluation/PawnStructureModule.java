@@ -1,7 +1,7 @@
 package julius.game.chessengine.evaluation;
 
-import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
+import julius.game.chessengine.board.ImmutableBoardView;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.helper.PawnHelper;
 
@@ -60,17 +60,25 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
 
     @Override
     public void initialize(EvaluationContext context) {
-        BitBoard board = Objects.requireNonNull(context, "context").getBoard();
         markAllFilesDirty();
-        evaluate(board);
+        evaluateContext(Objects.requireNonNull(context, "context"));
     }
 
     @Override
     public void evaluate(EvaluationContext context) {
-        evaluate(Objects.requireNonNull(context, "context").getBoard());
+        evaluateContext(Objects.requireNonNull(context, "context"));
     }
 
-    public PawnStructureView evaluate(BitBoard board) {
+    private PawnStructureView evaluateContext(EvaluationContext context) {
+        if (context == null) {
+            currentView = PawnStructureView.empty();
+            midgameScoreCache = 0;
+            endgameScoreCache = 0;
+            dirty = false;
+            metadataDirty = false;
+            return currentView;
+        }
+        ImmutableBoardView board = context.getBoardView();
         if (board == null) {
             currentView = PawnStructureView.empty();
             midgameScoreCache = 0;
@@ -89,8 +97,8 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         long allPieces = board.getAllPieces();
         long whiteRooks = board.getWhiteRooks();
         long blackRooks = board.getBlackRooks();
-        long whiteAttacks = board.getAttackBitboard(true);
-        long blackAttacks = board.getAttackBitboard(false);
+        long whiteAttacks = context.getWhiteAttackMap();
+        long blackAttacks = context.getBlackAttackMap();
         long whiteKing = board.getWhiteKing();
         long blackKing = board.getBlackKing();
 
@@ -255,10 +263,21 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
     }
 
     public PawnStructureView getView(BitBoard board) {
-        return evaluate(board);
+        if (board == null) {
+            return evaluateContext(null);
+        }
+        EvaluationContext context = EvaluationContext.from(board, null);
+        return evaluateContext(context);
     }
 
     public int countHalfOpenFilesWithRooks(BitBoard board, long rooksBitboard, boolean isWhite) {
+        if (board == null) {
+            return 0;
+        }
+        return countHalfOpenFilesWithRooks(ImmutableBoardView.from(board), rooksBitboard, isWhite);
+    }
+
+    private int countHalfOpenFilesWithRooks(ImmutableBoardView board, long rooksBitboard, boolean isWhite) {
         if (rooksBitboard == 0L) {
             return 0;
         }
@@ -283,6 +302,13 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
     }
 
     public int countOpenFilesWithRooks(BitBoard board, long rooksBitboard) {
+        if (board == null) {
+            return 0;
+        }
+        return countOpenFilesWithRooks(ImmutableBoardView.from(board), rooksBitboard);
+    }
+
+    private int countOpenFilesWithRooks(ImmutableBoardView board, long rooksBitboard) {
         if (rooksBitboard == 0L) {
             return 0;
         }
@@ -326,7 +352,7 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         }
     }
 
-    private void refreshFileMetadata(BitBoard board) {
+    private void refreshFileMetadata(ImmutableBoardView board) {
         if (!metadataDirty || board == null) {
             return;
         }

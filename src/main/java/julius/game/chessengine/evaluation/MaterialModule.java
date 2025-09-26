@@ -1,8 +1,8 @@
 package julius.game.chessengine.evaluation;
 
 import java.util.Arrays;
+import java.util.Objects;
 
-import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.figures.PieceType;
 /**
@@ -61,7 +61,7 @@ public final class MaterialModule implements EvaluationModule {
 
     @Override
     public void initialize(EvaluationContext context) {
-        rebuildFromBoard(context.getBoard());
+        rebuildFromContext(Objects.requireNonNull(context, "context"));
     }
 
     @Override
@@ -69,7 +69,7 @@ public final class MaterialModule implements EvaluationModule {
         if (!dirty) {
             return;
         }
-        rebuildFromBoard(context.getBoard());
+        rebuildFromContext(Objects.requireNonNull(context, "context"));
     }
 
     @Override
@@ -158,22 +158,22 @@ public final class MaterialModule implements EvaluationModule {
         updateScoreCaches();
     }
 
-    private void rebuildFromBoard(BitBoard board) {
+    private void rebuildFromContext(EvaluationContext context) {
         Arrays.fill(midgameMaterial, 0);
         Arrays.fill(endgameMaterial, 0);
         Arrays.fill(bishopCounts, 0);
 
-        accumulatePieces(WHITE, PAWN, Long.bitCount(board.getWhitePawns()));
-        accumulatePieces(WHITE, KNIGHT, Long.bitCount(board.getWhiteKnights()));
-        accumulatePieces(WHITE, BISHOP, Long.bitCount(board.getWhiteBishops()));
-        accumulatePieces(WHITE, ROOK, Long.bitCount(board.getWhiteRooks()));
-        accumulatePieces(WHITE, QUEEN, Long.bitCount(board.getWhiteQueens()));
+        accumulatePieces(WHITE, PAWN, Long.bitCount(context.getWhitePawns()));
+        accumulatePieces(WHITE, KNIGHT, Long.bitCount(context.getWhiteKnights()));
+        accumulatePieces(WHITE, BISHOP, Long.bitCount(context.getWhiteBishops()));
+        accumulatePieces(WHITE, ROOK, Long.bitCount(context.getWhiteRooks()));
+        accumulatePieces(WHITE, QUEEN, Long.bitCount(context.getWhiteQueens()));
 
-        accumulatePieces(BLACK, PAWN, Long.bitCount(board.getBlackPawns()));
-        accumulatePieces(BLACK, KNIGHT, Long.bitCount(board.getBlackKnights()));
-        accumulatePieces(BLACK, BISHOP, Long.bitCount(board.getBlackBishops()));
-        accumulatePieces(BLACK, ROOK, Long.bitCount(board.getBlackRooks()));
-        accumulatePieces(BLACK, QUEEN, Long.bitCount(board.getBlackQueens()));
+        accumulatePieces(BLACK, PAWN, Long.bitCount(context.getBlackPawns()));
+        accumulatePieces(BLACK, KNIGHT, Long.bitCount(context.getBlackKnights()));
+        accumulatePieces(BLACK, BISHOP, Long.bitCount(context.getBlackBishops()));
+        accumulatePieces(BLACK, ROOK, Long.bitCount(context.getBlackRooks()));
+        accumulatePieces(BLACK, QUEEN, Long.bitCount(context.getBlackQueens()));
 
         updateScoreCaches();
         dirty = false;
