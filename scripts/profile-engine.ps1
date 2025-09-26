@@ -98,6 +98,12 @@ function Write-LogAndMaybeConsole {
     if ($EchoEngine) { Write-Host $Message }
 }
 
+function Write-Status {
+    param([string]$Message)
+    Write-Log -Channel 'status' -Message $Message
+    Write-Host $Message
+}
+
 Write-Host "Launching engine for profiling..."
 Write-Host "  Engine jar    : $jarFullPath"
 Write-Host "  JFR duration  : $JfrDuration"
@@ -170,6 +176,7 @@ $allArgs += $jarFullPath
 
 $computedArgs = Join-Arguments -Arguments $allArgs
 Write-Log -Channel 'info' -Message "java $computedArgs"
+Write-Status 'Starting java process for profiling run...'
 
 if ($DryRun) {
     Write-Host ''
@@ -269,21 +276,30 @@ try {
     $process.BeginErrorReadLine()
 
     # ---- Handshake using async queue ----
+    Write-Status 'Sending UCI handshake (uci)...'
     Send-UciCommand -Command 'uci'
+    Write-Status 'Waiting for uciok from engine...'
     if (-not (Wait-ForRegexWithTimeout -Pattern '^uciok$' -Context 'uci handshake' -TimeoutMs 10000 -Queue $stdoutQueue)) {
         throw "Timeout waiting for uciok."
     }
+    Write-Status 'Received uciok from engine.'
 
+    Write-Status 'Querying engine readiness (isready)...'
     Send-UciCommand -Command 'isready'
+    Write-Status 'Waiting for readyok confirmation...'
     if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context 'engine readiness' -TimeoutMs 10000 -Queue $stdoutQueue)) {
         throw "Timeout waiting for readyok."
     }
+    Write-Status 'Engine reported ready.'
 
     Send-UciCommand -Command 'ucinewgame'
+    Write-Status 'Preparing for new game (isready after ucinewgame)...'
     Send-UciCommand -Command 'isready'
+    Write-Status 'Waiting for readyok confirmation after ucinewgame...'
     if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context 'new game readiness' -TimeoutMs 10000 -Queue $stdoutQueue)) {
         throw "Timeout waiting for readyok after ucinewgame."
     }
+    Write-Status 'Engine ready after ucinewgame.'
 
     # ---- Self-play loop ----
     for ($ply = 1; $ply -le $PlyCount; $ply++) {
