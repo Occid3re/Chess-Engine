@@ -182,7 +182,36 @@ public class AI {
 
     private ScheduledExecutorService scheduler;
 
-    private final Object calculationLock = new Object();
+    private final BlockingQueue<CalculationRequest> calculationRequests = new LinkedBlockingQueue<>();
+    private final BlockingQueue<SearchJob> searchJobs = new LinkedBlockingQueue<>();
+
+    private static final class CalculationRequest {
+        final long boardHash;
+        final boolean stop;
+
+        CalculationRequest(long boardHash, boolean stop) {
+            this.boardHash = boardHash;
+            this.stop = stop;
+        }
+    }
+
+    private static final class SearchJob {
+        final SearchTask task;
+        final boolean stop;
+
+        private SearchJob(SearchTask task, boolean stop) {
+            this.task = task;
+            this.stop = stop;
+        }
+
+        static SearchJob work(SearchTask task) {
+            return new SearchJob(task, false);
+        }
+
+        static SearchJob stopSignal() {
+            return new SearchJob(null, true);
+        }
+    }
 
     private volatile boolean keepCalculating = true;
 
@@ -371,8 +400,12 @@ public class AI {
         keepCalculating = true;
 
         if (calculationCoordinator != null && calculationCoordinator.isAlive()) {
+            enqueueCalculationRequest();
             return;
         }
+
+        calculationRequests.clear();
+        searchJobs.clear();
 
         calculationCoordinator = new Thread(this::calculateLine, "Simulator-Dispatcher");
         calculationCoordinator.setDaemon(true);
@@ -386,56 +419,80 @@ public class AI {
             worker.start();
             calculationThreads[i] = worker;
         }
+
+        enqueueCalculationRequest();
     }
 
     private void searchWorkerLoop(int workerIndex) {
-        long lastTaskId = -1L;
-        while (keepCalculating && !Thread.currentThread().isInterrupted()) {
-            SearchTask task;
-            synchronized (calculationLock) {
-                while (keepCalculating && !Thread.currentThread().isInterrupted()) {
-                    task = activeSearch.get();
-                    if (task != null && task.getId() != lastTaskId) break;
-                    task = null;
-                    try {
-                        calculationLock.wait();
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        return;
-                    }
-                }
-                if (!keepCalculating || Thread.currentThread().isInterrupted()) return;
-                task = activeSearch.get();
-                if (task == null || task.getId() == lastTaskId) continue;
-            }
-            lastTaskId = task.getId();
-            runSearchOnTask(task, workerIndex);
-        }
-    }
-
-    private void runSearchOnTask(SearchTask task, int workerIndex) {
         Engine simulator;
         try {
             simulator = mainEngine.createSimulation();
         } catch (RuntimeException e) {
-            log.error("Failed to create simulation for worker {}", workerIndex, e);
-            task.workerDone();
+            log.error("Failed to create initial simulation for worker {}", workerIndex, e);
             return;
         }
 
-        SplittableRandom rng = lazySmpThreads > 1
-                ? new SplittableRandom(task.getBoardHash() ^ (0x9E3779B97F4A7C15L * (workerIndex + 1L)))
-                : null;
+        while (!Thread.currentThread().isInterrupted()) {
+            SearchJob job;
+            try {
+                job = searchJobs.take();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
 
-        threadSearchTask.set(task);
-        try {
-            iterativeDeepening(task, simulator, rng);
-        } catch (Exception e) {
-            log.error("Search worker {} encountered an error", workerIndex, e);
-        } finally {
-            threadSearchTask.remove();
-            task.workerDone();
+            if (job.stop || !keepCalculating) {
+                break;
+            }
+
+            SearchTask task = job.task;
+            if (task == null) {
+                continue;
+            }
+
+            try {
+                simulator.copyFrom(task.getRootSnapshot());
+            } catch (RuntimeException e) {
+                log.error("Failed to sync simulation for worker {}", workerIndex, e);
+                task.workerDone();
+                continue;
+            }
+
+            SplittableRandom rng = lazySmpThreads > 1
+                    ? new SplittableRandom(task.getBoardHash() ^ (0x9E3779B97F4A7C15L * (workerIndex + 1L)))
+                    : null;
+
+            threadSearchTask.set(task);
+            try {
+                iterativeDeepening(task, simulator, rng);
+            } catch (Exception e) {
+                log.error("Search worker {} encountered an error", workerIndex, e);
+            } finally {
+                threadSearchTask.remove();
+                task.workerDone();
+            }
         }
+    }
+
+    private void dispatchSearchTask(SearchTask task) {
+        if (task == null) return;
+        if (lazySmpThreads <= 0) {
+            task.workerDone();
+            return;
+        }
+        for (int i = 0; i < lazySmpThreads; i++) {
+            searchJobs.offer(SearchJob.work(task));
+        }
+    }
+
+    private void enqueueCalculationRequest() {
+        if (!keepCalculating) {
+            return;
+        }
+        long hash = mainEngine.getBoardStateHash();
+        currentBoardState = hash;
+        calculationRequests.clear();
+        calculationRequests.offer(new CalculationRequest(hash, false));
     }
 
     private void iterativeDeepening(SearchTask task, Engine simulatorEngine, SplittableRandom rng) {
@@ -567,8 +624,11 @@ public class AI {
         SearchTask task = activeSearch.get();
         if (task != null) task.requestStop();
 
-        synchronized (calculationLock) {
-            calculationLock.notifyAll();
+        calculationRequests.clear();
+        searchJobs.clear();
+        calculationRequests.offer(new CalculationRequest(0L, true));
+        for (int i = 0; i < lazySmpThreads; i++) {
+            searchJobs.offer(SearchJob.stopSignal());
         }
 
         if (calculationThreads != null) {
@@ -648,9 +708,7 @@ public class AI {
             previousBestMove = -1;
             previousBestMoveHash = -1;
             searchResultReady = false;
-            synchronized (calculationLock) {
-                calculationLock.notifyAll();
-            } // <-- wake recalculation
+            enqueueCalculationRequest();
             return;
         }
 
@@ -665,10 +723,7 @@ public class AI {
         }
 
         mainEngine.performMove(currentBestMove);
-        currentBoardState = mainEngine.getBoardStateHash();
-        synchronized (calculationLock) {
-            calculationLock.notifyAll();
-        }
+        enqueueCalculationRequest();
         currentBestMove = -1; // don’t re-play it
         bestMoveForHash = -1;
         previousBestMove = -1;
@@ -679,21 +734,22 @@ public class AI {
 
     private void calculateLine() {
         long lastObservedHash = Long.MIN_VALUE;
-        while (keepCalculating && !Thread.currentThread().isInterrupted()) {
-            long targetHash;
-            synchronized (calculationLock) {
-                while (keepCalculating && !Thread.currentThread().isInterrupted()) {
-                    targetHash = currentBoardState;
-                    if (targetHash != lastObservedHash) break;
-                    try {
-                        calculationLock.wait();
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        return;
-                    }
-                }
-                if (!keepCalculating || Thread.currentThread().isInterrupted()) return;
-                targetHash = currentBoardState;
+        while (!Thread.currentThread().isInterrupted()) {
+            CalculationRequest request;
+            try {
+                request = calculationRequests.take();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+
+            if (request.stop || !keepCalculating) {
+                break;
+            }
+
+            long targetHash = request.boardHash;
+            if (targetHash == lastObservedHash) {
+                continue;
             }
 
             currentBoardState = mainEngine.getBoardStateHash();
@@ -727,7 +783,7 @@ public class AI {
                 return;
             }
 
-            SearchTask task = new SearchTask(searchIdGenerator.incrementAndGet(), boardStateHash, isWhite, deadline, lazySmpThreads);
+            SearchTask task = new SearchTask(searchIdGenerator.incrementAndGet(), boardStateHash, isWhite, deadline, lazySmpThreads, simulatorEngine);
             activeSearch.set(task);
             if (bestMoveForHash == boardStateHash && currentBestMove != -1) {
                 previousBestMove = currentBestMove;
@@ -740,11 +796,7 @@ public class AI {
             bestMoveForHash = -1;
             searchResultReady = false;
             this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
-
-            synchronized (calculationLock) {
-                calculationLock.notifyAll();
-            }
-
+            dispatchSearchTask(task);
             task.awaitCompletion();
             completeSearchTask(task, simulatorEngine);
             task.requestStop();
@@ -2091,10 +2143,7 @@ public class AI {
     }
 
     public void updateBoardStateHash() {
-        currentBoardState = mainEngine.getBoardStateHash();
-        synchronized (calculationLock) {
-            calculationLock.notifyAll();
-        }
+        enqueueCalculationRequest();
     }
 
     private void updateKillerMoves(int depth, int move) {
