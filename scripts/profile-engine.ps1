@@ -4,8 +4,6 @@ param(
     [int]$MoveTimeMs = 2000,
     [int]$PlyCount = 80,
     [string]$JfrDuration = "180s",
-    [int]$EngineStartupTimeoutMs = 60000,
-    [int]$ReadyOkTimeoutMs = 15000,
     [switch]$EchoEngine,   # show engine stdout live
     [switch]$DryRun        # just print the computed java command and exit
 )
@@ -74,8 +72,6 @@ $profileFullPath = Resolve-FullPath -PathValue $ProfileDir
 
 if ($MoveTimeMs -le 0) { throw "MoveTimeMs must be greater than zero." }
 if ($PlyCount   -le 0) { throw "PlyCount must be greater than zero." }
-if ($EngineStartupTimeoutMs -le 0) { throw "EngineStartupTimeoutMs must be greater than zero." }
-if ($ReadyOkTimeoutMs -le 0) { throw "ReadyOkTimeoutMs must be greater than zero." }
 
 $timestamp   = Get-Date -Format 'yyyyMMdd-HHmmss'
 $jfrFile     = Join-Path $profileFullPath "uci-$timestamp.jfr"
@@ -107,8 +103,6 @@ Write-Host "  Engine jar    : $jarFullPath"
 Write-Host "  JFR duration  : $JfrDuration"
 Write-Host "  Move time (ms): $MoveTimeMs"
 Write-Host "  Ply count     : $PlyCount"
-Write-Host "  Startup wait  : $EngineStartupTimeoutMs ms"
-Write-Host "  Ready wait    : $ReadyOkTimeoutMs ms"
 Write-Host "  Profile dir   : $profileFullPath"
 Write-Host "  Log file      : $logFile"
 
@@ -196,12 +190,21 @@ $stdoutQueue = $null
 
 # ---------- Async wait helper ----------
 function Wait-ForRegexWithTimeout {
-    param([string]$Pattern,[string]$Context,[int]$TimeoutMs = 0)
+    param(
+        [string]$Pattern,
+        [string]$Context,
+        [int]$TimeoutMs = 0,
+        [System.Collections.Concurrent.ConcurrentQueue[string]]$Queue
+    )
+
+    if (-not $Queue) {
+        throw 'Wait-ForRegexWithTimeout requires a queue instance.'
+    }
     $regex = if ([string]::IsNullOrWhiteSpace($Pattern)) { $null } else { [regex]$Pattern }
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     while ($true) {
         $line = $null
-        if ($stdoutQueue -and $stdoutQueue.TryDequeue([ref]$line)) {
+        if ($Queue.TryDequeue([ref]$line)) {
             if ($null -eq $regex) { return [PSCustomObject]@{ Line = $line } }
             $m = $regex.Match($line)
             if ($m.Success) { return [PSCustomObject]@{ Line = $line; Match = $m } }
@@ -242,7 +245,7 @@ try {
     if (-not $process.Start()) { throw "Failed to start 'java' process. Is Java on PATH?" }
 
     # Wire up async handlers for stdout/stderr
-    $stdoutQueue = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
+    $stdoutQueue = New-Object System.Collections.Concurrent.ConcurrentQueue[string]
 
     $stdoutHandler = [System.Diagnostics.DataReceivedEventHandler]{
         param($sender,$eventArgs)
@@ -266,37 +269,19 @@ try {
     $process.BeginErrorReadLine()
 
     # ---- Handshake using async queue ----
-    $startupTimeout = [Math]::Max($EngineStartupTimeoutMs, 1000)
-    $startupWatch = [System.Diagnostics.Stopwatch]::StartNew()
-    $lastUciSentAt = -1000
-    $uciOkResult = $null
-
-    while ($startupWatch.ElapsedMilliseconds -lt $startupTimeout) {
-        if ($startupWatch.ElapsedMilliseconds - $lastUciSentAt -ge 1000) {
-            Send-UciCommand -Command 'uci'
-            $lastUciSentAt = $startupWatch.ElapsedMilliseconds
-        }
-
-        $remaining = $startupTimeout - $startupWatch.ElapsedMilliseconds
-        if ($remaining -le 0) { break }
-
-        $sliceTimeout = [Math]::Min(1000, $remaining)
-        $uciOkResult = Wait-ForRegexWithTimeout -Pattern '^uciok$' -Context 'uci handshake' -TimeoutMs $sliceTimeout
-        if ($uciOkResult) { break }
-    }
-
-    if (-not $uciOkResult) {
-        throw "Timeout waiting for uciok after $EngineStartupTimeoutMs ms."
+    Send-UciCommand -Command 'uci'
+    if (-not (Wait-ForRegexWithTimeout -Pattern '^uciok$' -Context 'uci handshake' -TimeoutMs 10000 -Queue $stdoutQueue)) {
+        throw "Timeout waiting for uciok."
     }
 
     Send-UciCommand -Command 'isready'
-    if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context 'engine readiness' -TimeoutMs $ReadyOkTimeoutMs)) {
+    if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context 'engine readiness' -TimeoutMs 10000 -Queue $stdoutQueue)) {
         throw "Timeout waiting for readyok."
     }
 
     Send-UciCommand -Command 'ucinewgame'
     Send-UciCommand -Command 'isready'
-    if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context 'new game readiness' -TimeoutMs $ReadyOkTimeoutMs)) {
+    if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context 'new game readiness' -TimeoutMs 10000 -Queue $stdoutQueue)) {
         throw "Timeout waiting for readyok after ucinewgame."
     }
 
@@ -310,13 +295,15 @@ try {
 
         $bestMoveResult = Wait-ForRegexWithTimeout -Pattern $bestMovePattern `
             -Context ("bestmove response for ply $ply") `
-            -TimeoutMs ([Math]::Max($MoveTimeMs * 5, 5000))
+            -TimeoutMs ([Math]::Max($MoveTimeMs * 5, 5000)) `
+            -Queue $stdoutQueue
 
         if ($null -eq $bestMoveResult) {
             Send-UciCommand -Command 'stop'
             $bestMoveResult = Wait-ForRegexWithTimeout -Pattern $bestMovePattern `
                 -Context ("bestmove (post-stop) for ply $ply") `
-                -TimeoutMs 3000
+                -TimeoutMs 3000 `
+                -Queue $stdoutQueue
         }
 
         if ($null -eq $bestMoveResult) {
@@ -335,7 +322,7 @@ try {
         $moveHistory.Add($bestMove)
 
         Send-UciCommand -Command 'isready'
-        if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context ("post-move readiness for ply $ply") -TimeoutMs $ReadyOkTimeoutMs)) {
+        if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context ("post-move readiness for ply $ply") -TimeoutMs 10000 -Queue $stdoutQueue)) {
             throw "Timeout waiting for readyok after ply $ply."
         }
     }
@@ -373,12 +360,8 @@ catch {
 finally {
     try { if ($process) { $process.CancelOutputRead() } } catch {}
     try { if ($process) { $process.CancelErrorRead() } } catch {}
-    try {
-        if ($process -and $stdoutHandler) { $process.remove_OutputDataReceived($stdoutHandler) }
-    } catch {}
-    try {
-        if ($process -and $stderrHandler) { $process.remove_ErrorDataReceived($stderrHandler) }
-    } catch {}
+    try { if ($process -and $stdoutHandler) { $process.remove_OutputDataReceived($stdoutHandler) } } catch {}
+    try { if ($process -and $stderrHandler) { $process.remove_ErrorDataReceived($stderrHandler) } } catch {}
     $logWriter.Dispose()
 }
 
