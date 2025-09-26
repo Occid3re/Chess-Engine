@@ -2131,7 +2131,14 @@ public class AI {
         return capturesAndPromotions;
     }
 
-    private synchronized boolean positionChanged() {
+    /**
+     * Checks whether the board hash has changed since the current search task started.
+     *
+     * <p>The hashes live in {@code volatile} fields, so this is a lock-free visibility check that
+     * avoids serialising worker threads on a monitor. The volatile semantics already provide the
+     * required cross-thread visibility.</p>
+     */
+    private boolean positionChanged() {
         return currentBoardState != beforeCalculationBoardState;
     }
 
