@@ -1,9 +1,10 @@
 package julius.game.chessengine.evaluation;
 
 import java.util.Arrays;
+import java.util.Objects;
 
-import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
+import julius.game.chessengine.board.ImmutableBoardView;
 import julius.game.chessengine.figures.PieceType;
 
 import static julius.game.chessengine.evaluation.MaterialModule.BISHOP_VALUE;
@@ -145,10 +146,11 @@ public final class PieceSquareModule implements EvaluationModule {
 
     @Override
     public void initialize(EvaluationContext context) {
-        rebuildFromBoard(context.getBoard());
+        ImmutableBoardView board = Objects.requireNonNull(context, "context").getBoardView();
+        rebuildFromBoard(board);
         currentPhase = clampPhase(context.getPhase());
         recalculateDevelopmentContribution();
-        recalculateCastlingContribution(context.getBoard(), currentPhase);
+        recalculateCastlingContribution(board, currentPhase);
         dirty = false;
         initialized = true;
     }
@@ -158,10 +160,11 @@ public final class PieceSquareModule implements EvaluationModule {
         if (!dirty) {
             return;
         }
-        rebuildFromBoard(context.getBoard());
+        ImmutableBoardView board = Objects.requireNonNull(context, "context").getBoardView();
+        rebuildFromBoard(board);
         currentPhase = clampPhase(context.getPhase());
         recalculateDevelopmentContribution();
-        recalculateCastlingContribution(context.getBoard(), currentPhase);
+        recalculateCastlingContribution(board, currentPhase);
         dirty = false;
     }
 
@@ -173,7 +176,7 @@ public final class PieceSquareModule implements EvaluationModule {
         boolean forward = isForwardMove(moveContext);
         castlingDirty = true;
         if (!updateForMove(moveContext.getMove(), forward)) {
-            rebuildFromBoard(moveContext.getCurrentContext().getBoard());
+            rebuildFromBoard(moveContext.getCurrentContext().getBoardView());
         }
         int phase = clampPhase(moveContext.getCurrentContext().getPhase());
         if (phase != currentPhase) {
@@ -184,7 +187,7 @@ public final class PieceSquareModule implements EvaluationModule {
             recalculateDevelopmentContribution();
         }
         if (castlingDirty) {
-            recalculateCastlingContribution(moveContext.getCurrentContext().getBoard(), currentPhase);
+            recalculateCastlingContribution(moveContext.getCurrentContext().getBoardView(), currentPhase);
         }
         dirty = false;
     }
@@ -494,7 +497,7 @@ public final class PieceSquareModule implements EvaluationModule {
         developmentDirty = false;
     }
 
-    private void recalculateCastlingContribution(BitBoard board, int phase) {
+    private void recalculateCastlingContribution(ImmutableBoardView board, int phase) {
         if (!castlingDirty) {
             return;
         }
@@ -513,7 +516,7 @@ public final class PieceSquareModule implements EvaluationModule {
         castlingDirty = false;
     }
 
-    private int computeCastlingContribution(BitBoard board, int phase) {
+    private int computeCastlingContribution(ImmutableBoardView board, int phase) {
         int materialBalance = computeMaterialBalance(board);
         int whiteAdjustment = computeCastlingAdjustment(
                 board.getWhiteKing(),
@@ -609,7 +612,7 @@ public final class PieceSquareModule implements EvaluationModule {
         return adjustment;
     }
 
-    private static int computeMaterialBalance(BitBoard board) {
+    private static int computeMaterialBalance(ImmutableBoardView board) {
         int whiteMaterial = Long.bitCount(board.getWhitePawns()) * PAWN_VALUE
                 + Long.bitCount(board.getWhiteKnights()) * KNIGHT_VALUE
                 + Long.bitCount(board.getWhiteBishops()) * BISHOP_VALUE
@@ -623,7 +626,7 @@ public final class PieceSquareModule implements EvaluationModule {
         return whiteMaterial - blackMaterial;
     }
 
-    private void rebuildFromBoard(BitBoard board) {
+    private void rebuildFromBoard(ImmutableBoardView board) {
         Arrays.fill(occupantColor, -1);
         Arrays.fill(occupantPiece, 0);
         Arrays.fill(midgameContributionBySquare, 0);

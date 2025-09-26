@@ -1,7 +1,9 @@
 package julius.game.chessengine.evaluation;
 
 import julius.game.chessengine.board.BitBoard;
+import julius.game.chessengine.board.ImmutableBoardView;
 import julius.game.chessengine.engine.GameStateEnum;
+import julius.game.chessengine.figures.PieceType;
 
 import java.util.Objects;
 
@@ -12,34 +14,35 @@ import java.util.Objects;
  */
 public final class EvaluationContext {
 
-    private final BitBoard board;
-    private final GameStateEnum gameState;
-    private final int phase;
-    private final long whiteAttackMap;
-    private final long blackAttackMap;
-    private final boolean whiteToMove;
+    private final ImmutableBoardView boardView;
+    private GameStateEnum gameState;
+    private int phase;
+    private long whiteAttackMap;
+    private long blackAttackMap;
 
-    private EvaluationContext(BitBoard board, GameStateEnum gameState, int phase,
-                              long whiteAttackMap, long blackAttackMap, boolean whiteToMove) {
-        this.board = Objects.requireNonNull(board, "board");
+    private EvaluationContext(ImmutableBoardView boardView, GameStateEnum gameState, int phase,
+                              long whiteAttackMap, long blackAttackMap) {
+        this.boardView = Objects.requireNonNull(boardView, "boardView");
         this.gameState = gameState;
         this.phase = phase;
         this.whiteAttackMap = whiteAttackMap;
         this.blackAttackMap = blackAttackMap;
-        this.whiteToMove = whiteToMove;
     }
 
     public static EvaluationContext from(BitBoard bitBoard, GameStateEnum gameState) {
         Objects.requireNonNull(bitBoard, "bitBoard");
-        BitBoard snapshot = bitBoard.snapshotWithoutHistory();
-        long whiteAttacks = bitBoard.getAttackBitboard(true);
-        long blackAttacks = bitBoard.getAttackBitboard(false);
-        return new EvaluationContext(snapshot, gameState, bitBoard.getPhase(), whiteAttacks, blackAttacks,
-                bitBoard.isWhitesTurn());
+        ImmutableBoardView view = ImmutableBoardView.from(bitBoard);
+        return new EvaluationContext(view, gameState, bitBoard.getPhase(),
+                view.getWhiteAttackMap(), view.getBlackAttackMap());
     }
 
-    public BitBoard getBoard() {
-        return board;
+    public void updateFrom(BitBoard bitBoard, GameStateEnum gameState) {
+        Objects.requireNonNull(bitBoard, "bitBoard");
+        boardView.copyFrom(bitBoard);
+        this.gameState = gameState;
+        this.phase = bitBoard.getPhase();
+        this.whiteAttackMap = boardView.getWhiteAttackMap();
+        this.blackAttackMap = boardView.getBlackAttackMap();
     }
 
     public GameStateEnum getGameState() {
@@ -59,10 +62,122 @@ public final class EvaluationContext {
     }
 
     public boolean isWhiteToMove() {
-        return whiteToMove;
+        return boardView.isWhitesTurn();
+    }
+
+    public long getWhitePawns() {
+        return boardView.getWhitePawns();
+    }
+
+    public long getBlackPawns() {
+        return boardView.getBlackPawns();
+    }
+
+    public long getWhiteKnights() {
+        return boardView.getWhiteKnights();
+    }
+
+    public long getBlackKnights() {
+        return boardView.getBlackKnights();
+    }
+
+    public long getWhiteBishops() {
+        return boardView.getWhiteBishops();
+    }
+
+    public long getBlackBishops() {
+        return boardView.getBlackBishops();
+    }
+
+    public long getWhiteRooks() {
+        return boardView.getWhiteRooks();
+    }
+
+    public long getBlackRooks() {
+        return boardView.getBlackRooks();
+    }
+
+    public long getWhiteQueens() {
+        return boardView.getWhiteQueens();
+    }
+
+    public long getBlackQueens() {
+        return boardView.getBlackQueens();
+    }
+
+    public long getWhiteKing() {
+        return boardView.getWhiteKing();
+    }
+
+    public long getBlackKing() {
+        return boardView.getBlackKing();
+    }
+
+    public long getWhitePieces() {
+        return boardView.getWhitePieces();
+    }
+
+    public long getBlackPieces() {
+        return boardView.getBlackPieces();
+    }
+
+    public long getAllPieces() {
+        return boardView.getAllPieces();
+    }
+
+    public boolean isWhiteKingHasCastled() {
+        return boardView.isWhiteKingHasCastled();
+    }
+
+    public boolean isBlackKingHasCastled() {
+        return boardView.isBlackKingHasCastled();
+    }
+
+    public boolean isWhiteKingMoved() {
+        return boardView.isWhiteKingMoved();
+    }
+
+    public boolean isBlackKingMoved() {
+        return boardView.isBlackKingMoved();
+    }
+
+    public boolean isWhiteRookA1Moved() {
+        return boardView.isWhiteRookA1Moved();
+    }
+
+    public boolean isWhiteRookH1Moved() {
+        return boardView.isWhiteRookH1Moved();
+    }
+
+    public boolean isBlackRookA8Moved() {
+        return boardView.isBlackRookA8Moved();
+    }
+
+    public boolean isBlackRookH8Moved() {
+        return boardView.isBlackRookH8Moved();
+    }
+
+    public int getHalfmoveClock() {
+        return boardView.getHalfmoveClock();
+    }
+
+    public int getFullmoveNumber() {
+        return boardView.getFullmoveNumber();
+    }
+
+    public int getLastMoveDoubleStepPawnIndex() {
+        return boardView.getLastMoveDoubleStepPawnIndex();
+    }
+
+    public PieceType getPieceTypeAtIndex(int index) {
+        return boardView.getPieceTypeAtIndex(index);
+    }
+
+    public ImmutableBoardView getBoardView() {
+        return boardView;
     }
 
     public EvaluationContext copy() {
-        return new EvaluationContext(board.snapshotWithoutHistory(), gameState, phase, whiteAttackMap, blackAttackMap, whiteToMove);
+        return new EvaluationContext(boardView.copy(), gameState, phase, whiteAttackMap, blackAttackMap);
     }
 }

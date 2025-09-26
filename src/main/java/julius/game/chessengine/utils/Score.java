@@ -40,6 +40,8 @@ public class Score {
     private final EvaluationPipeline evaluationPipeline;
     @JsonIgnore
     private EvaluationContext evaluationContext;
+    @JsonIgnore
+    private EvaluationContext spareEvaluationContext;
 
     public Score() {
         materialModule.setPawnChangeListener(pawnStructureModule);
@@ -57,6 +59,9 @@ public class Score {
         this();
         if (other != null && other.evaluationContext != null) {
             this.evaluationContext = other.evaluationContext.copy();
+            if (other.spareEvaluationContext != null) {
+                this.spareEvaluationContext = other.spareEvaluationContext.copy();
+            }
             if (other.evaluationPipeline.isInitialized()) {
                 evaluationPipeline.initialize(this.evaluationContext);
             }
@@ -73,13 +78,18 @@ public class Score {
         Objects.requireNonNull(bitBoard, "bitBoard");
         EvaluationContext context = EvaluationContext.from(bitBoard, null);
         this.evaluationContext = context;
+        this.spareEvaluationContext = null;
         evaluationPipeline.initialize(context);
     }
 
     public void refresh(BitBoard bitBoard, GameStateEnum state) {
         Objects.requireNonNull(bitBoard, "bitBoard");
-        EvaluationContext updated = EvaluationContext.from(bitBoard, state);
-        this.evaluationContext = updated;
+        if (evaluationContext == null) {
+            evaluationContext = EvaluationContext.from(bitBoard, state);
+        } else {
+            evaluationContext.updateFrom(bitBoard, state);
+        }
+        EvaluationContext updated = evaluationContext;
 
         if (!evaluationPipeline.isInitialized()) {
             evaluationPipeline.initialize(updated);
@@ -94,32 +104,44 @@ public class Score {
     public void applyMove(BitBoard bitBoard, int move, GameStateEnum state) {
         Objects.requireNonNull(bitBoard, "bitBoard");
         EvaluationContext previous = this.evaluationContext;
-        EvaluationContext updated = EvaluationContext.from(bitBoard, state);
-        this.evaluationContext = updated;
+        EvaluationContext next = spareEvaluationContext;
+        if (next == null) {
+            next = EvaluationContext.from(bitBoard, state);
+        } else {
+            next.updateFrom(bitBoard, state);
+        }
+        this.evaluationContext = next;
+        this.spareEvaluationContext = previous;
 
-        if (previous == null || !evaluationPipeline.isInitialized()) {
-            evaluationPipeline.initialize(updated);
+        if (next == null || !evaluationPipeline.isInitialized()) {
+            evaluationPipeline.initialize(next);
             return;
         }
 
-        synchronizePipeline(updated);
-        MoveContext moveContext = new MoveContext(move, previous, updated);
+        synchronizePipeline(next);
+        MoveContext moveContext = new MoveContext(move, previous, next);
         evaluationPipeline.applyMove(moveContext);
     }
 
     public void undoMove(BitBoard bitBoard, int move, GameStateEnum state) {
         Objects.requireNonNull(bitBoard, "bitBoard");
         EvaluationContext previous = this.evaluationContext;
-        EvaluationContext updated = EvaluationContext.from(bitBoard, state);
-        this.evaluationContext = updated;
+        EvaluationContext next = spareEvaluationContext;
+        if (next == null) {
+            next = EvaluationContext.from(bitBoard, state);
+        } else {
+            next.updateFrom(bitBoard, state);
+        }
+        this.evaluationContext = next;
+        this.spareEvaluationContext = previous;
 
-        if (previous == null || !evaluationPipeline.isInitialized()) {
-            evaluationPipeline.initialize(updated);
+        if (next == null || !evaluationPipeline.isInitialized()) {
+            evaluationPipeline.initialize(next);
             return;
         }
 
-        synchronizePipeline(updated);
-        MoveContext moveContext = new MoveContext(move, previous, updated);
+        synchronizePipeline(next);
+        MoveContext moveContext = new MoveContext(move, previous, next);
         evaluationPipeline.undoMove(moveContext);
     }
 
