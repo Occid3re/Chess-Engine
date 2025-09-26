@@ -148,15 +148,21 @@ def detect_project_root(script_path: Path) -> Path:
 
 def build_java_cmd(jar: Path, jfr_file: Path, jfr_duration: str,
                    chess_threads: str, lazy_threads: str, root_par_limit: str) -> List[str]:
-    # JVM/env defaults
+    # JVM/env defaults (tuned for lower pauses & less thread thrash)
     java_xms = os.getenv("JAVA_XMS", "8g")
     java_xmx = os.getenv("JAVA_XMX", "8g")
-    java_gc  = os.getenv("JAVA_GC",  "g1")
-    apc      = os.getenv("JAVA_ACTIVE_PROCESSORS", "24")
-    extra    = os.getenv("JAVA_EXTRA_OPTS",
-                         "-XX:MaxGCPauseMillis=20 -XX:+AlwaysPreTouch "
-                         "-Dchessengine.tt.mb=256 -Dchessengine.uci.info.minIntervalMs=120 "
-                         "-Dchessengine.uci.info.maxPvLen=12")
+    java_gc  = os.getenv("JAVA_GC",  "zgc")   # default: low-pause ZGC
+    apc      = os.getenv("JAVA_ACTIVE_PROCESSORS", "12")  # cap workers below physical cores
+    extra    = os.getenv(
+        "JAVA_EXTRA_OPTS",
+        "-XX:+AlwaysPreTouch "
+        "-XX:+UnlockExperimentalVMOptions "
+        "-XX:+UseLargePages "
+        "-Dchessengine.tt.mb=512 "
+        "-Dchessengine.uci.info.minIntervalMs=250 "
+        "-Dchessengine.uci.info.maxPvLen=10 "
+        "-Dchessengine.openingbook.enabled=false "
+    )
 
     def gc_flag(v: str) -> str:
         v = v.lower().strip()
@@ -234,9 +240,9 @@ def main() -> int:
 
     with log_file.open("w", encoding="utf-8") as writer:
         # Engine params (env overrides supported)
-        chess_threads = os.getenv("CHESSENGINE_THREADS", "24")
-        lazy_threads  = os.getenv("CHESSENGINE_LAZY_THREADS", "8")
-        root_par_lim  = os.getenv("CHESSENGINE_ROOT_PAR_LIMIT", "48")
+        chess_threads = os.getenv("CHESSENGINE_THREADS", "8")
+        lazy_threads  = os.getenv("CHESSENGINE_LAZY_THREADS", "2")
+        root_par_lim  = os.getenv("CHESSENGINE_ROOT_PAR_LIMIT", "12")
 
         cmd = build_java_cmd(jar, jfr_file, args.jfr_duration, chess_threads, lazy_threads, root_par_lim)
 

@@ -167,6 +167,13 @@ def find_latest_uci_jar(dir_path: str) -> Optional[Path]:
 
 
 def build_engine_cmd() -> List[str]:
+    """
+    Production-focused engine launcher:
+    - Low-pause GC (ZGC by default), fixed Xms=Xmx, pre-touched heap
+    - Sane thread fanout that scales on 24 physical cores without lock thrash
+    - Opening book disabled at runtime to avoid random file I/O stalls
+    - All values remain overridable via environment variables
+    """
     if ENGINE_BAT and Path(ENGINE_BAT).exists():
         return ["cmd", "/c", ENGINE_BAT]
 
@@ -177,15 +184,54 @@ def build_engine_cmd() -> List[str]:
     if not jar:
         fail(f"[-] No chess-engine-*-uci.jar found in {JAR_DIR}")
 
+    # -------- JVM defaults (override via env if you like)
+    JAVA_GC  = os.environ.get("JAVA_GC", "zgc")   # "zgc" | "shenandoah" | "g1"
+    JAVA_XMS = os.environ.get("JAVA_XMS", "10g")
+    JAVA_XMX = os.environ.get("JAVA_XMX", "10g")
+
+    def gc_flag(gc: str) -> str:
+        g = gc.lower()
+        if g == "zgc": return "-XX:+UseZGC"
+        if g == "shenandoah": return "-XX:+UseShenandoahGC"
+        if g == "g1": return "-XX:+UseG1GC"
+        return gc  # pass-through for custom flags
+
     java_opts = [
-        f"-Dchessengine.searchThreads={SEARCH_THREADS}",
-        f"-Dchessengine.lazySmpThreads={LAZY_SMP_THREADS}",
-        f"-Dchessengine.rootParallelLimit={ROOT_PAR_LIMIT}",
+        JAVA_EXE,
+        f"-Xms{JAVA_XMS}",
+        f"-Xmx{JAVA_XMX}",
+        gc_flag(JAVA_GC),
+        "-XX:+AlwaysPreTouch",
+        # harmless even if JFR off; keeps stacks deep when you enable it
+        "-XX:FlightRecorderOptions=stackdepth=256",
+    ]
+
+    # -------- Engine defaults (good for blitz/rapid on 24P; override with env)
+    TT_MB      = os.environ.get("CHESSENGINE_TT_MB", "1024")
+    SEARCH_T   = os.environ.get("CHESSENGINE_THREADS", "10")
+    LAZY_T     = os.environ.get("CHESSENGINE_LAZY_THREADS", "4")
+    ROOT_LIMIT = os.environ.get("CHESSENGINE_ROOT_PAR_LIMIT", "120")
+
+    # Avoid mid-game disk hits unless you preload the book fully at startup
+    BOOK_ENABLED = os.environ.get("CHESSENGINE_BOOK_ENABLED", "false")
+
+    # Trim chatter/allocations a bit
+    INFO_MIN_MS = os.environ.get("CHESSENGINE_UCI_INFO_MIN_MS", "200")
+    PV_MAX_LEN  = os.environ.get("CHESSENGINE_UCI_MAX_PV", "10")
+
+    engine_sysprops = [
+        f"-Dchessengine.searchThreads={SEARCH_T}",
+        f"-Dchessengine.lazySmpThreads={LAZY_T}",
+        f"-Dchessengine.rootParallelLimit={ROOT_LIMIT}",
+        f"-Dchessengine.tt.mb={TT_MB}",
+        f"-Dchessengine.openingbook.enabled={BOOK_ENABLED}",
+        f"-Dchessengine.uci.info.minIntervalMs={INFO_MIN_MS}",
+        f"-Dchessengine.uci.info.maxPvLen={PV_MAX_LEN}",
         "-Dlogging.level.root=INFO",
     ]
 
-    # Note: with -jar the main class argument is ignored; drop it.
-    return [JAVA_EXE, *java_opts, "-jar", str(jar)]
+    return [*java_opts, *engine_sysprops, "-jar", str(jar)]
+
 
 
 def _make_retry():
