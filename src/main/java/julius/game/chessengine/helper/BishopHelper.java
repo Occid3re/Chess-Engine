@@ -3,7 +3,6 @@ package julius.game.chessengine.helper;
 import lombok.extern.log4j.Log4j2;
 
 import java.io.*;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -13,6 +12,73 @@ public class BishopHelper {
 
     private static final String BISHOP_MAGIC_NUMBERS_PATH = "/magic/bishop_magic_numbers.txt";
     private static final String BISHOP_MAGIC_NUMBERS_PATH_write = "src/main/resources" + BISHOP_MAGIC_NUMBERS_PATH;
+
+    private static final long[] PRECOMPUTED_BISHOP_MAGICS = new long[] {
+            4539888478322752L, // 0
+            4764905863112581644L, // 1
+            2346394106149881856L, // 2
+            9201284531881216L, // 3
+            -8528687258843217920L, // 4
+            54192868830478404L, // 5
+            36736951798238208L, // 6
+            -9223229097927178218L, // 7
+            76567859522175104L, // 8
+            -2161021897880305152L, // 9
+            3602888532958413828L, // 10
+            8815538078144L, // 11
+            1152922673911840896L, // 12
+            301743379494993920L, // 13
+            660824238735362L, // 14
+            2262799771373602L, // 15
+            1738399927429638156L, // 16
+            4644826776079106L, // 17
+            281543700417792L, // 18
+            -4025092004760223744L, // 19
+            -8925851302307037168L, // 20
+            70480549643265L, // 21
+            72146124522129432L, // 22
+            1162220220482356228L, // 23
+            9024791579330704L, // 24
+            -9218577616124901340L, // 25
+            2260595925712928L, // 26
+            148909063135051792L, // 27
+            1189232876115214342L, // 28
+            735212914180882944L, // 29
+            7494553005111648768L, // 30
+            -9183959765850183544L, // 31
+            20302001170842624L, // 32
+            288379944162034317L, // 33
+            2743255708212396616L, // 34
+            145152723648800L, // 35
+            1161092868874368L, // 36
+            117674133524973578L, // 37
+            2598022904152675328L, // 38
+            4616331601092035080L, // 39
+            4612821969632047136L, // 40
+            5188437625983344769L, // 41
+            47605564616280064L, // 42
+            1153239280932620291L, // 43
+            1161093011473408L, // 44
+            666541575305743426L, // 45
+            -8646327916256198144L, // 46
+            289356843279450692L, // 47
+            3456942140817416L, // 48
+            4807374275870738L, // 49
+            288301097217689168L, // 50
+            580964387397967880L, // 51
+            616993443700412417L, // 52
+            2306213016486027392L, // 53
+            2427863609444608L, // 54
+            4623091287206150146L, // 55
+            -8924722687374120939L, // 56
+            279307616768L, // 57
+            153122475713005568L, // 58
+            35304639824930L, // 59
+            83582479630856L, // 60
+            34393821697L, // 61
+            1152956845762562304L, // 62
+            -9218867268978982656L // 63
+    };
 
     public static final int[] BISHOP_MIDGAME_POSITIONAL_VALUES = {
             // R1
@@ -199,24 +265,8 @@ public class BishopHelper {
     }
 
     public void loadMagicNumbers() {
-        try (InputStream is = getClass().getResourceAsStream(BISHOP_MAGIC_NUMBERS_PATH)) {
-            assert is != null;
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    String[] parts = line.split(":");
-                    if (parts.length == 2) {
-                        int square = Integer.parseInt(parts[0]);
-                        squareMagicFound[square] = true;
-
-                        long magicNumber = Long.parseLong(parts[1]);
-                        bishopMagics[square] = magicNumber;
-                    }
-                }
-            }
-        } catch (IOException | NullPointerException e) {
-            log.error("Error reading magic numbers from file", e);
-        }
+        System.arraycopy(PRECOMPUTED_BISHOP_MAGICS, 0, bishopMagics, 0, bishopMagics.length);
+        Arrays.fill(squareMagicFound, true);
     }
 
     public long calculateMovesUsingBishopMagic(int square, long occupancy) {
