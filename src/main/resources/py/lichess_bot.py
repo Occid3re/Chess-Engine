@@ -50,7 +50,7 @@ ABORT_NO_MOVE_AFTER = float(os.environ.get("BOT_ABORT_NO_MOVE_AFTER", "45"))
 # Accept/decline policy
 ACCEPT_VARIANTS = {"standard"}  # e.g. {"standard","chess960"}
 ALLOW_RATED = True  # accept rated games?
-ALLOW_CASUAL = True  # accept casual games?
+ALLOW_CASUAL = False  # accept casual games?
 ALLOW_CORRESPONDENCE = False  # accept correspondence TC?
 ACCEPT_TC_TYPES = {"bullet", "blitz", "rapid", "classical"}  # which TCs to accept
 
