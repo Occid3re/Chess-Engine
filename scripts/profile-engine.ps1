@@ -3,7 +3,9 @@ param(
     [string]$ProfileDir,
     [int]$MoveTimeMs = 2000,
     [int]$PlyCount = 80,
-    [string]$JfrDuration = "180s"
+    [string]$JfrDuration = "180s",
+    [switch]$EchoEngine,   # show engine stdout live
+    [switch]$DryRun        # just print the computed java command and exit
 )
 
 Set-StrictMode -Version Latest
@@ -34,12 +36,12 @@ function Get-LatestUciJar {
     if (-not $candidates) { return $null }
 
     $sorted = $candidates | Sort-Object -Property @{ Expression = {
-            $match = $regex.Match($_.Name)
-            if ($match.Success) {
-                try { return [version]$match.Groups[1].Value } catch { return [version]'0.0.0.0' }
-            }
-            return [version]'0.0.0.0'
-        } }, @{ Expression = { $_.LastWriteTimeUtc } }
+        $match = $regex.Match($_.Name)
+        if ($match.Success) {
+            try { return [version]$match.Groups[1].Value } catch { return [version]'0.0.0.0' }
+        }
+        return [version]'0.0.0.0'
+    } }, @{ Expression = { $_.LastWriteTimeUtc } }
 
     return $sorted[-1].FullName
 }
@@ -79,22 +81,37 @@ $summaryFile = Join-Path $profileFullPath "uci-$timestamp-summary.json"
 $logWriter = New-Object System.IO.StreamWriter($logFile, $false, [System.Text.Encoding]::UTF8)
 $logWriter.AutoFlush = $true
 
+function Write-Log {
+    param([string]$Channel, [string]$Message)
+    if ($null -eq $Channel) { $Channel = '' }
+    if ($null -eq $Message) { $Message = '' }
+    $logWriter.WriteLine(("[{0}] {1}" -f @($Channel, $Message)))
+}
+
+function Write-LogAndMaybeConsole {
+    param([string]$Channel,[string]$Message)
+    Write-Log -Channel $Channel -Message $Message
+    # Always echo UCI traffic by default (less surprising)
+    if ($Channel -eq 'stderr') { Write-Warning $Message; return }
+    if ($Channel -eq 'stdout') { Write-Host    $Message; return }
+    if ($Channel -eq 'stdin')  { Write-Host    $Message; return }
+    if ($EchoEngine) { Write-Host $Message }
+}
+
 Write-Host "Launching engine for profiling..."
 Write-Host "  Engine jar    : $jarFullPath"
 Write-Host "  JFR duration  : $JfrDuration"
 Write-Host "  Move time (ms): $MoveTimeMs"
 Write-Host "  Ply count     : $PlyCount"
 Write-Host "  Profile dir   : $profileFullPath"
+Write-Host "  Log file      : $logFile"
 
-# Robustes JFR-Argument mit korrekt gequoteter Filename-Komponente
-$startFlightRecording = ('-XX:StartFlightRecording=name=uci,settings=profile,duration={0},filename="{1}"' -f $JfrDuration, $jfrFile)
-
-# ----> WICHTIG: In Windows PowerShell 5.1 .Arguments als String setzen (kein .ArgumentList vorhanden)
+# JVM options (env overrides supported)
 $javaXms              = if ($env:JAVA_XMS) { $env:JAVA_XMS } else { '8g' }
 $javaXmx              = if ($env:JAVA_XMX) { $env:JAVA_XMX } else { '8g' }
 $javaGc               = if ($env:JAVA_GC)  { $env:JAVA_GC }  else { 'g1' }
 $javaActiveProcessors = if ($env:JAVA_ACTIVE_PROCESSORS) { $env:JAVA_ACTIVE_PROCESSORS } else { '24' }
-$javaExtraOpts        = if ($env:JAVA_EXTRA_OPTS) { $env:JAVA_EXTRA_OPTS } else { '-XX:MaxGCPauseMillis=20 -XX:+AlwaysPreTouch -XX:+UseNUMA -Dchessengine.tt.mb=256 -Dchessengine.uci.info.minIntervalMs=120 -Dchessengine.uci.info.maxPvLen=12' }
+$javaExtraOpts        = if ($env:JAVA_EXTRA_OPTS) { $env:JAVA_EXTRA_OPTS } else { '-XX:MaxGCPauseMillis=20 -XX:+AlwaysPreTouch -Dchessengine.tt.mb=256 -Dchessengine.uci.info.minIntervalMs=120 -Dchessengine.uci.info.maxPvLen=12' }
 
 $chessThreads   = if ($env:CHESSENGINE_THREADS) { $env:CHESSENGINE_THREADS } else { '24' }
 $lazyThreads    = if ($env:CHESSENGINE_LAZY_THREADS) { $env:CHESSENGINE_LAZY_THREADS } else { '8' }
@@ -120,6 +137,16 @@ function Convert-GcOption {
     }
 }
 
+function Join-Arguments {
+    param([string[]]$Arguments)
+    return ($Arguments | ForEach-Object {
+        if ($_ -match '[\s\"]') { '"' + ($_ -replace '"', '""') + '"' } else { $_ }
+    }) -join ' '
+}
+
+# JFR - do not prequote filename (Join-Arguments will)
+$startFlightRecording = "-XX:StartFlightRecording=name=uci,settings=profile,duration=$JfrDuration,filename=$jfrFile"
+
 $javaOpts = @()
 $javaOpts += "-Xms$javaXms"
 $javaOpts += "-Xmx$javaXmx"
@@ -135,73 +162,90 @@ $javaOpts += "-Dchessengine.lazySmpThreads=$lazyThreads"
 $javaOpts += "-Dchessengine.rootParallelLimit=$rootParLimit"
 $javaOpts += '-Dlogging.level.root=INFO'
 
-function Join-Arguments {
-    param([string[]]$Arguments)
-    return ($Arguments | ForEach-Object {
-            if ($_ -match '[\s\"]') {
-                '"' + ($_ -replace '"', '""') + '"'
-            }
-            else { $_ }
-        }) -join ' '
-}
-
 $allArgs = @()
 $allArgs += $javaOpts
 $allArgs += $startFlightRecording
 $allArgs += '-jar'
 $allArgs += $jarFullPath
 
-$processStartInfo = New-Object System.Diagnostics.ProcessStartInfo
-$processStartInfo.FileName = 'java'
-$processStartInfo.Arguments = Join-Arguments -Arguments $allArgs
-$processStartInfo.RedirectStandardInput  = $true
-$processStartInfo.RedirectStandardOutput = $true
-$processStartInfo.RedirectStandardError  = $true
-$processStartInfo.UseShellExecute        = $false
-$processStartInfo.CreateNoWindow         = $true
+$computedArgs = Join-Arguments -Arguments $allArgs
+Write-Log -Channel 'info' -Message "java $computedArgs"
 
-$process = New-Object System.Diagnostics.Process
-$process.StartInfo = $processStartInfo
-$null = $process.Start()
+if ($DryRun) {
+    Write-Host ''
+    Write-Host '--- Dry Run ---'
+    Write-Host "Command line that would be executed:"
+    Write-Host "java $computedArgs"
+    Write-Host "Log file would be: $logFile"
+    Write-Host '---------------'
+    $logWriter.Dispose()
+    return
+}
 
-$stderrThread = [System.Threading.Thread]::new([System.Threading.ThreadStart]{
-    while (-not $process.StandardError.EndOfStream) {
-        $line = $process.StandardError.ReadLine()
-        if ($null -ne $line) {
-            $logWriter.WriteLine("[stderr] $line")
+# ---------- Globals for threads/queues ----------
+$process = $null
+$stderrThread = $null
+$stdoutThread = $null
+$script:outQueue = $null
+
+# ---------- Handshake (synchronous, reliable) ----------
+function Wait-ForLineSync {
+    param([string]$Pattern,[string]$Context,[int]$TimeoutMs = 10000)
+    $regex = if ([string]::IsNullOrWhiteSpace($Pattern)) { $null } else { [regex]$Pattern }
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
+    while ($true) {
+        # Timeout guard
+        if ([DateTime]::UtcNow -ge $deadline) { return $null }
+        # If the process died early, dump what we can and fail
+        if ($process -and $process.HasExited) {
+            $stderrAll = $process.StandardError.ReadToEnd()
+            $stdoutAll = $process.StandardOutput.ReadToEnd()
+            Write-Host "Java exited early with code $($process.ExitCode)"
+            if ($stderrAll) { Write-Host "`n--- STDERR ---`n$stderrAll" }
+            if ($stdoutAll) { Write-Host "`n--- STDOUT ---`n$stdoutAll" }
+            return $null
+        }
+        # Read line if available (non-blocking-ish with small sleeps)
+        if (-not $process.StandardOutput.EndOfStream) {
+            $line = $process.StandardOutput.ReadLine()
+            if ($line -ne $null) {
+                Write-LogAndMaybeConsole -Channel 'stdout' -Message $line
+                if ($null -eq $regex) { return [PSCustomObject]@{ Line = $line } }
+                $m = $regex.Match($line)
+                if ($m.Success) { return [PSCustomObject]@{ Line = $line; Match = $m } }
+            }
+        } else {
+            Start-Sleep -Milliseconds 10
         }
     }
-})
-$stderrThread.IsBackground = $true
-$stderrThread.Start()
+}
 
-$stdin = $process.StandardInput
-
-function Write-Log {
-    param([string]$Channel,[string]$Message)
-    $logWriter.WriteLine("[{0}] {1}" -f $Channel, $Message)
+# ---------- Async queue + timeout helper for the plies ----------
+function Wait-ForRegexWithTimeout {
+    param([string]$Pattern,[string]$Context,[int]$TimeoutMs = 0)
+    $regex = if ([string]::IsNullOrWhiteSpace($Pattern)) { $null } else { [regex]$Pattern }
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($true) {
+        $line = $null
+        if ($script:outQueue -and $script:outQueue.TryDequeue([ref]$line)) {
+            if ($null -eq $regex) { return [PSCustomObject]@{ Line = $line } }
+            $m = $regex.Match($line)
+            if ($m.Success) { return [PSCustomObject]@{ Line = $line; Match = $m } }
+            continue
+        }
+        if ($TimeoutMs -gt 0 -and $sw.ElapsedMilliseconds -ge $TimeoutMs) { return $null }
+        if ($process -and $process.HasExited -and ($null -eq $script:outQueue -or $script:outQueue.IsEmpty)) {
+            throw "Engine terminated unexpectedly while waiting for $Context ($Pattern)."
+        }
+        Start-Sleep -Milliseconds 10
+    }
 }
 
 function Send-UciCommand {
     param([string]$Command)
-    Write-Log -Channel 'stdin' -Message $Command
-    $stdin.WriteLine($Command)
-    $stdin.Flush()
-}
-
-function Wait-ForLine {
-    param([string]$Pattern,[string]$Context)
-    while ($true) {
-        $line = $process.StandardOutput.ReadLine()
-        if ($null -eq $line) {
-            if ($process.HasExited) { throw "Engine terminated unexpectedly while waiting for $Context ($Pattern)." }
-            continue
-        }
-        Write-Log -Channel 'stdout' -Message $line
-        if ([string]::IsNullOrWhiteSpace($Pattern)) { return [PSCustomObject]@{ Line = $line } }
-        $match = [regex]::Match($line, $Pattern)
-        if ($match.Success) { return [PSCustomObject]@{ Line = $line; Match = $match } }
-    }
+    Write-LogAndMaybeConsole -Channel 'stdin' -Message $Command
+    $process.StandardInput.WriteLine($Command)
+    $process.StandardInput.Flush()
 }
 
 $moveHistory   = New-Object System.Collections.Generic.List[string]
@@ -209,16 +253,67 @@ $quitIssued    = $false
 $bestMovePattern = '^bestmove\s+(\S+)'
 
 try {
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = 'java'
+    $psi.Arguments = $computedArgs
+    $psi.RedirectStandardInput  = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError  = $true
+    $psi.UseShellExecute        = $false
+    $psi.CreateNoWindow         = $true
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $psi
+
+    if (-not $process.Start()) { throw "Failed to start 'java' process. Is Java on PATH?" }
+
+    # Start STDERR thread (log + optional echo)
+    $stderrThread = [System.Threading.Thread]::new([System.Threading.ThreadStart]{
+        while ($true) {
+            try {
+                if ($process.StandardError.EndOfStream) { break }
+                $line = $process.StandardError.ReadLine()
+                if ($null -ne $line) { Write-LogAndMaybeConsole -Channel 'stderr' -Message $line }
+            } catch { break }
+        }
+    })
+    $stderrThread.IsBackground = $true
+    $stderrThread.Start()
+
+    # ---- Handshake using SYNC reads (robust on PS 5.1) ----
     Send-UciCommand -Command 'uci'
-    [void](Wait-ForLine -Pattern '^uciok$' -Context 'uci handshake')
+    if (-not (Wait-ForLineSync -Pattern '^uciok$' -Context 'uci handshake' -TimeoutMs 10000)) {
+        throw "Timeout waiting for uciok (sync handshake)."
+    }
 
     Send-UciCommand -Command 'isready'
-    [void](Wait-ForLine -Pattern '^readyok$' -Context 'engine readiness')
+    if (-not (Wait-ForLineSync -Pattern '^readyok$' -Context 'engine readiness' -TimeoutMs 10000)) {
+        throw "Timeout waiting for readyok (sync handshake)."
+    }
 
     Send-UciCommand -Command 'ucinewgame'
     Send-UciCommand -Command 'isready'
-    [void](Wait-ForLine -Pattern '^readyok$' -Context 'new game readiness')
+    if (-not (Wait-ForLineSync -Pattern '^readyok$' -Context 'new game readiness' -TimeoutMs 10000)) {
+        throw "Timeout waiting for readyok after ucinewgame (sync handshake)."
+    }
 
+    # ---- Switch to threaded STDOUT for the long-running loop ----
+    $script:outQueue = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
+    $stdoutThread = [System.Threading.Thread]::new([System.Threading.ThreadStart]{
+        try {
+            while (-not $process.StandardOutput.EndOfStream) {
+                $line = $process.StandardOutput.ReadLine()
+                if ($null -ne $line) {
+                    Write-LogAndMaybeConsole -Channel 'stdout' -Message $line
+                    $script:outQueue.Enqueue($line) | Out-Null
+                }
+            }
+        } catch {}
+    })
+    $stdoutThread.IsBackground = $true
+    $stdoutThread.Start()
+
+    # ---- Self-play loop ----
     for ($ply = 1; $ply -le $PlyCount; $ply++) {
         $positionCommand = 'position startpos'
         if ($moveHistory.Count -gt 0) { $positionCommand += ' moves ' + ($moveHistory -join ' ') }
@@ -226,7 +321,22 @@ try {
         Send-UciCommand -Command $positionCommand
         Send-UciCommand -Command ("go movetime {0}" -f $MoveTimeMs)
 
-        $bestMoveResult = Wait-ForLine -Pattern $bestMovePattern -Context ("bestmove response for ply $ply")
+        $bestMoveResult = Wait-ForRegexWithTimeout -Pattern $bestMovePattern `
+            -Context ("bestmove response for ply $ply") `
+            -TimeoutMs ([Math]::Max($MoveTimeMs * 5, 5000))
+
+        if ($null -eq $bestMoveResult) {
+            Send-UciCommand -Command 'stop'
+            $bestMoveResult = Wait-ForRegexWithTimeout -Pattern $bestMovePattern `
+                -Context ("bestmove (post-stop) for ply $ply") `
+                -TimeoutMs 3000
+        }
+
+        if ($null -eq $bestMoveResult) {
+            Write-Warning "No 'bestmove' received on ply $ply; aborting self-play."
+            break
+        }
+
         $bestMove = $bestMoveResult.Match.Groups[1].Value
 
         if ([string]::IsNullOrWhiteSpace($bestMove) -or $bestMove -eq '(none)') {
@@ -238,12 +348,14 @@ try {
         $moveHistory.Add($bestMove)
 
         Send-UciCommand -Command 'isready'
-        [void](Wait-ForLine -Pattern '^readyok$' -Context ("post-move readiness for ply $ply"))
+        if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context ("post-move readiness for ply $ply") -TimeoutMs 10000)) {
+            throw "Timeout waiting for readyok after ply $ply."
+        }
     }
 
     Send-UciCommand -Command 'quit'
     $quitIssued = $true
-    $stdin.Close()
+    $process.StandardInput.Close()
 
     if (-not $process.WaitForExit(10000)) {
         Write-Warning 'Engine did not exit within 10 seconds after quit; terminating the process.'
@@ -253,21 +365,31 @@ try {
 }
 catch {
     Write-Error $_
-    if (-not $process.HasExited) {
-        try { if (-not $quitIssued) { $stdin.WriteLine('quit'); $stdin.Flush() } } catch {}
-        try { $stdin.Close() } catch {}
+    if ($process) {
         try {
-            if (-not $process.WaitForExit(2000)) { $process.Kill(); $process.WaitForExit() }
+            $stderrTail = ""
+            $stdoutTail = ""
+            try { $stderrTail = $process.StandardError.ReadToEnd() } catch {}
+            try { $stdoutTail = $process.StandardOutput.ReadToEnd() } catch {}
+            if ($stderrTail) { Write-Host "`n--- STDERR (tail) ---`n$stderrTail" }
+            if ($stdoutTail) { Write-Host "`n--- STDOUT (tail) ---`n$stdoutTail" }
         } catch {}
+        if (-not $process.HasExited) {
+            try { if (-not $quitIssued) { $process.StandardInput.WriteLine('quit'); $process.StandardInput.Flush() } } catch {}
+            try { $process.StandardInput.Close() } catch {}
+            try { if (-not $process.WaitForExit(2000)) { $process.Kill(); $process.WaitForExit() } } catch {}
+        }
+        Write-Host "Process exit code: $($process.ExitCode)"
     }
     throw
 }
 finally {
     try { if ($stderrThread -and $stderrThread.IsAlive) { $stderrThread.Join() } } catch {}
+    try { if ($stdoutThread -and $stdoutThread.IsAlive) { $stdoutThread.Join() } } catch {}
     $logWriter.Dispose()
 }
 
-$exitCode = $process.ExitCode
+$exitCode = if ($process) { $process.ExitCode } else { -1 }
 
 $summary = [ordered]@{
     timestampUtc       = (Get-Date).ToUniversalTime().ToString('u')
