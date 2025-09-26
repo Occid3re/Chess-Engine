@@ -136,6 +136,34 @@ public class Engine {
         startNewGame();
     }
 
+    private void replaceLegalMoves(MoveList next) {
+        if (this.legalMoves != null && this.legalMoves != next) {
+            MoveListPool.release(this.legalMoves);
+        }
+        this.legalMoves = next;
+    }
+
+    private void discardLegalMoves() {
+        if (this.legalMoves != null) {
+            MoveListPool.release(this.legalMoves);
+            this.legalMoves = null;
+        }
+    }
+
+    private static MoveList snapshotOf(MoveList source) {
+        MoveList snapshot = new MoveList();
+        source.copyInto(snapshot);
+        return snapshot;
+    }
+
+    private void ensureCacheWithinBounds() {
+        int size = legalMovesCache.size();
+        if (size > CACHE_CFG.maxSize) {
+            throw new RuntimeException(String.format(
+                    "LegalMovesCache size %s is larger than configured MAX_SIZE %s", size, CACHE_CFG.maxSize));
+        }
+    }
+
     public Engine(Engine other) {
         synchronized (other.boardLock) {
             this.bitBoard = new BitBoard(other.bitBoard);
@@ -178,13 +206,7 @@ public class Engine {
 
     public MoveList getAllLegalMoves() {
         synchronized (boardLock) {
-            if (gameState.isGameOver()) {
-                if (legalMoves == null) {
-                    legalMoves = new MoveList();  // Create only if null
-                } else {
-                    legalMoves.clear();  // Clear existing list instead of creating a new one
-                }
-            } else if (legalMovesNeedUpdate) {
+            if (legalMovesNeedUpdate || legalMoves == null) {
                 generateLegalMoves();
             }
             return legalMoves;
@@ -220,6 +242,7 @@ public class Engine {
 
     public void importBoardFromFen(String fen) {
         synchronized (boardLock) {
+            discardLegalMoves();
             this.bitBoard = FEN.translateFENtoBitBoard(fen);
             this.gameState = new GameState(bitBoard);
 
@@ -236,11 +259,7 @@ public class Engine {
             // For terminal draw states (e.g., fifty-move rule) skip move generation entirely so
             // callers observe an empty legal move list.
             if (gameState.isFiftyMoveRule() || gameState.isThreefoldRepetition()) {
-                if (legalMoves == null) {
-                    legalMoves = new MoveList();
-                } else {
-                    legalMoves.clear();
-                }
+                replaceLegalMoves(MoveListPool.borrow());
                 legalMovesNeedUpdate = false;
                 gameState.setState(GameStateEnum.DRAW);
             } else {
@@ -262,6 +281,7 @@ public class Engine {
         Objects.requireNonNull(other, "other engine");
         synchronized (boardLock) {
             synchronized (other.boardLock) {
+                discardLegalMoves();
                 this.bitBoard = new BitBoard(other.bitBoard);
                 this.gameState = new GameState(other.gameState);
                 this.line = new ArrayList<>(other.line);
@@ -276,6 +296,7 @@ public class Engine {
 
     public void startNewGame() {
         synchronized (boardLock) {
+            discardLegalMoves();
             bitBoard = new BitBoard();
             gameState = new GameState(bitBoard);
             legalMovesNeedUpdate = true;
@@ -296,43 +317,53 @@ public class Engine {
             // Use cached result if available
             MoveList cached = legalMovesCache.get(boardStateHash);
             if (cached != null) {
-                this.legalMoves = new MoveList(cached);
+                MoveList snapshot = MoveListPool.borrow();
+                cached.copyInto(snapshot);
+                replaceLegalMoves(snapshot);
                 legalMovesNeedUpdate = false;
                 return;
             }
 
             if (gameState.isGameOver()) {
-                this.legalMoves = new MoveList();
+                MoveList empty = MoveListPool.borrow();
+                replaceLegalMoves(empty);
                 legalMovesNeedUpdate = false;
+                legalMovesCache.put(boardStateHash, snapshotOf(empty));
+                ensureCacheWithinBounds();
                 return;
             }
 
             // Generate pseudo-legal moves on the current board
-            MoveList moves = bitBoard.getAllCurrentPossibleMoves();
+            MoveList pseudoLegal = null;
+            MoveList legal = MoveListPool.borrow();
+            try {
+                pseudoLegal = MoveListPool.borrow();
+                bitBoard.getAllCurrentPossibleMoves(pseudoLegal);
 
-            // Filter in-place by making/unmaking on the SAME bitBoard (no BitBoard copy)
-            MoveList legal = new MoveList();
-            for (int i = 0; i < moves.size(); i++) {
-                int move = moves.getMove(i);
+                // Filter in-place by making/unmaking on the SAME bitBoard (no BitBoard copy)
+                for (int i = 0; i < pseudoLegal.size(); i++) {
+                    int move = pseudoLegal.getMove(i);
 
-                bitBoard.performMove(move);
-                // If the mover's king is not left in check, the move is legal
-                if (!bitBoard.isInCheck(MoveHelper.isWhitesMove(move))) {
-                    legal.add(move);
+                    bitBoard.performMove(move);
+                    // If the mover's king is not left in check, the move is legal
+                    if (!bitBoard.isInCheck(MoveHelper.isWhitesMove(move))) {
+                        legal.add(move);
+                    }
+                    bitBoard.undoMove(move);
                 }
-                bitBoard.undoMove(move);
-            }
 
-            this.legalMoves = legal;
-            legalMovesNeedUpdate = false;
-            // Store a clone to keep the cache immutable from callers' perspective.
-            legalMovesCache.put(boardStateHash, new MoveList(legal));
-
-            int size = legalMovesCache.size();
-            if (size > CACHE_CFG.maxSize) {
-                // This should be rare due to eviction, but keep the guard to surface misconfigurations.
-                throw new RuntimeException(String.format(
-                        "LegalMovesCache size %s is larger than configured MAX_SIZE %s", size, CACHE_CFG.maxSize));
+                replaceLegalMoves(legal);
+                legalMovesNeedUpdate = false;
+                // Store a clone to keep the cache immutable from callers' perspective.
+                legalMovesCache.put(boardStateHash, snapshotOf(legal));
+                ensureCacheWithinBounds();
+            } finally {
+                if (legal != this.legalMoves) {
+                    MoveListPool.release(legal);
+                }
+                if (pseudoLegal != null) {
+                    MoveListPool.release(pseudoLegal);
+                }
             }
         }
     }

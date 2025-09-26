@@ -61,9 +61,6 @@ public class BitBoard {
     private boolean blackAttackDirty = true;
     private PieceType[] pieceBoard = new PieceType[64];
 
-    // Reusable buffer for move generation to avoid frequent allocations.
-    private final MoveList moveGenerationBuffer = new MoveList();
-
     @Getter(AccessLevel.NONE)
     private final Deque<Integer> halfmoveHistory = new ArrayDeque<>();
     @Getter(AccessLevel.NONE)
@@ -265,8 +262,8 @@ public class BitBoard {
         return (whiteMinorPieces <= 1) && (blackMinorPieces <= 1);
     }
 
-    public MoveList getAllCurrentPossibleMoves() {
-        return generateAllPossibleMoves(whitesTurn);
+    public void getAllCurrentPossibleMoves(MoveList target) {
+        generateAllPossibleMoves(whitesTurn, target);
     }
 
     // Method to set up the initial position
@@ -782,9 +779,7 @@ public class BitBoard {
         }
     }
 
-    public MoveList generateAllPossibleMoves(boolean whitesTurn) {
-        // Reuse the internal buffer to cut down on object creation and GC pressure.
-        MoveList moves = moveGenerationBuffer;
+    public void generateAllPossibleMoves(boolean whitesTurn, MoveList moves) {
         moves.clear();
 
         // Do NOT recompute white/black attack maps here.
@@ -799,7 +794,6 @@ public class BitBoard {
         generateQueenMoves(whitesTurn, moves);
         generateKingMoves(whitesTurn, moves);
 
-        return moves;
     }
 
 

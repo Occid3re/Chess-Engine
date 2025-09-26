@@ -2,13 +2,12 @@ package julius.game.chessengine.board;
 
 import lombok.extern.log4j.Log4j2;
 
-import java.util.Arrays;
 
 @Log4j2
 public class MoveList {
     private int[] moves;
     private int moveCount;
-    private static final int MAX_SIZE = 218; // Maximum number of legal moves
+    public static final int MAX_SIZE = 218; // Maximum number of legal moves
 
     private String stringRepresentation;
     private boolean isStringRepresentationStale = true;
@@ -52,10 +51,6 @@ public class MoveList {
         return moves[index];
     }
 
-    public int[] toArray() {
-        return Arrays.copyOf(moves, moveCount);
-    }
-
     public int[] get() {
         return this.moves;
     }
@@ -63,6 +58,22 @@ public class MoveList {
     public void clear() {
         moveCount = 0;
         isStringRepresentationStale = true;
+    }
+
+    /**
+     * Copy the contents of this list into the provided target list. The target list is cleared
+     * and populated without allocating a new backing array.
+     *
+     * @param target the list to receive the copy
+     * @throws IllegalArgumentException if the target cannot accommodate {@link #MAX_SIZE} moves
+     */
+    public void copyInto(MoveList target) {
+        if (target.moves.length < MAX_SIZE) {
+            throw new IllegalArgumentException("Target MoveList capacity is insufficient");
+        }
+        System.arraycopy(this.moves, 0, target.moves, 0, this.moveCount);
+        target.moveCount = this.moveCount;
+        target.isStringRepresentationStale = true;
     }
 
     /**

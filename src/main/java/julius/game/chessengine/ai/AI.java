@@ -4,6 +4,7 @@ import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.Move;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.MoveList;
+import julius.game.chessengine.board.MoveListPool;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
@@ -2049,44 +2050,51 @@ public class AI {
 
         // Generate moves: evasions if in check, else captures/promotions
         MoveList moves = inCheck ? simulatorEngine.getAllLegalMoves() : getPossibleCapturesOrPromotions(simulatorEngine);
+        final boolean borrowedMoves = !inCheck;
 
-        // Order them (captures first via MVV-LVA/promotion bonus, killers/history still help)
-        MoveList ordered = sortMovesByEfficiency(moves, 0, simulatorEngine.getBoardStateHash(), -1,
-                simulatorEngine);
+        try {
+            // Order them (captures first via MVV-LVA/promotion bonus, killers/history still help)
+            MoveList ordered = sortMovesByEfficiency(moves, 0, simulatorEngine.getBoardStateHash(), -1,
+                    simulatorEngine);
 
-        for (int i = 0; i < ordered.size(); i++) {
-            int m = ordered.getMove(i);
-            boolean isCapture = MoveHelper.isCapture(m);
-            boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
-            boolean isQuiet = !isCapture && !isPromotion;
+            for (int i = 0; i < ordered.size(); i++) {
+                int m = ordered.getMove(i);
+                boolean isCapture = MoveHelper.isCapture(m);
+                boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
+                boolean isQuiet = !isCapture && !isPromotion;
 
-            // --- SEE pruning: drop clearly losing captures or quiet moves (keeps promotions) ---
-            if ((!inCheck && isCapture && !isPromotion) || isQuiet) {
-                int see = simulatorEngine.see(m);
-                if (see < 0) {
-                    simulatorEngine.performMove(m);
-                    boolean givesCheck = isSideInCheck(simulatorEngine, !isWhitesTurn);
-                    simulatorEngine.undoLastMove();
-                    if (!givesCheck) continue;
+                // --- SEE pruning: drop clearly losing captures or quiet moves (keeps promotions) ---
+                if ((!inCheck && isCapture && !isPromotion) || isQuiet) {
+                    int see = simulatorEngine.see(m);
+                    if (see < 0) {
+                        simulatorEngine.performMove(m);
+                        boolean givesCheck = isSideInCheck(simulatorEngine, !isWhitesTurn);
+                        simulatorEngine.undoLastMove();
+                        if (!givesCheck) continue;
+                    }
+                }
+                simulatorEngine.performMove(m);
+                // Propagate timeout BEFORE negation
+                double child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
+                simulatorEngine.undoLastMove();
+
+                if (child == EXIT_FLAG) return EXIT_FLAG;
+
+                double score = -child;
+
+                if (score >= beta) {
+                    return beta;
+                }
+                if (score > alpha) {
+                    alpha = score;
                 }
             }
-            simulatorEngine.performMove(m);
-            // Propagate timeout BEFORE negation
-            double child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
-            simulatorEngine.undoLastMove();
-
-            if (child == EXIT_FLAG) return EXIT_FLAG;
-
-            double score = -child;
-
-            if (score >= beta) {
-                return beta;
-            }
-            if (score > alpha) {
-                alpha = score;
+            return alpha;
+        } finally {
+            if (borrowedMoves) {
+                MoveListPool.release(moves);
             }
         }
-        return alpha;
     }
 
     private double evaluateStaticPosition(GameState gameState, boolean isWhitesTurn, int depthOrPly) {
@@ -2120,7 +2128,7 @@ public class AI {
 
     private MoveList getPossibleCapturesOrPromotions(Engine simulatorEngine) {
         MoveList allLegalMoves = simulatorEngine.getAllLegalMoves();
-        MoveList capturesAndPromotions = new MoveList();
+        MoveList capturesAndPromotions = MoveListPool.borrow();
         for (int i = 0; i < allLegalMoves.size(); i++) {
             int m = allLegalMoves.getMove(i);
             if (MoveHelper.isCapture(m) || MoveHelper.isPawnPromotionMove(m)) {

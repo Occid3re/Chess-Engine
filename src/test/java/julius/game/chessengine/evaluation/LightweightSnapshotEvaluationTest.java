@@ -3,6 +3,7 @@ package julius.game.chessengine.evaluation;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.FEN;
 import julius.game.chessengine.board.MoveList;
+import julius.game.chessengine.board.MoveListPool;
 import julius.game.chessengine.utils.Score;
 import org.junit.jupiter.api.Test;
 
@@ -36,12 +37,17 @@ class LightweightSnapshotEvaluationTest {
         Deque<Integer> played = new ArrayDeque<>();
 
         for (int ply = 0; ply < 6; ply++) {
-            MoveList moves = board.getAllCurrentPossibleMoves();
-            assertTrue(moves.size() > 0, "No legal move available at ply " + ply);
-            int move = moves.getMove(0);
-            played.push(move);
-            board.performMove(move);
-            score.applyMove(board, move, null);
+            MoveList moves = MoveListPool.borrow();
+            try {
+                board.getAllCurrentPossibleMoves(moves);
+                assertTrue(moves.size() > 0, "No legal move available at ply " + ply);
+                int move = moves.getMove(0);
+                played.push(move);
+                board.performMove(move);
+                score.applyMove(board, move, null);
+            } finally {
+                MoveListPool.release(moves);
+            }
         }
 
         score.refresh(board, null);
