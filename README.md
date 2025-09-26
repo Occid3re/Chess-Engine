@@ -24,6 +24,44 @@ java -jar target/chess-engine-<version>-uci.jar
 The process listens on standard input and speaks the UCI protocol on standard
 output.
 
+## Profiling the engine on Windows
+
+To automate the build, self-play session, and profiling capture, run the
+`profile-engine.bat` helper from a Windows terminal:
+
+```cmd
+profile-engine.bat
+```
+
+The script performs the following steps:
+
+1. Builds the project with `mvnw.cmd -DskipTests package`.
+2. Locates the latest `*-uci.jar` artifact in `target/`.
+3. Launches the UCI engine with Java Flight Recorder (JFR) profiling enabled
+   while the engine plays both sides of a game for a configurable number of
+   plies and move time.
+4. Stores the resulting artifacts under `profiles/`:
+   * `uci-<timestamp>.jfr` &mdash; the JFR capture that you can inspect with
+     Java Mission Control.
+   * `uci-<timestamp>.log` &mdash; the raw UCI transcript, including the
+     commands sent to the engine and the `info`/`bestmove` responses.
+   * `uci-<timestamp>-summary.json` &mdash; metadata about the run, including
+     the moves that were played and the effective configuration.
+
+You can tweak the duration and game characteristics by exporting environment
+variables before running the batch file:
+
+```cmd
+set PROFILE_MOVE_TIME_MS=1500
+set PROFILE_PLY_COUNT=120
+set PROFILE_JFR_DURATION=240s
+profile-engine.bat
+```
+
+Adjust `PROFILE_JFR_DURATION` to ensure the recording lasts long enough to
+cover the requested number of plies. The batch file automatically validates that
+Java is available on the `PATH` and reports any build or runtime errors.
+
 ## Running the web UI
 
 The browser UI talks to the engine through a WebSocket that is hosted by the
