@@ -244,6 +244,10 @@ try {
 
     if (-not $process.Start()) { throw "Failed to start 'java' process. Is Java on PATH?" }
 
+    $pidMessage = "Engine process started. PID=$($process.Id)"
+    Write-Host $pidMessage
+    Write-Log -Channel 'info' -Message $pidMessage
+
     # Wire up async handlers for stdout/stderr
     $stdoutQueue = New-Object System.Collections.Concurrent.ConcurrentQueue[string]
 
@@ -269,21 +273,36 @@ try {
     $process.BeginErrorReadLine()
 
     # ---- Handshake using async queue ----
+    Write-Host 'Waiting for engine to acknowledge UCI (uciok)...'
+    Write-Log -Channel 'info' -Message 'Waiting for uciok response'
     Send-UciCommand -Command 'uci'
     if (-not (Wait-ForRegexWithTimeout -Pattern '^uciok$' -Context 'uci handshake' -TimeoutMs 10000 -Queue $stdoutQueue)) {
         throw "Timeout waiting for uciok."
     }
 
+    Write-Host 'uciok received.'
+    Write-Log -Channel 'info' -Message 'uciok received'
+
+    Write-Host 'Checking engine readiness (readyok)...'
+    Write-Log -Channel 'info' -Message 'Waiting for readyok response'
     Send-UciCommand -Command 'isready'
     if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context 'engine readiness' -TimeoutMs 10000 -Queue $stdoutQueue)) {
         throw "Timeout waiting for readyok."
     }
 
+    Write-Host 'readyok received. Sending ucinewgame...'
+    Write-Log -Channel 'info' -Message 'Initial readyok received'
+
     Send-UciCommand -Command 'ucinewgame'
+    Write-Host 'Waiting for engine to be ready after ucinewgame...'
+    Write-Log -Channel 'info' -Message 'Waiting for readyok after ucinewgame'
     Send-UciCommand -Command 'isready'
     if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context 'new game readiness' -TimeoutMs 10000 -Queue $stdoutQueue)) {
         throw "Timeout waiting for readyok after ucinewgame."
     }
+
+    Write-Host 'Engine reported ready after ucinewgame.'
+    Write-Log -Channel 'info' -Message 'Ready after ucinewgame'
 
     # ---- Self-play loop ----
     for ($ply = 1; $ply -le $PlyCount; $ply++) {
