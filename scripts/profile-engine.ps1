@@ -184,9 +184,9 @@ if ($DryRun) {
 
 # ---------- Globals for process + async queues ----------
 $process = $null
-$stdoutSubscription = $null
-$stderrSubscription = $null
-$script:stdoutQueue = $null
+$stdoutHandler = $null
+$stderrHandler = $null
+$stdoutQueue = $null
 
 # ---------- Async wait helper ----------
 function Wait-ForRegexWithTimeout {
@@ -195,7 +195,7 @@ function Wait-ForRegexWithTimeout {
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     while ($true) {
         $line = $null
-        if ($script:stdoutQueue -and $script:stdoutQueue.TryDequeue([ref]$line)) {
+        if ($stdoutQueue -and $stdoutQueue.TryDequeue([ref]$line)) {
             if ($null -eq $regex) { return [PSCustomObject]@{ Line = $line } }
             $m = $regex.Match($line)
             if ($m.Success) { return [PSCustomObject]@{ Line = $line; Match = $m } }
@@ -236,22 +236,25 @@ try {
     if (-not $process.Start()) { throw "Failed to start 'java' process. Is Java on PATH?" }
 
     # Wire up async handlers for stdout/stderr
-    $script:stdoutQueue = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
+    $stdoutQueue = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
 
-    $stdoutSubscription = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -Action {
+    $stdoutHandler = [System.Diagnostics.DataReceivedEventHandler]{
         param($sender,$eventArgs)
         $line = $eventArgs.Data
         if ($null -eq $line) { return }
-        $script:stdoutQueue.Enqueue($line) | Out-Null
+        $stdoutQueue.Enqueue($line) | Out-Null
         Write-LogAndMaybeConsole -Channel 'stdout' -Message $line
     }
 
-    $stderrSubscription = Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived -Action {
+    $stderrHandler = [System.Diagnostics.DataReceivedEventHandler]{
         param($sender,$eventArgs)
         $line = $eventArgs.Data
         if ($null -eq $line) { return }
         Write-LogAndMaybeConsole -Channel 'stderr' -Message $line
     }
+
+    $process.add_OutputDataReceived($stdoutHandler)
+    $process.add_ErrorDataReceived($stderrHandler)
 
     $process.BeginOutputReadLine()
     $process.BeginErrorReadLine()
@@ -347,16 +350,10 @@ finally {
     try { if ($process) { $process.CancelOutputRead() } } catch {}
     try { if ($process) { $process.CancelErrorRead() } } catch {}
     try {
-        if ($stdoutSubscription) {
-            Unregister-Event -SubscriptionId $stdoutSubscription.Id -ErrorAction SilentlyContinue
-            Remove-Event -SourceIdentifier $stdoutSubscription.SourceIdentifier -ErrorAction SilentlyContinue
-        }
+        if ($process -and $stdoutHandler) { $process.remove_OutputDataReceived($stdoutHandler) }
     } catch {}
     try {
-        if ($stderrSubscription) {
-            Unregister-Event -SubscriptionId $stderrSubscription.Id -ErrorAction SilentlyContinue
-            Remove-Event -SourceIdentifier $stderrSubscription.SourceIdentifier -ErrorAction SilentlyContinue
-        }
+        if ($process -and $stderrHandler) { $process.remove_ErrorDataReceived($stderrHandler) }
     } catch {}
     $logWriter.Dispose()
 }
