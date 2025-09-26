@@ -31,7 +31,7 @@ public final class EvaluationContext {
 
     public static EvaluationContext from(BitBoard bitBoard, GameStateEnum gameState) {
         Objects.requireNonNull(bitBoard, "bitBoard");
-        BitBoard snapshot = new BitBoard(bitBoard);
+        BitBoard snapshot = bitBoard.snapshotWithoutHistory();
         long whiteAttacks = bitBoard.getAttackBitboard(true);
         long blackAttacks = bitBoard.getAttackBitboard(false);
         return new EvaluationContext(snapshot, gameState, bitBoard.getPhase(), whiteAttacks, blackAttacks,
@@ -63,6 +63,6 @@ public final class EvaluationContext {
     }
 
     public EvaluationContext copy() {
-        return new EvaluationContext(new BitBoard(board), gameState, phase, whiteAttackMap, blackAttackMap, whiteToMove);
+        return new EvaluationContext(board.snapshotWithoutHistory(), gameState, phase, whiteAttackMap, blackAttackMap, whiteToMove);
     }
 }

@@ -171,6 +171,10 @@ public class BitBoard {
     }
 
     public BitBoard(BitBoard other) {
+        this(other, true);
+    }
+
+    private BitBoard(BitBoard other, boolean includeHistory) {
         // Copying all the long fields representing the pieces
         this.bishopHelper = other.bishopHelper;
         this.rookHelper = other.rookHelper;
@@ -215,8 +219,15 @@ public class BitBoard {
         this.pieceBoard = Arrays.copyOf(other.pieceBoard, other.pieceBoard.length);
         this.halfmoveClock = other.halfmoveClock;
         this.fullmoveNumber = other.fullmoveNumber;
-        this.halfmoveHistory.addAll(other.halfmoveHistory);
-        this.fullmoveHistory.addAll(other.fullmoveHistory);
+
+        if (includeHistory) {
+            this.halfmoveHistory.addAll(other.halfmoveHistory);
+            this.fullmoveHistory.addAll(other.fullmoveHistory);
+        }
+    }
+
+    public BitBoard snapshotWithoutHistory() {
+        return new BitBoard(this, false);
     }
     public void setLastMoveDoubleStepPawnIndex(int index) {
         int oldEp = getEnPassantTargetIndex();
