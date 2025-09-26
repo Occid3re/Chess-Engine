@@ -1326,46 +1326,53 @@ public class BitBoard {
         // ---- 1) Captures (fast, no aggregates yet)
         if (isCapture) {
             int capIndex = isEnPassant ? (isWhite ? toIndex - 8 : toIndex + 8) : toIndex;
-            PieceType capType = pieceBoard[capIndex];
+            PieceType capType = isEnPassant ? PieceType.PAWN : pieceBoard[capIndex];
+            if (capType == null) {
+                throw new IllegalStateException("No captured piece present at index " + capIndex);
+            }
             Color capColor = isWhite ? Color.BLACK : Color.WHITE;
             xorPiece(capColor, capType, capIndex);
             long capMask = 1L << capIndex;
-
-            if (isWhite) {
-                if ((blackPawns & capMask) != 0) {
-                    blackPawns &= ~capMask;
-                    pieceBoard[capIndex] = null;
-                } else if ((blackKnights & capMask) != 0) {
-                    blackKnights &= ~capMask;
-                    pieceBoard[capIndex] = null;
-                } else if ((blackBishops & capMask) != 0) {
-                    blackBishops &= ~capMask;
-                    pieceBoard[capIndex] = null;
-                } else if ((blackRooks & capMask) != 0) {
-                    blackRooks &= ~capMask;
-                    pieceBoard[capIndex] = null;
-                } else if ((blackQueens & capMask) != 0) {
-                    blackQueens &= ~capMask;
-                    pieceBoard[capIndex] = null;
-                } else if ((blackKing & capMask) != 0) throw new IllegalStateException("Cannot capture the king");
-            } else {
-                if ((whitePawns & capMask) != 0) {
-                    whitePawns &= ~capMask;
-                    pieceBoard[capIndex] = null;
-                } else if ((whiteKnights & capMask) != 0) {
-                    whiteKnights &= ~capMask;
-                    pieceBoard[capIndex] = null;
-                } else if ((whiteBishops & capMask) != 0) {
-                    whiteBishops &= ~capMask;
-                    pieceBoard[capIndex] = null;
-                } else if ((whiteRooks & capMask) != 0) {
-                    whiteRooks &= ~capMask;
-                    pieceBoard[capIndex] = null;
-                } else if ((whiteQueens & capMask) != 0) {
-                    whiteQueens &= ~capMask;
-                    pieceBoard[capIndex] = null;
-                } else if ((whiteKing & capMask) != 0) throw new IllegalStateException("Cannot capture the king");
+            switch (capType) {
+                case PAWN -> {
+                    if (isWhite) {
+                        blackPawns &= ~capMask;
+                    } else {
+                        whitePawns &= ~capMask;
+                    }
+                }
+                case KNIGHT -> {
+                    if (isWhite) {
+                        blackKnights &= ~capMask;
+                    } else {
+                        whiteKnights &= ~capMask;
+                    }
+                }
+                case BISHOP -> {
+                    if (isWhite) {
+                        blackBishops &= ~capMask;
+                    } else {
+                        whiteBishops &= ~capMask;
+                    }
+                }
+                case ROOK -> {
+                    if (isWhite) {
+                        blackRooks &= ~capMask;
+                    } else {
+                        whiteRooks &= ~capMask;
+                    }
+                }
+                case QUEEN -> {
+                    if (isWhite) {
+                        blackQueens &= ~capMask;
+                    } else {
+                        whiteQueens &= ~capMask;
+                    }
+                }
+                case KING -> throw new IllegalStateException("Cannot capture the king");
+                default -> throw new IllegalArgumentException("Unknown captured piece type: " + capType);
             }
+            pieceBoard[capIndex] = null;
         }
 
         // ---- 2) Castling (move rook fast)
