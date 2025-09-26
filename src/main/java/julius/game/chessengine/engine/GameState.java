@@ -2,6 +2,7 @@ package julius.game.chessengine.engine;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongArrayList;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.MoveList;
@@ -10,15 +11,11 @@ import lombok.Data;
 import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
 
-import java.util.ArrayDeque;
-import java.util.Deque;
-
-
 @Data
 @Log4j2
 public class GameState {
 
-    private final Deque<Long> hashHistory = new ArrayDeque<>(256);
+    private final LongArrayList hashHistory = new LongArrayList(256);
     private final Long2IntOpenHashMap repetition;
     private final IntArrayList halfmoveStack = new IntArrayList();
     private final IntArrayList fullmoveStack = new IntArrayList();
@@ -155,7 +152,7 @@ public class GameState {
      * Threefold Repetition Logic
      */
     public void recordHash(long zKey) {
-        hashHistory.addLast(zKey);
+        hashHistory.add(zKey);
         repetition.addTo(zKey, 1);
         lastZobrist = zKey;
     }
@@ -168,8 +165,10 @@ public class GameState {
             else repetition.put(zKey, count - 1);
         }
         // We only ever remove the most recent
-        if (!hashHistory.isEmpty()) hashHistory.removeLast();
-        lastZobrist = hashHistory.isEmpty() ? 0L : hashHistory.getLast();
+        if (!hashHistory.isEmpty()) {
+            hashHistory.removeLong(hashHistory.size() - 1);
+        }
+        lastZobrist = hashHistory.isEmpty() ? 0L : hashHistory.getLong(hashHistory.size() - 1);
     }
 
     public boolean isThreefoldRepetition() {
@@ -197,12 +196,23 @@ public class GameState {
 
     @Override
     public String toString() {
+        StringBuilder hashHistoryBuilder = new StringBuilder("[");
+        for (int i = 0; i < hashHistory.size(); i++) {
+            if (i > 0) {
+                hashHistoryBuilder.append(',').append(' ');
+            }
+            hashHistoryBuilder.append(hashHistory.getLong(i));
+        }
+        hashHistoryBuilder.append(']');
+
         return "GameState {" +
                 "\n  State: " + state +
                 "\n  Midgame Score: " + score.getMidgameScore() +
                 "\n  Endgame Score: " + score.getEndgameScore() +
                 "\n  Blended Score: " + score.getBlendedScore() +
                 "\n  Score Difference: " + score.getScoreDifference() +
+                "\n  Last Zobrist: " + lastZobrist +
+                "\n  Hash History: " + hashHistoryBuilder +
                 "\n  Repetition Count: " + repetition +
                 "\n}";
     }
