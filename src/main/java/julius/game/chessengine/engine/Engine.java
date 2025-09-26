@@ -123,6 +123,7 @@ public class Engine {
 
     private boolean legalMovesNeedUpdate = true;
     private MoveList legalMoves;
+    private MoveList legalMovesSnapshot;
 
     @Getter
     private ArrayList<Integer> line = new ArrayList<>();
@@ -153,7 +154,7 @@ public class Engine {
 
             // ✅ light: fresh empty state for the clone; compute lazily when needed
             this.legalMoves = null;
-            this.legalMovesNeedUpdate = true;
+            markLegalMovesStale();
             recycleCacheEntries();
             this.legalMovesCache = createLegalMovesCache();
 
@@ -185,10 +186,13 @@ public class Engine {
             if (gameState.isGameOver()) {
                 buffer.clear();
                 legalMovesNeedUpdate = false;
+                publishLegalMovesSnapshot(buffer);
             } else if (legalMovesNeedUpdate) {
                 generateLegalMoves();
+            } else if (legalMovesSnapshot == null) {
+                publishLegalMovesSnapshot(buffer);
             }
-            return buffer;
+            return legalMovesSnapshot != null ? legalMovesSnapshot : new MoveList(buffer);
         }
     }
 
@@ -240,6 +244,7 @@ public class Engine {
                 MoveList buffer = ensureLegalMovesBuffer();
                 buffer.clear();
                 legalMovesNeedUpdate = false;
+                publishLegalMovesSnapshot(buffer);
                 gameState.setState(GameStateEnum.DRAW);
             } else {
                 generateLegalMoves();
@@ -265,7 +270,7 @@ public class Engine {
                 this.line = new ArrayList<>(other.line);
                 this.redoLine = new ArrayList<>(other.redoLine);
                 this.legalMoves = null;
-                this.legalMovesNeedUpdate = true;
+                markLegalMovesStale();
                 recycleCacheEntries();
                 this.legalMovesCache = createLegalMovesCache();
                 this.openingBook = other.openingBook;
@@ -277,7 +282,7 @@ public class Engine {
         synchronized (boardLock) {
             bitBoard = new BitBoard();
             gameState = new GameState(bitBoard);
-            legalMovesNeedUpdate = true;
+            markLegalMovesStale();
             line = new ArrayList<>();
             redoLine = new ArrayList<>();
             this.openingBook = OpeningBook.getInstance();
@@ -301,11 +306,13 @@ public class Engine {
             if (cached != null) {
                 buffer.copyFrom(cached);
                 legalMovesNeedUpdate = false;
+                publishLegalMovesSnapshot(buffer);
                 return;
             }
 
             if (gameState.isGameOver()) {
                 legalMovesNeedUpdate = false;
+                publishLegalMovesSnapshot(buffer);
                 return;
             }
 
@@ -326,6 +333,8 @@ public class Engine {
 
             legalMovesNeedUpdate = false;
 
+            publishLegalMovesSnapshot(buffer);
+
             MoveList snapshot = obtainSnapshot();
             snapshot.copyFrom(buffer);
             legalMovesCache.put(boardStateHash, snapshot);
@@ -337,6 +346,15 @@ public class Engine {
                         "LegalMovesCache size %s is larger than configured MAX_SIZE %s", size, CACHE_CFG.maxSize));
             }
         }
+    }
+
+    private void markLegalMovesStale() {
+        legalMovesNeedUpdate = true;
+        legalMovesSnapshot = null;
+    }
+
+    private void publishLegalMovesSnapshot(MoveList buffer) {
+        legalMovesSnapshot = new MoveList(buffer);
     }
 
     private MoveList ensureLegalMovesBuffer() {
@@ -493,7 +511,7 @@ public class Engine {
             bitBoard.flipSideToMove();
 
             // Mark move list stale so the next search ply regenerates for the new side.
-            legalMovesNeedUpdate = true;
+            markLegalMovesStale();
 
             gameState.refreshScore(bitBoard);
 
@@ -511,7 +529,7 @@ public class Engine {
             bitBoard.setLastMoveDoubleStepPawnIndex(previousDoubleStep);
 
             // Mark stale again so we rebuild for the restored side.
-            legalMovesNeedUpdate = true;
+            markLegalMovesStale();
 
             gameState.refreshScore(bitBoard);
         }
