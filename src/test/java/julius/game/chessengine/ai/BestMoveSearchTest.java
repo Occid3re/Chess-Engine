@@ -22,6 +22,7 @@ import java.util.stream.Stream;
  * Verifies that the AI selects the expected best move from a set of FEN
  * positions within a small time budget. Similar in spirit to
  * {@link MateSearchTest} but checks the single move chosen by the engine
+ * -Xms8g -Xmx8g -XX:+UseG1GC -XX:MaxGCPauseMillis=20 -XX:+AlwaysPreTouch -XX:+UseNUMA -XX:ActiveProcessorCount=24 -Dchessengine.tt.mb=256 -Dchessengine.searchThreads=16 -Dchessengine.lazySmpThreads=8 -Dchessengine.rootParallelLimit=48
  * instead of the game result.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
