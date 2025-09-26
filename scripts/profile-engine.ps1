@@ -6,14 +6,11 @@ param(
     [string]$ProfileDir,
 
     [int]$MoveTimeMs = 2000,
-
     [int]$PlyCount = 80,
-
     [string]$JfrDuration = "180s"
 )
 
 Set-StrictMode -Version Latest
-
 $ErrorActionPreference = 'Stop'
 
 function Resolve-FullPath {
@@ -24,7 +21,6 @@ function Resolve-FullPath {
 if (-not (Test-Path -LiteralPath $JarPath)) {
     throw "The UCI engine jar '$JarPath' was not found. Build the project before running the profiler."
 }
-
 if (-not (Test-Path -LiteralPath $ProfileDir)) {
     New-Item -ItemType Directory -Path $ProfileDir -Force | Out-Null
 }
@@ -32,17 +28,12 @@ if (-not (Test-Path -LiteralPath $ProfileDir)) {
 $jarFullPath = Resolve-FullPath -PathValue $JarPath
 $profileFullPath = Resolve-FullPath -PathValue $ProfileDir
 
-if ($MoveTimeMs -le 0) {
-    throw "MoveTimeMs must be greater than zero."
-}
+if ($MoveTimeMs -le 0) { throw "MoveTimeMs must be greater than zero." }
+if ($PlyCount   -le 0) { throw "PlyCount must be greater than zero." }
 
-if ($PlyCount -le 0) {
-    throw "PlyCount must be greater than zero."
-}
-
-$timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$jfrFile = Join-Path $profileFullPath "uci-$timestamp.jfr"
-$logFile = Join-Path $profileFullPath "uci-$timestamp.log"
+$timestamp   = Get-Date -Format 'yyyyMMdd-HHmmss'
+$jfrFile     = Join-Path $profileFullPath "uci-$timestamp.jfr"
+$logFile     = Join-Path $profileFullPath "uci-$timestamp.log"
 $summaryFile = Join-Path $profileFullPath "uci-$timestamp-summary.json"
 
 $logWriter = New-Object System.IO.StreamWriter($logFile, $false, [System.Text.Encoding]::UTF8)
@@ -54,19 +45,18 @@ Write-Host "  JFR duration  : $JfrDuration"
 Write-Host "  Move time (ms): $MoveTimeMs"
 Write-Host "  Ply count     : $PlyCount"
 
-$startFlightRecording = "-XX:StartFlightRecording=name=uci,settings=profile,duration=$JfrDuration,filename=\"$jfrFile\""
-$argumentList = @($startFlightRecording, '-jar', $jarFullPath)
+# Robustes JFR-Argument mit korrekt gequoteter Filename-Komponente
+$startFlightRecording = ('-XX:StartFlightRecording=name=uci,settings=profile,duration={0},filename="{1}"' -f $JfrDuration, $jfrFile)
 
+# ----> WICHTIG: In Windows PowerShell 5.1 .Arguments als String setzen (kein .ArgumentList vorhanden)
 $processStartInfo = New-Object System.Diagnostics.ProcessStartInfo
 $processStartInfo.FileName = 'java'
-foreach ($arg in $argumentList) {
-    [void]$processStartInfo.ArgumentList.Add($arg)
-}
-$processStartInfo.RedirectStandardInput = $true
+$processStartInfo.Arguments = "$startFlightRecording -jar `"$jarFullPath`""
+$processStartInfo.RedirectStandardInput  = $true
 $processStartInfo.RedirectStandardOutput = $true
-$processStartInfo.RedirectStandardError = $true
-$processStartInfo.UseShellExecute = $false
-$processStartInfo.CreateNoWindow = $true
+$processStartInfo.RedirectStandardError  = $true
+$processStartInfo.UseShellExecute        = $false
+$processStartInfo.CreateNoWindow         = $true
 
 $process = New-Object System.Diagnostics.Process
 $process.StartInfo = $processStartInfo
@@ -86,10 +76,7 @@ $stderrThread.Start()
 $stdin = $process.StandardInput
 
 function Write-Log {
-    param(
-        [string]$Channel,
-        [string]$Message
-    )
+    param([string]$Channel,[string]$Message)
     $logWriter.WriteLine("[{0}] {1}" -f $Channel, $Message)
 }
 
@@ -101,36 +88,23 @@ function Send-UciCommand {
 }
 
 function Wait-ForLine {
-    param(
-        [string]$Pattern,
-        [string]$Context
-    )
-
+    param([string]$Pattern,[string]$Context)
     while ($true) {
         $line = $process.StandardOutput.ReadLine()
         if ($null -eq $line) {
-            if ($process.HasExited) {
-                throw "Engine terminated unexpectedly while waiting for $Context ($Pattern)."
-            }
+            if ($process.HasExited) { throw "Engine terminated unexpectedly while waiting for $Context ($Pattern)." }
             continue
         }
-
         Write-Log -Channel 'stdout' -Message $line
-
-        if ([string]::IsNullOrWhiteSpace($Pattern)) {
-            return [PSCustomObject]@{ Line = $line }
-        }
-
+        if ([string]::IsNullOrWhiteSpace($Pattern)) { return [PSCustomObject]@{ Line = $line } }
         $match = [regex]::Match($line, $Pattern)
-        if ($match.Success) {
-            return [PSCustomObject]@{ Line = $line; Match = $match }
-        }
+        if ($match.Success) { return [PSCustomObject]@{ Line = $line; Match = $match } }
     }
 }
 
-$moveHistory = New-Object System.Collections.Generic.List[string]
-$quitIssued = $false
-$bestMovePattern = '^bestmove\s+(\S+)' 
+$moveHistory   = New-Object System.Collections.Generic.List[string]
+$quitIssued    = $false
+$bestMovePattern = '^bestmove\s+(\S+)'
 
 try {
     Send-UciCommand -Command 'uci'
@@ -145,9 +119,7 @@ try {
 
     for ($ply = 1; $ply -le $PlyCount; $ply++) {
         $positionCommand = 'position startpos'
-        if ($moveHistory.Count -gt 0) {
-            $positionCommand += ' moves ' + ($moveHistory -join ' ')
-        }
+        if ($moveHistory.Count -gt 0) { $positionCommand += ' moves ' + ($moveHistory -join ' ') }
 
         Send-UciCommand -Command $positionCommand
         Send-UciCommand -Command ("go movetime {0}" -f $MoveTimeMs)
@@ -180,45 +152,32 @@ try {
 catch {
     Write-Error $_
     if (-not $process.HasExited) {
-        try {
-            if (-not $quitIssued) {
-                $stdin.WriteLine('quit')
-                $stdin.Flush()
-            }
-        } catch {}
+        try { if (-not $quitIssued) { $stdin.WriteLine('quit'); $stdin.Flush() } } catch {}
         try { $stdin.Close() } catch {}
         try {
-            if (-not $process.WaitForExit(2000)) {
-                $process.Kill()
-                $process.WaitForExit()
-            }
+            if (-not $process.WaitForExit(2000)) { $process.Kill(); $process.WaitForExit() }
         } catch {}
     }
     throw
 }
 finally {
-    try {
-        if ($stderrThread -and $stderrThread.IsAlive) {
-            $stderrThread.Join()
-        }
-    } catch {}
-
+    try { if ($stderrThread -and $stderrThread.IsAlive) { $stderrThread.Join() } } catch {}
     $logWriter.Dispose()
 }
 
 $exitCode = $process.ExitCode
 
 $summary = [ordered]@{
-    timestampUtc = (Get-Date).ToUniversalTime().ToString('u')
-    engineJar = $jarFullPath
-    jfrDuration = $JfrDuration
-    moveTimeMs = $MoveTimeMs
-    requestedPlyCount = $PlyCount
-    completedPlyCount = $moveHistory.Count
-    bestMoves = $moveHistory
-    jfrFile = $jfrFile
-    logFile = $logFile
-    exitCode = $exitCode
+    timestampUtc       = (Get-Date).ToUniversalTime().ToString('u')
+    engineJar          = $jarFullPath
+    jfrDuration        = $JfrDuration
+    moveTimeMs         = $MoveTimeMs
+    requestedPlyCount  = $PlyCount
+    completedPlyCount  = $moveHistory.Count
+    bestMoves          = $moveHistory
+    jfrFile            = $jfrFile
+    logFile            = $logFile
+    exitCode           = $exitCode
 }
 
 $summary | ConvertTo-Json -Depth 4 | Set-Content -Path $summaryFile -Encoding UTF8
