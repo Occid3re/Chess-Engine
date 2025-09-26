@@ -16,9 +16,11 @@ import org.springframework.stereotype.Component;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.LongAdder;
 
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.locks.StampedLock;
 
 import static julius.game.chessengine.helper.BitHelper.FileMasks;
 import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
@@ -133,7 +135,8 @@ public class AI {
      */
     private final ThreadLocal<Heuristics> threadHeuristics;
 
-    private final Object heuristicsLock = new Object();
+    private final StampedLock heuristicsLock = new StampedLock();
+    private final LockMetrics heuristicsLockMetrics = new LockMetrics();
 
     // Buffers used for move ordering. Reused across calls to avoid repeated
     // allocations when ordering moves.
@@ -267,6 +270,52 @@ public class AI {
         this.mainEngine.setOnPositionChanged(h -> updateBoardStateHash());
     }
 
+    private long acquireWriteLock() {
+        long start = System.nanoTime();
+        long stamp = heuristicsLock.writeLock();
+        heuristicsLockMetrics.recordWriteAcquisition(System.nanoTime() - start);
+        return stamp;
+    }
+
+    private long acquireReadLock() {
+        long start = System.nanoTime();
+        long stamp = heuristicsLock.readLock();
+        heuristicsLockMetrics.recordReadAcquisition(System.nanoTime() - start);
+        return stamp;
+    }
+
+    private void releaseWriteLock(long stamp) {
+        heuristicsLock.unlockWrite(stamp);
+    }
+
+    private void releaseReadLock(long stamp) {
+        heuristicsLock.unlockRead(stamp);
+    }
+
+    private Heuristics.Snapshot captureHeuristicsSnapshot(int requiredDepth) {
+        while (true) {
+            long stamp = heuristicsLock.tryOptimisticRead();
+            if (stamp != 0L) {
+                Heuristics.Snapshot optimistic = globalHeuristics.snapshot(requiredDepth);
+                if (heuristicsLock.validate(stamp)) {
+                    heuristicsLockMetrics.recordOptimisticSnapshot();
+                    return optimistic;
+                }
+            }
+            long readStamp = acquireReadLock();
+            try {
+                heuristicsLockMetrics.recordOptimisticFallback();
+                return globalHeuristics.snapshot(requiredDepth);
+            } finally {
+                releaseReadLock(readStamp);
+            }
+        }
+    }
+
+    LockMetricsSnapshot snapshotHeuristicsLockMetrics() {
+        return heuristicsLockMetrics.snapshot();
+    }
+
     private void rebuildTranspositionTables() {
         boolean concurrent = Math.max(searchThreads, lazySmpThreads) > 1;
         long totalBytes = Math.max(1L, (long) hashSizeMb * 1024L * 1024L);
@@ -371,8 +420,11 @@ public class AI {
      */
     public synchronized void setMaxDepth(int depth) {
         int requestedDepth = Math.max(1, depth);
-        synchronized (heuristicsLock) {
+        long stamp = acquireWriteLock();
+        try {
             globalHeuristics.ensureCapacity(requestedDepth);
+        } finally {
+            releaseWriteLock(stamp);
         }
         threadHeuristics.get().ensureCapacity(requestedDepth);
         this.maxDepth = requestedDepth;
@@ -561,7 +613,8 @@ public class AI {
     }
 
     private void prepareIterationState(SearchTask task, Heuristics heuristics, int currentDepth, boolean firstAtDepth) {
-        synchronized (heuristicsLock) {
+        long stamp = acquireWriteLock();
+        try {
             globalHeuristics.ensureCapacity(maxDepth);
             if (firstAtDepth) {
                 if (transpositionTable != null) {
@@ -572,14 +625,20 @@ public class AI {
                 }
                 globalHeuristics.decayHistory();
             }
-            heuristics.beginIteration(globalHeuristics, maxDepth);
-            heuristics.markPrepared(task.getId(), currentDepth);
+        } finally {
+            releaseWriteLock(stamp);
         }
+        Heuristics.Snapshot snapshot = captureHeuristicsSnapshot(maxDepth);
+        heuristics.beginIteration(snapshot, maxDepth);
+        heuristics.markPrepared(task.getId(), currentDepth);
     }
 
     private void mergeThreadHeuristics(Heuristics heuristics) {
-        synchronized (heuristicsLock) {
+        long stamp = acquireWriteLock();
+        try {
             heuristics.mergeInto(globalHeuristics);
+        } finally {
+            releaseWriteLock(stamp);
         }
         heuristics.resetUpdates();
     }
@@ -587,11 +646,15 @@ public class AI {
     private Heuristics prepareHelperHeuristics(SearchTask task, int depth) {
         Heuristics heuristics = threadHeuristics.get();
         if (!heuristics.isPreparedFor(task.getId(), depth)) {
-            synchronized (heuristicsLock) {
+            long stamp = acquireWriteLock();
+            try {
                 globalHeuristics.ensureCapacity(maxDepth);
-                heuristics.beginIteration(globalHeuristics, maxDepth);
-                heuristics.markPrepared(task.getId(), depth);
+            } finally {
+                releaseWriteLock(stamp);
             }
+            Heuristics.Snapshot snapshot = captureHeuristicsSnapshot(maxDepth);
+            heuristics.beginIteration(snapshot, maxDepth);
+            heuristics.markPrepared(task.getId(), depth);
         }
         return heuristics;
     }
@@ -2162,21 +2225,30 @@ public class AI {
     }
 
     private void decayHistoryTable() {
-        synchronized (heuristicsLock) {
+        long stamp = acquireWriteLock();
+        try {
             globalHeuristics.decayHistory();
+        } finally {
+            releaseWriteLock(stamp);
         }
     }
 
     private void clearHistoryTable() {
-        synchronized (heuristicsLock) {
+        long stamp = acquireWriteLock();
+        try {
             globalHeuristics.clearHistory();
             globalHeuristics.clearCounter();
+        } finally {
+            releaseWriteLock(stamp);
         }
     }
 
     int[][] snapshotKillerMoves() {
-        synchronized (heuristicsLock) {
+        long stamp = acquireReadLock();
+        try {
             return globalHeuristics.snapshotKillers();
+        } finally {
+            releaseReadLock(stamp);
         }
     }
 
@@ -2187,6 +2259,95 @@ public class AI {
         int victimValue = Score.getPieceValue(MoveHelper.deriveCapturedPieceTypeBits(move));
         int attackerValue = Score.getPieceValue(MoveHelper.derivePieceTypeBits(move));
         return victimValue - attackerValue;
+    }
+
+    static final class LockMetricsSnapshot {
+        private final long maxReadWaitNanos;
+        private final long maxWriteWaitNanos;
+        private final long readAcquisitions;
+        private final long writeAcquisitions;
+        private final long optimisticSnapshots;
+        private final long optimisticFallbacks;
+
+        LockMetricsSnapshot(long maxReadWaitNanos,
+                            long maxWriteWaitNanos,
+                            long readAcquisitions,
+                            long writeAcquisitions,
+                            long optimisticSnapshots,
+                            long optimisticFallbacks) {
+            this.maxReadWaitNanos = maxReadWaitNanos;
+            this.maxWriteWaitNanos = maxWriteWaitNanos;
+            this.readAcquisitions = readAcquisitions;
+            this.writeAcquisitions = writeAcquisitions;
+            this.optimisticSnapshots = optimisticSnapshots;
+            this.optimisticFallbacks = optimisticFallbacks;
+        }
+
+        long getMaxReadWaitNanos() {
+            return maxReadWaitNanos;
+        }
+
+        long getMaxWriteWaitNanos() {
+            return maxWriteWaitNanos;
+        }
+
+        long getReadAcquisitions() {
+            return readAcquisitions;
+        }
+
+        long getWriteAcquisitions() {
+            return writeAcquisitions;
+        }
+
+        long getOptimisticSnapshots() {
+            return optimisticSnapshots;
+        }
+
+        long getOptimisticFallbacks() {
+            return optimisticFallbacks;
+        }
+    }
+
+    private static final class LockMetrics {
+        private final AtomicLong maxReadWait = new AtomicLong();
+        private final AtomicLong maxWriteWait = new AtomicLong();
+        private final LongAdder readAcquisitions = new LongAdder();
+        private final LongAdder writeAcquisitions = new LongAdder();
+        private final LongAdder optimisticSnapshots = new LongAdder();
+        private final LongAdder optimisticFallbacks = new LongAdder();
+
+        void recordReadAcquisition(long waitNanos) {
+            readAcquisitions.increment();
+            updateMax(maxReadWait, waitNanos);
+        }
+
+        void recordWriteAcquisition(long waitNanos) {
+            writeAcquisitions.increment();
+            updateMax(maxWriteWait, waitNanos);
+        }
+
+        void recordOptimisticSnapshot() {
+            optimisticSnapshots.increment();
+        }
+
+        void recordOptimisticFallback() {
+            optimisticFallbacks.increment();
+        }
+
+        LockMetricsSnapshot snapshot() {
+            return new LockMetricsSnapshot(
+                    maxReadWait.get(),
+                    maxWriteWait.get(),
+                    readAcquisitions.sum(),
+                    writeAcquisitions.sum(),
+                    optimisticSnapshots.sum(),
+                    optimisticFallbacks.sum()
+            );
+        }
+
+        private static void updateMax(AtomicLong target, long value) {
+            target.accumulateAndGet(value, (cur, v) -> Math.max(cur, v));
+        }
     }
 
     private static final class Heuristics {
@@ -2253,17 +2414,46 @@ public class AI {
             killerDirtyList = Arrays.copyOf(killerDirtyList, depth);
         }
 
-        void beginIteration(Heuristics base, int requiredDepth) {
+        void beginIteration(Snapshot snapshot, int requiredDepth) {
             resetUpdates();
             ensureCapacity(requiredDepth);
-            base.ensureCapacity(requiredDepth);
-            int limit = Math.min(requiredDepth, base.killers.length);
+            int limit = Math.min(requiredDepth, snapshot.killers.length);
             for (int d = 0; d < limit; d++) {
-                System.arraycopy(base.killers[d], 0, killers[d], 0, NUM_KILLER_MOVES);
+                System.arraycopy(snapshot.killers[d], 0, killers[d], 0, NUM_KILLER_MOVES);
+            }
+            for (int d = limit; d < requiredDepth; d++) {
+                Arrays.fill(killers[d], -1);
             }
             for (int f = 0; f < BOARD_SQUARES; f++) {
-                System.arraycopy(base.history[f], 0, history[f], 0, BOARD_SQUARES);
-                System.arraycopy(base.counter[f], 0, counter[f], 0, BOARD_SQUARES);
+                System.arraycopy(snapshot.history[f], 0, history[f], 0, BOARD_SQUARES);
+                System.arraycopy(snapshot.counter[f], 0, counter[f], 0, BOARD_SQUARES);
+            }
+        }
+
+        Snapshot snapshot(int requiredDepth) {
+            int killerDepth = Math.min(requiredDepth, killers.length);
+            int[][] killerCopy = new int[killerDepth][];
+            for (int d = 0; d < killerDepth; d++) {
+                killerCopy[d] = Arrays.copyOf(killers[d], NUM_KILLER_MOVES);
+            }
+            int[][] historyCopy = new int[BOARD_SQUARES][];
+            int[][] counterCopy = new int[BOARD_SQUARES][];
+            for (int f = 0; f < BOARD_SQUARES; f++) {
+                historyCopy[f] = Arrays.copyOf(history[f], BOARD_SQUARES);
+                counterCopy[f] = Arrays.copyOf(counter[f], BOARD_SQUARES);
+            }
+            return new Snapshot(killerCopy, historyCopy, counterCopy);
+        }
+
+        static final class Snapshot {
+            final int[][] killers;
+            final int[][] history;
+            final int[][] counter;
+
+            Snapshot(int[][] killers, int[][] history, int[][] counter) {
+                this.killers = killers;
+                this.history = history;
+                this.counter = counter;
             }
         }
 
