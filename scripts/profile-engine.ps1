@@ -182,59 +182,27 @@ if ($DryRun) {
     return
 }
 
-# ---------- Globals for threads/queues ----------
+# ---------- Globals for process + async queues ----------
 $process = $null
-$stderrThread = $null
-$stdoutThread = $null
-$script:outQueue = $null
+$stdoutSubscription = $null
+$stderrSubscription = $null
+$script:stdoutQueue = $null
 
-# ---------- Handshake (synchronous, reliable) ----------
-function Wait-ForLineSync {
-    param([string]$Pattern,[string]$Context,[int]$TimeoutMs = 10000)
-    $regex = if ([string]::IsNullOrWhiteSpace($Pattern)) { $null } else { [regex]$Pattern }
-    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
-    while ($true) {
-        # Timeout guard
-        if ([DateTime]::UtcNow -ge $deadline) { return $null }
-        # If the process died early, dump what we can and fail
-        if ($process -and $process.HasExited) {
-            $stderrAll = $process.StandardError.ReadToEnd()
-            $stdoutAll = $process.StandardOutput.ReadToEnd()
-            Write-Host "Java exited early with code $($process.ExitCode)"
-            if ($stderrAll) { Write-Host "`n--- STDERR ---`n$stderrAll" }
-            if ($stdoutAll) { Write-Host "`n--- STDOUT ---`n$stdoutAll" }
-            return $null
-        }
-        # Read line if available (non-blocking-ish with small sleeps)
-        if (-not $process.StandardOutput.EndOfStream) {
-            $line = $process.StandardOutput.ReadLine()
-            if ($line -ne $null) {
-                Write-LogAndMaybeConsole -Channel 'stdout' -Message $line
-                if ($null -eq $regex) { return [PSCustomObject]@{ Line = $line } }
-                $m = $regex.Match($line)
-                if ($m.Success) { return [PSCustomObject]@{ Line = $line; Match = $m } }
-            }
-        } else {
-            Start-Sleep -Milliseconds 10
-        }
-    }
-}
-
-# ---------- Async queue + timeout helper for the plies ----------
+# ---------- Async wait helper ----------
 function Wait-ForRegexWithTimeout {
     param([string]$Pattern,[string]$Context,[int]$TimeoutMs = 0)
     $regex = if ([string]::IsNullOrWhiteSpace($Pattern)) { $null } else { [regex]$Pattern }
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     while ($true) {
         $line = $null
-        if ($script:outQueue -and $script:outQueue.TryDequeue([ref]$line)) {
+        if ($script:stdoutQueue -and $script:stdoutQueue.TryDequeue([ref]$line)) {
             if ($null -eq $regex) { return [PSCustomObject]@{ Line = $line } }
             $m = $regex.Match($line)
             if ($m.Success) { return [PSCustomObject]@{ Line = $line; Match = $m } }
             continue
         }
         if ($TimeoutMs -gt 0 -and $sw.ElapsedMilliseconds -ge $TimeoutMs) { return $null }
-        if ($process -and $process.HasExited -and ($null -eq $script:outQueue -or $script:outQueue.IsEmpty)) {
+        if ($process -and $process.HasExited) {
             throw "Engine terminated unexpectedly while waiting for $Context ($Pattern)."
         }
         Start-Sleep -Milliseconds 10
@@ -267,51 +235,43 @@ try {
 
     if (-not $process.Start()) { throw "Failed to start 'java' process. Is Java on PATH?" }
 
-    # Start STDERR thread (log + optional echo)
-    $stderrThread = [System.Threading.Thread]::new([System.Threading.ThreadStart]{
-        while ($true) {
-            try {
-                if ($process.StandardError.EndOfStream) { break }
-                $line = $process.StandardError.ReadLine()
-                if ($null -ne $line) { Write-LogAndMaybeConsole -Channel 'stderr' -Message $line }
-            } catch { break }
-        }
-    })
-    $stderrThread.IsBackground = $true
-    $stderrThread.Start()
+    # Wire up async handlers for stdout/stderr
+    $script:stdoutQueue = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
 
-    # ---- Handshake using SYNC reads (robust on PS 5.1) ----
+    $stdoutSubscription = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -Action {
+        param($sender,$eventArgs)
+        $line = $eventArgs.Data
+        if ($null -eq $line) { return }
+        $script:stdoutQueue.Enqueue($line) | Out-Null
+        Write-LogAndMaybeConsole -Channel 'stdout' -Message $line
+    }
+
+    $stderrSubscription = Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived -Action {
+        param($sender,$eventArgs)
+        $line = $eventArgs.Data
+        if ($null -eq $line) { return }
+        Write-LogAndMaybeConsole -Channel 'stderr' -Message $line
+    }
+
+    $process.BeginOutputReadLine()
+    $process.BeginErrorReadLine()
+
+    # ---- Handshake using async queue ----
     Send-UciCommand -Command 'uci'
-    if (-not (Wait-ForLineSync -Pattern '^uciok$' -Context 'uci handshake' -TimeoutMs 10000)) {
-        throw "Timeout waiting for uciok (sync handshake)."
+    if (-not (Wait-ForRegexWithTimeout -Pattern '^uciok$' -Context 'uci handshake' -TimeoutMs 10000)) {
+        throw "Timeout waiting for uciok."
     }
 
     Send-UciCommand -Command 'isready'
-    if (-not (Wait-ForLineSync -Pattern '^readyok$' -Context 'engine readiness' -TimeoutMs 10000)) {
-        throw "Timeout waiting for readyok (sync handshake)."
+    if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context 'engine readiness' -TimeoutMs 10000)) {
+        throw "Timeout waiting for readyok."
     }
 
     Send-UciCommand -Command 'ucinewgame'
     Send-UciCommand -Command 'isready'
-    if (-not (Wait-ForLineSync -Pattern '^readyok$' -Context 'new game readiness' -TimeoutMs 10000)) {
-        throw "Timeout waiting for readyok after ucinewgame (sync handshake)."
+    if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context 'new game readiness' -TimeoutMs 10000)) {
+        throw "Timeout waiting for readyok after ucinewgame."
     }
-
-    # ---- Switch to threaded STDOUT for the long-running loop ----
-    $script:outQueue = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
-    $stdoutThread = [System.Threading.Thread]::new([System.Threading.ThreadStart]{
-        try {
-            while (-not $process.StandardOutput.EndOfStream) {
-                $line = $process.StandardOutput.ReadLine()
-                if ($null -ne $line) {
-                    Write-LogAndMaybeConsole -Channel 'stdout' -Message $line
-                    $script:outQueue.Enqueue($line) | Out-Null
-                }
-            }
-        } catch {}
-    })
-    $stdoutThread.IsBackground = $true
-    $stdoutThread.Start()
 
     # ---- Self-play loop ----
     for ($ply = 1; $ply -le $PlyCount; $ply++) {
@@ -384,8 +344,20 @@ catch {
     throw
 }
 finally {
-    try { if ($stderrThread -and $stderrThread.IsAlive) { $stderrThread.Join() } } catch {}
-    try { if ($stdoutThread -and $stdoutThread.IsAlive) { $stdoutThread.Join() } } catch {}
+    try { if ($process) { $process.CancelOutputRead() } } catch {}
+    try { if ($process) { $process.CancelErrorRead() } } catch {}
+    try {
+        if ($stdoutSubscription) {
+            Unregister-Event -SubscriptionId $stdoutSubscription.Id -ErrorAction SilentlyContinue
+            Remove-Event -SourceIdentifier $stdoutSubscription.SourceIdentifier -ErrorAction SilentlyContinue
+        }
+    } catch {}
+    try {
+        if ($stderrSubscription) {
+            Unregister-Event -SubscriptionId $stderrSubscription.Id -ErrorAction SilentlyContinue
+            Remove-Event -SourceIdentifier $stderrSubscription.SourceIdentifier -ErrorAction SilentlyContinue
+        }
+    } catch {}
     $logWriter.Dispose()
 }
 
