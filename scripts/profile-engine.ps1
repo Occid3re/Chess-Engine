@@ -4,6 +4,7 @@ param(
     [int]$MoveTimeMs = 2000,
     [int]$PlyCount = 80,
     [string]$JfrDuration = "180s",
+    [int]$HandshakeTimeoutMs = 30000,
     [switch]$EchoEngine,   # show engine stdout live
     [switch]$DryRun        # just print the computed java command and exit
 )
@@ -67,11 +68,18 @@ if (-not (Test-Path -LiteralPath $ProfileDir)) {
     New-Item -ItemType Directory -Path $ProfileDir -Force | Out-Null
 }
 
+if (-not $PSBoundParameters.ContainsKey('HandshakeTimeoutMs') -and $env:CHESSENGINE_HANDSHAKE_TIMEOUT_MS) {
+    if (-not [int]::TryParse($env:CHESSENGINE_HANDSHAKE_TIMEOUT_MS, [ref]$HandshakeTimeoutMs)) {
+        throw "Environment variable CHESSENGINE_HANDSHAKE_TIMEOUT_MS must be a valid integer."
+    }
+}
+
 $jarFullPath = Resolve-FullPath -PathValue $JarPath
 $profileFullPath = Resolve-FullPath -PathValue $ProfileDir
 
 if ($MoveTimeMs -le 0) { throw "MoveTimeMs must be greater than zero." }
 if ($PlyCount   -le 0) { throw "PlyCount must be greater than zero." }
+if ($HandshakeTimeoutMs -le 0) { throw "HandshakeTimeoutMs must be greater than zero." }
 
 $timestamp   = Get-Date -Format 'yyyyMMdd-HHmmss'
 $jfrFile     = Join-Path $profileFullPath "uci-$timestamp.jfr"
@@ -105,6 +113,7 @@ Write-Host "  Move time (ms): $MoveTimeMs"
 Write-Host "  Ply count     : $PlyCount"
 Write-Host "  Profile dir   : $profileFullPath"
 Write-Host "  Log file      : $logFile"
+Write-Host "  Handshake wait: $HandshakeTimeoutMs ms"
 
 # JVM options (env overrides supported)
 $javaXms              = if ($env:JAVA_XMS) { $env:JAVA_XMS } else { '8g' }
@@ -258,18 +267,18 @@ try {
 
     # ---- Handshake using async queue ----
     Send-UciCommand -Command 'uci'
-    if (-not (Wait-ForRegexWithTimeout -Pattern '^uciok$' -Context 'uci handshake' -TimeoutMs 10000)) {
+    if (-not (Wait-ForRegexWithTimeout -Pattern '^uciok$' -Context 'uci handshake' -TimeoutMs $HandshakeTimeoutMs)) {
         throw "Timeout waiting for uciok."
     }
 
     Send-UciCommand -Command 'isready'
-    if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context 'engine readiness' -TimeoutMs 10000)) {
+    if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context 'engine readiness' -TimeoutMs $HandshakeTimeoutMs)) {
         throw "Timeout waiting for readyok."
     }
 
     Send-UciCommand -Command 'ucinewgame'
     Send-UciCommand -Command 'isready'
-    if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context 'new game readiness' -TimeoutMs 10000)) {
+    if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context 'new game readiness' -TimeoutMs $HandshakeTimeoutMs)) {
         throw "Timeout waiting for readyok after ucinewgame."
     }
 
@@ -308,7 +317,7 @@ try {
         $moveHistory.Add($bestMove)
 
         Send-UciCommand -Command 'isready'
-        if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context ("post-move readiness for ply $ply") -TimeoutMs 10000)) {
+        if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context ("post-move readiness for ply $ply") -TimeoutMs $HandshakeTimeoutMs)) {
             throw "Timeout waiting for readyok after ply $ply."
         }
     }
