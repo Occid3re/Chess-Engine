@@ -113,6 +113,16 @@ $javaGc               = if ($env:JAVA_GC)  { $env:JAVA_GC }  else { 'g1' }
 $javaActiveProcessors = if ($env:JAVA_ACTIVE_PROCESSORS) { $env:JAVA_ACTIVE_PROCESSORS } else { '24' }
 $javaExtraOpts        = if ($env:JAVA_EXTRA_OPTS) { $env:JAVA_EXTRA_OPTS } else { '-XX:MaxGCPauseMillis=20 -XX:+AlwaysPreTouch -Dchessengine.tt.mb=256 -Dchessengine.uci.info.minIntervalMs=120 -Dchessengine.uci.info.maxPvLen=12' }
 
+$handshakeTimeoutMs = 30000
+if ($env:CHESSENGINE_HANDSHAKE_TIMEOUT_MS) {
+    $parsedTimeout = $null
+    if ([int]::TryParse($env:CHESSENGINE_HANDSHAKE_TIMEOUT_MS, [ref]$parsedTimeout)) {
+        $handshakeTimeoutMs = $parsedTimeout
+    }
+}
+
+if ($handshakeTimeoutMs -lt 1000) { $handshakeTimeoutMs = 1000 }
+
 $chessThreads   = if ($env:CHESSENGINE_THREADS) { $env:CHESSENGINE_THREADS } else { '24' }
 $lazyThreads    = if ($env:CHESSENGINE_LAZY_THREADS) { $env:CHESSENGINE_LAZY_THREADS } else { '8' }
 $rootParLimit   = if ($env:CHESSENGINE_ROOT_PAR_LIMIT) { $env:CHESSENGINE_ROOT_PAR_LIMIT } else { '48' }
@@ -120,6 +130,7 @@ $rootParLimit   = if ($env:CHESSENGINE_ROOT_PAR_LIMIT) { $env:CHESSENGINE_ROOT_P
 Write-Host "  Search threads: $chessThreads"
 Write-Host "  Lazy threads  : $lazyThreads"
 Write-Host "  Root fanout   : $rootParLimit"
+Write-Host "  Handshake wait: $handshakeTimeoutMs ms"
 
 function Split-OptionString {
     param([string]$Value)
@@ -258,18 +269,18 @@ try {
 
     # ---- Handshake using async queue ----
     Send-UciCommand -Command 'uci'
-    if (-not (Wait-ForRegexWithTimeout -Pattern '^uciok$' -Context 'uci handshake' -TimeoutMs 10000)) {
+    if (-not (Wait-ForRegexWithTimeout -Pattern '^uciok$' -Context 'uci handshake' -TimeoutMs $handshakeTimeoutMs)) {
         throw "Timeout waiting for uciok."
     }
 
     Send-UciCommand -Command 'isready'
-    if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context 'engine readiness' -TimeoutMs 10000)) {
+    if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context 'engine readiness' -TimeoutMs $handshakeTimeoutMs)) {
         throw "Timeout waiting for readyok."
     }
 
     Send-UciCommand -Command 'ucinewgame'
     Send-UciCommand -Command 'isready'
-    if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context 'new game readiness' -TimeoutMs 10000)) {
+    if (-not (Wait-ForRegexWithTimeout -Pattern '^readyok$' -Context 'new game readiness' -TimeoutMs $handshakeTimeoutMs)) {
         throw "Timeout waiting for readyok after ucinewgame."
     }
 
