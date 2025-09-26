@@ -3,7 +3,6 @@ package julius.game.chessengine.helper;
 import lombok.extern.log4j.Log4j2;
 
 import java.io.*;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -13,6 +12,73 @@ public class RookHelper {
 
     private static final String ROOK_MAGIC_NUMBERS_PATH = "/magic/rook_magic_numbers.txt";
     private static final String ROOK_MAGIC_NUMBERS_PATH_write = "src/main/resources" + ROOK_MAGIC_NUMBERS_PATH;
+
+    private static final long[] PRECOMPUTED_ROOK_MAGICS = new long[] {
+            36028936609595408L, // 0
+            2323857476446855168L, // 1
+            144124259317448836L, // 2
+            612498345683846272L, // 3
+            144120823207297040L, // 4
+            4647715932146237952L, // 5
+            180144534867411456L, // 6
+            72057732559143168L, // 7
+            5189694884176757796L, // 8
+            1297107062502723588L, // 9
+            2392674742042752L, // 10
+            72339107670392864L, // 11
+            1267189432714240L, // 12
+            9570157798361105L, // 13
+            6991979167579373824L, // 14
+            1153203118171884800L, // 15
+            576497586019385344L, // 16
+            150083874340875L, // 17
+            141287512612868L, // 18
+            2305879293365911560L, // 19
+            141287311280128L, // 20
+            1268286729748992L, // 21
+            5192654768538980354L, // 22
+            144117387109138500L, // 23
+            108086684188418048L, // 24
+            288318338155683844L, // 25
+            4904420065081827328L, // 26
+            281513633648640L, // 27
+            5771362939722285088L, // 28
+            1153488854762652160L, // 29
+            1152939148343509274L, // 30
+            2598577268460650788L, // 31
+            -8070309519839723488L, // 32
+            189151734650650630L, // 33
+            4647855621729689601L, // 34
+            18032274196924448L, // 35
+            72199465439593472L, // 36
+            703704630034944L, // 37
+            2305851809668817424L, // 38
+            290597520801961L, // 39
+            576531157557215232L, // 40
+            2305930970680803328L, // 41
+            5908746902551265312L, // 42
+            20266267043201152L, // 43
+            -9220833264371957744L, // 44
+            579275536497508368L, // 45
+            146371394526052608L, // 46
+            45109681949638660L, // 47
+            -6016737633340714496L, // 48
+            70370944091264L, // 49
+            -8646770409622994816L, // 50
+            567485577302528L, // 51
+            -9078129827751362432L, // 52
+            38562106202915072L, // 53
+            18031998077633536L, // 54
+            -9218582405214354944L, // 55
+            3314667467707720961L, // 56
+            2306133831112987683L, // 57
+            450432667944096001L, // 58
+            4503741364455525L, // 59
+            564066913886210L, // 60
+            3171097671754846210L, // 61
+            576536627467780228L, // 62
+            290482315568628738L // 63
+    };
 
     // Rook directions
 
@@ -270,24 +336,8 @@ public class RookHelper {
     }
 
     public void loadMagicNumbers() {
-        try (InputStream is = getClass().getResourceAsStream(ROOK_MAGIC_NUMBERS_PATH)) {
-            assert is != null;
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    String[] parts = line.split(":");
-                    if (parts.length == 2) {
-                        int square = Integer.parseInt(parts[0]);
-                        squareMagicFound[square] = true;
-
-                        long magicNumber = Long.parseLong(parts[1]);
-                        rookMagics[square] = magicNumber;
-                    }
-                }
-            }
-        } catch (IOException | NullPointerException e) {
-            log.error("Error reading magic numbers from file", e);
-        }
+        System.arraycopy(PRECOMPUTED_ROOK_MAGICS, 0, rookMagics, 0, rookMagics.length);
+        Arrays.fill(squareMagicFound, true);
     }
 
     private void writeMagicNumbersToFile(ConcurrentHashMap<Integer, Long> magicNumbers) {
