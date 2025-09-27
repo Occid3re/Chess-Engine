@@ -195,7 +195,12 @@ public class Engine {
             } else if (legalMovesSnapshot == null) {
                 publishLegalMovesSnapshot(buffer);
             }
-            return legalMovesSnapshot != null ? legalMovesSnapshot : new MoveList(buffer);
+
+            if (legalMovesSnapshot == null) {
+                publishLegalMovesSnapshot(buffer);
+            }
+
+            return legalMovesSnapshot;
         }
     }
 
@@ -379,11 +384,19 @@ public class Engine {
 
     private void markLegalMovesStale() {
         legalMovesNeedUpdate = true;
+        releaseSnapshot(legalMovesSnapshot);
         legalMovesSnapshot = null;
     }
 
     private void publishLegalMovesSnapshot(MoveList buffer) {
-        legalMovesSnapshot = new MoveList(buffer);
+        MoveList previousSnapshot = legalMovesSnapshot;
+        if (previousSnapshot != null) {
+            releaseSnapshot(previousSnapshot);
+        }
+
+        MoveList snapshot = obtainSnapshot();
+        snapshot.copyFrom(buffer);
+        legalMovesSnapshot = snapshot;
     }
 
     private MoveList ensureLegalMovesBuffer() {
