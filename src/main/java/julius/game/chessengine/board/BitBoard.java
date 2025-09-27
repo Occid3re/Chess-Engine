@@ -63,6 +63,12 @@ public class BitBoard {
     private boolean blackAttackDirty = true;
     private PieceType[] pieceBoard = new PieceType[64];
 
+    private final MoveSnapshot moveSnapshot = new MoveSnapshot();
+    private final PieceBitboards attackScratchWhite = new PieceBitboards();
+    private final PieceBitboards attackScratchBlack = new PieceBitboards();
+    private final PieceBitboards seeWhiteScratch = new PieceBitboards();
+    private final PieceBitboards seeBlackScratch = new PieceBitboards();
+
     private static final int MAX_PSEUDO_LEGAL_MOVES = 218;
 
     public static final class PinState {
@@ -114,6 +120,80 @@ public class BitBoard {
 
         public int getPinnerSquare() {
             return pinnerSquare;
+        }
+    }
+
+    private static final class PieceBitboards {
+        long pawns;
+        long knights;
+        long bishops;
+        long rooks;
+        long queens;
+        long king;
+
+        PieceBitboards() {
+        }
+
+        PieceBitboards(long pawns, long knights, long bishops, long rooks, long queens, long king) {
+            load(pawns, knights, bishops, rooks, queens, king);
+        }
+
+        void load(long pawns, long knights, long bishops, long rooks, long queens, long king) {
+            this.pawns = pawns;
+            this.knights = knights;
+            this.bishops = bishops;
+            this.rooks = rooks;
+            this.queens = queens;
+            this.king = king;
+        }
+
+        long get(int pieceBits) {
+            return switch (pieceBits) {
+                case 1 -> pawns;
+                case 2 -> knights;
+                case 3 -> bishops;
+                case 4 -> rooks;
+                case 5 -> queens;
+                case 6 -> king;
+                default -> 0L;
+            };
+        }
+
+        void set(int pieceBits, long value) {
+            switch (pieceBits) {
+                case 1 -> pawns = value;
+                case 2 -> knights = value;
+                case 3 -> bishops = value;
+                case 4 -> rooks = value;
+                case 5 -> queens = value;
+                case 6 -> king = value;
+                default -> {
+                }
+            }
+        }
+
+        void clearBit(int pieceBits, long mask) {
+            if (pieceBits >= 1 && pieceBits <= 6) {
+                set(pieceBits, get(pieceBits) & ~mask);
+            }
+        }
+
+        void addBit(int pieceBits, long mask) {
+            if (pieceBits >= 1 && pieceBits <= 6) {
+                set(pieceBits, get(pieceBits) | mask);
+            }
+        }
+    }
+
+    private static final class MoveSnapshot {
+        final PieceBitboards white = new PieceBitboards();
+        final PieceBitboards black = new PieceBitboards();
+        long occ;
+
+        void load(BitBoard board) {
+            white.load(board.whitePawns, board.whiteKnights, board.whiteBishops, board.whiteRooks, board.whiteQueens, board.whiteKing);
+            black.load(board.blackPawns, board.blackKnights, board.blackBishops, board.blackRooks, board.blackQueens, board.blackKing);
+            occ = board.allPieces;
         }
     }
 
@@ -584,28 +664,32 @@ public class BitBoard {
         long toMask = 1L << to;
         long fromMask = 1L << from;
 
-        // Local mutable copies of per-piece bitboards (index 1..6)
-        long[] W = new long[7];
-        long[] B = new long[7];
-        W[1]=whitePawns; W[2]=whiteKnights; W[3]=whiteBishops; W[4]=whiteRooks; W[5]=whiteQueens; W[6]=whiteKing;
-        B[1]=blackPawns; B[2]=blackKnights; B[3]=blackBishops; B[4]=blackRooks; B[5]=blackQueens; B[6]=blackKing;
+        PieceBitboards whiteState = seeWhiteScratch;
+        PieceBitboards blackState = seeBlackScratch;
+        whiteState.load(whitePawns, whiteKnights, whiteBishops, whiteRooks, whiteQueens, whiteKing);
+        blackState.load(blackPawns, blackKnights, blackBishops, blackRooks, blackQueens, blackKing);
 
         // Remove captured piece from its set/occ
         int capIndex = isEp ? (whiteMove ? (to - 8) : (to + 8)) : to;
         if (isCapture) {
             long capMask = 1L << capIndex;
             if (whiteMove) {
-                if (capturedBits >= 1 && capturedBits <= 6) B[capturedBits] &= ~capMask;
+                blackState.clearBit(capturedBits, capMask);
             } else {
-                if (capturedBits >= 1 && capturedBits <= 6) W[capturedBits] &= ~capMask;
+                whiteState.clearBit(capturedBits, capMask);
             }
             occ &= ~capMask;
         }
 
         // Move the attacking piece onto 'to' (promotion changes its type/value)
         int placedBits = (promoBits != 0 ? promoBits : moverBits);
-        if (whiteMove) { W[moverBits] &= ~fromMask; W[placedBits] |= toMask; }
-        else           { B[moverBits] &= ~fromMask; B[placedBits] |= toMask; }
+        if (whiteMove) {
+            whiteState.clearBit(moverBits, fromMask);
+            whiteState.addBit(placedBits, toMask);
+        } else {
+            blackState.clearBit(moverBits, fromMask);
+            blackState.addBit(placedBits, toMask);
+        }
         occ &= ~fromMask;
         occ |= toMask;
 
@@ -628,14 +712,14 @@ public class BitBoard {
 
         while (true) {
             // Build attackers for the side to move now
-            long pawns   = sideWhite ? W[1] : B[1];
-            long knights = sideWhite ? W[2] : B[2];
-            long bishops = sideWhite ? W[3] : B[3];
-            long rooks   = sideWhite ? W[4] : B[4];
-            long queens  = sideWhite ? W[5] : B[5];
-            long king    = sideWhite ? W[6] : B[6];
+            long pawns   = sideWhite ? whiteState.pawns : blackState.pawns;
+            long knights = sideWhite ? whiteState.knights : blackState.knights;
+            long bishops = sideWhite ? whiteState.bishops : blackState.bishops;
+            long rooks   = sideWhite ? whiteState.rooks : blackState.rooks;
+            long queens  = sideWhite ? whiteState.queens : blackState.queens;
+            long king    = sideWhite ? whiteState.king : blackState.king;
 
-            long attPawns   = pawnAttackersToSquare(to, sideWhite, W[1], B[1]);
+            long attPawns   = pawnAttackersToSquare(to, sideWhite, whiteState.pawns, blackState.pawns);
             long attKnights = KnightHelper.knightMoveTable[to] & knights;
             long bRay = bishopAttacksFromWithOcc(to, occ);
             long rRay = rookAttacksFromWithOcc(to, occ);
@@ -651,7 +735,7 @@ public class BitBoard {
 
             while (true) {
                 if (attPawns != 0) {
-                    int candidate = selectLegalAttacker(attPawns, 1, sideWhite, W, B, occ, to, toPieceWhite, toPieceBits);
+                    int candidate = selectLegalAttacker(attPawns, 1, sideWhite, whiteState, blackState, occ, to, toPieceWhite, toPieceBits);
                     if (candidate != -1) {
                         fromBB = 1L << candidate;
                         attBits = 1;
@@ -661,7 +745,7 @@ public class BitBoard {
                     }
                     attPawns = 0;
                 } else if (attKnights != 0) {
-                    int candidate = selectLegalAttacker(attKnights, 2, sideWhite, W, B, occ, to, toPieceWhite, toPieceBits);
+                    int candidate = selectLegalAttacker(attKnights, 2, sideWhite, whiteState, blackState, occ, to, toPieceWhite, toPieceBits);
                     if (candidate != -1) {
                         fromBB = 1L << candidate;
                         attBits = 2;
@@ -671,7 +755,7 @@ public class BitBoard {
                     }
                     attKnights = 0;
                 } else if (attBishops != 0) {
-                    int candidate = selectLegalAttacker(attBishops, 3, sideWhite, W, B, occ, to, toPieceWhite, toPieceBits);
+                    int candidate = selectLegalAttacker(attBishops, 3, sideWhite, whiteState, blackState, occ, to, toPieceWhite, toPieceBits);
                     if (candidate != -1) {
                         fromBB = 1L << candidate;
                         attBits = 3;
@@ -681,7 +765,7 @@ public class BitBoard {
                     }
                     attBishops = 0;
                 } else if (attRooks != 0) {
-                    int candidate = selectLegalAttacker(attRooks, 4, sideWhite, W, B, occ, to, toPieceWhite, toPieceBits);
+                    int candidate = selectLegalAttacker(attRooks, 4, sideWhite, whiteState, blackState, occ, to, toPieceWhite, toPieceBits);
                     if (candidate != -1) {
                         fromBB = 1L << candidate;
                         attBits = 4;
@@ -691,7 +775,7 @@ public class BitBoard {
                     }
                     attRooks = 0;
                 } else if (attQueens != 0) {
-                    int candidate = selectLegalAttacker(attQueens, 5, sideWhite, W, B, occ, to, toPieceWhite, toPieceBits);
+                    int candidate = selectLegalAttacker(attQueens, 5, sideWhite, whiteState, blackState, occ, to, toPieceWhite, toPieceBits);
                     if (candidate != -1) {
                         fromBB = 1L << candidate;
                         attBits = 5;
@@ -702,7 +786,7 @@ public class BitBoard {
                     attQueens = 0;
                 } else if (attKing != 0) {
                     int kingFrom = Long.numberOfTrailingZeros(attKing);
-                    if (!isKingCaptureLegal(sideWhite, kingFrom, to, W, B, occ, toPieceWhite, toPieceBits)) {
+                    if (!isKingCaptureLegal(sideWhite, kingFrom, to, whiteState, blackState, occ, toPieceWhite, toPieceBits)) {
                         attKing = 0;
                         continue;
                     }
@@ -721,49 +805,24 @@ public class BitBoard {
             }
 
             // Remove previous occupant of 'to' (it is being captured now)
-            if (toPieceWhite) W[toPieceBits] &= ~toMask;
-            else              B[toPieceBits] &= ~toMask;
+            if (toPieceWhite) {
+                whiteState.clearBit(toPieceBits, toMask);
+            } else {
+                blackState.clearBit(toPieceBits, toMask);
+            }
 
             // Move this attacker onto 'to'
             if (sideWhite) {
-                switch (attBits) {
-                    case 1 -> W[1] &= ~attMask;
-                    case 2 -> W[2] &= ~attMask;
-                    case 3 -> W[3] &= ~attMask;
-                    case 4 -> W[4] &= ~attMask;
-                    case 5 -> W[5] &= ~attMask;
-                    case 6 -> W[6] &= ~attMask;
-                }
+                whiteState.clearBit(attBits, attMask);
             } else {
-                switch (attBits) {
-                    case 1 -> B[1] &= ~attMask;
-                    case 2 -> B[2] &= ~attMask;
-                    case 3 -> B[3] &= ~attMask;
-                    case 4 -> B[4] &= ~attMask;
-                    case 5 -> B[5] &= ~attMask;
-                    case 6 -> B[6] &= ~attMask;
-                }
+                blackState.clearBit(attBits, attMask);
             }
             occ &= ~attMask; // from-square cleared
             // place on 'to' (keep occupancy accurate for slider lookups)
             if (sideWhite) {
-                switch (attBits) {
-                    case 1 -> W[1] |= toMask;
-                    case 2 -> W[2] |= toMask;
-                    case 3 -> W[3] |= toMask;
-                    case 4 -> W[4] |= toMask;
-                    case 5 -> W[5] |= toMask;
-                    case 6 -> W[6] |= toMask;
-                }
+                whiteState.addBit(attBits, toMask);
             } else {
-                switch (attBits) {
-                    case 1 -> B[1] |= toMask;
-                    case 2 -> B[2] |= toMask;
-                    case 3 -> B[3] |= toMask;
-                    case 4 -> B[4] |= toMask;
-                    case 5 -> B[5] |= toMask;
-                    case 6 -> B[6] |= toMask;
-                }
+                blackState.addBit(attBits, toMask);
             }
             occ |= toMask; // ensure destination remains occupied for future attack discovery
 
@@ -784,43 +843,57 @@ public class BitBoard {
     }
 
     private boolean isKingCaptureLegal(boolean kingIsWhite, int kingFrom, int target,
-                                       long[] whiteByType, long[] blackByType, long occ,
+                                       PieceBitboards whiteState, PieceBitboards blackState, long occ,
                                        boolean toPieceWhite, int toPieceBits) {
-        long[] wCopy = whiteByType.clone();
-        long[] bCopy = blackByType.clone();
-        long occCopy = occ;
-
         long toMask = 1L << target;
         long fromMask = 1L << kingFrom;
 
+        long originalWhite = whiteState.king;
+        long originalBlack = blackState.king;
+        long originalCaptured = 0L;
+
         if (toPieceBits >= 1 && toPieceBits <= 6) {
             if (toPieceWhite) {
-                wCopy[toPieceBits] &= ~toMask;
+                originalCaptured = whiteState.get(toPieceBits);
+                whiteState.set(toPieceBits, originalCaptured & ~toMask);
             } else {
-                bCopy[toPieceBits] &= ~toMask;
+                originalCaptured = blackState.get(toPieceBits);
+                blackState.set(toPieceBits, originalCaptured & ~toMask);
             }
         }
 
         if (kingIsWhite) {
-            wCopy[6] &= ~fromMask;
-            wCopy[6] |= toMask;
+            whiteState.king = (originalWhite & ~fromMask) | toMask;
         } else {
-            bCopy[6] &= ~fromMask;
-            bCopy[6] |= toMask;
+            blackState.king = (originalBlack & ~fromMask) | toMask;
         }
 
-        occCopy &= ~fromMask;
-        occCopy |= toMask;
+        long occCopy = (occ & ~fromMask) | toMask;
 
-        return !isSquareAttackedInSee(target, !kingIsWhite, wCopy, bCopy, occCopy);
+        boolean safe = !isSquareAttackedInSee(target, !kingIsWhite, whiteState, blackState, occCopy);
+
+        if (kingIsWhite) {
+            whiteState.king = originalWhite;
+        } else {
+            blackState.king = originalBlack;
+        }
+        if (toPieceBits >= 1 && toPieceBits <= 6) {
+            if (toPieceWhite) {
+                whiteState.set(toPieceBits, originalCaptured);
+            } else {
+                blackState.set(toPieceBits, originalCaptured);
+            }
+        }
+
+        return safe;
     }
 
     private int selectLegalAttacker(long attackers, int attBits, boolean sideWhite,
-                                    long[] whiteByType, long[] blackByType, long occ, int target,
+                                    PieceBitboards whiteState, PieceBitboards blackState, long occ, int target,
                                     boolean toPieceWhite, int toPieceBits) {
         while (attackers != 0) {
             int from = Long.numberOfTrailingZeros(attackers);
-            if (attBits == 6 || isNonKingCaptureLegal(sideWhite, from, target, attBits, whiteByType, blackByType, occ,
+            if (attBits == 6 || isNonKingCaptureLegal(sideWhite, from, target, attBits, whiteState, blackState, occ,
                                                      toPieceWhite, toPieceBits)) {
                 return from;
             }
@@ -830,46 +903,73 @@ public class BitBoard {
     }
 
     private boolean isNonKingCaptureLegal(boolean attackerWhite, int attackerFrom, int target, int attackerBits,
-                                          long[] whiteByType, long[] blackByType, long occ,
+                                          PieceBitboards whiteState, PieceBitboards blackState, long occ,
                                           boolean toPieceWhite, int toPieceBits) {
-        long[] wCopy = whiteByType.clone();
-        long[] bCopy = blackByType.clone();
-        long occCopy = occ;
-
         long toMask = 1L << target;
         long fromMask = 1L << attackerFrom;
 
+        long originalAttacker = attackerWhite ? whiteState.get(attackerBits) : blackState.get(attackerBits);
+        long originalCaptured = 0L;
+        long occCopy = occ;
+
         if (toPieceBits >= 1 && toPieceBits <= 6) {
             if (toPieceWhite) {
-                wCopy[toPieceBits] &= ~toMask;
+                originalCaptured = whiteState.get(toPieceBits);
+                whiteState.set(toPieceBits, originalCaptured & ~toMask);
             } else {
-                bCopy[toPieceBits] &= ~toMask;
+                originalCaptured = blackState.get(toPieceBits);
+                blackState.set(toPieceBits, originalCaptured & ~toMask);
             }
             occCopy &= ~toMask;
         }
 
         if (attackerWhite) {
-            wCopy[attackerBits] &= ~fromMask;
-            wCopy[attackerBits] |= toMask;
+            whiteState.set(attackerBits, (originalAttacker & ~fromMask) | toMask);
         } else {
-            bCopy[attackerBits] &= ~fromMask;
-            bCopy[attackerBits] |= toMask;
+            blackState.set(attackerBits, (originalAttacker & ~fromMask) | toMask);
         }
 
         occCopy &= ~fromMask;
         occCopy |= toMask;
 
-        long kingBB = attackerWhite ? wCopy[6] : bCopy[6];
+        long kingBB = attackerWhite ? whiteState.king : blackState.king;
         if (kingBB == 0) {
+            if (attackerWhite) {
+                whiteState.set(attackerBits, originalAttacker);
+            } else {
+                blackState.set(attackerBits, originalAttacker);
+            }
+            if (toPieceBits >= 1 && toPieceBits <= 6) {
+                if (toPieceWhite) {
+                    whiteState.set(toPieceBits, originalCaptured);
+                } else {
+                    blackState.set(toPieceBits, originalCaptured);
+                }
+            }
             return false;
         }
         int kingSquare = Long.numberOfTrailingZeros(kingBB);
-        return !isSquareAttackedInSee(kingSquare, !attackerWhite, wCopy, bCopy, occCopy);
+        boolean safe = !isSquareAttackedInSee(kingSquare, !attackerWhite, whiteState, blackState, occCopy);
+
+        if (attackerWhite) {
+            whiteState.set(attackerBits, originalAttacker);
+        } else {
+            blackState.set(attackerBits, originalAttacker);
+        }
+        if (toPieceBits >= 1 && toPieceBits <= 6) {
+            if (toPieceWhite) {
+                whiteState.set(toPieceBits, originalCaptured);
+            } else {
+                blackState.set(toPieceBits, originalCaptured);
+            }
+        }
+
+        return safe;
     }
 
     private boolean isSquareAttackedInSee(int square, boolean attackerWhite,
-                                          long[] whiteByType, long[] blackByType, long occ) {
-        return isSquareUnderAttack(square, !attackerWhite, occ, whiteByType, blackByType);
+                                          PieceBitboards whiteState, PieceBitboards blackState, long occ) {
+        return isSquareUnderAttack(square, !attackerWhite, occ, whiteState, blackState);
     }
 
 
@@ -1501,29 +1601,39 @@ public class BitBoard {
 
     // Replace your current isSquareUnderAttack with this version
     private boolean isSquareUnderAttack(int index, boolean colorWhite) {
-        long[] whiteByType = {0L, whitePawns, whiteKnights, whiteBishops, whiteRooks, whiteQueens, whiteKing};
-        long[] blackByType = {0L, blackPawns, blackKnights, blackBishops, blackRooks, blackQueens, blackKing};
-        return isSquareUnderAttack(index, colorWhite, allPieces, whiteByType, blackByType);
+        attackScratchWhite.load(whitePawns, whiteKnights, whiteBishops, whiteRooks, whiteQueens, whiteKing);
+        attackScratchBlack.load(blackPawns, blackKnights, blackBishops, blackRooks, blackQueens, blackKing);
+        return isSquareUnderAttack(index, colorWhite, allPieces, attackScratchWhite, attackScratchBlack);
     }
 
     private boolean isSquareUnderAttack(int index, boolean colorWhite, long occ,
-                                        long[] whiteByType, long[] blackByType) {
+                                        PieceBitboards whiteState, PieceBitboards blackState) {
+        return isSquareUnderAttack(index, colorWhite, occ,
+                whiteState.pawns, whiteState.knights, whiteState.bishops, whiteState.rooks, whiteState.queens, whiteState.king,
+                blackState.pawns, blackState.knights, blackState.bishops, blackState.rooks, blackState.queens, blackState.king);
+    }
+
+    private boolean isSquareUnderAttack(int index, boolean colorWhite, long occ,
+                                        long whitePawnsBB, long whiteKnightsBB, long whiteBishopsBB,
+                                        long whiteRooksBB, long whiteQueensBB, long whiteKingBB,
+                                        long blackPawnsBB, long blackKnightsBB, long blackBishopsBB,
+                                        long blackRooksBB, long blackQueensBB, long blackKingBB) {
         if (colorWhite) {
-            if (pawnAttackersToSquare(index, false, whiteByType[1], blackByType[1]) != 0) return true;
-            if ((KnightHelper.knightMoveTable[index] & blackByType[2]) != 0) return true;
-            if ((KING_ATTACKS[index] & blackByType[6]) != 0) return true;
+            if (pawnAttackersToSquare(index, false, whitePawnsBB, blackPawnsBB) != 0) return true;
+            if ((KnightHelper.knightMoveTable[index] & blackKnightsBB) != 0) return true;
+            if ((KING_ATTACKS[index] & blackKingBB) != 0) return true;
             long bishopRays = bishopAttacksFromWithOcc(index, occ);
-            if ((bishopRays & (blackByType[3] | blackByType[5])) != 0) return true;
+            if ((bishopRays & (blackBishopsBB | blackQueensBB)) != 0) return true;
             long rookRays = rookAttacksFromWithOcc(index, occ);
-            return (rookRays & (blackByType[4] | blackByType[5])) != 0;
+            return (rookRays & (blackRooksBB | blackQueensBB)) != 0;
         } else {
-            if (pawnAttackersToSquare(index, true, whiteByType[1], blackByType[1]) != 0) return true;
-            if ((KnightHelper.knightMoveTable[index] & whiteByType[2]) != 0) return true;
-            if ((KING_ATTACKS[index] & whiteByType[6]) != 0) return true;
+            if (pawnAttackersToSquare(index, true, whitePawnsBB, blackPawnsBB) != 0) return true;
+            if ((KnightHelper.knightMoveTable[index] & whiteKnightsBB) != 0) return true;
+            if ((KING_ATTACKS[index] & whiteKingBB) != 0) return true;
             long bishopRays = bishopAttacksFromWithOcc(index, occ);
-            if ((bishopRays & (whiteByType[3] | whiteByType[5])) != 0) return true;
+            if ((bishopRays & (whiteBishopsBB | whiteQueensBB)) != 0) return true;
             long rookRays = rookAttacksFromWithOcc(index, occ);
-            return (rookRays & (whiteByType[4] | whiteByType[5])) != 0;
+            return (rookRays & (whiteRooksBB | whiteQueensBB)) != 0;
         }
     }
 
@@ -1558,38 +1668,36 @@ public class BitBoard {
             }
         }
 
-        long[] whiteByType = {0L, whitePawns, whiteKnights, whiteBishops, whiteRooks, whiteQueens, whiteKing};
-        long[] blackByType = {0L, blackPawns, blackKnights, blackBishops, blackRooks, blackQueens, blackKing};
-        long occ = allPieces;
+        MoveSnapshot snapshot = moveSnapshot;
+        snapshot.load(this);
+        PieceBitboards whiteState = snapshot.white;
+        PieceBitboards blackState = snapshot.black;
+        long occ = snapshot.occ;
 
         if (isCapture) {
             int capturedBits = MoveHelper.deriveCapturedPieceTypeBits(move);
             int captureSquare = isEnPassant ? (whiteMove ? to - 8 : to + 8) : to;
             long captureMask = 1L << captureSquare;
             if (whiteMove) {
-                if (capturedBits >= 1 && capturedBits <= 6) {
-                    blackByType[capturedBits] &= ~captureMask;
-                }
+                blackState.clearBit(capturedBits, captureMask);
             } else {
-                if (capturedBits >= 1 && capturedBits <= 6) {
-                    whiteByType[capturedBits] &= ~captureMask;
-                }
+                whiteState.clearBit(capturedBits, captureMask);
             }
             occ &= ~captureMask;
         }
 
         if (whiteMove) {
-            whiteByType[pieceBits] &= ~fromMask;
+            whiteState.clearBit(pieceBits, fromMask);
         } else {
-            blackByType[pieceBits] &= ~fromMask;
+            blackState.clearBit(pieceBits, fromMask);
         }
         occ &= ~fromMask;
 
         int placedBits = promotionBits != 0 ? promotionBits : pieceBits;
         if (whiteMove) {
-            whiteByType[placedBits] |= toMask;
+            whiteState.addBit(placedBits, toMask);
         } else {
-            blackByType[placedBits] |= toMask;
+            blackState.addBit(placedBits, toMask);
         }
         occ |= toMask;
 
@@ -1599,11 +1707,11 @@ public class BitBoard {
             long rookFromMask = 1L << rookFrom;
             long rookToMask = 1L << rookTo;
             if (whiteMove) {
-                whiteByType[4] &= ~rookFromMask;
-                whiteByType[4] |= rookToMask;
+                whiteState.clearBit(4, rookFromMask);
+                whiteState.addBit(4, rookToMask);
             } else {
-                blackByType[4] &= ~rookFromMask;
-                blackByType[4] |= rookToMask;
+                blackState.clearBit(4, rookFromMask);
+                blackState.addBit(4, rookToMask);
             }
             occ &= ~rookFromMask;
             occ |= rookToMask;
@@ -1614,7 +1722,7 @@ public class BitBoard {
             kingSquare = to;
         }
 
-        return !isSquareUnderAttack(kingSquare, whiteMove, occ, whiteByType, blackByType);
+        return !isSquareUnderAttack(kingSquare, whiteMove, occ, whiteState, blackState);
     }
 
 
