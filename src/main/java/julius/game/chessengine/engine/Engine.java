@@ -5,6 +5,7 @@ import julius.game.chessengine.board.*;
 import julius.game.chessengine.cache.TimedLRUCache;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.utils.Color;
+import julius.game.chessengine.utils.MoveStack;
 import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
@@ -126,8 +127,8 @@ public class Engine {
     private MoveList legalMovesSnapshot;
 
     @Getter
-    private ArrayList<Integer> line = new ArrayList<>();
-    private ArrayList<Integer> redoLine = new ArrayList<>();
+    private MoveStack line = new MoveStack();
+    private MoveStack redoLine = new MoveStack();
     private BitBoard bitBoard = new BitBoard();
     @Getter
     private GameState gameState = new GameState(bitBoard);
@@ -143,8 +144,8 @@ public class Engine {
         synchronized (other.boardLock) {
             this.bitBoard = new BitBoard(other.bitBoard);
             this.gameState = new GameState(other.gameState);
-            this.line = new ArrayList<>(other.line);
-            this.redoLine = new ArrayList<>(other.redoLine);
+            this.line = new MoveStack(other.line);
+            this.redoLine = new MoveStack(other.redoLine);
 
             // ❌ heavy: cloning the current legal list and cache
             // this.legalMoves = other.legalMoves == null ? null : new MoveList(other.legalMoves);
@@ -217,7 +218,7 @@ public class Engine {
                 gameState.pushHalfmoveClock();
                 gameState.update(bitBoard, legalMoves, move, isOpeningMove);
                 gameState.getScore().applyMove(bitBoard, move, gameState.getState());
-                line.add(move);
+                line.push(move);
                 notifyPositionChanged();
             }
         }
@@ -267,8 +268,8 @@ public class Engine {
             synchronized (other.boardLock) {
                 this.bitBoard = new BitBoard(other.bitBoard);
                 this.gameState = new GameState(other.gameState);
-                this.line = new ArrayList<>(other.line);
-                this.redoLine = new ArrayList<>(other.redoLine);
+                this.line = new MoveStack(other.line);
+                this.redoLine = new MoveStack(other.redoLine);
                 this.legalMoves = null;
                 markLegalMovesStale();
                 recycleCacheEntries();
@@ -283,8 +284,8 @@ public class Engine {
             bitBoard = new BitBoard();
             gameState = new GameState(bitBoard);
             markLegalMovesStale();
-            line = new ArrayList<>();
-            redoLine = new ArrayList<>();
+            line = new MoveStack();
+            redoLine = new MoveStack();
             this.openingBook = OpeningBook.getInstance();
             recycleCacheEntries();
             legalMovesCache = createLegalMovesCache();
@@ -539,7 +540,7 @@ public class Engine {
         synchronized (boardLock) {
             if (line.isEmpty()) throw new IllegalStateException("undoLastMoveWasNotPossible, line is empty");
 
-            Integer undoMove = line.getLast();
+            int undoMove = line.pop();
 
             long currentHash = getBoardStateHash();
             gameState.removeHash(currentHash);
@@ -554,8 +555,7 @@ public class Engine {
             gameState.getScore().undoMove(bitBoard, undoMove, gameState.getState());
 
             // 3) Bookkeeping
-            redoLine.add(undoMove);
-            line.removeLast();
+            redoLine.push(undoMove);
             notifyPositionChanged();
         }
     }
@@ -564,8 +564,7 @@ public class Engine {
     public void redoMove() {
         synchronized (boardLock) {
             if (!redoLine.isEmpty()) {
-                performMove(redoLine.getLast());
-                redoLine.removeLast();
+                performMove(redoLine.pop());
                 notifyPositionChanged();
             } else {
                 throw new IllegalStateException("redoLastMoveWasNotPossible, redoLine is empty");
@@ -573,9 +572,9 @@ public class Engine {
         }
     }
 
-    public Integer getLastMove() {
+    public int getLastMove() {
         if (!line.isEmpty()) {
-            return line.getLast();
+            return line.peek();
         } else {
             return -1;
         }
