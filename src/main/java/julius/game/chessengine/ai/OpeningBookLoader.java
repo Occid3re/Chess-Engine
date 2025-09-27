@@ -2,6 +2,7 @@ package julius.game.chessengine.ai;
 
 import julius.game.chessengine.pgn.OpeningPgnReader;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 
@@ -14,6 +15,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -137,6 +139,14 @@ final class OpeningBookLoader {
     }
 
     private List<OpeningResource> readFromClasspath() {
+        List<OpeningResource> resolverResources = readFromClasspathWithResolver();
+        if (!resolverResources.isEmpty()) {
+            return resolverResources;
+        }
+        return readFromClasspathWithClassLoader();
+    }
+
+    private List<OpeningResource> readFromClasspathWithResolver() {
         try {
             PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
             Resource[] resources = resolver.getResources(DEFAULT_RESOURCE_PATTERN);
@@ -151,9 +161,58 @@ final class OpeningBookLoader {
             }
             return result;
         } catch (IOException ex) {
-            log.warn("Unable to read classpath PGNs", ex);
+            log.warn("Unable to read classpath PGNs via resolver", ex);
             return Collections.emptyList();
         }
+    }
+
+    private List<OpeningResource> readFromClasspathWithClassLoader() {
+        ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
+        if (classLoader == null) {
+            classLoader = OpeningBookLoader.class.getClassLoader();
+        }
+        if (classLoader == null) {
+            return Collections.emptyList();
+        }
+
+        try {
+            List<OpeningResource> result = new ArrayList<>();
+            Resource directoryResource = null;
+            try {
+                directoryResource = new ClassPathResource("opening/");
+            } catch (Exception ignored) {
+                // Spring resource may not be available; fall back below
+            }
+
+            if (directoryResource != null && directoryResource.exists()) {
+                try {
+                    Path path = directoryResource.getFile().toPath();
+                    if (Files.isDirectory(path)) {
+                        return readFromDirectory(path);
+                    }
+                } catch (IOException ignored) {
+                    // If the directory cannot be accessed as a file, fall back to manual enumeration below
+                }
+            }
+
+            Enumeration<java.net.URL> urls = classLoader.getResources("opening");
+            while (urls.hasMoreElements()) {
+                java.net.URL url = urls.nextElement();
+                if (!"file".equalsIgnoreCase(url.getProtocol())) {
+                    continue;
+                }
+                Path directory = Paths.get(url.toURI());
+                if (Files.isDirectory(directory)) {
+                    result.addAll(readFromDirectory(directory));
+                }
+            }
+            if (!result.isEmpty()) {
+                return result;
+            }
+        } catch (IOException | java.net.URISyntaxException ex) {
+            log.warn("Unable to read classpath PGNs via ClassLoader", ex);
+        }
+        return Collections.emptyList();
     }
 
     private Path resolveCachePath() {
