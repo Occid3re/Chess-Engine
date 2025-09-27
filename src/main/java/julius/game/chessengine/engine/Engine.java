@@ -113,7 +113,15 @@ public class Engine {
 
     // --- Cache instance based on computed configuration ---
     private static final CacheConfig CACHE_CFG = computeCacheConfig();
+    /**
+     * Retain a generous number of historical legal-move snapshots so background consumers can
+     * continue iterating over slightly older lists without risk of the underlying MoveList being
+     * recycled. A 2k history provides a safety margin for the engine's deep quiescence searches
+     * running across multiple worker threads while still keeping the retained set bounded.
+     */
+    private static final int ACTIVE_SNAPSHOT_HISTORY = 2_048;
     private final ConcurrentLinkedDeque<MoveList> legalMovesSnapshotPool = new ConcurrentLinkedDeque<>();
+    private final ArrayDeque<MoveList> activeSnapshots = new ArrayDeque<>(ACTIVE_SNAPSHOT_HISTORY);
     private TimedLRUCache<MoveList> legalMovesCache = createLegalMovesCache();
 
     private final Object boardLock = new Object();
@@ -141,24 +149,27 @@ public class Engine {
 
     public Engine(Engine other) {
         synchronized (other.boardLock) {
-            this.bitBoard = new BitBoard(other.bitBoard);
-            this.gameState = new GameState(other.gameState);
-            this.line = new ArrayList<>(other.line);
-            this.redoLine = new ArrayList<>(other.redoLine);
+            synchronized (this.boardLock) {
+                this.bitBoard = new BitBoard(other.bitBoard);
+                this.gameState = new GameState(other.gameState);
+                this.line = new ArrayList<>(other.line);
+                this.redoLine = new ArrayList<>(other.redoLine);
 
-            // ❌ heavy: cloning the current legal list and cache
-            // this.legalMoves = other.legalMoves == null ? null : new MoveList(other.legalMoves);
-            // this.legalMovesNeedUpdate = other.legalMovesNeedUpdate;
-            // this.legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
-            // other.legalMovesCache.forEach((k, v) -> this.legalMovesCache.put(k, new MoveList(v)));
+                // ❌ heavy: cloning the current legal list and cache
+                // this.legalMoves = other.legalMoves == null ? null : new MoveList(other.legalMoves);
+                // this.legalMovesNeedUpdate = other.legalMovesNeedUpdate;
+                // this.legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
+                // other.legalMovesCache.forEach((k, v) -> this.legalMovesCache.put(k, new MoveList(v)));
 
-            // ✅ light: fresh empty state for the clone; compute lazily when needed
-            this.legalMoves = null;
-            markLegalMovesStale();
-            recycleCacheEntries();
-            this.legalMovesCache = createLegalMovesCache();
+                // ✅ light: fresh empty state for the clone; compute lazily when needed
+                this.legalMoves = null;
+                flushActiveSnapshots();
+                markLegalMovesStale();
+                recycleCacheEntries();
+                this.legalMovesCache = createLegalMovesCache();
 
-            this.openingBook = other.openingBook;
+                this.openingBook = other.openingBook;
+            }
         }
     }
 
@@ -225,6 +236,7 @@ public class Engine {
 
     public void importBoardFromFen(String fen) {
         synchronized (boardLock) {
+            flushActiveSnapshots();
             this.bitBoard = FEN.translateFENtoBitBoard(fen);
             this.gameState = new GameState(bitBoard);
 
@@ -270,6 +282,7 @@ public class Engine {
                 this.line = new ArrayList<>(other.line);
                 this.redoLine = new ArrayList<>(other.redoLine);
                 this.legalMoves = null;
+                flushActiveSnapshots();
                 markLegalMovesStale();
                 recycleCacheEntries();
                 this.legalMovesCache = createLegalMovesCache();
@@ -282,6 +295,7 @@ public class Engine {
         synchronized (boardLock) {
             bitBoard = new BitBoard();
             gameState = new GameState(bitBoard);
+            flushActiveSnapshots();
             markLegalMovesStale();
             line = new ArrayList<>();
             redoLine = new ArrayList<>();
@@ -354,7 +368,17 @@ public class Engine {
     }
 
     private void publishLegalMovesSnapshot(MoveList buffer) {
-        legalMovesSnapshot = new MoveList(buffer);
+        MoveList snapshot = obtainSnapshot();
+        snapshot.copyFrom(buffer);
+        activeSnapshots.addLast(snapshot);
+        legalMovesSnapshot = snapshot;
+
+        if (activeSnapshots.size() > ACTIVE_SNAPSHOT_HISTORY) {
+            // Allow the GC to reclaim very old snapshots once no external callers retain them.
+            // Releasing back to the pool here risks clearing a list while callers are still
+            // iterating over it, so we simply drop the strong reference.
+            activeSnapshots.removeFirst();
+        }
     }
 
     private MoveList ensureLegalMovesBuffer() {
@@ -378,6 +402,13 @@ public class Engine {
         }
         snapshot.clear();
         legalMovesSnapshotPool.offer(snapshot);
+    }
+
+    private void flushActiveSnapshots() {
+        while (!activeSnapshots.isEmpty()) {
+            releaseSnapshot(activeSnapshots.removeFirst());
+        }
+        legalMovesSnapshot = null;
     }
 
     private void recycleCacheEntries() {
