@@ -3,7 +3,6 @@ package julius.game.chessengine.engine;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.ai.OpeningBook;
 import julius.game.chessengine.board.*;
-import julius.game.chessengine.cache.TimedLRUCache;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.utils.Color;
 import julius.game.chessengine.utils.MoveStack;
@@ -12,7 +11,6 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
-import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.function.LongConsumer;
 import java.util.stream.Collectors;
 
@@ -22,103 +20,7 @@ import static julius.game.chessengine.board.MoveHelper.convertIndexToString;
 @Log4j2
 public class Engine {
 
-    /*
-     * Adaptive cache configuration
-     * ---------------------------
-     * By default we:
-     *  - Allocate ~8% of max heap (min 64MB) for the legal-moves cache.
-     *  - Assume ~256 bytes per entry (heuristic), clamped between 50k and 500k entries.
-     *  - Use a long TTL (24h). Legal move lists for a board state don't "age" by wall-clock,
-     *    so eviction should primarily be LRU. You can disable time expiry by setting TTL <= 0.
-     *
-     * Overrides (priority: System Property > Env Var > Heuristic):
-     *  - chess.cache.maxSize (int)
-     *  - chess.cache.maxAgeMs (long)
-     *  - CHESS_CACHE_MAX_SIZE (int)
-     *  - CHESS_CACHE_MAX_AGE_MS (long)
-     *
-     * This makes it easy to run multiple app versions with different cache sizing.
-     */
-    private static final class CacheConfig {
-        final int maxSize;
-        final int maxAgeMs;
-        CacheConfig(int maxSize, int maxAgeMs) { this.maxSize = maxSize; this.maxAgeMs = maxAgeMs; }
-    }
-
     private static final boolean VERIFY_LEGAL_MOVES = Boolean.getBoolean("chess.verify.movegen");
-
-    private static CacheConfig computeCacheConfig() {
-        // Heuristic baseline
-        long maxHeap = Runtime.getRuntime().maxMemory();          // bytes
-        long budget  = Math.max(64L << 20, (maxHeap * 8) / 100);  // >=64MB or 8% of heap
-        long estimatedBytesPerEntry = 256;                        // adjust if profiling suggests otherwise
-
-        long computedSize = Math.max(1, budget / estimatedBytesPerEntry);
-        int heuristicMaxSize = (int) Math.min(500_000, computedSize);
-        int heuristicMaxAgeMs = 86_400_000; // 24h; set <=0 to disable time expiry
-
-        // Overrides via System Properties
-        Integer sysMaxSize = getIntSysProp("chess.cache.maxSize");
-        Long sysMaxAgeMs   = getLongSysProp("chess.cache.maxAgeMs");
-
-        // Fallback to environment variables if system properties absent
-        Integer envMaxSize = (sysMaxSize == null) ? getIntEnv("CHESS_CACHE_MAX_SIZE") : null;
-        Long envMaxAgeMs   = (sysMaxAgeMs == null) ? getLongEnv("CHESS_CACHE_MAX_AGE_MS") : null;
-
-        int maxSize = firstNonNull(sysMaxSize, envMaxSize, heuristicMaxSize);
-        long maxAge = firstNonNull(sysMaxAgeMs, envMaxAgeMs, (long) heuristicMaxAgeMs);
-
-        // Defensive clamps
-        if (maxSize <= 0) maxSize = heuristicMaxSize;
-        // maxAge can be <=0 to mean "no time-based expiry"
-
-        if (log.isInfoEnabled()) {
-            log.info("LegalMovesCache config -> maxSize={}, maxAgeMs={} (heap={}, budget~{}MB, heuristicSize={})",
-                    maxSize, maxAge, maxHeap, budget >> 20, heuristicMaxSize);
-        }
-        return new CacheConfig(maxSize, (int) Math.min(Integer.MAX_VALUE, Math.max(Integer.MIN_VALUE, maxAge)));
-    }
-
-    private static Integer getIntSysProp(String key) {
-        String v = System.getProperty(key);
-        return parseInt(v);
-    }
-
-    private static Long getLongSysProp(String key) {
-        String v = System.getProperty(key);
-        return parseLong(v);
-    }
-
-    private static Integer getIntEnv(String key) {
-        String v = System.getenv(key);
-        return parseInt(v);
-    }
-
-    private static Long getLongEnv(String key) {
-        String v = System.getenv(key);
-        return parseLong(v);
-    }
-
-    private static Integer parseInt(String v) {
-        if (v == null || v.isEmpty()) return null;
-        try { return Integer.parseInt(v.trim()); } catch (NumberFormatException ignored) { return null; }
-    }
-
-    private static Long parseLong(String v) {
-        if (v == null || v.isEmpty()) return null;
-        try { return Long.parseLong(v.trim()); } catch (NumberFormatException ignored) { return null; }
-    }
-
-    @SafeVarargs
-    private static <T> T firstNonNull(T... values) {
-        for (T v : values) if (v != null) return v;
-        return null;
-    }
-
-    // --- Cache instance based on computed configuration ---
-    private static final CacheConfig CACHE_CFG = computeCacheConfig();
-    private final ConcurrentLinkedDeque<MoveList> legalMovesSnapshotPool = new ConcurrentLinkedDeque<>();
-    private TimedLRUCache<MoveList> legalMovesCache = createLegalMovesCache();
 
     private final Object boardLock = new Object();
 
@@ -126,8 +28,9 @@ public class Engine {
     private OpeningBook openingBook;
 
     private boolean legalMovesNeedUpdate = true;
-    private MoveList legalMoves;
-    private MoveList legalMovesSnapshot;
+    private long cachedLegalMovesHash = Long.MIN_VALUE;
+    private int[] cachedLegalMoves = new int[0];
+    private int cachedLegalMoveCount = 0;
 
     @Getter
     private MoveStack line = new MoveStack();
@@ -150,17 +53,9 @@ public class Engine {
             this.line = new MoveStack(other.line);
             this.redoLine = new MoveStack(other.redoLine);
 
-            // ❌ heavy: cloning the current legal list and cache
-            // this.legalMoves = other.legalMoves == null ? null : new MoveList(other.legalMoves);
-            // this.legalMovesNeedUpdate = other.legalMovesNeedUpdate;
-            // this.legalMovesCache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
-            // other.legalMovesCache.forEach((k, v) -> this.legalMovesCache.put(k, new MoveList(v)));
-
-            // ✅ light: fresh empty state for the clone; compute lazily when needed
-            this.legalMoves = null;
+            // Fresh empty state for the clone; legal moves will be computed lazily when needed.
+            resetCachedLegalMoves();
             markLegalMovesStale();
-            recycleCacheEntries();
-            this.legalMovesCache = createLegalMovesCache();
 
             this.openingBook = other.openingBook;
         }
@@ -186,17 +81,15 @@ public class Engine {
 
     public MoveList getAllLegalMoves() {
         synchronized (boardLock) {
-            MoveList buffer = ensureLegalMovesBuffer();
-            if (gameState.isGameOver()) {
-                buffer.clear();
-                legalMovesNeedUpdate = false;
-                publishLegalMovesSnapshot(buffer);
-            } else if (legalMovesNeedUpdate) {
-                generateLegalMoves();
-            } else if (legalMovesSnapshot == null) {
-                publishLegalMovesSnapshot(buffer);
+            long boardHash = getBoardStateHash();
+            if (legalMovesNeedUpdate || cachedLegalMovesHash != boardHash) {
+                if (gameState.isGameOver()) {
+                    cacheLegalMoves(boardHash, new MoveList());
+                    return new MoveList();
+                }
+                return generateLegalMoves();
             }
-            return legalMovesSnapshot != null ? legalMovesSnapshot : new MoveList(buffer);
+            return copyCachedLegalMoves();
         }
     }
 
@@ -218,7 +111,7 @@ public class Engine {
                 if (book != null && book.containsMoveAndBoardStateHash(boardStateHashBeforeMove, move)) {
                     isOpeningMove = true;
                 }
-                generateLegalMoves();
+                MoveList legalMoves = generateLegalMoves();
                 gameState.pushHalfmoveClock();
                 gameState.update(bitBoard, legalMoves, move, isOpeningMove);
                 gameState.getScore().applyMove(bitBoard, move, gameState.getState());
@@ -246,13 +139,10 @@ public class Engine {
             // For terminal draw states (e.g., fifty-move rule) skip move generation entirely so
             // callers observe an empty legal move list.
             if (gameState.isFiftyMoveRule() || gameState.isThreefoldRepetition()) {
-                MoveList buffer = ensureLegalMovesBuffer();
-                buffer.clear();
-                legalMovesNeedUpdate = false;
-                publishLegalMovesSnapshot(buffer);
+                cacheLegalMoves(getBoardStateHash(), new MoveList());
                 gameState.setState(GameStateEnum.DRAW);
             } else {
-                generateLegalMoves();
+                MoveList legalMoves = generateLegalMoves();
                 gameState.updateState(bitBoard, legalMoves, false);
             }
             notifyPositionChanged();
@@ -274,10 +164,8 @@ public class Engine {
                 this.gameState = new GameState(other.gameState);
                 this.line = new MoveStack(other.line);
                 this.redoLine = new MoveStack(other.redoLine);
-                this.legalMoves = null;
+                resetCachedLegalMoves();
                 markLegalMovesStale();
-                recycleCacheEntries();
-                this.legalMovesCache = createLegalMovesCache();
                 this.openingBook = other.openingBook;
             }
         }
@@ -294,10 +182,7 @@ public class Engine {
             if (instance != null) {
                 this.openingBook = instance;
             }
-            recycleCacheEntries();
-            legalMovesCache = createLegalMovesCache();
-            // Optional: one cleanup to ensure fresh state
-            legalMovesCache.cleanup();
+            resetCachedLegalMoves();
             notifyPositionChanged();
         }
     }
@@ -312,36 +197,18 @@ public class Engine {
         return openingBook;
     }
 
-    private void generateLegalMoves() {
+    private MoveList generateLegalMoves() {
         synchronized (boardLock) {
-            MoveList buffer = ensureLegalMovesBuffer();
-            buffer.clear();
-
+            MoveList legalMoves = new MoveList();
             final long boardStateHash = getBoardStateHash();
 
-            // Use cached result if available
-            MoveList cached = legalMovesCache.get(boardStateHash);
-            if (cached != null) {
-                buffer.copyFrom(cached);
-                legalMovesNeedUpdate = false;
-                publishLegalMovesSnapshot(buffer);
-                return;
-            }
-
-            if (gameState.isGameOver()) {
-                legalMovesNeedUpdate = false;
-                publishLegalMovesSnapshot(buffer);
-                return;
-            }
-
-            // Generate pseudo-legal moves on the current board
             IntArrayList pseudoMoves = bitBoard.getAllCurrentPossibleMoves();
             BitBoard.PinState pinState = bitBoard.computePinState(bitBoard.isWhitesTurn());
 
             for (int i = 0; i < pseudoMoves.size(); i++) {
                 int move = pseudoMoves.getInt(i);
                 if (bitBoard.isMoveLegalFast(move, pinState)) {
-                    buffer.add(move);
+                    legalMoves.add(move);
                 }
             }
 
@@ -355,73 +222,43 @@ public class Engine {
                     }
                     bitBoard.undoMove(move);
                 }
-                if (!moveListsEqual(buffer, legacy)) {
+                if (!moveListsEqual(legalMoves, legacy)) {
                     throw new IllegalStateException("Mismatch between fast and legacy legal move filtering: fast="
-                            + buffer + ", legacy=" + legacy);
+                            + legalMoves + ", legacy=" + legacy);
                 }
             }
 
-            legalMovesNeedUpdate = false;
+            cacheLegalMoves(boardStateHash, legalMoves);
 
-            publishLegalMovesSnapshot(buffer);
-
-            MoveList snapshot = obtainSnapshot();
-            snapshot.copyFrom(buffer);
-            legalMovesCache.put(boardStateHash, snapshot);
-
-            int size = legalMovesCache.size();
-            if (size > CACHE_CFG.maxSize) {
-                // This should be rare due to eviction, but keep the guard to surface misconfigurations.
-                throw new RuntimeException(String.format(
-                        "LegalMovesCache size %s is larger than configured MAX_SIZE %s", size, CACHE_CFG.maxSize));
-            }
+            return legalMoves;
         }
     }
 
     private void markLegalMovesStale() {
         legalMovesNeedUpdate = true;
-        legalMovesSnapshot = null;
+        cachedLegalMovesHash = Long.MIN_VALUE;
     }
 
-    private void publishLegalMovesSnapshot(MoveList buffer) {
-        legalMovesSnapshot = new MoveList(buffer);
+    private void cacheLegalMoves(long boardHash, MoveList legalMoves) {
+        this.cachedLegalMovesHash = boardHash;
+        this.cachedLegalMoves = legalMoves.toArray();
+        this.cachedLegalMoveCount = this.cachedLegalMoves.length;
+        this.legalMovesNeedUpdate = false;
     }
 
-    private MoveList ensureLegalMovesBuffer() {
-        if (legalMoves == null) {
-            legalMoves = new MoveList();
+    private MoveList copyCachedLegalMoves() {
+        MoveList copy = new MoveList();
+        for (int i = 0; i < cachedLegalMoveCount; i++) {
+            copy.add(cachedLegalMoves[i]);
         }
-        return legalMoves;
+        return copy;
     }
 
-    private MoveList obtainSnapshot() {
-        MoveList snapshot = legalMovesSnapshotPool.pollFirst();
-        if (snapshot == null) {
-            snapshot = new MoveList();
-        }
-        return snapshot;
-    }
-
-    private void releaseSnapshot(MoveList snapshot) {
-        if (snapshot == null) {
-            return;
-        }
-        snapshot.clear();
-        legalMovesSnapshotPool.offer(snapshot);
-    }
-
-    private void recycleCacheEntries() {
-        if (legalMovesCache == null) {
-            return;
-        }
-        legalMovesCache.forEach((hash, list) -> releaseSnapshot(list));
-        legalMovesCache.clear();
-    }
-
-    private TimedLRUCache<MoveList> createLegalMovesCache() {
-        TimedLRUCache<MoveList> cache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
-        cache.setEvictionListener(this::releaseSnapshot);
-        return cache;
+    private void resetCachedLegalMoves() {
+        cachedLegalMoves = new int[0];
+        cachedLegalMoveCount = 0;
+        cachedLegalMovesHash = Long.MIN_VALUE;
+        legalMovesNeedUpdate = true;
     }
 
     private boolean moveListsEqual(MoveList a, MoveList b) {
@@ -590,7 +427,7 @@ public class Engine {
             this.bitBoard.undoMove(undoMove);
 
             // 2) Recompute legal moves
-            generateLegalMoves();
+            MoveList legalMoves = generateLegalMoves();
             gameState.popHalfmoveClock(bitBoard);
             gameState.updateState(bitBoard, legalMoves, false);
             gameState.getScore().undoMove(bitBoard, undoMove, gameState.getState());
