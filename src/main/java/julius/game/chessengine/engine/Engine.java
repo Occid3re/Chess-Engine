@@ -211,7 +211,8 @@ public class Engine {
                 bitBoard.performMove(move);
                 long newHash = getBoardStateHash();
                 gameState.recordHash(newHash);
-                if (openingBook.containsMoveAndBoardStateHash(boardStateHashBeforeMove, move)) {
+                OpeningBook book = resolveOpeningBook();
+                if (book != null && book.containsMoveAndBoardStateHash(boardStateHashBeforeMove, move)) {
                     isOpeningMove = true;
                 }
                 generateLegalMoves();
@@ -286,13 +287,26 @@ public class Engine {
             markLegalMovesStale();
             line = new MoveStack();
             redoLine = new MoveStack();
-            this.openingBook = OpeningBook.getInstance();
+            OpeningBook instance = OpeningBook.getInstance();
+            if (instance != null) {
+                this.openingBook = instance;
+            }
             recycleCacheEntries();
             legalMovesCache = createLegalMovesCache();
             // Optional: one cleanup to ensure fresh state
             legalMovesCache.cleanup();
             notifyPositionChanged();
         }
+    }
+
+    private OpeningBook resolveOpeningBook() {
+        if (openingBook == null) {
+            OpeningBook instance = OpeningBook.getInstance();
+            if (instance != null) {
+                openingBook = instance;
+            }
+        }
+        return openingBook;
     }
 
     private void generateLegalMoves() {
