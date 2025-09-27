@@ -1,9 +1,9 @@
 package julius.game.chessengine.uci;
 
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.ai.AI;
 import julius.game.chessengine.ai.MoveAndScore;
 import julius.game.chessengine.board.MoveHelper;
-import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.utils.Score;
@@ -201,9 +201,9 @@ public class UciHandler {
             };
         }
 
-        MoveList legal = engine.getAllLegalMoves();
+        IntArrayList legal = engine.getAllLegalMoves();
         for (int i = 0; i < legal.size(); i++) {
-            int move = legal.getMove(i);
+            int move = legal.getInt(i);
             if (from == MoveHelper.deriveFromIndex(move)
                     && to == MoveHelper.deriveToIndex(move)
                     && promo == MoveHelper.derivePromotionPieceTypeBits(move)) {
@@ -334,9 +334,9 @@ public class UciHandler {
                     engine.performMove(bm);
                     output.accept("bestmove " + toUci(bm));
                 } else {
-                    MoveList legal = engine.getAllLegalMoves();
-                    if (legal.size() > 0) {
-                        int move = legal.getMove(0);
+                    IntArrayList legal = engine.getAllLegalMoves();
+                    if (!legal.isEmpty()) {
+                        int move = legal.getInt(0);
                         engine.performMove(move);
                         output.accept("bestmove " + toUci(move));
                     } else {

@@ -1,6 +1,6 @@
 package julius.game.chessengine.engine;
 
-import julius.game.chessengine.board.MoveList;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -14,7 +14,7 @@ class EngineConcurrencyTest {
     @Test
     void concurrentAccessDoesNotCorruptInitialPosition() throws InterruptedException {
         Engine reference = new Engine();
-        MoveList referenceMoves = reference.getAllLegalMoves();
+        IntArrayList referenceMoves = reference.getAllLegalMoves();
         int expectedMoveCount = referenceMoves.size();
         String expectedFen = reference.translateBoardToFen().getRenderBoard();
         long expectedHash = reference.getBoardStateHash();
@@ -37,7 +37,7 @@ class EngineConcurrencyTest {
                     if (failure.get() != null) {
                         break;
                     }
-                    MoveList moves = engine.getAllLegalMoves();
+                    IntArrayList moves = engine.getAllLegalMoves();
                     if (moves.size() != expectedMoveCount) {
                         failure.compareAndSet(null, new AssertionError("Unexpected legal move count"));
                         break;
@@ -82,7 +82,7 @@ class EngineConcurrencyTest {
             Assertions.fail("Worker thread failed", workerFailure);
         }
 
-        MoveList finalMoves = engine.getAllLegalMoves();
+        IntArrayList finalMoves = engine.getAllLegalMoves();
         Assertions.assertEquals(expectedMoveCount, finalMoves.size());
         Assertions.assertEquals(expectedFen, engine.translateBoardToFen().getRenderBoard());
         Assertions.assertEquals(expectedHash, engine.getBoardStateHash());

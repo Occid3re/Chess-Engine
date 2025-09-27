@@ -1,8 +1,8 @@
 package julius.game.chessengine.ai;
 
 import julius.game.chessengine.board.Move;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.board.MoveHelper;
-import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
@@ -49,9 +49,9 @@ class AvoidRepetitionDrawTest {
     private int findMove(Engine engine, String from, String to) {
         int fromIndex = MoveHelper.convertStringToIndex(from);
         int toIndex = MoveHelper.convertStringToIndex(to);
-        MoveList legalMoves = engine.getAllLegalMoves();
+        IntArrayList legalMoves = engine.getAllLegalMoves();
         for (int i = 0; i < legalMoves.size(); i++) {
-            int move = legalMoves.getMove(i);
+            int move = legalMoves.getInt(i);
             if (MoveHelper.deriveFromIndex(move) == fromIndex
                     && MoveHelper.deriveToIndex(move) == toIndex) {
                 return move;

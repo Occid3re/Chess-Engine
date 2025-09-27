@@ -431,9 +431,9 @@ public class BitBoardTest {
             return node;
         }
 
-        MoveList moves = engine.getAllLegalMoves();
+        IntArrayList moves = engine.getAllLegalMoves();
         for (int i = 0; i < moves.size(); i++) {
-            int move = moves.getMove(i);
+            int move = moves.getInt(i);
             engine.performMove(move);
 
             PerftNode childNode = perft(depth - 1, engine, move); // Pass the current move as lastMove
@@ -467,7 +467,7 @@ public class BitBoardTest {
         simulation.moveFigure(convertStringToIndex("f1"), convertStringToIndex("c4"));
         simulation.moveFigure(convertStringToIndex("f6"), convertStringToIndex("d5"));
 
-        MoveList moves = simulation.getAllLegalMoves();
+        IntArrayList moves = simulation.getAllLegalMoves();
 
         assertEquals(moves.size(), 35);
 
@@ -496,7 +496,7 @@ public class BitBoardTest {
         engine.moveFigure(convertStringToIndex("h1"), convertStringToIndex("g1"));
         engine.undoLastMove();
 
-        MoveList moves = engine.getAllLegalMoves();
+        IntArrayList moves = engine.getAllLegalMoves();
 
         assertEquals(moves.stream().filter(Move::isRookFirstMove).toList().size(), 1);
     }*/
@@ -510,7 +510,7 @@ public class BitBoardTest {
         engine.moveFigure(convertStringToIndex("e4"), convertStringToIndex("e5"));
         engine.moveFigure(convertStringToIndex("d7"), convertStringToIndex("d5"));
 
-        MoveList moves = engine.getAllLegalMoves();
+        IntArrayList moves = engine.getAllLegalMoves();
 
         engine.logBoard();
         assertEquals(31, moves.size());
@@ -527,7 +527,7 @@ public class BitBoardTest {
 
 
         engine.logBoard();
-        MoveList mightNotLegalMoves = engine.getAllLegalMoves();
+        IntArrayList mightNotLegalMoves = engine.getAllLegalMoves();
 
         assertEquals(31, mightNotLegalMoves.size());
     }
@@ -542,7 +542,7 @@ public class BitBoardTest {
         engine.moveFigure(convertStringToIndex("e5"), convertStringToIndex("e4"));
         engine.moveFigure(convertStringToIndex("f2"), convertStringToIndex("f4"));
 
-        MoveList moves = engine.getAllLegalMoves();
+        IntArrayList moves = engine.getAllLegalMoves();
 
         engine.logBoard();
         assertEquals(31, moves.size());
@@ -576,7 +576,7 @@ public class BitBoardTest {
         engine.moveFigure(convertStringToIndex("e5"), convertStringToIndex("e4"));
         engine.moveFigure(convertStringToIndex("d2"), convertStringToIndex("d4"));
 
-        MoveList moves = engine.getAllLegalMoves();
+        IntArrayList moves = engine.getAllLegalMoves();
 
         engine.logBoard();
         assertEquals(31, moves.size());
@@ -591,7 +591,7 @@ public class BitBoardTest {
         engine.moveFigure(convertStringToIndex("f7"), convertStringToIndex("f5"));
         engine.moveFigure(convertStringToIndex("g2"), convertStringToIndex("g4"));
 
-        MoveList moves = engine.getAllLegalMoves();
+        IntArrayList moves = engine.getAllLegalMoves();
 
         engine.logBoard();
         assertEquals(22, moves.size());

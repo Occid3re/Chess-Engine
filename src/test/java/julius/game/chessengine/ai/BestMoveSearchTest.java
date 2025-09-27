@@ -1,7 +1,7 @@
 package julius.game.chessengine.ai;
 
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.board.Move;
-import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.utils.Score;
 import org.junit.jupiter.api.Assertions;
@@ -235,10 +235,10 @@ public class BestMoveSearchTest {
         double baselineForMover = orientScoreForMover(whiteToMove,
                 analysisEngine.getGameState().getScore().getScoreDifference());
 
-        MoveList legalMovesSnapshot = analysisEngine.getAllLegalMoves();
+        IntArrayList legalMovesSnapshot = analysisEngine.getAllLegalMoves();
         List<Integer> legalMoves = new ArrayList<>(legalMovesSnapshot.size());
         for (int i = 0; i < legalMovesSnapshot.size(); i++) {
-            legalMoves.add(legalMovesSnapshot.getMove(i));
+            legalMoves.add(legalMovesSnapshot.getInt(i));
         }
 
         List<MoveEvaluation> evaluations = new ArrayList<>(legalMoves.size());

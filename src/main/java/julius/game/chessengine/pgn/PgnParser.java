@@ -1,7 +1,7 @@
 package julius.game.chessengine.pgn;
 
 import julius.game.chessengine.board.MoveHelper;
-import julius.game.chessengine.board.MoveList;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.utils.MoveStack;
@@ -69,13 +69,13 @@ public class PgnParser {
 
     private AmbiguityType isMoveAmbiguous(PieceType pieceType, int fromIndex, int toIndex) {
         engine.undoLastMove();
-        MoveList allMoves = engine.getAllLegalMoves();
+        IntArrayList allMoves = engine.getAllLegalMoves();
         boolean ambiguityInFile = false;
         boolean ambiguityInRank = false;
         boolean otherPieceCanMoveToSameSquare = false;
 
         for (int i = 0; i < allMoves.size(); i++) {
-            int move = allMoves.getMove(i);
+            int move = allMoves.getInt(i);
             int moveFromIndex = MoveHelper.deriveFromIndex(move);
             int moveToIndex = MoveHelper.deriveToIndex(move);
 
