@@ -1,5 +1,6 @@
 package julius.game.chessengine.board;
 
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.utils.Color;
@@ -94,7 +95,7 @@ public class BitBoardTest {
         engine.importBoardFromFen("4r3/8/8/8/8/3n1n2/4P3/4K3 w - - 0 1");
 
         BitBoard board = engine.getBitBoard();
-        MoveList moves = board.generateAllPossibleMoves(board.whitesTurn);
+        IntArrayList moves = board.generateAllPossibleMoves(board.whitesTurn);
 
         int from = convertStringToIndex("e2");
         assertTrue(moveExists(moves, from, convertStringToIndex("e3")));
@@ -198,9 +199,9 @@ public class BitBoardTest {
 
     }
 
-    private boolean moveExists(MoveList moves, int from, int to) {
+    private boolean moveExists(IntArrayList moves, int from, int to) {
         for (int i = 0; i < moves.size(); i++) {
-            int move = moves.getMove(i);
+            int move = moves.getInt(i);
             if (MoveHelper.deriveFromIndex(move) == from && MoveHelper.deriveToIndex(move) == to) {
                 return true;
             }

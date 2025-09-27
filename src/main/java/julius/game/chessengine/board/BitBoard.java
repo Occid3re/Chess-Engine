@@ -1,5 +1,6 @@
 package julius.game.chessengine.board;
 
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.helper.BishopHelper;
 import julius.game.chessengine.helper.BitboardHelper;
@@ -62,8 +63,7 @@ public class BitBoard {
     private boolean blackAttackDirty = true;
     private PieceType[] pieceBoard = new PieceType[64];
 
-    // Reusable buffer for move generation to avoid frequent allocations.
-    private final MoveList moveGenerationBuffer = new MoveList();
+    private static final int MAX_PSEUDO_LEGAL_MOVES = 218;
 
     public static final class PinState {
         private final boolean whiteSide;
@@ -318,7 +318,14 @@ public class BitBoard {
         return (whiteMinorPieces <= 1) && (blackMinorPieces <= 1);
     }
 
-    public MoveList getAllCurrentPossibleMoves() {
+    /**
+     * Returns all pseudo-legal moves for the side to move.
+     *
+     * <p>The returned list is freshly allocated on each invocation and is exclusively owned by the
+     * caller. Callers may freely modify the contents but should not expect subsequent invocations to
+     * reuse or preserve previously returned instances.</p>
+     */
+    public IntArrayList getAllCurrentPossibleMoves() {
         return generateAllPossibleMoves(whitesTurn);
     }
 
@@ -945,10 +952,20 @@ public class BitBoard {
         }
     }
 
-    public MoveList generateAllPossibleMoves(boolean whitesTurn) {
-        // Reuse the internal buffer to cut down on object creation and GC pressure.
-        MoveList moves = moveGenerationBuffer;
-        moves.clear();
+    /**
+     * Generates all pseudo-legal moves for the specified side.
+     *
+     * <p>A new {@link IntArrayList} is created for every call to guarantee that the caller receives a
+     * private container. This avoids the subtle aliasing bugs that occurred when the move generation
+     * buffer was shared across threads. The list is pre-sized to the theoretical maximum number of
+     * pseudo-legal moves so the amortized allocation cost is limited to the list instance itself.</p>
+     *
+     * @param whitesTurn {@code true} if white is to move, otherwise {@code false}
+     * @return an {@link IntArrayList} containing pseudo-legal moves encoded with
+     * {@link MoveHelper#createMoveInt(int, int, PieceType, boolean, boolean, boolean, boolean, PieceType, PieceType, boolean, boolean, int)}
+     */
+    public IntArrayList generateAllPossibleMoves(boolean whitesTurn) {
+        IntArrayList moves = new IntArrayList(MAX_PSEUDO_LEGAL_MOVES);
 
         // Do NOT recompute white/black attack maps here.
         // They are recomputed lazily inside isSquareUnderAttack() only when needed
@@ -1061,7 +1078,7 @@ public class BitBoard {
         blackAttackDirty = false;
     }
 
-    private void generatePawnMoves(boolean whitesTurn, MoveList moves, PinState pinState) {
+    private void generatePawnMoves(boolean whitesTurn, IntArrayList moves, PinState pinState) {
         long pawns = whitesTurn ? whitePawns : blackPawns;
         long opponentPieces = whitesTurn ? blackPieces : whitePieces;
         long emptySquares = ~allPieces;
@@ -1192,7 +1209,7 @@ public class BitBoard {
 
     }
 
-    private void generateEnPassantMoves(MoveList moves, long pawns, boolean whitesTurn, PinState pinState) {
+    private void generateEnPassantMoves(IntArrayList moves, long pawns, boolean whitesTurn, PinState pinState) {
         int enPassantRank = whitesTurn ? 5 : 2;
         int fileIndexOfDoubleSteppedPawn = lastMoveDoubleStepPawnIndex % 8;
         int enPassantTargetIndex = (enPassantRank * 8) + fileIndexOfDoubleSteppedPawn;
@@ -1229,19 +1246,19 @@ public class BitBoard {
     }
 
 
-    private void addEnPassantMove(MoveList moves, int fromIndex, int toIndex, boolean whitesTurn) {
+    private void addEnPassantMove(IntArrayList moves, int fromIndex, int toIndex, boolean whitesTurn) {
         moves.add(
                 createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, true, false, true, null, PieceType.PAWN, false, false, lastMoveDoubleStepPawnIndex));
     }
 
-    private void addPromotionMoves(MoveList moves, int fromIndex, int toIndex, boolean whitesTurn, boolean isCapture, PieceType capturedType) {
+    private void addPromotionMoves(IntArrayList moves, int fromIndex, int toIndex, boolean whitesTurn, boolean isCapture, PieceType capturedType) {
         for (PieceType promotionPiece : PROMOTION_PIECES) {
             moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, isCapture, false, false, promotionPiece, capturedType, false, false, lastMoveDoubleStepPawnIndex));
         }
     }
 
 
-    private void generateKnightMoves(boolean whitesTurn, MoveList moves, PinState pinState) {
+    private void generateKnightMoves(boolean whitesTurn, IntArrayList moves, PinState pinState) {
         long knights = whitesTurn ? whiteKnights : blackKnights;
         long opponentPieces = whitesTurn ? blackPieces : whitePieces;
         long ownPieces = whitesTurn ? whitePieces : blackPieces;
@@ -1271,7 +1288,7 @@ public class BitBoard {
     }
 
 
-    private void generateBishopMoves(boolean isWhite, MoveList moves, PinState pinState) {
+    private void generateBishopMoves(boolean isWhite, IntArrayList moves, PinState pinState) {
         long bishops = isWhite ? whiteBishops : blackBishops;
         long ownPieces = isWhite ? whitePieces : blackPieces;
         long opponentPieces = isWhite ? blackPieces : whitePieces;
@@ -1308,7 +1325,7 @@ public class BitBoard {
         }
     }
 
-    private void generateRookMoves(boolean whitesTurn, MoveList moves, PinState pinState) {
+    private void generateRookMoves(boolean whitesTurn, IntArrayList moves, PinState pinState) {
         long rooks = whitesTurn ? whiteRooks : blackRooks;
         long ownPieces = whitesTurn ? whitePieces : blackPieces;
         long opponentPieces = whitesTurn ? blackPieces : whitePieces;
@@ -1345,7 +1362,7 @@ public class BitBoard {
         }
     }
 
-    private void generateQueenMoves(boolean whitesTurn, MoveList moves, PinState pinState) {
+    private void generateQueenMoves(boolean whitesTurn, IntArrayList moves, PinState pinState) {
         long queens = whitesTurn ? whiteQueens : blackQueens;
         long ownPieces = whitesTurn ? whitePieces : blackPieces;
         long opponentPieces = whitesTurn ? blackPieces : whitePieces;
@@ -1384,7 +1401,7 @@ public class BitBoard {
         }
     }
 
-    private void generateKingMoves(boolean whitesTurn, MoveList moves, PinState pinState) {
+    private void generateKingMoves(boolean whitesTurn, IntArrayList moves, PinState pinState) {
         long kingBitboard = whitesTurn ? whiteKing : blackKing;
         if (kingBitboard == 0L) {
             return; // No king present for the given color; cannot generate moves
@@ -1410,7 +1427,7 @@ public class BitBoard {
         addCastlingMoves(whitesTurn, kingPositionIndex, moves, pinState);
     }
 
-    private void addCastlingMoves(boolean whitesTurn, int kingPositionIndex, MoveList moves, PinState pinState) {
+    private void addCastlingMoves(boolean whitesTurn, int kingPositionIndex, IntArrayList moves, PinState pinState) {
         // Avoid an extra bit scan: we already know the king's square.
         if (canKingCastle(whitesTurn, kingPositionIndex, pinState)) {
             if (canCastleKingside(whitesTurn, kingPositionIndex, pinState)) {
