@@ -196,25 +196,17 @@ public class Engine {
         synchronized (boardLock) {
             final long boardStateHash = getBoardStateHash();
 
-            // Get pseudo moves + the already-computed PinState in one shot
             BitBoard.MoveGenResult gen = bitBoard.generateAllPossibleMovesWithPins(bitBoard.whitesTurn);
             IntArrayList pseudoMoves = gen.moves();
-            BitBoard.PinState pinState = gen.pinState();
-
-            // NEW: detect check once
-            boolean inCheck = bitBoard.isInCheck(bitBoard.whitesTurn);
+            boolean inCheck = gen.inCheck();
 
             IntArrayList legalMoves = new IntArrayList(pseudoMoves.size());
             for (int i = 0; i < pseudoMoves.size(); i++) {
                 int move = pseudoMoves.getInt(i);
 
-                // Fast path when NOT in check:
-                // - pins already enforced during generation
-                // - king steps were prefiltered in generateKingMoves (see §2)
-                // So only EP needs a special legality test.
                 if (!inCheck) {
                     if (MoveHelper.isEnPassantMove(move)) {
-                        if (bitBoard.isMoveLegalFast(move, pinState)) {
+                        if (bitBoard.isMoveLegalFast(move)) {
                             legalMoves.add(move);
                         }
                     } else {
@@ -223,8 +215,7 @@ public class Engine {
                     continue;
                 }
 
-                // If in check, fall back to the full legality test
-                if (bitBoard.isMoveLegalFast(move, pinState)) {
+                if (bitBoard.isMoveLegalFast(move)) {
                     legalMoves.add(move);
                 }
             }
