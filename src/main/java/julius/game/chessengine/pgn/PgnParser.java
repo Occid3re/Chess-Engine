@@ -4,9 +4,9 @@ import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.figures.PieceType;
+import julius.game.chessengine.utils.MoveStack;
 
 import java.time.ZonedDateTime;
-import java.util.ArrayList;
 
 public class PgnParser {
 
@@ -18,7 +18,7 @@ public class PgnParser {
         BOTH  // Ambiguity in both file and rank
     }
     private final Engine engine = new Engine();
-    private final ArrayList<Integer> line;
+    private final MoveStack line;
 
     private String event = "Alieknek testing";
     private String site = "Neulengbach";
@@ -32,7 +32,7 @@ public class PgnParser {
     boolean sameFile = false;
     boolean sameRank = false;
 
-    public PgnParser(ArrayList<Integer> line) {
+    public PgnParser(MoveStack line) {
         this.line = line;
     }
 
@@ -44,11 +44,12 @@ public class PgnParser {
         int moveCounter = 1;
 
         for (int i = 0; i < line.size(); i++) {
-            engine.performMove(line.get(i)); // Update the engine's state for the next move
+            int move = line.get(i);
+            engine.performMove(move); // Update the engine's state for the next move
             if (i % 2 == 0) {
                 pgn.append(moveCounter++).append(". ");
             }
-            String movePgn = convertMoveToPgn(line.get(i));
+            String movePgn = convertMoveToPgn(move);
             pgn.append(movePgn).append(" ");
 
         }
