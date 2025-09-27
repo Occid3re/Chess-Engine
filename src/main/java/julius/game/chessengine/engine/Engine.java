@@ -30,7 +30,17 @@ public class Engine {
     private boolean legalMovesNeedUpdate = true;
     private long cachedLegalMovesHash = Long.MIN_VALUE;
     private int[] cachedLegalMoves = new int[0];
+    /** Lightweight view over {@link #cachedLegalMoves}; never modify the returned instance. */
+    private final CachedMoveListView cachedLegalMoveView = new CachedMoveListView();
     private int cachedLegalMoveCount = 0;
+
+    /**
+     * Scratch buffer for legal move generation.  Callers must treat the returned instance as
+     * read-only and not retain it beyond the current synchronized block, as the buffer is reused.
+     */
+    private final IntArrayList legalMoveBuf = new IntArrayList(64);
+
+    private boolean evaluationEnabled = true;
 
     @Getter
     private MoveStack line = new MoveStack();
@@ -84,13 +94,25 @@ public class Engine {
             long boardHash = getBoardStateHash();
             if (legalMovesNeedUpdate || cachedLegalMovesHash != boardHash) {
                 if (gameState.isGameOver()) {
-                    IntArrayList empty = new IntArrayList(0);
-                    cacheLegalMoves(boardHash, empty);
-                    return new IntArrayList(0);
+                    legalMoveBuf.clear();
+                    cacheLegalMoves(boardHash, legalMoveBuf);
+                    return legalMoveBuf;
                 }
                 return generateLegalMoves();
             }
-            return copyCachedLegalMoves();
+            return viewCachedLegalMoves();
+        }
+    }
+
+    public void setEvaluationEnabled(boolean evaluationEnabled) {
+        synchronized (boardLock) {
+            if (this.evaluationEnabled == evaluationEnabled) {
+                return;
+            }
+            this.evaluationEnabled = evaluationEnabled;
+            if (evaluationEnabled) {
+                gameState.refreshScore(bitBoard);
+            }
         }
     }
 
@@ -109,7 +131,9 @@ public class Engine {
                 IntArrayList legalMoves = generateLegalMoves();
                 gameState.pushHalfmoveClock();
                 gameState.update(bitBoard, legalMoves, move, isOpeningMove);
-                gameState.getScore().applyMove(bitBoard, move, gameState.getState());
+                if (evaluationEnabled) {
+                    gameState.getScore().applyMove(bitBoard, move, gameState.getState());
+                }
                 line.push(move);
                 notifyPositionChanged();
             }
@@ -134,7 +158,8 @@ public class Engine {
             // For terminal draw states (e.g., fifty-move rule) skip move generation entirely so
             // callers observe an empty legal move list.
             if (gameState.isFiftyMoveRule() || gameState.isThreefoldRepetition()) {
-                cacheLegalMoves(getBoardStateHash(), new IntArrayList(0));
+                legalMoveBuf.clear();
+                cacheLegalMoves(getBoardStateHash(), legalMoveBuf);
                 gameState.setState(GameStateEnum.DRAW);
             } else {
                 IntArrayList legalMoves = generateLegalMoves();
@@ -200,7 +225,9 @@ public class Engine {
             IntArrayList pseudoMoves = gen.moves();
             boolean inCheck = gen.inCheck();
 
-            IntArrayList legalMoves = new IntArrayList(pseudoMoves.size());
+            legalMoveBuf.clear();
+            legalMoveBuf.ensureCapacity(pseudoMoves.size());
+            IntArrayList legalMoves = legalMoveBuf;
             for (int i = 0; i < pseudoMoves.size(); i++) {
                 int move = pseudoMoves.getInt(i);
 
@@ -252,19 +279,41 @@ public class Engine {
     private void cacheLegalMoves(long boardHash, IntArrayList legalMoves) {
         this.cachedLegalMovesHash = boardHash;
         this.cachedLegalMoveCount = legalMoves.size();
-        this.cachedLegalMoves = legalMoves.toIntArray();
+        ensureCachedCapacity(cachedLegalMoveCount);
+        if (cachedLegalMoveCount > 0) {
+            System.arraycopy(legalMoves.elements(), 0, cachedLegalMoves, 0, cachedLegalMoveCount);
+        }
+        cachedLegalMoveView.reset(cachedLegalMoves, cachedLegalMoveCount);
         this.legalMovesNeedUpdate = false;
     }
 
-    private IntArrayList copyCachedLegalMoves() {
-        return new IntArrayList(java.util.Arrays.copyOf(cachedLegalMoves, cachedLegalMoveCount));
+    private void ensureCachedCapacity(int required) {
+        if (cachedLegalMoves.length < required) {
+            cachedLegalMoves = java.util.Arrays.copyOf(cachedLegalMoves, Math.max(required, cachedLegalMoves.length * 2 + 1));
+        }
+    }
+
+    private IntArrayList viewCachedLegalMoves() {
+        return cachedLegalMoveView;
     }
 
     private void resetCachedLegalMoves() {
         cachedLegalMoves = new int[0];
+        cachedLegalMoveView.reset(cachedLegalMoves, 0);
         cachedLegalMoveCount = 0;
         cachedLegalMovesHash = Long.MIN_VALUE;
         legalMovesNeedUpdate = true;
+    }
+
+    private static final class CachedMoveListView extends IntArrayList {
+        CachedMoveListView() {
+            super(0);
+        }
+
+        void reset(int[] backingArray, int size) {
+            this.a = backingArray;
+            this.size = size;
+        }
     }
 
     private boolean moveListsEqual(IntArrayList a, IntArrayList b) {
@@ -436,7 +485,9 @@ public class Engine {
             IntArrayList legalMoves = generateLegalMoves();
             gameState.popHalfmoveClock(bitBoard);
             gameState.updateState(bitBoard, legalMoves, false);
-            gameState.getScore().undoMove(bitBoard, undoMove, gameState.getState());
+            if (evaluationEnabled) {
+                gameState.getScore().undoMove(bitBoard, undoMove, gameState.getState());
+            }
 
             // 3) Bookkeeping
             redoLine.push(undoMove);

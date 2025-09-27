@@ -128,6 +128,7 @@ public class BitBoardTest {
         long startTime = System.nanoTime(); // Start timing
 
         Engine engine = new Engine(); // The chess engine
+        engine.setEvaluationEnabled(false);
 
         // Depth 1
         PerftNode d1 = perft(1, engine);
@@ -226,6 +227,7 @@ public class BitBoardTest {
         long startTime = System.nanoTime(); // Start timing
 
         Engine engine = new Engine();
+        engine.setEvaluationEnabled(false);
         engine.importBoardFromFen("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -");// The chess engine
 
         // Depth 1
@@ -289,6 +291,7 @@ public class BitBoardTest {
     public void PERFTPos_3() {
 
         Engine engine = new Engine();
+        engine.setEvaluationEnabled(false);
         engine.importBoardFromFen("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - ");// The chess engine
 
         // Depth 1
@@ -336,6 +339,7 @@ public class BitBoardTest {
     public void PERFTPos_4() {
 
         Engine engine = new Engine();
+        engine.setEvaluationEnabled(false);
         engine.importBoardFromFen("r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1");// The chess engine
 
         // Depth 1
@@ -385,6 +389,7 @@ public class BitBoardTest {
     public void PERFT_castling_rights() {
 
         Engine engine = new Engine();
+        engine.setEvaluationEnabled(false);
         engine.importBoardFromFen("r3k2r/1b4bq/8/8/8/8/7B/R3K2R w KQkq - 0 1");// The chess engine
 
         // Depth 4
