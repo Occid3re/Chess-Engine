@@ -1,5 +1,6 @@
 package julius.game.chessengine.board;
 
+import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.utils.Color;
 import julius.game.chessengine.figures.PieceType;
@@ -85,6 +86,37 @@ public class BitBoardTest {
         board.performMove(move);
 
         assertEquals(d5, board.getLastMoveDoubleStepPawnIndex());
+    }
+
+    @Test
+    void verticallyPinnedPawnStaysOnFile() {
+        Engine engine = new Engine();
+        engine.importBoardFromFen("4r3/8/8/8/8/3n1n2/4P3/4K3 w - - 0 1");
+
+        BitBoard board = engine.getBitBoard();
+        MoveList moves = board.generateAllPossibleMoves(board.whitesTurn);
+
+        int from = convertStringToIndex("e2");
+        assertTrue(moveExists(moves, from, convertStringToIndex("e3")));
+        assertTrue(moveExists(moves, from, convertStringToIndex("e4")));
+        assertFalse(moveExists(moves, from, convertStringToIndex("d3")));
+        assertFalse(moveExists(moves, from, convertStringToIndex("f3")));
+    }
+
+    @Test
+    void diagonallyPinnedQueenOnlyMovesAlongRay() {
+        Engine engine = new Engine();
+        engine.importBoardFromFen("8/8/8/6b1/8/8/3Q4/2K5 w - - 0 1");
+
+        BitBoard board = engine.getBitBoard();
+        MoveList moves = board.generateAllPossibleMoves(board.whitesTurn);
+
+        int from = convertStringToIndex("d2");
+        assertTrue(moveExists(moves, from, convertStringToIndex("e3")));
+        assertTrue(moveExists(moves, from, convertStringToIndex("f4")));
+        assertTrue(moveExists(moves, from, convertStringToIndex("g5")));
+        assertFalse(moveExists(moves, from, convertStringToIndex("d3")));
+        assertFalse(moveExists(moves, from, convertStringToIndex("c2")));
     }
 
     @Test
@@ -180,6 +212,16 @@ public class BitBoardTest {
         endTime = System.nanoTime();
         log.info("(1-6) Time taken for move calculation: {} ms", (endTime - startTime) / 1e6);
 
+    }
+
+    private boolean moveExists(MoveList moves, int from, int to) {
+        for (int i = 0; i < moves.size(); i++) {
+            int move = moves.getMove(i);
+            if (MoveHelper.deriveFromIndex(move) == from && MoveHelper.deriveToIndex(move) == to) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Test
