@@ -201,15 +201,36 @@ public class Engine {
             IntArrayList pseudoMoves = gen.moves();
             BitBoard.PinState pinState = gen.pinState();
 
+            // NEW: detect check once
+            boolean inCheck = bitBoard.isInCheck(bitBoard.whitesTurn);
+
             IntArrayList legalMoves = new IntArrayList(pseudoMoves.size());
             for (int i = 0; i < pseudoMoves.size(); i++) {
                 int move = pseudoMoves.getInt(i);
+
+                // Fast path when NOT in check:
+                // - pins already enforced during generation
+                // - king steps were prefiltered in generateKingMoves (see §2)
+                // So only EP needs a special legality test.
+                if (!inCheck) {
+                    if (MoveHelper.isEnPassantMove(move)) {
+                        if (bitBoard.isMoveLegalFast(move, pinState)) {
+                            legalMoves.add(move);
+                        }
+                    } else {
+                        legalMoves.add(move);
+                    }
+                    continue;
+                }
+
+                // If in check, fall back to the full legality test
                 if (bitBoard.isMoveLegalFast(move, pinState)) {
                     legalMoves.add(move);
                 }
             }
 
             if (VERIFY_LEGAL_MOVES) {
+                // Optional self-check retained for debugging
                 IntArrayList legacy = new IntArrayList(legalMoves.size());
                 for (int i = 0; i < pseudoMoves.size(); i++) {
                     int move = pseudoMoves.getInt(i);
@@ -245,11 +266,7 @@ public class Engine {
     }
 
     private IntArrayList copyCachedLegalMoves() {
-        IntArrayList copy = new IntArrayList(cachedLegalMoveCount);
-        for (int i = 0; i < cachedLegalMoveCount; i++) {
-            copy.add(cachedLegalMoves[i]);
-        }
-        return copy;
+        return new IntArrayList(java.util.Arrays.copyOf(cachedLegalMoves, cachedLegalMoveCount));
     }
 
     private void resetCachedLegalMoves() {

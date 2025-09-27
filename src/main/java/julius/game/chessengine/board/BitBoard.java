@@ -80,7 +80,8 @@ public class BitBoard {
         }
     }
 
-    private record PinRayInfo(long rayMask, int pinnerSquare) { }
+    private record PinRayInfo(long rayMask, int pinnerSquare) {
+    }
 
     public static final class MoveGenResult {
         public final IntArrayList moves;
@@ -90,8 +91,14 @@ public class BitBoard {
             this.moves = moves;
             this.pinState = pinState;
         }
-        public IntArrayList moves() { return moves; }
-        public PinState pinState() { return pinState; }
+
+        public IntArrayList moves() {
+            return moves;
+        }
+
+        public PinState pinState() {
+            return pinState;
+        }
     }
 
     private static final class PieceBitboards {
@@ -1479,12 +1486,23 @@ public class BitBoard {
 
         for (long possibleMoves = legalMoves; possibleMoves != 0; possibleMoves &= possibleMoves - 1) {
             int targetIndex = Long.numberOfTrailingZeros(possibleMoves);
+
+            // Skip squares attacked by opponent (cheap, cached)
+            if (isSquareUnderAttack(targetIndex, whitesTurn)) {
+                continue;
+            }
+
             boolean isCapture = (captureMoves & (1L << targetIndex)) != 0;
             PieceType capturedType = isCapture ? getPieceTypeAtIndex(targetIndex) : null;
             if (capturedType != PieceType.KING) {
-                moves.add(createMoveInt(kingPositionIndex, targetIndex, PieceType.KING, whitesTurn, isCapture, false, false, null, capturedType, isFirstKingMove, false, lastMoveDoubleStepPawnIndex));
+                moves.add(createMoveInt(
+                        kingPositionIndex, targetIndex, PieceType.KING, whitesTurn,
+                        isCapture, false, false, null, capturedType, isFirstKingMove, false,
+                        lastMoveDoubleStepPawnIndex
+                ));
             }
         }
+
 
         addCastlingMoves(whitesTurn, kingPositionIndex, moves, pinState);
     }
@@ -1563,23 +1581,8 @@ public class BitBoard {
 
     // Fast path: no loads, uses live fields directly.
     private boolean isSquareUnderAttack(int index, boolean colorWhite) {
-        if (colorWhite) {
-            if (pawnAttackersToSquare(index, false, whitePawns, blackPawns) != 0) return true;
-            if ((KnightHelper.knightMoveTable[index] & blackKnights) != 0) return true;
-            if ((KING_ATTACKS[index] & blackKing) != 0) return true;
-            long b = bishopAttacksFromWithOcc(index, allPieces);
-            if ((b & (blackBishops | blackQueens)) != 0) return true;
-            long r = rookAttacksFromWithOcc(index, allPieces);
-            return (r & (blackRooks | blackQueens)) != 0;
-        } else {
-            if (pawnAttackersToSquare(index, true, whitePawns, blackPawns) != 0) return true;
-            if ((KnightHelper.knightMoveTable[index] & whiteKnights) != 0) return true;
-            if ((KING_ATTACKS[index] & whiteKing) != 0) return true;
-            long b = bishopAttacksFromWithOcc(index, allPieces);
-            if ((b & (whiteBishops | whiteQueens)) != 0) return true;
-            long r = rookAttacksFromWithOcc(index, allPieces);
-            return (r & (whiteRooks | whiteQueens)) != 0;
-        }
+        long attackers = getAttackBitboard(!colorWhite);
+        return (attackers & (1L << index)) != 0;
     }
 
 
