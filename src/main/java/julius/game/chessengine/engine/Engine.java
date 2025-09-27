@@ -79,13 +79,14 @@ public class Engine {
         return bitBoard;
     }
 
-    public MoveList getAllLegalMoves() {
+    public IntArrayList getAllLegalMoves() {
         synchronized (boardLock) {
             long boardHash = getBoardStateHash();
             if (legalMovesNeedUpdate || cachedLegalMovesHash != boardHash) {
                 if (gameState.isGameOver()) {
-                    cacheLegalMoves(boardHash, new MoveList());
-                    return new MoveList();
+                    IntArrayList empty = new IntArrayList(0);
+                    cacheLegalMoves(boardHash, empty);
+                    return new IntArrayList(0);
                 }
                 return generateLegalMoves();
             }
@@ -111,7 +112,7 @@ public class Engine {
                 if (book != null && book.containsMoveAndBoardStateHash(boardStateHashBeforeMove, move)) {
                     isOpeningMove = true;
                 }
-                MoveList legalMoves = generateLegalMoves();
+                IntArrayList legalMoves = generateLegalMoves();
                 gameState.pushHalfmoveClock();
                 gameState.update(bitBoard, legalMoves, move, isOpeningMove);
                 gameState.getScore().applyMove(bitBoard, move, gameState.getState());
@@ -139,10 +140,10 @@ public class Engine {
             // For terminal draw states (e.g., fifty-move rule) skip move generation entirely so
             // callers observe an empty legal move list.
             if (gameState.isFiftyMoveRule() || gameState.isThreefoldRepetition()) {
-                cacheLegalMoves(getBoardStateHash(), new MoveList());
+                cacheLegalMoves(getBoardStateHash(), new IntArrayList(0));
                 gameState.setState(GameStateEnum.DRAW);
             } else {
-                MoveList legalMoves = generateLegalMoves();
+                IntArrayList legalMoves = generateLegalMoves();
                 gameState.updateState(bitBoard, legalMoves, false);
             }
             notifyPositionChanged();
@@ -197,12 +198,12 @@ public class Engine {
         return openingBook;
     }
 
-    private MoveList generateLegalMoves() {
+    private IntArrayList generateLegalMoves() {
         synchronized (boardLock) {
-            MoveList legalMoves = new MoveList();
             final long boardStateHash = getBoardStateHash();
 
             IntArrayList pseudoMoves = bitBoard.getAllCurrentPossibleMoves();
+            IntArrayList legalMoves = new IntArrayList(pseudoMoves.size());
             BitBoard.PinState pinState = bitBoard.computePinState(bitBoard.isWhitesTurn());
 
             for (int i = 0; i < pseudoMoves.size(); i++) {
@@ -213,7 +214,7 @@ public class Engine {
             }
 
             if (VERIFY_LEGAL_MOVES) {
-                MoveList legacy = new MoveList();
+                IntArrayList legacy = new IntArrayList(legalMoves.size());
                 for (int i = 0; i < pseudoMoves.size(); i++) {
                     int move = pseudoMoves.getInt(i);
                     bitBoard.performMove(move);
@@ -239,15 +240,15 @@ public class Engine {
         cachedLegalMovesHash = Long.MIN_VALUE;
     }
 
-    private void cacheLegalMoves(long boardHash, MoveList legalMoves) {
+    private void cacheLegalMoves(long boardHash, IntArrayList legalMoves) {
         this.cachedLegalMovesHash = boardHash;
-        this.cachedLegalMoves = legalMoves.toArray();
-        this.cachedLegalMoveCount = this.cachedLegalMoves.length;
+        this.cachedLegalMoveCount = legalMoves.size();
+        this.cachedLegalMoves = legalMoves.toIntArray();
         this.legalMovesNeedUpdate = false;
     }
 
-    private MoveList copyCachedLegalMoves() {
-        MoveList copy = new MoveList();
+    private IntArrayList copyCachedLegalMoves() {
+        IntArrayList copy = new IntArrayList(cachedLegalMoveCount);
         for (int i = 0; i < cachedLegalMoveCount; i++) {
             copy.add(cachedLegalMoves[i]);
         }
@@ -261,12 +262,12 @@ public class Engine {
         legalMovesNeedUpdate = true;
     }
 
-    private boolean moveListsEqual(MoveList a, MoveList b) {
+    private boolean moveListsEqual(IntArrayList a, IntArrayList b) {
         if (a.size() != b.size()) {
             return false;
         }
         for (int i = 0; i < a.size(); i++) {
-            if (a.getMove(i) != b.getMove(i)) {
+            if (a.getInt(i) != b.getInt(i)) {
                 return false;
             }
         }
@@ -275,10 +276,10 @@ public class Engine {
 
     // Each of these methods would need to be implemented to handle the specific move generation for each piece type.
     public List<Move> getMovesFromIndex(int fromIndex) {
-        MoveList legalMoves = getAllLegalMoves();
+        IntArrayList legalMoves = getAllLegalMoves();
         List<Move> movesFromIndex = new ArrayList<>();
         for (int i = 0; i < legalMoves.size(); i++) {
-            int m = legalMoves.getMove(i);
+            int m = legalMoves.getInt(i);
             int from = MoveHelper.deriveFromIndex(m); // Extract the first 6 bits
             if (from == fromIndex) {
                 movesFromIndex.add(Move.convertIntToMove(m));
@@ -288,12 +289,12 @@ public class Engine {
     }
 
     public void moveRandomFigure(boolean isWhite) {
-        MoveList moves = getAllLegalMoves();
+        IntArrayList moves = getAllLegalMoves();
         if (moves.size() == 0) {
             throw new RuntimeException("No moves possible for " + (isWhite ? "White" : "Black"));
         }
         Random rand = new Random();
-        int randomMove = moves.getMove(rand.nextInt(moves.size()));
+        int randomMove = moves.getInt(rand.nextInt(moves.size()));
         performMove(randomMove);
     }
 
@@ -336,12 +337,12 @@ public class Engine {
     }
 
     private int getMove(int fromIndex, int toIndex, int promotionPiece) {
-        MoveList legalMoves = getAllLegalMoves();
+        IntArrayList legalMoves = getAllLegalMoves();
 
         int move = -1;
 
         for (int i = 0; i < legalMoves.size(); i++) {
-            int m = legalMoves.getMove(i);
+            int m = legalMoves.getInt(i);
             int from = MoveHelper.deriveFromIndex(m); // Extract the first 6 bits
             int to = MoveHelper.deriveToIndex(m);     // Extract the next 6 bits
             int promotionPieceTypeBits = MoveHelper.derivePromotionPieceTypeBits(m);
@@ -427,7 +428,7 @@ public class Engine {
             this.bitBoard.undoMove(undoMove);
 
             // 2) Recompute legal moves
-            MoveList legalMoves = generateLegalMoves();
+            IntArrayList legalMoves = generateLegalMoves();
             gameState.popHalfmoveClock(bitBoard);
             gameState.updateState(bitBoard, legalMoves, false);
             gameState.getScore().undoMove(bitBoard, undoMove, gameState.getState());

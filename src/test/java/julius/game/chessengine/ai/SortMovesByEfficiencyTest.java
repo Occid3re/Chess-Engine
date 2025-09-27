@@ -1,7 +1,7 @@
 package julius.game.chessengine.ai;
 
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.board.MoveHelper;
-import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.Engine;
 import org.junit.jupiter.api.Test;
 
@@ -44,14 +44,14 @@ class SortMovesByEfficiencyTest {
 
         AI ai = new AI(engine);
 
-        MoveList moves = engine.getAllLegalMoves();
+        IntArrayList moves = engine.getAllLegalMoves();
         long hash = engine.getBoardStateHash();
 
-        MoveList ordered = ai.sortMovesByEfficiency(moves, 0, hash, -1, engine);
+        IntArrayList ordered = ai.sortMovesByEfficiency(moves, 0, hash, -1, engine);
 
         Set<Integer> captureMoves = new HashSet<>();
         for (int i = 0; i < moves.size(); i++) {
-            int move = moves.getMove(i);
+            int move = moves.getInt(i);
             if (MoveHelper.isCapture(move)) {
                 captureMoves.add(move);
             }
@@ -73,7 +73,7 @@ class SortMovesByEfficiencyTest {
         int firstCaptureIndex = -1;
         int firstCaptureMove = -1;
         for (int i = 0; i < ordered.size(); i++) {
-            int move = ordered.getMove(i);
+            int move = ordered.getInt(i);
             if (seeByMove.containsKey(move)) {
                 firstCaptureIndex = i;
                 firstCaptureMove = move;

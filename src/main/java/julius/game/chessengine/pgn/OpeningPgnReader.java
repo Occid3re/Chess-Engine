@@ -1,7 +1,7 @@
 package julius.game.chessengine.pgn;
 
 import julius.game.chessengine.board.MoveHelper;
-import julius.game.chessengine.board.MoveList;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.figures.PieceType;
 import lombok.extern.log4j.Log4j2;
@@ -230,9 +230,9 @@ public class OpeningPgnReader {
         Integer fromFile = disambiguationFile == null ? null : disambiguationFile - 'a';
         Integer fromRank = disambiguationRank == null ? null : Character.getNumericValue(disambiguationRank) - 1;
 
-        MoveList legalMoves = engine.getAllLegalMoves();
+        IntArrayList legalMoves = engine.getAllLegalMoves();
         for (int i = 0; i < legalMoves.size(); i++) {
-            int move = legalMoves.getMove(i);
+            int move = legalMoves.getInt(i);
             if (!matchesMove(move, pieceType, destinationIndex, capture, fromFile, fromRank, promotionPiece)) {
                 continue;
             }
@@ -268,9 +268,9 @@ public class OpeningPgnReader {
     }
 
     private int locateCastling(Engine engine, boolean kingSide) {
-        MoveList legal = engine.getAllLegalMoves();
+        IntArrayList legal = engine.getAllLegalMoves();
         for (int i = 0; i < legal.size(); i++) {
-            int move = legal.getMove(i);
+            int move = legal.getInt(i);
             if (!MoveHelper.isCastlingMove(move)) {
                 continue;
             }

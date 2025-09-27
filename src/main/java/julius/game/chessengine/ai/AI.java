@@ -1,9 +1,9 @@
 package julius.game.chessengine.ai;
 
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.Move;
 import julius.game.chessengine.board.MoveHelper;
-import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
@@ -920,16 +920,11 @@ public class AI {
     }
 
     private boolean isMoveStillLegal(Engine simulatorEngine, int move) {
-        MoveList legalMoves = simulatorEngine.getAllLegalMoves();
-        for (int i = 0; i < legalMoves.size(); i++) {
-            if (legalMoves.getMove(i) == move) {
-                return true;
-            }
-        }
-        return false;
+        IntArrayList legalMoves = simulatorEngine.getAllLegalMoves();
+        return MoveContainerUtils.contains(legalMoves, move);
     }
 
-    private void maybeRotateRootMoves(MoveList moves, SplittableRandom rng) {
+    private void maybeRotateRootMoves(IntArrayList moves, SplittableRandom rng) {
         if (rng == null) return;
         int size = moves.size();
         if (size == 0) return;
@@ -940,25 +935,7 @@ public class AI {
         int rotation = rng.nextInt(bound);
         if (rotation == 0) return;
 
-        rotateMoveListLeft(moves, rotation);
-    }
-
-    private void rotateMoveListLeft(MoveList moves, int distance) {
-        int size = moves.size();
-        if (size <= 1) return;
-
-        int shift = distance % size;
-        if (shift < 0) shift += size;
-        if (shift == 0) return;
-
-        for (int r = 0; r < shift; r++) {
-            int first = moves.getMove(0);
-            for (int i = 0; i < size - 1; i++) {
-                int next = moves.getMove(i + 1);
-                moves.setMove(i, next);
-            }
-            moves.setMove(size - 1, first);
-        }
+        MoveContainerUtils.rotateLeft(moves, rotation);
     }
 
     private boolean abortRequested(long deadline) {
@@ -981,12 +958,12 @@ public class AI {
         }
 
         final boolean isWhitesTurn = task.isWhiteToMove();
-        MoveList legal = simulatorEngine.getAllLegalMoves();
-        MoveList orderedMoves = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
+        IntArrayList legal = simulatorEngine.getAllLegalMoves();
+        IntArrayList orderedMoves = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
         if (orderedMoves.size() == 0) return null;
         maybeRotateRootMoves(orderedMoves, rng);
 
-        int firstMove = orderedMoves.getMove(0);
+        int firstMove = orderedMoves.getInt(0);
         int bestMove = -1;
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
 
@@ -1031,7 +1008,7 @@ public class AI {
         final java.util.concurrent.locks.ReentrantLock fullResLock = new java.util.concurrent.locks.ReentrantLock();
 
         for (int i = 1; i <= fanout; i++) {
-            final int moveInt = orderedMoves.getMove(i);
+            final int moveInt = orderedMoves.getInt(i);
             futures.add(ecs.submit(() -> {
                 if (stopRef.get() || abortRequested(deadline)) return null;
                 Heuristics helperHeuristics = prepareHelperHeuristics(task, depth);
@@ -1155,11 +1132,8 @@ public class AI {
 
         // Helper to check legality
         java.util.function.IntPredicate isLegalNow = (mv) -> {
-            MoveList legal = simulation.getAllLegalMoves();
-            for (int i = 0; i < legal.size(); i++) {
-                if (legal.getMove(i) == mv) return true;
-            }
-            return false;
+            IntArrayList legal = simulation.getAllLegalMoves();
+            return MoveContainerUtils.contains(legal, mv);
         };
 
         // 1) Try to get a ROOT move (prefer EXACT, else accept LOWER/UPPER), else use currentBestMove, else first legal.
@@ -1182,9 +1156,9 @@ public class AI {
 
         if (seedMove == -1) {
             // Fallback: first legal move, if any
-            MoveList legal = simulation.getAllLegalMoves();
-            if (legal.size() > 0) {
-                int mv = legal.getMove(0);
+            IntArrayList legal = simulation.getAllLegalMoves();
+            if (!legal.isEmpty()) {
+                int mv = legal.getInt(0);
                 if (MoveHelper.isWhitesMove(mv) == simulation.whitesTurn()) {
                     seedMove = mv;
                 }
@@ -1235,12 +1209,12 @@ public class AI {
         int bestMove = -1;
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
 
-        MoveList sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth,
+        IntArrayList sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth,
                 simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
         maybeRotateRootMoves(sortedMoves, rng);
 
         for (int idx = 0; idx < sortedMoves.size(); idx++) {
-            int moveInt = sortedMoves.getMove(idx);
+            int moveInt = sortedMoves.getInt(idx);
             if (abortRequested(deadline)) break;
 
             simulatorEngine.performMove(moveInt);
@@ -1328,7 +1302,7 @@ public class AI {
         }
 
         // -------- Safer Null-move pruning (same as before, but use depthHere) --------
-        MoveList moves = simulatorEngine.getAllLegalMoves();
+        IntArrayList moves = simulatorEngine.getAllLegalMoves();
         int mobility = moves.size();
         BitBoard bitBoard = simulatorEngine.getBitBoard();
         boolean allowNullMove = useNullMovePruning
@@ -1506,7 +1480,7 @@ public class AI {
 
     private double maximizer(Engine simulatorEngine, int depth, double alpha, double beta,
                              boolean isWhite, long boardHash, double alphaOriginal,
-                             MoveList moves, long deadline, int prevMove, int plyFromRoot,
+                             IntArrayList moves, long deadline, int prevMove, int plyFromRoot,
                              int extStreak) {
 
         long start = log.isDebugEnabled() ? System.nanoTime() : 0L;
@@ -1517,14 +1491,14 @@ public class AI {
         final Heuristics heuristics = threadHeuristics.get();
         final int[][] historyTable = heuristics.history;
 
-        MoveList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
+        IntArrayList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
         final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (abortRequested(deadline)) {
                 return EXIT_FLAG;
             }
-            int move = orderedMoves.getMove(index);
+            int move = orderedMoves.getInt(index);
 
             int from = MoveHelper.deriveFromIndex(move);
             int to = MoveHelper.deriveToIndex(move);
@@ -1696,7 +1670,7 @@ public class AI {
 
     private double minimizer(Engine simulatorEngine, int depth, double alpha, double beta,
                              boolean isWhite, long boardHash, double betaOriginal,
-                             MoveList moves, long deadline, int prevMove, int plyFromRoot,
+                             IntArrayList moves, long deadline, int prevMove, int plyFromRoot,
                              int extStreak) {
 
         long start = log.isDebugEnabled() ? System.nanoTime() : 0L;
@@ -1707,7 +1681,7 @@ public class AI {
         final Heuristics heuristics = threadHeuristics.get();
         final int[][] historyTable = heuristics.history;
 
-        MoveList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
+        IntArrayList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
         final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
         for (int index = 0; index < orderedMoves.size(); index++) {
@@ -1715,7 +1689,7 @@ public class AI {
                 return EXIT_FLAG;
             }
 
-            int move = orderedMoves.getMove(index);
+            int move = orderedMoves.getInt(index);
 
             int from = MoveHelper.deriveFromIndex(move);
             int to = MoveHelper.deriveToIndex(move);
@@ -1886,8 +1860,8 @@ public class AI {
      * their capture bucket. Results are cached per move within this ordering
      * pass so repeated SEE queries are avoided.
      */
-    MoveList sortMovesByEfficiency(MoveList moves, int currentDepth, long boardHash, int prevMove,
-                                   Engine simulatorEngine) {
+    IntArrayList sortMovesByEfficiency(IntArrayList moves, int currentDepth, long boardHash, int prevMove,
+                                       Engine simulatorEngine) {
         final int size = moves.size();
         final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
@@ -1934,7 +1908,7 @@ public class AI {
         final int COUNTER_MOVE_BONUS = 400;
 
         for (int i = 0; i < size; i++) {
-            final int moveInt = moves.getMove(i);
+            final int moveInt = moves.getInt(i);
 
             // Track TT move position for the "pin to front" trick
             if (moveInt == ttMove) {
@@ -2037,9 +2011,7 @@ public class AI {
             }
         }
 
-        for (int i = 0; i < size; i++) {
-            moves.setMove(i, moveBuffer[i]);
-        }
+        MoveContainerUtils.overwriteFromBuffer(moves, moveBuffer, size);
 
         return moves;
     }
@@ -2111,14 +2083,14 @@ public class AI {
         }
 
         // Generate moves: evasions if in check, else captures/promotions
-        MoveList moves = inCheck ? simulatorEngine.getAllLegalMoves() : getPossibleCapturesOrPromotions(simulatorEngine);
+        IntArrayList moves = inCheck ? simulatorEngine.getAllLegalMoves() : getPossibleCapturesOrPromotions(simulatorEngine);
 
         // Order them (captures first via MVV-LVA/promotion bonus, killers/history still help)
-        MoveList ordered = sortMovesByEfficiency(moves, 0, simulatorEngine.getBoardStateHash(), -1,
+        IntArrayList ordered = sortMovesByEfficiency(moves, 0, simulatorEngine.getBoardStateHash(), -1,
                 simulatorEngine);
 
         for (int i = 0; i < ordered.size(); i++) {
-            int m = ordered.getMove(i);
+            int m = ordered.getInt(i);
             boolean isCapture = MoveHelper.isCapture(m);
             boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
             boolean isQuiet = !isCapture && !isPromotion;
@@ -2181,17 +2153,9 @@ public class AI {
         return isWhitesTurn ? scoreDifference : -scoreDifference;
     }
 
-    private MoveList getPossibleCapturesOrPromotions(Engine simulatorEngine) {
-        MoveList allLegalMoves = simulatorEngine.getAllLegalMoves();
-        MoveList capturesAndPromotions = new MoveList();
-        for (int i = 0; i < allLegalMoves.size(); i++) {
-            int m = allLegalMoves.getMove(i);
-            if (MoveHelper.isCapture(m) || MoveHelper.isPawnPromotionMove(m)) {
-                capturesAndPromotions.add(m);
-            }
-        }
-
-        return capturesAndPromotions;
+    private IntArrayList getPossibleCapturesOrPromotions(Engine simulatorEngine) {
+        IntArrayList allLegalMoves = simulatorEngine.getAllLegalMoves();
+        return MoveContainerUtils.filterCapturesAndPromotions(allLegalMoves);
     }
 
     /**

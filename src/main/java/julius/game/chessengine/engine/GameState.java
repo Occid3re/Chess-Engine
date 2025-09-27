@@ -5,7 +5,6 @@ import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
-import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.utils.Score;
 import lombok.Data;
 import lombok.Getter;
@@ -54,7 +53,7 @@ public class GameState {
     public void refreshScore(BitBoard bitBoard) {
         score.refresh(bitBoard, state);
     }
-    public void update(BitBoard bitBoard, MoveList legalMoves, int move, boolean isOpeningMove) {
+    public void update(BitBoard bitBoard, IntArrayList legalMoves, int move, boolean isOpeningMove) {
         updateState(bitBoard, legalMoves, isOpeningMove);
 
         // 50-move clock maintenance
@@ -76,7 +75,7 @@ public class GameState {
         }
     }
 
-    public void updateState(BitBoard bitBoard, MoveList legalMoves, boolean isOpeningMove) {
+    public void updateState(BitBoard bitBoard, IntArrayList legalMoves, boolean isOpeningMove) {
         if (whiteInCheck(bitBoard)) {
             state = GameStateEnum.WHITE_IN_CHECK;
             if (whiteLost(legalMoves)) {
@@ -132,18 +131,18 @@ public class GameState {
         return bitBoard.isInCheck(false);
     }
 
-    private boolean whiteLost(MoveList legalMoves) {
-        return state.equals(GameStateEnum.WHITE_IN_CHECK) && legalMoves.size() == 0;
+    private boolean whiteLost(IntArrayList legalMoves) {
+        return state.equals(GameStateEnum.WHITE_IN_CHECK) && legalMoves.isEmpty();
     }
 
-    private boolean blackLost(MoveList legalMoves) {
-        return state.equals(GameStateEnum.BLACK_IN_CHECK) && legalMoves.size() == 0;
+    private boolean blackLost(IntArrayList legalMoves) {
+        return state.equals(GameStateEnum.BLACK_IN_CHECK) && legalMoves.isEmpty();
     }
 
 
-    private boolean isDraw(BitBoard bitBoard, MoveList legalMoves) {
+    private boolean isDraw(BitBoard bitBoard, IntArrayList legalMoves) {
         boolean insufficientMaterial = bitBoard.hasInsufficientMaterial();
-        boolean noLegalMoves = legalMoves.size() == 0;
+        boolean noLegalMoves = legalMoves.isEmpty();
         boolean inCheck = bitBoard.isInCheck(bitBoard.isWhitesTurn());
         return (noLegalMoves && !inCheck) || insufficientMaterial;
     }
