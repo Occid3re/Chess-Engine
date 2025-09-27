@@ -1,15 +1,16 @@
 package julius.game.chessengine.board;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
-import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
-import julius.game.chessengine.utils.Color;
 import julius.game.chessengine.figures.PieceType;
+import julius.game.chessengine.utils.Color;
 import lombok.extern.log4j.Log4j2;
 import org.junit.jupiter.api.Test;
 
 import static julius.game.chessengine.board.MoveHelper.convertStringToIndex;
 import static org.junit.jupiter.api.Assertions.*;
+
+//-XX:StartFlightRecording=name=uci,settings=profile,filename=Perft_refactor.jfr
 
 @Log4j2
 public class BitBoardTest {
