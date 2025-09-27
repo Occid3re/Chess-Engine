@@ -1,8 +1,8 @@
 package julius.game.chessengine.evaluation;
 
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.FEN;
-import julius.game.chessengine.board.MoveList;
 import julius.game.chessengine.utils.Score;
 import org.junit.jupiter.api.Test;
 
@@ -36,9 +36,9 @@ class LightweightSnapshotEvaluationTest {
         Deque<Integer> played = new ArrayDeque<>();
 
         for (int ply = 0; ply < 6; ply++) {
-            MoveList moves = board.getAllCurrentPossibleMoves();
+            IntArrayList moves = board.getAllCurrentPossibleMoves();
             assertTrue(moves.size() > 0, "No legal move available at ply " + ply);
-            int move = moves.getMove(0);
+            int move = moves.getInt(0);
             played.push(move);
             board.performMove(move);
             score.applyMove(board, move, null);

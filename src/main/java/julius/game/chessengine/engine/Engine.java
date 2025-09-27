@@ -1,5 +1,6 @@
 package julius.game.chessengine.engine;
 
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.ai.OpeningBook;
 import julius.game.chessengine.board.*;
 import julius.game.chessengine.cache.TimedLRUCache;
@@ -334,11 +335,11 @@ public class Engine {
             }
 
             // Generate pseudo-legal moves on the current board
-            MoveList moves = bitBoard.getAllCurrentPossibleMoves();
+            IntArrayList pseudoMoves = bitBoard.getAllCurrentPossibleMoves();
             BitBoard.PinState pinState = bitBoard.computePinState(bitBoard.isWhitesTurn());
 
-            for (int i = 0; i < moves.size(); i++) {
-                int move = moves.getMove(i);
+            for (int i = 0; i < pseudoMoves.size(); i++) {
+                int move = pseudoMoves.getInt(i);
                 if (bitBoard.isMoveLegalFast(move, pinState)) {
                     buffer.add(move);
                 }
@@ -346,8 +347,8 @@ public class Engine {
 
             if (VERIFY_LEGAL_MOVES) {
                 MoveList legacy = new MoveList();
-                for (int i = 0; i < moves.size(); i++) {
-                    int move = moves.getMove(i);
+                for (int i = 0; i < pseudoMoves.size(); i++) {
+                    int move = pseudoMoves.getInt(i);
                     bitBoard.performMove(move);
                     if (!bitBoard.isInCheck(MoveHelper.isWhitesMove(move))) {
                         legacy.add(move);
