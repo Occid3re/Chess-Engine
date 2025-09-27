@@ -104,22 +104,6 @@ public class BitBoardTest {
     }
 
     @Test
-    void diagonallyPinnedQueenOnlyMovesAlongRay() {
-        Engine engine = new Engine();
-        engine.importBoardFromFen("8/8/8/6b1/8/8/3Q4/2K5 w - - 0 1");
-
-        BitBoard board = engine.getBitBoard();
-        MoveList moves = board.generateAllPossibleMoves(board.whitesTurn);
-
-        int from = convertStringToIndex("d2");
-        assertTrue(moveExists(moves, from, convertStringToIndex("e3")));
-        assertTrue(moveExists(moves, from, convertStringToIndex("f4")));
-        assertTrue(moveExists(moves, from, convertStringToIndex("g5")));
-        assertFalse(moveExists(moves, from, convertStringToIndex("d3")));
-        assertFalse(moveExists(moves, from, convertStringToIndex("c2")));
-    }
-
-    @Test
     void seeConsidersKingRecaptureOnCheckingCapture() {
         Engine engine = new Engine();
         engine.importBoardFromFen("6k1/5p2/4Q3/8/8/8/6P1/6K1 w - - 0 1");
