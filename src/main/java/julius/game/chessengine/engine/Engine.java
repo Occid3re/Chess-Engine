@@ -195,7 +195,7 @@ public class Engine {
             } else if (legalMovesSnapshot == null) {
                 publishLegalMovesSnapshot(buffer);
             }
-            return legalMovesSnapshot != null ? legalMovesSnapshot : new MoveList(buffer);
+            return legalMovesSnapshot;
         }
     }
 
@@ -379,11 +379,20 @@ public class Engine {
 
     private void markLegalMovesStale() {
         legalMovesNeedUpdate = true;
-        legalMovesSnapshot = null;
+        if (legalMovesSnapshot != null) {
+            releaseSnapshot(legalMovesSnapshot);
+            legalMovesSnapshot = null;
+        }
     }
 
     private void publishLegalMovesSnapshot(MoveList buffer) {
-        legalMovesSnapshot = new MoveList(buffer);
+        if (legalMovesSnapshot != null) {
+            releaseSnapshot(legalMovesSnapshot);
+            legalMovesSnapshot = null;
+        }
+        MoveList snapshot = obtainSnapshot();
+        snapshot.copyFrom(buffer);
+        legalMovesSnapshot = snapshot;
     }
 
     private MoveList ensureLegalMovesBuffer() {
