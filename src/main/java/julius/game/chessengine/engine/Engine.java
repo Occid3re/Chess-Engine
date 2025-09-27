@@ -44,6 +44,8 @@ public class Engine {
         CacheConfig(int maxSize, int maxAgeMs) { this.maxSize = maxSize; this.maxAgeMs = maxAgeMs; }
     }
 
+    private static final boolean VERIFY_LEGAL_MOVES = Boolean.getBoolean("chess.verify.movegen");
+
     private static CacheConfig computeCacheConfig() {
         // Heuristic baseline
         long maxHeap = Runtime.getRuntime().maxMemory();          // bytes
@@ -333,17 +335,29 @@ public class Engine {
 
             // Generate pseudo-legal moves on the current board
             MoveList moves = bitBoard.getAllCurrentPossibleMoves();
+            BitBoard.PinState pinState = bitBoard.computePinState(bitBoard.isWhitesTurn());
 
-            // Filter in-place by making/unmaking on the SAME bitBoard (no BitBoard copy)
             for (int i = 0; i < moves.size(); i++) {
                 int move = moves.getMove(i);
-
-                bitBoard.performMove(move);
-                // If the mover's king is not left in check, the move is legal
-                if (!bitBoard.isInCheck(MoveHelper.isWhitesMove(move))) {
+                if (bitBoard.isMoveLegalFast(move, pinState)) {
                     buffer.add(move);
                 }
-                bitBoard.undoMove(move);
+            }
+
+            if (VERIFY_LEGAL_MOVES) {
+                MoveList legacy = new MoveList();
+                for (int i = 0; i < moves.size(); i++) {
+                    int move = moves.getMove(i);
+                    bitBoard.performMove(move);
+                    if (!bitBoard.isInCheck(MoveHelper.isWhitesMove(move))) {
+                        legacy.add(move);
+                    }
+                    bitBoard.undoMove(move);
+                }
+                if (!moveListsEqual(buffer, legacy)) {
+                    throw new IllegalStateException("Mismatch between fast and legacy legal move filtering: fast="
+                            + buffer + ", legacy=" + legacy);
+                }
             }
 
             legalMovesNeedUpdate = false;
@@ -407,6 +421,18 @@ public class Engine {
         TimedLRUCache<MoveList> cache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
         cache.setEvictionListener(this::releaseSnapshot);
         return cache;
+    }
+
+    private boolean moveListsEqual(MoveList a, MoveList b) {
+        if (a.size() != b.size()) {
+            return false;
+        }
+        for (int i = 0; i < a.size(); i++) {
+            if (a.getMove(i) != b.getMove(i)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // Each of these methods would need to be implemented to handle the specific move generation for each piece type.
