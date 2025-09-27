@@ -94,12 +94,6 @@ public class Engine {
         }
     }
 
-    public int getEnPassantTargetIndex() {
-        synchronized (boardLock) {
-            return bitBoard.getEnPassantTargetIndex();
-        }
-    }
-
     public void performMove(int move) {
         synchronized (boardLock) {
             boolean isOpeningMove = false;
@@ -202,10 +196,12 @@ public class Engine {
         synchronized (boardLock) {
             final long boardStateHash = getBoardStateHash();
 
-            IntArrayList pseudoMoves = bitBoard.getAllCurrentPossibleMoves();
-            IntArrayList legalMoves = new IntArrayList(pseudoMoves.size());
-            BitBoard.PinState pinState = bitBoard.computePinState(bitBoard.isWhitesTurn());
+            // Get pseudo moves + the already-computed PinState in one shot
+            BitBoard.MoveGenResult gen = bitBoard.generateAllPossibleMovesWithPins(bitBoard.whitesTurn);
+            IntArrayList pseudoMoves = gen.moves();
+            BitBoard.PinState pinState = gen.pinState();
 
+            IntArrayList legalMoves = new IntArrayList(pseudoMoves.size());
             for (int i = 0; i < pseudoMoves.size(); i++) {
                 int move = pseudoMoves.getInt(i);
                 if (bitBoard.isMoveLegalFast(move, pinState)) {
@@ -224,16 +220,17 @@ public class Engine {
                     bitBoard.undoMove(move);
                 }
                 if (!moveListsEqual(legalMoves, legacy)) {
-                    throw new IllegalStateException("Mismatch between fast and legacy legal move filtering: fast="
-                            + legalMoves + ", legacy=" + legacy);
+                    throw new IllegalStateException(
+                            "Mismatch between fast and legacy legal move filtering: fast=" + legalMoves + ", legacy=" + legacy
+                    );
                 }
             }
 
             cacheLegalMoves(boardStateHash, legalMoves);
-
             return legalMoves;
         }
     }
+
 
     private void markLegalMovesStale() {
         legalMovesNeedUpdate = true;
