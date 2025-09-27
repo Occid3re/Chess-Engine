@@ -65,6 +65,16 @@ public class BitBoard {
     // Reusable buffer for move generation to avoid frequent allocations.
     private final MoveList moveGenerationBuffer = new MoveList();
 
+    /**
+     * Scratch buffers for {@link #isMoveLegalFast(int, PinState)}.
+     *
+     * <p>The buffers are mutable and therefore must only be accessed while holding the engine's
+     * {@code boardLock}. Callers are expected to register that monitor via
+     * {@link #setMoveLegalityScratchGuard(Object)} before invoking the fast legality checks.</p>
+     */
+    private final long[][] moveLegalityScratch = {new long[7], new long[7]};
+    private volatile Object moveLegalityScratchGuard;
+
     public static final class PinState {
         private final boolean whiteSide;
         private final int kingSquare;
@@ -277,10 +287,24 @@ public class BitBoard {
             this.halfmoveHistory.addAll(other.halfmoveHistory);
             this.fullmoveHistory.addAll(other.fullmoveHistory);
         }
+        this.moveLegalityScratchGuard = other.moveLegalityScratchGuard;
+    }
+
+    /**
+     * Registers the monitor that must be held while accessing {@link #moveLegalityScratch}.
+     * The provided object should be the same {@code boardLock} used by {@code Engine} to guard
+     * move generation, ensuring these mutable buffers are never mutated concurrently.
+     *
+     * @param boardLock the monitor protecting move generation, or {@code null} to clear the guard
+     */
+    public void setMoveLegalityScratchGuard(Object boardLock) {
+        this.moveLegalityScratchGuard = boardLock;
     }
 
     public BitBoard snapshotWithoutHistory() {
-        return new BitBoard(this, false);
+        BitBoard snapshot = new BitBoard(this, false);
+        snapshot.moveLegalityScratchGuard = this.moveLegalityScratchGuard;
+        return snapshot;
     }
     public void setLastMoveDoubleStepPawnIndex(int index) {
         int oldEp = getEnPassantTargetIndex();
@@ -1511,6 +1535,11 @@ public class BitBoard {
     }
 
     public boolean isMoveLegalFast(int move, PinState pinState) {
+        Object scratchGuard = this.moveLegalityScratchGuard;
+        if (scratchGuard != null && !Thread.holdsLock(scratchGuard)) {
+            throw new IllegalStateException("isMoveLegalFast must be called while holding the registered board lock");
+        }
+
         boolean whiteMove = MoveHelper.isWhitesMove(move);
         if (pinState == null || pinState.isWhiteSide() != whiteMove) {
             pinState = computePinState(whiteMove);
@@ -1541,8 +1570,22 @@ public class BitBoard {
             }
         }
 
-        long[] whiteByType = {0L, whitePawns, whiteKnights, whiteBishops, whiteRooks, whiteQueens, whiteKing};
-        long[] blackByType = {0L, blackPawns, blackKnights, blackBishops, blackRooks, blackQueens, blackKing};
+        long[] whiteByType = moveLegalityScratch[0];
+        long[] blackByType = moveLegalityScratch[1];
+        Arrays.fill(whiteByType, 0L);
+        Arrays.fill(blackByType, 0L);
+        whiteByType[1] = whitePawns;
+        whiteByType[2] = whiteKnights;
+        whiteByType[3] = whiteBishops;
+        whiteByType[4] = whiteRooks;
+        whiteByType[5] = whiteQueens;
+        whiteByType[6] = whiteKing;
+        blackByType[1] = blackPawns;
+        blackByType[2] = blackKnights;
+        blackByType[3] = blackBishops;
+        blackByType[4] = blackRooks;
+        blackByType[5] = blackQueens;
+        blackByType[6] = blackKing;
         long occ = allPieces;
 
         if (isCapture) {

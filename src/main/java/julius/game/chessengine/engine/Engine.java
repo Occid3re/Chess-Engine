@@ -131,7 +131,7 @@ public class Engine {
     @Getter
     private MoveStack line = new MoveStack();
     private MoveStack redoLine = new MoveStack();
-    private BitBoard bitBoard = new BitBoard();
+    private BitBoard bitBoard = attachBoard(new BitBoard());
     @Getter
     private GameState gameState = new GameState(bitBoard);
 
@@ -144,7 +144,7 @@ public class Engine {
 
     public Engine(Engine other) {
         synchronized (other.boardLock) {
-            this.bitBoard = new BitBoard(other.bitBoard);
+            this.bitBoard = attachBoard(new BitBoard(other.bitBoard));
             this.gameState = new GameState(other.gameState);
             this.line = new MoveStack(other.line);
             this.redoLine = new MoveStack(other.redoLine);
@@ -229,7 +229,7 @@ public class Engine {
 
     public void importBoardFromFen(String fen) {
         synchronized (boardLock) {
-            this.bitBoard = FEN.translateFENtoBitBoard(fen);
+            this.bitBoard = attachBoard(FEN.translateFENtoBitBoard(fen));
             this.gameState = new GameState(bitBoard);
 
             // Ensure the imported state reflects the parsed halfmove/fullmove counters and
@@ -269,7 +269,7 @@ public class Engine {
         Objects.requireNonNull(other, "other engine");
         synchronized (boardLock) {
             synchronized (other.boardLock) {
-                this.bitBoard = new BitBoard(other.bitBoard);
+                this.bitBoard = attachBoard(new BitBoard(other.bitBoard));
                 this.gameState = new GameState(other.gameState);
                 this.line = new MoveStack(other.line);
                 this.redoLine = new MoveStack(other.redoLine);
@@ -284,7 +284,7 @@ public class Engine {
 
     public void startNewGame() {
         synchronized (boardLock) {
-            bitBoard = new BitBoard();
+            bitBoard = attachBoard(new BitBoard());
             gameState = new GameState(bitBoard);
             markLegalMovesStale();
             line = new MoveStack();
@@ -421,6 +421,12 @@ public class Engine {
         TimedLRUCache<MoveList> cache = new TimedLRUCache<>(CACHE_CFG.maxSize, CACHE_CFG.maxAgeMs);
         cache.setEvictionListener(this::releaseSnapshot);
         return cache;
+    }
+
+    private BitBoard attachBoard(BitBoard board) {
+        Objects.requireNonNull(board, "board");
+        board.setMoveLegalityScratchGuard(boardLock);
+        return board;
     }
 
     private boolean moveListsEqual(MoveList a, MoveList b) {
