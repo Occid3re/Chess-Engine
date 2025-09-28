@@ -548,7 +548,7 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
                 int forwardIndex = Long.numberOfTrailingZeros(forward);
                 long enemyAttack = PAWN_ATTACKS[isWhite ? WHITE : BLACK][forwardIndex] & enemyPawns;
                 if (enemyAttack != 0) {
-                    penalty += BACKWARD_PAWN_PENALTY;
+                    penalty += BACKWARD_PAWN_PENALTY.getInt();
                 }
             }
             remaining &= remaining - 1;
