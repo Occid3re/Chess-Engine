@@ -153,29 +153,29 @@ public class Move {
     }
 
     public static Move convertIntToMove(int moveInt) {
-        int fromIndex = moveInt & 0x3F; // Extract the first 6 bits
+        int fromIndex = MoveHelper.deriveFromIndex(moveInt);
         Position from = bitIndexToPosition(fromIndex);
 
-        int toIndex = (moveInt >> 6) & 0x3F; // Extract the next 6 bits
+        int toIndex = MoveHelper.deriveToIndex(moveInt);
         Position to = bitIndexToPosition(toIndex);
 
-        int pieceTypeBits = (moveInt >> 12) & 0x07; // Extract the next 3 bits
+        int pieceTypeBits = MoveHelper.derivePieceTypeBits(moveInt);
         PieceType pieceType = intToPieceType(pieceTypeBits);
 
-        boolean isWhite = (moveInt & (1 << 15)) != 0; // Extract the color bit
+        boolean isWhite = MoveHelper.isWhitesMove(moveInt);
 
-        int specialProperty = (moveInt >> 16) & 0x03; // Extract the next 2 bits
+        int specialProperty = MoveHelper.deriveSpecialProperty(moveInt);
         boolean isCapture = (specialProperty & 0x01) != 0;
         boolean isEnPassantMove = specialProperty == 3;
         boolean isCastlingMove = specialProperty == 2;
 
-        int promotionPieceTypeBits = (moveInt >> 18) & 0x07; // Extract the next 3 bits
+        int promotionPieceTypeBits = MoveHelper.derivePromotionPieceTypeBits(moveInt);
         PieceType promotionPieceType = intToPieceType(promotionPieceTypeBits);
         if (promotionPieceTypeBits == 0) {
             promotionPieceType = null; // No promotion
         }
 
-        int capturedPieceTypeBits = (moveInt >> 21) & 0x07; // Extract the next 3 bits
+        int capturedPieceTypeBits = MoveHelper.deriveCapturedPieceTypeBits(moveInt);
         PieceType capturedPieceType = intToPieceType(capturedPieceTypeBits);
         if (capturedPieceTypeBits == 0) {
             capturedPieceType = null; // No capture
@@ -194,7 +194,6 @@ public class Move {
 
         boolean isRookFirstMove = false;
         if (pieceType == PieceType.ROOK) {
-            int fromIndex = moveInt & 0x3F;
             if (isWhite) {
                 if (fromIndex == 0) {
                     isRookFirstMove = !whiteRookA1Moved;

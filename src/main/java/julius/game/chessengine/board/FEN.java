@@ -183,8 +183,8 @@ public class FEN {
         // You'll need to parse the other FEN parts like castling availability, en passant, etc.
 
         // Set castling and en passant flags...
-        boolean whiteKingMoved = !parts[2].contains("K");
-        boolean blackKingMoved = !parts[2].contains("k");
+        boolean whiteKingMoved = !(parts[2].contains("K") || parts[2].contains("Q"));
+        boolean blackKingMoved = !(parts[2].contains("k") || parts[2].contains("q"));
         boolean whiteRookA1Moved = !parts[2].contains("Q");
         boolean whiteRookH1Moved = !parts[2].contains("K");
         boolean blackRookA8Moved = !parts[2].contains("q");
