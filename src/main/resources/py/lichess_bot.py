@@ -33,6 +33,7 @@ import chess.engine
 ENGINE_BAT = ""  # e.g. r"E:\ChessEngines\chess-engine-3.0.9.bat"
 JAR_DIR = r"C:\Development\Chess-Engine\target"
 JAVA_EXE = r"java"
+DEFAULT_TUNING_FILE = r"C:\Development\Chess-Engine\target\classes\tuning\seed-tunings.yaml"
 
 LICHESS_TOKEN = os.environ.get("LICHESS_TOKEN") or "YOUR_TOKEN_HERE"
 
@@ -219,6 +220,8 @@ def build_engine_cmd() -> List[str]:
     INFO_MIN_MS = os.environ.get("CHESSENGINE_UCI_INFO_MIN_MS", "200")
     PV_MAX_LEN  = os.environ.get("CHESSENGINE_UCI_MAX_PV", "10")
 
+    TUNING_FILE = os.environ.get("CHESSENGINE_TUNING_FILE", DEFAULT_TUNING_FILE)
+
     engine_sysprops = [
         f"-Dchessengine.searchThreads={SEARCH_T}",
         f"-Dchessengine.lazySmpThreads={LAZY_T}",
@@ -227,6 +230,7 @@ def build_engine_cmd() -> List[str]:
         f"-Dchessengine.openingbook.enabled={BOOK_ENABLED}",
         f"-Dchessengine.uci.info.minIntervalMs={INFO_MIN_MS}",
         f"-Dchessengine.uci.info.maxPvLen={PV_MAX_LEN}",
+        f"-Dchessengine.tuning.file={TUNING_FILE}",
         "-Dlogging.level.root=INFO",
     ]
 
