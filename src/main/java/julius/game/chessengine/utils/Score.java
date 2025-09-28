@@ -49,7 +49,7 @@ public class Score {
     private EvaluationContext spareEvaluationContext;
 
     public Score() {
-        this(null);
+        this(EvaluationWeights.identity());
     }
 
     public Score(EvaluationWeights weights) {
