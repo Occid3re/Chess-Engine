@@ -85,7 +85,7 @@ public class BitBoardTest {
         int e2 = convertStringToIndex("e2");
         int e4 = convertStringToIndex("e4");
         int move = MoveHelper.createMoveInt(e2, e4, PieceType.PAWN, true,
-                false, false, false, null, null, false, false,
+                false, false, false, null, null, computeCastlingRights(board),
                 board.getLastMoveDoubleStepPawnIndex());
         board.performMove(move);
 
@@ -96,24 +96,70 @@ public class BitBoardTest {
         int a7 = convertStringToIndex("a7");
         int a6 = convertStringToIndex("a6");
         move = MoveHelper.createMoveInt(a7, a6, PieceType.PAWN, false,
-                false, false, false, null, null, false, false,
+                false, false, false, null, null, computeCastlingRights(board),
                 board.getLastMoveDoubleStepPawnIndex());
         board.performMove(move);
 
         int e5 = convertStringToIndex("e5");
         move = MoveHelper.createMoveInt(e4, e5, PieceType.PAWN, true,
-                false, false, false, null, null, false, false,
+                false, false, false, null, null, computeCastlingRights(board),
                 board.getLastMoveDoubleStepPawnIndex());
         board.performMove(move);
 
         int d7 = convertStringToIndex("d7");
         int d5 = convertStringToIndex("d5");
         move = MoveHelper.createMoveInt(d7, d5, PieceType.PAWN, false,
-                false, false, false, null, null, false, false,
+                false, false, false, null, null, computeCastlingRights(board),
                 board.getLastMoveDoubleStepPawnIndex());
         board.performMove(move);
 
         assertEquals(d5, board.getLastMoveDoubleStepPawnIndex());
+    }
+
+    @Test
+    void capturingHomeRookDisablesCastling() {
+        BitBoard board = FEN.translateFENtoBitBoard("4k3/8/8/8/8/8/r7/R3K2R b KQ - 0 1");
+
+        int a2 = convertStringToIndex("a2");
+        int a1 = convertStringToIndex("a1");
+        int rightsBefore = computeCastlingRights(board);
+        int move = MoveHelper.createMoveInt(a2, a1, PieceType.ROOK, false,
+                true, false, false, null, PieceType.ROOK, rightsBefore,
+                board.getLastMoveDoubleStepPawnIndex());
+
+        assertEquals(rightsBefore, MoveHelper.deriveCastlingRights(move));
+
+        board.performMove(move);
+
+        assertTrue(board.isWhiteRookA1Moved());
+        assertFalse(board.isWhiteRookH1Moved());
+        assertFalse(board.isWhiteKingMoved());
+    }
+
+    @Test
+    void undoRedoRookCaptureRestoresHashAndRights() {
+        BitBoard board = FEN.translateFENtoBitBoard("4k3/8/8/8/8/8/r7/R3K2R b KQ - 0 1");
+        int a2 = convertStringToIndex("a2");
+        int a1 = convertStringToIndex("a1");
+        int move = MoveHelper.createMoveInt(a2, a1, PieceType.ROOK, false,
+                true, false, false, null, PieceType.ROOK, computeCastlingRights(board),
+                board.getLastMoveDoubleStepPawnIndex());
+
+        long initialHash = board.getBoardStateHash();
+
+        board.performMove(move);
+        long captureHash = board.getBoardStateHash();
+
+        board.undoMove(move);
+
+        assertEquals(initialHash, board.getBoardStateHash());
+        assertFalse(board.isWhiteRookA1Moved());
+        assertFalse(board.isWhiteKingMoved());
+
+        board.performMove(move);
+
+        assertEquals(captureHash, board.getBoardStateHash());
+        assertTrue(board.isWhiteRookA1Moved());
     }
 
     @Test
@@ -141,7 +187,8 @@ public class BitBoardTest {
         PieceType captured = engine.getBitBoard().getPieceTypeAtIndex(to);
 
         int move = MoveHelper.createMoveInt(from, to, PieceType.QUEEN, true,
-                true, false, false, null, captured, false, false,
+                true, false, false, null, captured,
+                computeCastlingRights(engine.getBitBoard()),
                 engine.getBitBoard().getLastMoveDoubleStepPawnIndex());
 
         int see = engine.see(move);
@@ -234,6 +281,23 @@ public class BitBoardTest {
             }
         }
         return false;
+    }
+
+    private int computeCastlingRights(BitBoard board) {
+        int rights = 0;
+        if (!board.isWhiteKingMoved() && !board.isWhiteRookH1Moved()) {
+            rights |= 0b0001;
+        }
+        if (!board.isWhiteKingMoved() && !board.isWhiteRookA1Moved()) {
+            rights |= 0b0010;
+        }
+        if (!board.isBlackKingMoved() && !board.isBlackRookH8Moved()) {
+            rights |= 0b0100;
+        }
+        if (!board.isBlackKingMoved() && !board.isBlackRookA8Moved()) {
+            rights |= 0b1000;
+        }
+        return rights;
     }
 
     @Test

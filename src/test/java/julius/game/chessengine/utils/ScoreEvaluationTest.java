@@ -197,7 +197,8 @@ public class ScoreEvaluationTest {
         int from = MoveHelper.convertStringToIndex("d4");
         int to = MoveHelper.convertStringToIndex("d5");
         int move = MoveHelper.createMoveInt(from, to, PieceType.PAWN, true, true,
-                false, false, null, PieceType.PAWN, false, false, board.getLastMoveDoubleStepPawnIndex());
+                false, false, null, PieceType.PAWN, computeCastlingRights(board),
+                board.getLastMoveDoubleStepPawnIndex());
 
         board.performMove(move);
         score.applyMove(board, move, null);
@@ -216,6 +217,23 @@ public class ScoreEvaluationTest {
         EvaluationPipeline pipeline = new EvaluationPipeline(java.util.List.of(module));
         pipeline.initialize(EvaluationContext.from(board, null));
         return pipeline.getBlendedScore();
+    }
+
+    private static int computeCastlingRights(BitBoard board) {
+        int rights = 0;
+        if (!board.isWhiteKingMoved() && !board.isWhiteRookH1Moved()) {
+            rights |= 0b0001;
+        }
+        if (!board.isWhiteKingMoved() && !board.isWhiteRookA1Moved()) {
+            rights |= 0b0010;
+        }
+        if (!board.isBlackKingMoved() && !board.isBlackRookH8Moved()) {
+            rights |= 0b0100;
+        }
+        if (!board.isBlackKingMoved() && !board.isBlackRookA8Moved()) {
+            rights |= 0b1000;
+        }
+        return rights;
     }
 
     private static KingSafetyView kingSafetyView(BitBoard board) {

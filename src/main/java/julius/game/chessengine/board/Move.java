@@ -1,6 +1,7 @@
 package julius.game.chessengine.board;
 
 import julius.game.chessengine.figures.PieceType;
+import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.utils.Color;
 import lombok.Getter;
 
@@ -181,8 +182,8 @@ public class Move {
             capturedPieceType = null; // No capture
         }
 
-        boolean isKingFirstMove = (moveInt & (1 << 24)) != 0; // Extract the king's first move bit
-        boolean isRookFirstMove = (moveInt & (1 << 25)) != 0; // Extract the rook's first move bit
+        boolean isKingFirstMove = MoveHelper.isKingFirstMove(moveInt);
+        boolean isRookFirstMove = MoveHelper.isRookFirstMove(moveInt);
 
         return new Move(from, to, pieceType, isWhite, isCapture, isCastlingMove, isEnPassantMove, promotionPieceType, capturedPieceType, isKingFirstMove, isRookFirstMove);
     }

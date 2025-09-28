@@ -49,18 +49,63 @@ public class MoveHelper {
     }
 
     public static boolean isKingFirstMove(int move) {
-        return (move & (1 << 24)) != 0;
+        if (derivePieceTypeBits(move) != pieceTypeToInt(PieceType.KING)) {
+            return false;
+        }
+        int castlingRights = deriveCastlingRights(move);
+        boolean whiteMove = isWhitesMove(move);
+        if (whiteMove) {
+            return (castlingRights & 0b0011) != 0;
+        }
+        return (castlingRights & 0b1100) != 0;
     }
 
     public static boolean isRookFirstMove(int move) {
-        return (move & (1 << 25)) != 0;
+        if (isCastlingMove(move)) {
+            return true;
+        }
+        if (derivePieceTypeBits(move) != pieceTypeToInt(PieceType.ROOK)) {
+            return false;
+        }
+
+        int fromIndex = deriveFromIndex(move);
+        int castlingRights = deriveCastlingRights(move);
+        boolean whiteMove = isWhitesMove(move);
+
+        if (whiteMove) {
+            if (fromIndex == 0) {
+                return (castlingRights & 0b0010) != 0;
+            }
+            if (fromIndex == 7) {
+                return (castlingRights & 0b0001) != 0;
+            }
+        } else {
+            if (fromIndex == 56) {
+                return (castlingRights & 0b1000) != 0;
+            }
+            if (fromIndex == 63) {
+                return (castlingRights & 0b0100) != 0;
+            }
+        }
+        return false;
+    }
+
+    public static int deriveCastlingRights(int move) {
+        return (move >> 24) & 0x0F;
     }
 
     public static int deriveLastMoveDoubleStepPawnIndex(int move) {
-        return (move >> 26) & 0x3F; // Extract the 6 bits starting from the 26th bit
+        boolean hasDoubleStep = (move & (1 << 31)) != 0;
+        if (!hasDoubleStep) {
+            return 0;
+        }
+        int file = (move >> 28) & 0x7;
+        boolean doubleStepByWhite = !isWhitesMove(move);
+        int base = doubleStepByWhite ? 24 : 32;
+        return base + file;
     }
 
-    public static int createMoveInt(int fromIndex, int toIndex, PieceType pieceType, boolean isWhite, boolean isCapture, boolean isCastlingMove, boolean isEnPassantMove, PieceType promotionPieceType, PieceType capturedPieceType, boolean isKingFirstMove, boolean isRookFirstMove, int lastMoveDoubleStepPawnIndex) {
+    public static int createMoveInt(int fromIndex, int toIndex, PieceType pieceType, boolean isWhite, boolean isCapture, boolean isCastlingMove, boolean isEnPassantMove, PieceType promotionPieceType, PieceType capturedPieceType, int castlingRights, int lastMoveDoubleStepPawnIndex) {
         int moveInt = 0;
         moveInt |= fromIndex; // 6 bits for 'from' position
         moveInt |= toIndex << 6; // 6 bits for 'to' position, shifted by 6 bits
@@ -87,15 +132,12 @@ public class MoveHelper {
             moveInt &= ~(0x07 << 21); // Ensure captured piece bits are set to 000 if no piece is captured
         }
 
-        if (isKingFirstMove) {
-            moveInt |= 1 << 24; // 1 bit for king's first move, shifted by 24 bits
-        }
+        moveInt |= (castlingRights & 0x0F) << 24;
 
-        if (isRookFirstMove) {
-            moveInt |= 1 << 25; // 1 bit for rook's first move, shifted by 25 bits
+        if (lastMoveDoubleStepPawnIndex != 0) {
+            moveInt |= (lastMoveDoubleStepPawnIndex & 0x7) << 28;
+            moveInt |= 1 << 31;
         }
-
-        moveInt |= lastMoveDoubleStepPawnIndex << 26; // Shifted by 26 bits
 
         return moveInt;
     }
