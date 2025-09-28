@@ -8,7 +8,7 @@ import julius.game.chessengine.utils.Color;
 import lombok.extern.log4j.Log4j2;
 import org.junit.jupiter.api.Test;
 
-import static julius.game.chessengine.board.MoveHelper.convertStringToIndex;
+import static julius.game.chessengine.board.MoveHelper.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 //-XX:StartFlightRecording=name=uci,settings=profile,filename=Perft_refactor.jfr
@@ -114,6 +114,50 @@ public class BitBoardTest {
         board.performMove(move);
 
         assertEquals(d5, board.getLastMoveDoubleStepPawnIndex());
+    }
+
+    @Test
+    public void blackCanCastleKingsideEvenIfRookIsAttacked() {
+        // Position: Black to move, castling rights 'k', rook h8 is attacked by a white rook on h1.
+        // King path (e8->f8->g8) is empty and not attacked.
+        BitBoard board = FEN.translateFENtoBitBoard("4k2r/8/8/8/8/8/8/7R b k - 0 1");
+
+        IntArrayList moves = board.generateAllPossibleMoves(board.isWhitesTurn());
+        int e8 = convertStringToIndex("e8");
+        int g8 = convertStringToIndex("g8");
+
+        boolean foundCastle = false;
+        for (int i = 0; i < moves.size(); i++) {
+            int m = moves.getInt(i);
+            if (deriveFromIndex(m) == e8 && deriveToIndex(m) == g8 && isCastlingMove(m)) {
+                foundCastle = true;
+                break;
+            }
+        }
+
+        assertTrue(foundCastle, "Black should be able to castle O-O even if the rook is attacked.");
+    }
+
+    @Test
+    public void whiteCanCastleQueensideEvenIfRookIsAttacked() {
+        // Position: White to move, castling rights 'Q', rook a1 is attacked by a black rook on a8.
+        // King path (e1->d1->c1) is empty and not attacked.
+        BitBoard board = FEN.translateFENtoBitBoard("r3k3/8/8/8/8/8/8/R3K3 w Q - 0 1");
+
+        IntArrayList moves = board.generateAllPossibleMoves(board.isWhitesTurn());
+        int e1 = convertStringToIndex("e1");
+        int c1 = convertStringToIndex("c1");
+
+        boolean foundCastle = false;
+        for (int i = 0; i < moves.size(); i++) {
+            int m = moves.getInt(i);
+            if (deriveFromIndex(m) == e1 && deriveToIndex(m) == c1 && isCastlingMove(m)) {
+                foundCastle = true;
+                break;
+            }
+        }
+
+        assertTrue(foundCastle, "White should be able to castle O-O-O even if the rook is attacked.");
     }
 
     @Test
@@ -229,7 +273,7 @@ public class BitBoardTest {
     private boolean moveExists(IntArrayList moves, int from, int to) {
         for (int i = 0; i < moves.size(); i++) {
             int move = moves.getInt(i);
-            if (MoveHelper.deriveFromIndex(move) == from && MoveHelper.deriveToIndex(move) == to) {
+            if (deriveFromIndex(move) == from && deriveToIndex(move) == to) {
                 return true;
             }
         }
@@ -526,7 +570,7 @@ public class BitBoardTest {
         int captureMove = -1;
         for (int i = 0; i < moves.size(); i++) {
             int move = moves.getInt(i);
-            if (MoveHelper.deriveFromIndex(move) == from && MoveHelper.deriveToIndex(move) == to) {
+            if (deriveFromIndex(move) == from && deriveToIndex(move) == to) {
                 captureMove = move;
                 break;
             }
@@ -560,7 +604,7 @@ public class BitBoardTest {
         int captureMove = -1;
         for (int i = 0; i < moves.size(); i++) {
             int move = moves.getInt(i);
-            if (MoveHelper.deriveFromIndex(move) == from && MoveHelper.deriveToIndex(move) == to) {
+            if (deriveFromIndex(move) == from && deriveToIndex(move) == to) {
                 captureMove = move;
                 break;
             }
