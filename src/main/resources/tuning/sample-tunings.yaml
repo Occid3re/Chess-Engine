@@ -1,0 +1,33 @@
+population:
+  - name: baseline
+    ai:
+      searchThreads: 1
+      lazySmpThreads: 1
+      hashSizeMb: 32
+      maxDepth: 32
+      timeLimitMillis: 50
+      nullMovePruning: true
+    evaluation:
+      modules:
+        MaterialModule:
+          midgame: 1.0
+          endgame: 1.0
+        PawnStructureModule:
+          midgame: 1.0
+          endgame: 1.0
+  - name: aggressive
+    ai:
+      searchThreads: 1
+      lazySmpThreads: 1
+      hashSizeMb: 64
+      maxDepth: 36
+      timeLimitMillis: 75
+      nullMovePruning: true
+    evaluation:
+      modules:
+        MaterialModule:
+          midgame: 1.05
+          endgame: 1.0
+        ThreatModule:
+          midgame: 1.2
+          endgame: 1.1

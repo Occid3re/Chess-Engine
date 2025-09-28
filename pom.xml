@@ -81,6 +81,12 @@
             <artifactId>fastutil</artifactId>
             <version>8.5.16</version>
         </dependency>
+
+        <!-- YAML support for external tuning configuration -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-yaml</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

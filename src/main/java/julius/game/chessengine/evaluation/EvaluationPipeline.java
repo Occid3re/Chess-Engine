@@ -19,16 +19,19 @@ public final class EvaluationPipeline {
 
     private static final class ModuleState {
         private final EvaluationModule module;
+        private final EvaluationWeights.ModuleWeight weight;
         private int midgameCache;
         private int endgameCache;
 
-        private ModuleState(EvaluationModule module) {
+        private ModuleState(EvaluationModule module, EvaluationWeights.ModuleWeight weight) {
             this.module = module;
+            this.weight = weight;
             this.module.markDirty();
         }
     }
 
     private final List<ModuleState> modules;
+    private final EvaluationWeights weights;
     private EvaluationContext context;
     private boolean initialized;
     private boolean aggregateDirty = true;
@@ -36,12 +39,18 @@ public final class EvaluationPipeline {
     private int endgameTotal;
 
     public EvaluationPipeline(List<? extends EvaluationModule> modules) {
+        this(modules, EvaluationWeights.identity());
+    }
+
+    public EvaluationPipeline(List<? extends EvaluationModule> modules, EvaluationWeights weights) {
         if (modules == null || modules.isEmpty()) {
             throw new IllegalArgumentException("At least one evaluation module is required");
         }
+        this.weights = (weights != null ? weights : EvaluationWeights.identity());
         List<ModuleState> moduleStates = new ArrayList<>(modules.size());
         for (EvaluationModule module : modules) {
-            moduleStates.add(new ModuleState(module));
+            EvaluationWeights.ModuleWeight weight = this.weights.weightFor(module.getClass());
+            moduleStates.add(new ModuleState(module, weight));
         }
         this.modules = Collections.unmodifiableList(moduleStates);
     }
@@ -121,22 +130,22 @@ public final class EvaluationPipeline {
         if (!aggregateDirty) {
             return;
         }
-        int midgame = 0;
-        int endgame = 0;
+        double midgame = 0.0;
+        double endgame = 0.0;
         for (ModuleState state : modules) {
             if (state.module.isDirty()) {
                 state.module.evaluate(context);
             }
             state.midgameCache = state.module.getMidgameScore();
             state.endgameCache = state.module.getEndgameScore();
-            midgame += state.midgameCache;
-            endgame += state.endgameCache;
+            midgame += state.midgameCache * state.weight.midgame();
+            endgame += state.endgameCache * state.weight.endgame();
         }
         int checkAdjustment = computeCheckAdjustment();
         midgame += checkAdjustment;
         endgame += checkAdjustment;
-        midgameTotal = midgame;
-        endgameTotal = endgame;
+        midgameTotal = (int) Math.round(midgame);
+        endgameTotal = (int) Math.round(endgame);
         aggregateDirty = false;
     }
 
