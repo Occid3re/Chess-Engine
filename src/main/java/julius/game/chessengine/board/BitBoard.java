@@ -2396,12 +2396,19 @@ public class BitBoard {
 
     @Override
     public int hashCode() {
-        return Objects.hash(whitePawns, blackPawns, whiteKnights, blackKnights, whiteBishops, blackBishops,
-                whiteRooks, blackRooks, whiteQueens, blackQueens, whiteKing, blackKing,
-                whitePieces, blackPieces, allPieces, whiteKingMoved, blackKingMoved,
-                whiteRookA1Moved, whiteRookH1Moved, blackRookA8Moved, blackRookH8Moved,
-                lastMoveDoubleStepPawnIndex, halfmoveClock, fullmoveNumber);
+        // Mix zKey to 32 bits and salt with clocks for better distribution
+        long x = zKey;
+        x ^= (x >>> 33);
+        x *= 0xff51afd7ed558ccdL;
+        x ^= (x >>> 33);
+        x *= 0xc4ceb9fe1a85ec53L;
+        x ^= (x >>> 33);
+        int h = Long.hashCode(x);
+        h = 31 * h + halfmoveClock;
+        h = 31 * h + fullmoveNumber;
+        return h;
     }
+
 
     /**
      * Returns the en-passant *target* square index [0..63], or -1 if none.
