@@ -1,9 +1,10 @@
 package julius.game.chessengine.tuning;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import org.yaml.snakeyaml.LoaderOptions;
+import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.constructor.Constructor;
+import org.yaml.snakeyaml.error.YAMLException;
+import org.yaml.snakeyaml.introspector.BeanAccess;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -35,8 +36,7 @@ import java.util.stream.Collectors;
  */
 public final class EngineTuningLoader {
 
-    private static final ObjectMapper YAML_MAPPER = new ObjectMapper(new YAMLFactory())
-            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    private static final Yaml YAML_MAPPER = createYamlMapper();
 
     private EngineTuningLoader() {
     }
@@ -50,7 +50,32 @@ public final class EngineTuningLoader {
 
     public static EngineTuningSet load(InputStream inputStream) throws IOException {
         Objects.requireNonNull(inputStream, "inputStream");
-        EngineTuningDocument document = YAML_MAPPER.readValue(inputStream, EngineTuningDocument.class);
+        EngineTuningDocument document = readDocument(() -> YAML_MAPPER.load(inputStream));
+        return toTuningSet(document);
+    }
+
+    public static EngineTuningSet loadFromString(String yaml) throws IOException {
+        Objects.requireNonNull(yaml, "yaml");
+        EngineTuningDocument document = readDocument(() -> YAML_MAPPER.load(yaml));
+        return toTuningSet(document);
+    }
+
+    private static EngineTuningDocument readDocument(YamlLoader loader) throws IOException {
+        try {
+            Object loaded = loader.load();
+            if (loaded == null) {
+                return null;
+            }
+            if (loaded instanceof EngineTuningDocument document) {
+                return document;
+            }
+            throw new IOException("Unexpected YAML structure for engine tuning definition");
+        } catch (YAMLException ex) {
+            throw new IOException("Failed to parse engine tuning definition", ex);
+        }
+    }
+
+    private static EngineTuningSet toTuningSet(EngineTuningDocument document) {
         if (document == null || document.population == null || document.population.isEmpty()) {
             return EngineTuningSet.empty();
         }
@@ -60,15 +85,12 @@ public final class EngineTuningLoader {
         return new EngineTuningSet(tunings);
     }
 
-    public static EngineTuningSet loadFromString(String yaml) throws JsonProcessingException {
-        EngineTuningDocument document = YAML_MAPPER.readValue(yaml, EngineTuningDocument.class);
-        if (document == null || document.population == null || document.population.isEmpty()) {
-            return EngineTuningSet.empty();
-        }
-        List<EngineTuning> tunings = document.population.stream()
-                .map(EngineTuningLoader::toEngineTuning)
-                .collect(Collectors.toUnmodifiableList());
-        return new EngineTuningSet(tunings);
+    private static Yaml createYamlMapper() {
+        LoaderOptions options = new LoaderOptions();
+        Constructor constructor = new Constructor(EngineTuningDocument.class, options);
+        constructor.getPropertyUtils().setBeanAccess(BeanAccess.FIELD);
+        constructor.getPropertyUtils().setSkipMissingProperties(true);
+        return new Yaml(constructor);
     }
 
     private static EngineTuning toEngineTuning(EngineTuningConfig config) {
@@ -162,5 +184,10 @@ public final class EngineTuningLoader {
     private static final class ModuleConfig {
         public double midgame = 1.0;
         public double endgame = 1.0;
+    }
+
+    @FunctionalInterface
+    private interface YamlLoader {
+        Object load();
     }
 }

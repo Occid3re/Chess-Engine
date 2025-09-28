@@ -1,13 +1,11 @@
 package julius.game.chessengine.tuning;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import org.yaml.snakeyaml.DumperOptions;
+import org.yaml.snakeyaml.Yaml;
 
 import java.io.IOException;
-import java.io.OutputStream;
+import java.io.StringWriter;
+import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -16,15 +14,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+
 /**
  * Serialises {@link EngineTuningSet} instances to a YAML structure that mirrors the format accepted
  * by {@link EngineTuningLoader}.
  */
 public final class EngineTuningWriter {
 
-    private static final ObjectMapper YAML_MAPPER = new ObjectMapper(new YAMLFactory())
-            .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
-            .setSerializationInclusion(JsonInclude.Include.NON_EMPTY);
+    private static final Yaml YAML_MAPPER = new Yaml(createOptions());
 
     private EngineTuningWriter() {
     }
@@ -35,92 +33,89 @@ public final class EngineTuningWriter {
             throw new IllegalArgumentException("Population must contain at least one tuning");
         }
         Files.createDirectories(path.toAbsolutePath().getParent());
-        try (OutputStream out = Files.newOutputStream(path)) {
-            YAML_MAPPER.writerWithDefaultPrettyPrinter()
-                    .writeValue(out, toDocument(population));
+        try (Writer writer = Files.newBufferedWriter(path, UTF_8)) {
+            YAML_MAPPER.dump(toDocument(population), writer);
         }
     }
 
-    public static String toYaml(EngineTuningSet population) throws JsonProcessingException {
+    public static String toYaml(EngineTuningSet population) {
         if (population == null || population.isEmpty()) {
             throw new IllegalArgumentException("Population must contain at least one tuning");
         }
-        return YAML_MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(toDocument(population));
+        try (StringWriter writer = new StringWriter()) {
+            YAML_MAPPER.dump(toDocument(population), writer);
+            return writer.toString();
+        } catch (IOException ex) {
+            // StringWriter does not throw IOException, but keep signature future-proof
+            throw new IllegalStateException("Failed to render tuning definition", ex);
+        }
     }
 
-    private static EngineTuningDocument toDocument(EngineTuningSet population) {
-        List<EngineTuningConfig> configs = new ArrayList<>();
+    private static DumperOptions createOptions() {
+        DumperOptions options = new DumperOptions();
+        options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
+        options.setPrettyFlow(true);
+        options.setIndent(2);
+        options.setIndicatorIndent(2);
+        options.setSplitLines(false);
+        return options;
+    }
+
+    private static Map<String, Object> toDocument(EngineTuningSet population) {
+        Map<String, Object> document = new LinkedHashMap<>();
+        List<Map<String, Object>> configs = new ArrayList<>();
         for (EngineTuning tuning : population.population()) {
             configs.add(toConfig(tuning));
         }
-        EngineTuningDocument document = new EngineTuningDocument();
-        document.population = configs;
+        document.put("population", configs);
         return document;
     }
 
-    private static EngineTuningConfig toConfig(EngineTuning tuning) {
-        EngineTuningConfig config = new EngineTuningConfig();
-        config.name = tuning.name();
-        config.ai = toAiConfig(tuning.ai());
-        config.evaluation = toEvaluationConfig(tuning.evaluation());
-        config.numericParameters = new LinkedHashMap<>(tuning.numericParameters());
+    private static Map<String, Object> toConfig(EngineTuning tuning) {
+        Map<String, Object> config = new LinkedHashMap<>();
+        if (tuning.name() != null && !tuning.name().isBlank()) {
+            config.put("name", tuning.name());
+        }
+        Map<String, Object> ai = toAiConfig(tuning.ai());
+        if (!ai.isEmpty()) {
+            config.put("ai", ai);
+        }
+        Map<String, Object> evaluation = toEvaluationConfig(tuning.evaluation());
+        if (!evaluation.isEmpty()) {
+            config.put("evaluation", evaluation);
+        }
+        if (!tuning.numericParameters().isEmpty()) {
+            config.put("numericParameters", new LinkedHashMap<>(tuning.numericParameters()));
+        }
         return config;
     }
 
-    private static AiConfig toAiConfig(AiTuning tuning) {
-        AiConfig config = new AiConfig();
-        config.searchThreads = tuning.searchThreads();
-        config.lazySmpThreads = tuning.lazySmpThreads();
-        config.hashSizeMb = tuning.hashSizeMb();
-        config.maxDepth = tuning.maxDepth();
-        config.timeLimitMillis = tuning.timeLimitMillis();
-        config.nullMovePruning = tuning.nullMovePruning();
+    private static Map<String, Object> toAiConfig(AiTuning tuning) {
+        Map<String, Object> config = new LinkedHashMap<>();
+        config.put("searchThreads", tuning.searchThreads());
+        config.put("lazySmpThreads", tuning.lazySmpThreads());
+        config.put("hashSizeMb", tuning.hashSizeMb());
+        config.put("maxDepth", tuning.maxDepth());
+        config.put("timeLimitMillis", tuning.timeLimitMillis());
+        config.put("nullMovePruning", tuning.nullMovePruning());
         return config;
     }
 
-    private static EvaluationConfig toEvaluationConfig(EvaluationTuning tuning) {
+    private static Map<String, Object> toEvaluationConfig(EvaluationTuning tuning) {
         Map<String, EvaluationTuning.ModuleConfig> modules = tuning.modules();
         if (modules.isEmpty()) {
-            return null;
+            return Map.of();
         }
-        EvaluationConfig config = new EvaluationConfig();
-        config.modules = new LinkedHashMap<>();
+        Map<String, Object> config = new LinkedHashMap<>();
+        Map<String, Object> serializedModules = new LinkedHashMap<>();
         modules.forEach((name, moduleConfig) -> {
-            ModuleConfig module = new ModuleConfig();
-            module.midgame = moduleConfig.midgame();
-            module.endgame = moduleConfig.endgame();
-            config.modules.put(name, module);
+            Map<String, Object> module = new LinkedHashMap<>();
+            module.put("midgame", moduleConfig.midgame());
+            module.put("endgame", moduleConfig.endgame());
+            serializedModules.put(name, module);
         });
+        config.put("modules", serializedModules);
         return config;
-    }
-
-    private static final class EngineTuningDocument {
-        public List<EngineTuningConfig> population;
-    }
-
-    private static final class EngineTuningConfig {
-        public String name;
-        public AiConfig ai;
-        public EvaluationConfig evaluation;
-        public Map<String, Double> numericParameters;
-    }
-
-    private static final class AiConfig {
-        public int searchThreads;
-        public int lazySmpThreads;
-        public int hashSizeMb;
-        public int maxDepth;
-        public long timeLimitMillis;
-        public boolean nullMovePruning;
-    }
-
-    private static final class EvaluationConfig {
-        public Map<String, ModuleConfig> modules;
-    }
-
-    private static final class ModuleConfig {
-        public double midgame;
-        public double endgame;
     }
 }
 
