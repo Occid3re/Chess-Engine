@@ -1,0 +1,55 @@
+@echo off
+setlocal
+
+REM --- project root ---
+cd /d "C:\Development\Chess-Engine"
+
+REM --- newest chess-engine-*-uci.jar ---
+set "JARFILE="
+for /f "usebackq delims=" %%F in (`dir /b /a:-d /o:-d "target\chess-engine-*-uci.jar" 2^>nul`) do (
+  set "JARFILE=target\%%F"
+  goto :havejar
+)
+:havejar
+if "%JARFILE%"=="" (
+  echo [ERROR] No JAR matching target\chess-engine-*-uci.jar found. Build first.
+  exit /b 1
+)
+
+REM --- inputs ---
+set "SEED=src\main\resources\tuning\seed-tunings.yaml"
+set "MATCHES=%CD%\match-log.csv"
+if not exist "%SEED%" (
+  echo [ERROR] Seed file not found: "%SEED%"
+  exit /b 2
+)
+
+echo [INFO] Using JAR : "%JARFILE%"
+echo [INFO] Seed      : "%SEED%"
+echo [INFO] Matches   : "%MATCHES%"
+echo.
+
+REM ---------------------------------------------------------------------------
+REM IMPORTANT:
+REM To select a different main in a Spring Boot fat JAR, you must run the
+REM PropertiesLauncher explicitly. Then -Dloader.main=<FQN> is honored.
+REM ---------------------------------------------------------------------------
+
+java ^
+  "-Dloader.main=julius.game.chessengine.tuning.GeneticTuningMain" ^
+  -cp "%JARFILE%" ^
+  org.springframework.boot.loader.PropertiesLauncher ^
+  --seed "%SEED%" ^
+  --generations 10 ^
+  --population 12 ^
+  --matches "%MATCHES%"
+
+set "ERR=%ERRORLEVEL%"
+echo.
+if not "%ERR%"=="0" (
+  echo [ERROR] Exited with code %ERR%.
+) else (
+  echo [INFO] Finished successfully.
+)
+pause
+endlocal
