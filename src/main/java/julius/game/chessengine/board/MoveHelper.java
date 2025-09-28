@@ -60,7 +60,8 @@ public class MoveHelper {
             moveInt |= 1 << 15; // 1 bit for color, shifted by 15 bits
         }
 
-        int specialProperty = (isCapture ? 1 : 0) | (isCastlingMove ? 2 : 0) | (isEnPassantMove ? 3 : 0);
+        int specialProperty = isEnPassantMove ? 3 : (isCastlingMove ? 2 : (isCapture ? 1 : 0));
+
         moveInt |= specialProperty << 16; // Shifted by 16 bits
 
         if (promotionPieceType != null) {
