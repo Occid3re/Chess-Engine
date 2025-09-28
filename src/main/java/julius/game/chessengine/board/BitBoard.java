@@ -2,13 +2,8 @@ package julius.game.chessengine.board;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.figures.PieceType;
-import julius.game.chessengine.helper.BishopHelper;
-import julius.game.chessengine.helper.BitboardHelper;
-import julius.game.chessengine.helper.KnightHelper;
-import julius.game.chessengine.helper.RookHelper;
-import julius.game.chessengine.helper.ZobristTable;
+import julius.game.chessengine.helper.*;
 import julius.game.chessengine.utils.Color;
-
 import julius.game.chessengine.utils.Score;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -18,7 +13,6 @@ import lombok.extern.log4j.Log4j2;
 import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Deque;
-import java.util.Objects;
 
 import static julius.game.chessengine.board.MoveHelper.createMoveInt;
 import static julius.game.chessengine.helper.BitHelper.*;
