@@ -6,6 +6,7 @@ import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.evaluation.ActivityModule;
 import julius.game.chessengine.evaluation.EvaluationContext;
 import julius.game.chessengine.evaluation.EvaluationPipeline;
+import julius.game.chessengine.evaluation.EvaluationWeights;
 import julius.game.chessengine.evaluation.KingSafetyModule;
 import julius.game.chessengine.evaluation.MaterialModule;
 import julius.game.chessengine.evaluation.MoveContext;
@@ -24,6 +25,9 @@ import java.util.Objects;
  */
 public class Score {
 
+    private static final ThreadLocal<ScoreFactory> THREAD_FACTORY = new ThreadLocal<>();
+    private static volatile ScoreFactory GLOBAL_FACTORY = bitBoard -> new Score(bitBoard, EvaluationWeights.identity());
+
     public static final int CHECKMATE = 100000;
     public static final int CHECK = 50;
     public static final int DRAW = 0;
@@ -37,6 +41,7 @@ public class Score {
     private final ThreatModule threatModule = new ThreatModule();
 
     @JsonIgnore
+    private final EvaluationWeights weights;
     private final EvaluationPipeline evaluationPipeline;
     @JsonIgnore
     private EvaluationContext evaluationContext;
@@ -44,6 +49,11 @@ public class Score {
     private EvaluationContext spareEvaluationContext;
 
     public Score() {
+        this(null);
+    }
+
+    public Score(EvaluationWeights weights) {
+        this.weights = weights != null ? weights : EvaluationWeights.identity();
         materialModule.setPawnChangeListener(pawnStructureModule);
         this.evaluationPipeline = new EvaluationPipeline(List.of(
                 materialModule,
@@ -52,11 +62,16 @@ public class Score {
                 activityModule,
                 kingSafetyModule,
                 threatModule
-        ));
+        ), this.weights);
+    }
+
+    public Score(BitBoard bitBoard, EvaluationWeights weights) {
+        this(weights);
+        initializeFrom(bitBoard);
     }
 
     public Score(Score other) {
-        this();
+        this(other != null ? other.weights : null);
         if (other != null && other.evaluationContext != null) {
             this.evaluationContext = other.evaluationContext.copy();
             if (other.spareEvaluationContext != null) {
@@ -69,9 +84,8 @@ public class Score {
     }
 
     public static Score initializeScore(BitBoard bitBoard) {
-        Score score = new Score();
-        score.initializeFrom(bitBoard);
-        return score;
+        Objects.requireNonNull(bitBoard, "bitBoard");
+        return resolveFactory().create(bitBoard);
     }
 
     private void initializeFrom(BitBoard bitBoard) {
@@ -80,6 +94,37 @@ public class Score {
         this.evaluationContext = context;
         this.spareEvaluationContext = null;
         evaluationPipeline.initialize(context);
+    }
+
+    private static ScoreFactory resolveFactory() {
+        ScoreFactory local = THREAD_FACTORY.get();
+        return (local != null) ? local : GLOBAL_FACTORY;
+    }
+
+    public static AutoCloseable useFactory(ScoreFactory factory) {
+        Objects.requireNonNull(factory, "factory");
+        ScoreFactory previous = THREAD_FACTORY.get();
+        THREAD_FACTORY.set(factory);
+        return () -> {
+            if (previous == null) {
+                THREAD_FACTORY.remove();
+            } else {
+                THREAD_FACTORY.set(previous);
+            }
+        };
+    }
+
+    public static AutoCloseable useEvaluationWeights(EvaluationWeights weights) {
+        return useFactory(forEvaluationWeights(weights));
+    }
+
+    public static ScoreFactory forEvaluationWeights(EvaluationWeights weights) {
+        EvaluationWeights resolved = (weights != null ? weights : EvaluationWeights.identity());
+        return bitBoard -> new Score(bitBoard, resolved);
+    }
+
+    public static void setGlobalFactory(ScoreFactory factory) {
+        GLOBAL_FACTORY = Objects.requireNonNull(factory, "factory");
     }
 
     public void refresh(BitBoard bitBoard, GameStateEnum state) {

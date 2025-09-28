@@ -7,6 +7,7 @@ import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
+import julius.game.chessengine.tuning.AiTuning;
 import julius.game.chessengine.utils.Score;
 import lombok.Getter;
 import lombok.Setter;
@@ -32,6 +33,9 @@ public class AI {
 
     @Getter
     private final Engine mainEngine;
+
+    @Getter
+    private final AiTuning tuning;
 
     /**
      * Number of threads used for searching. Defaults to single-threaded search but
@@ -240,7 +244,7 @@ public class AI {
     @Setter
     private long timeLimit; // milliseconds
 
-    private final boolean useNullMovePruning = Boolean.parseBoolean(
+    private boolean useNullMovePruning = Boolean.parseBoolean(
             System.getProperty("chessengine.nullMove", "true")
     );
 
@@ -250,24 +254,40 @@ public class AI {
     private long nullMoveCount = 0;
 
     public AI(Engine mainEngine) {
+        this(mainEngine, AiTuning.defaults());
+    }
+
+    public AI(Engine mainEngine, AiTuning tuning) {
+        this.mainEngine = Objects.requireNonNull(mainEngine, "mainEngine");
+        this.tuning = tuning != null ? tuning : AiTuning.defaults();
+        this.searchThreads = this.tuning.searchThreads();
+        this.lazySmpThreads = Math.max(1, this.tuning.lazySmpThreads());
+        this.hashSizeMb = this.tuning.hashSizeMb();
+        this.maxDepth = this.tuning.maxDepth();
+        this.timeLimit = this.tuning.timeLimitMillis();
+        this.useNullMovePruning = this.tuning.nullMovePruning();
+
         log.info("### SearchThreads = " + searchThreads + ", LazySmpThreads = " + lazySmpThreads);
-        this.mainEngine = mainEngine;
-        this.timeLimit = 50;
 
         this.globalHeuristics = new Heuristics(maxDepth);
         this.threadHeuristics = ThreadLocal.withInitial(() -> new Heuristics(maxDepth));
 
         rebuildTranspositionTables();
 
-        this.searchPool = searchThreads > 1
-                ? Executors.newFixedThreadPool(searchThreads, r -> {
+        this.searchPool = createSearchPool();
+
+        this.mainEngine.setOnPositionChanged(h -> updateBoardStateHash());
+    }
+
+    private ExecutorService createSearchPool() {
+        if (searchThreads <= 1) {
+            return null;
+        }
+        return Executors.newFixedThreadPool(searchThreads, r -> {
             Thread t = new Thread(r, "AI-Search-" + System.identityHashCode(r));
             t.setDaemon(true);
             return t;
-        })
-                : null;
-
-        this.mainEngine.setOnPositionChanged(h -> updateBoardStateHash());
+        });
     }
 
     private long acquireWriteLock() {
@@ -664,6 +684,63 @@ public class AI {
             return getBestMoveParallel(sim, task, depth, task.getDeadline(), alpha, beta, rng);
         }
         return getBestMove(sim, task.isWhiteToMove(), depth, task.getDeadline(), alpha, beta, rng);
+    }
+
+    public synchronized MoveAndScore searchBestMoveBlocking(long timeLimitMillis) {
+        long previousTimeLimit = this.timeLimit;
+        if (timeLimitMillis > 0) {
+            this.timeLimit = timeLimitMillis;
+        }
+        try {
+            Engine simulatorEngine = mainEngine.createSimulation();
+            long boardStateHash = simulatorEngine.getBoardStateHash();
+            long deadline = System.nanoTime() + this.timeLimit * 1_000_000L;
+
+            SearchTask task = new SearchTask(
+                    searchIdGenerator.incrementAndGet(),
+                    boardStateHash,
+                    simulatorEngine.whitesTurn(),
+                    deadline,
+                    1,
+                    simulatorEngine.createSimulation()
+            );
+
+            activeSearch.set(task);
+            currentBoardState = boardStateHash;
+            beforeCalculationBoardState = boardStateHash;
+            currentBestMove = -1;
+            bestMoveForHash = -1;
+            previousBestMove = -1;
+            previousBestMoveHash = -1;
+            searchResultReady = false;
+            this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
+
+            SplittableRandom rng = (lazySmpThreads > 1)
+                    ? new SplittableRandom(boardStateHash ^ System.nanoTime())
+                    : null;
+
+            threadSearchTask.set(task);
+            try {
+                iterativeDeepening(task, simulatorEngine, rng);
+            } finally {
+                threadSearchTask.remove();
+            }
+
+            task.workerDone();
+            completeSearchTask(task, simulatorEngine);
+            task.requestStop();
+
+            if (searchResultReady && currentBestMove != -1 && bestMoveForHash == boardStateHash) {
+                return new MoveAndScore(currentBestMove, task.getBest().score);
+            }
+            return null;
+        } catch (RuntimeException ex) {
+            log.error("Synchronous search failed", ex);
+            return null;
+        } finally {
+            activeSearch.set(null);
+            this.timeLimit = previousTimeLimit;
+        }
     }
 
 

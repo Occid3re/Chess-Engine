@@ -110,3 +110,22 @@ example via `file://`). Keep the Spring Boot application running in the
 background: the page automatically connects to `ws://localhost:8080/ws/uci` when
 it is not served by the app itself.
 
+## Engine tuning and self-play
+
+The engine can now load search and evaluation parameters from an external YAML
+file. Point the Spring Boot application at your configuration with
+
+```bash
+java -Dchessengine.tuning.file=/path/to/tunings.yaml -jar target/chess-engine-<version>-uci.jar
+```
+
+Each entry under the top-level `population` key defines an engine variant. The
+sample file in `src/main/resources/tuning/sample-tunings.yaml` demonstrates the
+structure and shows how to tweak search depth, hash size, and module weights.
+
+For automated exploration you can use the `GeneticOptimizer` together with the
+`MatchRunner`. The optimiser stages round-robin matches between configurations
+with identical thread counts, keeps the strongest performers, and mutates them
+into the next generation. This workflow makes it possible to evolve evaluation
+parameters while keeping the UCI engine executable unchanged.
+
