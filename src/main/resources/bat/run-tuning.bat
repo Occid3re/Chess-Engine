@@ -38,7 +38,7 @@ REM ---------------------------------------------------------------------------
 java ^
   "-Dloader.main=julius.game.chessengine.tuning.GeneticTuningMain" ^
   -cp "%JARFILE%" ^
-  org.springframework.boot.loader.PropertiesLauncher ^
+  org.springframework.boot.loader.launch.PropertiesLauncher ^
   --seed "%SEED%" ^
   --generations 10 ^
   --population 12 ^
