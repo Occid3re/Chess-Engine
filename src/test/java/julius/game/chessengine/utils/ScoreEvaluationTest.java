@@ -197,7 +197,7 @@ public class ScoreEvaluationTest {
         int from = MoveHelper.convertStringToIndex("d4");
         int to = MoveHelper.convertStringToIndex("d5");
         int move = MoveHelper.createMoveInt(from, to, PieceType.PAWN, true, true,
-                false, false, null, PieceType.PAWN, false, false, board.getLastMoveDoubleStepPawnIndex());
+                false, false, null, PieceType.PAWN, false, false, board.getCastlingRightsMask());
 
         board.performMove(move);
         score.applyMove(board, move, null);

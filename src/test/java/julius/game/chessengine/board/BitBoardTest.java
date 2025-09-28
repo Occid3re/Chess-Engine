@@ -86,7 +86,7 @@ public class BitBoardTest {
         int e4 = convertStringToIndex("e4");
         int move = MoveHelper.createMoveInt(e2, e4, PieceType.PAWN, true,
                 false, false, false, null, null, false, false,
-                board.getLastMoveDoubleStepPawnIndex());
+                board.getCastlingRightsMask());
         board.performMove(move);
 
         // No black pawn can capture the pawn on e4, so en passant index should be 0
@@ -97,20 +97,20 @@ public class BitBoardTest {
         int a6 = convertStringToIndex("a6");
         move = MoveHelper.createMoveInt(a7, a6, PieceType.PAWN, false,
                 false, false, false, null, null, false, false,
-                board.getLastMoveDoubleStepPawnIndex());
+                board.getCastlingRightsMask());
         board.performMove(move);
 
         int e5 = convertStringToIndex("e5");
         move = MoveHelper.createMoveInt(e4, e5, PieceType.PAWN, true,
                 false, false, false, null, null, false, false,
-                board.getLastMoveDoubleStepPawnIndex());
+                board.getCastlingRightsMask());
         board.performMove(move);
 
         int d7 = convertStringToIndex("d7");
         int d5 = convertStringToIndex("d5");
         move = MoveHelper.createMoveInt(d7, d5, PieceType.PAWN, false,
                 false, false, false, null, null, false, false,
-                board.getLastMoveDoubleStepPawnIndex());
+                board.getCastlingRightsMask());
         board.performMove(move);
 
         assertEquals(d5, board.getLastMoveDoubleStepPawnIndex());
@@ -142,11 +142,69 @@ public class BitBoardTest {
 
         int move = MoveHelper.createMoveInt(from, to, PieceType.QUEEN, true,
                 true, false, false, null, captured, false, false,
-                engine.getBitBoard().getLastMoveDoubleStepPawnIndex());
+                engine.getBitBoard().getCastlingRightsMask());
 
         int see = engine.see(move);
 
         assertTrue(see < 0, "King recapture after checking capture should be evaluated");
+    }
+
+    @Test
+    void rookCaptureUpdatesCastlingRightsAndZobristHash() {
+        BitBoard board = FEN.translateFENtoBitBoard("r3k2r/8/8/8/8/8/4K3/R6R w KQkq - 0 1");
+        long originalHash = board.getBoardStateHash();
+        int initialRights = board.getCastlingRightsMask();
+
+        int from = convertStringToIndex("a1");
+        int to = convertStringToIndex("a8");
+        int move = MoveHelper.createMoveInt(from, to, PieceType.ROOK, true, true,
+                false, false, null, PieceType.ROOK, false, false, board.getCastlingRightsMask());
+
+        board.performMove(move);
+        long hashAfterCapture = board.getBoardStateHash();
+        int expectedRightsAfterCapture = initialRights & ~(1 << 1) & ~(1 << 3);
+
+        assertTrue(board.isBlackRookA8Moved(), "Black rook capture should mark A8 rook as moved");
+        assertTrue(board.isWhiteRookA1Moved(), "Moving rook should mark A1 rook as moved");
+        assertEquals(expectedRightsAfterCapture, board.getCastlingRightsMask(), "Castling rights should reflect captured rooks");
+
+        board.undoMove(move);
+
+        assertFalse(board.isBlackRookA8Moved());
+        assertFalse(board.isWhiteRookA1Moved());
+        assertEquals(initialRights, board.getCastlingRightsMask());
+        assertEquals(originalHash, board.getBoardStateHash(), "Undo should restore original hash");
+
+        board.performMove(move);
+        assertEquals(hashAfterCapture, board.getBoardStateHash(), "Redo should reproduce capture hash");
+        board.undoMove(move);
+        assertEquals(originalHash, board.getBoardStateHash());
+    }
+
+    @Test
+    void blackRookCaptureRestoresRightsOnUndo() {
+        BitBoard board = FEN.translateFENtoBitBoard("4k2r/8/8/8/8/8/4K3/7R b Kk - 0 1");
+        long initialHash = board.getBoardStateHash();
+        int initialRights = board.getCastlingRightsMask();
+
+        int from = convertStringToIndex("h8");
+        int to = convertStringToIndex("h1");
+        int move = MoveHelper.createMoveInt(from, to, PieceType.ROOK, false, true,
+                false, false, null, PieceType.ROOK, false, false, board.getCastlingRightsMask());
+
+        board.performMove(move);
+        int rightsAfterCapture = board.getCastlingRightsMask();
+
+        assertTrue(board.isWhiteRookH1Moved());
+        assertTrue(board.isBlackRookH8Moved());
+        assertEquals(0, rightsAfterCapture, "Both sides should lose relevant castling rights after capture");
+
+        board.undoMove(move);
+
+        assertFalse(board.isWhiteRookH1Moved());
+        assertFalse(board.isBlackRookH8Moved());
+        assertEquals(initialRights, board.getCastlingRightsMask());
+        assertEquals(initialHash, board.getBoardStateHash());
     }
 
     @Test

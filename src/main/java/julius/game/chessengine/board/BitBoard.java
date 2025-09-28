@@ -20,7 +20,6 @@ import java.util.Arrays;
 import java.util.Deque;
 import java.util.Objects;
 
-import static julius.game.chessengine.board.MoveHelper.createMoveInt;
 import static julius.game.chessengine.helper.BitHelper.*;
 import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
 import static julius.game.chessengine.helper.KnightHelper.knightMoveTable;
@@ -175,6 +174,8 @@ public class BitBoard {
     private final Deque<Integer> halfmoveHistory = new ArrayDeque<>();
     @Getter(AccessLevel.NONE)
     private final Deque<Integer> fullmoveHistory = new ArrayDeque<>();
+    @Getter(AccessLevel.NONE)
+    private final Deque<Integer> doubleStepHistory = new ArrayDeque<>();
 
     // This variable needs to be set whenever a move is made
     @Getter
@@ -329,6 +330,7 @@ public class BitBoard {
         if (includeHistory) {
             this.halfmoveHistory.addAll(other.halfmoveHistory);
             this.fullmoveHistory.addAll(other.fullmoveHistory);
+            this.doubleStepHistory.addAll(other.doubleStepHistory);
         }
     }
 
@@ -1165,8 +1167,8 @@ public class BitBoard {
             int toIndex = Long.numberOfTrailingZeros(temp);
             int fromIndex = whitesTurn ? toIndex - 8 : toIndex + 8;
             if (isMoveAllowedByPin(pinState, fromIndex, toIndex)) {
-                moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, false, false, false,
-                        null, null, false, false, lastMoveDoubleStepPawnIndex));
+                moves.add(encodeMove(fromIndex, toIndex, PieceType.PAWN, whitesTurn, false, false, false,
+                        null, null, false, false));
             }
             temp &= temp - 1;
         }
@@ -1199,8 +1201,8 @@ public class BitBoard {
             int toIndex = Long.numberOfTrailingZeros(temp);
             int fromIndex = whitesTurn ? toIndex - 16 : toIndex + 16;
             if (isMoveAllowedByPin(pinState, fromIndex, toIndex)) {
-                moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, false, false, false,
-                        null, null, false, false, lastMoveDoubleStepPawnIndex));
+                moves.add(encodeMove(fromIndex, toIndex, PieceType.PAWN, whitesTurn, false, false, false,
+                        null, null, false, false));
             }
             temp &= temp - 1;
         }
@@ -1230,8 +1232,8 @@ public class BitBoard {
             int fromIndex = whitesTurn ? toIndex - 7 : toIndex + 7;
             PieceType capturedType = getPieceTypeAtIndex(toIndex);
             if (capturedType != PieceType.KING && isMoveAllowedByPin(pinState, fromIndex, toIndex)) {
-                moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, true, false, false,
-                        null, capturedType, false, false, lastMoveDoubleStepPawnIndex));
+                moves.add(encodeMove(fromIndex, toIndex, PieceType.PAWN, whitesTurn, true, false, false,
+                        null, capturedType, false, false));
             }
             temp &= temp - 1;
         }
@@ -1243,8 +1245,8 @@ public class BitBoard {
             int fromIndex = whitesTurn ? toIndex - 9 : toIndex + 9;
             PieceType capturedType = getPieceTypeAtIndex(toIndex);
             if (capturedType != PieceType.KING && isMoveAllowedByPin(pinState, fromIndex, toIndex)) {
-                moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, true, false, false,
-                        null, capturedType, false, false, lastMoveDoubleStepPawnIndex));
+                moves.add(encodeMove(fromIndex, toIndex, PieceType.PAWN, whitesTurn, true, false, false,
+                        null, capturedType, false, false));
             }
             temp &= temp - 1;
         }
@@ -1318,13 +1320,23 @@ public class BitBoard {
 
     private void addEnPassantMove(IntArrayList moves, int fromIndex, int toIndex, boolean whitesTurn) {
         moves.add(
-                createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, true, false, true, null, PieceType.PAWN, false, false, lastMoveDoubleStepPawnIndex));
+                encodeMove(fromIndex, toIndex, PieceType.PAWN, whitesTurn, true, false, true, null, PieceType.PAWN, false, false));
     }
 
     private void addPromotionMoves(IntArrayList moves, int fromIndex, int toIndex, boolean whitesTurn, boolean isCapture, PieceType capturedType) {
         for (PieceType promotionPiece : PROMOTION_PIECES) {
-            moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn, isCapture, false, false, promotionPiece, capturedType, false, false, lastMoveDoubleStepPawnIndex));
+            moves.add(encodeMove(fromIndex, toIndex, PieceType.PAWN, whitesTurn, isCapture, false, false, promotionPiece, capturedType, false, false));
         }
+    }
+
+
+    private int encodeMove(int fromIndex, int toIndex, PieceType pieceType, boolean isWhite,
+                           boolean isCapture, boolean isCastlingMove, boolean isEnPassantMove,
+                           PieceType promotionPieceType, PieceType capturedPieceType,
+                           boolean isKingFirstMove, boolean isRookFirstMove) {
+        return MoveHelper.createMoveInt(fromIndex, toIndex, pieceType, isWhite, isCapture, isCastlingMove,
+                isEnPassantMove, promotionPieceType, capturedPieceType, isKingFirstMove,
+                isRookFirstMove, getCastlingRightsMask());
     }
 
 
@@ -1347,7 +1359,7 @@ public class BitBoard {
 
                 PieceType capturedPieceType = isCapture ? getPieceTypeAtIndex(targetIndex) : null;
                 if (capturedPieceType != PieceType.KING) {
-                    moves.add(createMoveInt(knightIndex, targetIndex, PieceType.KNIGHT, whitesTurn, isCapture, false, false, null, capturedPieceType, false, false, lastMoveDoubleStepPawnIndex));
+                    moves.add(encodeMove(knightIndex, targetIndex, PieceType.KNIGHT, whitesTurn, isCapture, false, false, null, capturedPieceType, false, false));
                 }
 
                 potentialMoves &= potentialMoves - 1; // Clear the lowest set bit
@@ -1389,7 +1401,7 @@ public class BitBoard {
                     if (pinRayInfo != null && isCapture && pinRayInfo.pinnerSquare() != targetSquare) {
                         continue;
                     }
-                    moves.add(createMoveInt(bishopSquare, targetSquare, PieceType.BISHOP, isWhite, isCapture, false, false, null, capturedType, false, false, lastMoveDoubleStepPawnIndex));
+                    moves.add(encodeMove(bishopSquare, targetSquare, PieceType.BISHOP, isWhite, isCapture, false, false, null, capturedType, false, false));
                 }
             }
         }
@@ -1426,7 +1438,7 @@ public class BitBoard {
                     if (pinRayInfo != null && isCapture && pinRayInfo.pinnerSquare() != targetSquare) {
                         continue;
                     }
-                    moves.add(createMoveInt(rookSquare, targetSquare, PieceType.ROOK, whitesTurn, isCapture, false, false, null, capturedType, false, isFirstRookMove, lastMoveDoubleStepPawnIndex));
+                    moves.add(encodeMove(rookSquare, targetSquare, PieceType.ROOK, whitesTurn, isCapture, false, false, null, capturedType, false, isFirstRookMove));
                 }
             }
         }
@@ -1465,7 +1477,7 @@ public class BitBoard {
                     if (pinRayInfo != null && isCapture && pinRayInfo.pinnerSquare() != targetSquare) {
                         continue;
                     }
-                    moves.add(createMoveInt(queenSquare, targetSquare, PieceType.QUEEN, whitesTurn, isCapture, false, false, null, capturedType, false, false, lastMoveDoubleStepPawnIndex));
+                    moves.add(encodeMove(queenSquare, targetSquare, PieceType.QUEEN, whitesTurn, isCapture, false, false, null, capturedType, false, false));
                 }
             }
         }
@@ -1496,7 +1508,7 @@ public class BitBoard {
             boolean isCapture = (captureMoves & (1L << targetIndex)) != 0;
             PieceType capturedType = isCapture ? getPieceTypeAtIndex(targetIndex) : null;
             if (capturedType != PieceType.KING) {
-                moves.add(createMoveInt(
+                moves.add(encodeMove(
                         kingPositionIndex, targetIndex, PieceType.KING, whitesTurn,
                         isCapture, false, false, null, capturedType, isFirstKingMove, false,
                         lastMoveDoubleStepPawnIndex
@@ -1512,12 +1524,12 @@ public class BitBoard {
         // Avoid an extra bit scan: we already know the king's square.
         if (canKingCastle(whitesTurn, kingPositionIndex)) {
             if (canCastleKingside(whitesTurn, kingPositionIndex, pinState)) {
-                moves.add(createMoveInt(kingPositionIndex, kingPositionIndex + 2, PieceType.KING,
-                        whitesTurn, false, true, false, null, null, true, true, lastMoveDoubleStepPawnIndex));
+                moves.add(encodeMove(kingPositionIndex, kingPositionIndex + 2, PieceType.KING,
+                        whitesTurn, false, true, false, null, null, true, true));
             }
             if (canCastleQueenside(whitesTurn, kingPositionIndex, pinState)) {
-                moves.add(createMoveInt(kingPositionIndex, kingPositionIndex - 2, PieceType.KING,
-                        whitesTurn, false, true, false, null, null, true, true, lastMoveDoubleStepPawnIndex));
+                moves.add(encodeMove(kingPositionIndex, kingPositionIndex - 2, PieceType.KING,
+                        whitesTurn, false, true, false, null, null, true, true));
             }
         }
     }
@@ -1730,6 +1742,8 @@ public class BitBoard {
         boolean oldBK = !blackKingMoved && !blackRookH8Moved;
         boolean oldBQ = !blackKingMoved && !blackRookA8Moved;
 
+        doubleStepHistory.push(lastMoveDoubleStepPawnIndex);
+
         PieceType movingPiece = pieceTypeFromBits(pieceBits);
         Color moverColor = isWhite ? Color.WHITE : Color.BLACK;
         xorPiece(moverColor, movingPiece, fromIndex);
@@ -1774,6 +1788,7 @@ public class BitBoard {
                     } else {
                         whiteRooks &= ~capMask;
                     }
+                    markRookCaptured(capIndex);
                 }
                 case QUEEN -> {
                     if (isWhite) {
@@ -1996,6 +2011,10 @@ public class BitBoard {
         }
     }
 
+    private void markRookCaptured(int rookIndex) {
+        markRookAsMoved(rookIndex);
+    }
+
     public boolean hasRookMoved(int rookIndex) {
         return switch (rookIndex) {
             case 0 ->  // 'a1'
@@ -2113,7 +2132,7 @@ public class BitBoard {
         int capturedPieceTypeBits = MoveHelper.deriveCapturedPieceTypeBits(move);
         boolean isKingFirstMove = MoveHelper.isKingFirstMove(move);
         boolean isRookFirstMove = MoveHelper.isRookFirstMove(move);
-        int doubleStepPawnIndex = MoveHelper.deriveLastMoveDoubleStepPawnIndex(move);
+        int castlingRightsMask = MoveHelper.deriveCastlingRights(move);
 
         int oldEp = getEnPassantTargetIndex();
         boolean oldWK = !whiteKingMoved && !whiteRookH1Moved;
@@ -2163,7 +2182,7 @@ public class BitBoard {
         undoCastling(fromIndex, toIndex, isCastlingMove, isWhite);
 
         // 7) restore state flags + ep index
-        undoGameState(fromIndex, toIndex, pieceTypeBits, isKingFirstMove, isRookFirstMove, isWhite, doubleStepPawnIndex);
+        undoGameState(fromIndex, toIndex, pieceTypeBits, isKingFirstMove, isRookFirstMove, isWhite, castlingRightsMask);
 
         int newEp = (lastMoveDoubleStepPawnIndex != 0) ? ((isWhite ? 5 : 2) * 8 + (lastMoveDoubleStepPawnIndex & 7)) : -1;
         if (oldEp != -1) xorEp(oldEp);
@@ -2198,9 +2217,11 @@ public class BitBoard {
         flipSideToMove();
     }
 
-    private void undoGameState(int fromIndex, int toIndex, int pieceTypeBits, boolean isKingFirstMove, boolean isRookFirstMove, boolean isWhite, int doubleStepPawnIndex) {
+    private void undoGameState(int fromIndex, int toIndex, int pieceTypeBits, boolean isKingFirstMove, boolean isRookFirstMove, boolean isWhite, int castlingRightsMask) {
 
-        lastMoveDoubleStepPawnIndex = doubleStepPawnIndex;
+        lastMoveDoubleStepPawnIndex = doubleStepHistory.isEmpty() ? 0 : doubleStepHistory.pop();
+
+        restoreCastlingFlags(castlingRightsMask);
 
         if (pieceTypeBits == 6 && isKingFirstMove) {
             if (isWhite) {
@@ -2234,6 +2255,27 @@ public class BitBoard {
             } else if (fromIndex == 63) { // 'h8'
                 blackRookH8Moved = false;
             }
+        }
+    }
+
+    private void restoreCastlingFlags(int castlingRightsMask) {
+        if ((castlingRightsMask & 0x1) != 0) {
+            whiteRookH1Moved = false;
+        }
+        if ((castlingRightsMask & 0x2) != 0) {
+            whiteRookA1Moved = false;
+        }
+        if ((castlingRightsMask & 0x4) != 0) {
+            blackRookH8Moved = false;
+        }
+        if ((castlingRightsMask & 0x8) != 0) {
+            blackRookA8Moved = false;
+        }
+        if ((castlingRightsMask & 0x3) != 0) {
+            whiteKingMoved = false;
+        }
+        if ((castlingRightsMask & 0xC) != 0) {
+            blackKingMoved = false;
         }
     }
 
@@ -2395,6 +2437,23 @@ public class BitBoard {
         int file = lastMoveDoubleStepPawnIndex & 7;
         int rank = whitesTurn ? 5 : 2;
         return rank * 8 + file;
+    }
+
+    public int getCastlingRightsMask() {
+        int mask = 0;
+        if (!whiteKingMoved && !whiteRookH1Moved) {
+            mask |= 1;
+        }
+        if (!whiteKingMoved && !whiteRookA1Moved) {
+            mask |= 1 << 1;
+        }
+        if (!blackKingMoved && !blackRookH8Moved) {
+            mask |= 1 << 2;
+        }
+        if (!blackKingMoved && !blackRookA8Moved) {
+            mask |= 1 << 3;
+        }
+        return mask;
     }
 
 

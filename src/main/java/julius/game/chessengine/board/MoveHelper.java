@@ -37,7 +37,7 @@ public class MoveHelper {
     }
 
     public static boolean isCapture(int move) {
-        return ((move >>> 16) & 0x1) != 0;
+        return deriveCapturedPieceTypeBits(move) != 0;
     }
 
     public static boolean isEnPassantMove(int move) {
@@ -56,11 +56,11 @@ public class MoveHelper {
         return (move & (1 << 25)) != 0;
     }
 
-    public static int deriveLastMoveDoubleStepPawnIndex(int move) {
-        return (move >> 26) & 0x3F; // Extract the 6 bits starting from the 26th bit
+    public static int deriveCastlingRights(int move) {
+        return (move >> 26) & 0x0F;
     }
 
-    public static int createMoveInt(int fromIndex, int toIndex, PieceType pieceType, boolean isWhite, boolean isCapture, boolean isCastlingMove, boolean isEnPassantMove, PieceType promotionPieceType, PieceType capturedPieceType, boolean isKingFirstMove, boolean isRookFirstMove, int lastMoveDoubleStepPawnIndex) {
+    public static int createMoveInt(int fromIndex, int toIndex, PieceType pieceType, boolean isWhite, boolean isCapture, boolean isCastlingMove, boolean isEnPassantMove, PieceType promotionPieceType, PieceType capturedPieceType, boolean isKingFirstMove, boolean isRookFirstMove, int castlingRightsMask) {
         int moveInt = 0;
         moveInt |= fromIndex; // 6 bits for 'from' position
         moveInt |= toIndex << 6; // 6 bits for 'to' position, shifted by 6 bits
@@ -72,7 +72,7 @@ public class MoveHelper {
             moveInt |= 1 << 15; // 1 bit for color, shifted by 15 bits
         }
 
-        int specialProperty = (isCapture ? 1 : 0) | (isCastlingMove ? 2 : 0) | (isEnPassantMove ? 3 : 0);
+        int specialProperty = isCastlingMove ? 2 : (isEnPassantMove ? 3 : 0);
         moveInt |= specialProperty << 16; // Shifted by 16 bits
 
         if (promotionPieceType != null) {
@@ -95,7 +95,7 @@ public class MoveHelper {
             moveInt |= 1 << 25; // 1 bit for rook's first move, shifted by 25 bits
         }
 
-        moveInt |= lastMoveDoubleStepPawnIndex << 26; // Shifted by 26 bits
+        moveInt |= (castlingRightsMask & 0x0F) << 26; // 4 bits for castling rights, shifted by 26 bits
 
         return moveInt;
     }

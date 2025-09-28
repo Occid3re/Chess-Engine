@@ -165,9 +165,8 @@ public class Move {
         boolean isWhite = (moveInt & (1 << 15)) != 0; // Extract the color bit
 
         int specialProperty = (moveInt >> 16) & 0x03; // Extract the next 2 bits
-        boolean isCapture = (specialProperty & 0x01) != 0;
-        boolean isEnPassantMove = specialProperty == 3;
         boolean isCastlingMove = specialProperty == 2;
+        boolean isEnPassantMove = specialProperty == 3;
 
         int promotionPieceTypeBits = (moveInt >> 18) & 0x07; // Extract the next 3 bits
         PieceType promotionPieceType = intToPieceType(promotionPieceTypeBits);
@@ -180,6 +179,8 @@ public class Move {
         if (capturedPieceTypeBits == 0) {
             capturedPieceType = null; // No capture
         }
+
+        boolean isCapture = capturedPieceType != null;
 
         boolean isKingFirstMove = (moveInt & (1 << 24)) != 0; // Extract the king's first move bit
         boolean isRookFirstMove = (moveInt & (1 << 25)) != 0; // Extract the rook's first move bit
