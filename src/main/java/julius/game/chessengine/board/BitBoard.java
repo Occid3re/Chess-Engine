@@ -71,6 +71,9 @@ public class BitBoard {
     private final PieceBitboards seeWhiteScratch = new PieceBitboards();
     private final PieceBitboards seeBlackScratch = new PieceBitboards();
 
+    // Reuse gain stack in SEE (allocation-free)
+    private final int[] seeGain = new int[32];
+
     private static final int MAX_PSEUDO_LEGAL_MOVES = 218;
 
     public record PinState(boolean whiteSide, int kingSquare, long diagonalPinned, long straightPinned) {
@@ -666,7 +669,7 @@ public class BitBoard {
         occ |= toMask;
 
         // Gain stack (swap-off)
-        int[] gain = new int[32];
+        int[] gain = seeGain;
         int d = 0;
 
         int capVal = isCapture ? Score.getPieceValue(isEp ? 1 : capturedBits) : 0;
