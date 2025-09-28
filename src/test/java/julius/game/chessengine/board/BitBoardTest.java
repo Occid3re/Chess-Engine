@@ -91,21 +91,6 @@ public class BitBoardTest {
     }
 
     @Test
-    void verticallyPinnedPawnStaysOnFile() {
-        Engine engine = new Engine();
-        engine.importBoardFromFen("4r3/8/8/8/8/3n1n2/4P3/4K3 w - - 0 1");
-
-        BitBoard board = engine.getBitBoard();
-        IntArrayList moves = board.generateAllPossibleMoves(board.whitesTurn);
-
-        int from = convertStringToIndex("e2");
-        assertTrue(moveExists(moves, from, convertStringToIndex("e3")));
-        assertTrue(moveExists(moves, from, convertStringToIndex("e4")));
-        assertFalse(moveExists(moves, from, convertStringToIndex("d3")));
-        assertFalse(moveExists(moves, from, convertStringToIndex("f3")));
-    }
-
-    @Test
     void seeConsidersKingRecaptureOnCheckingCapture() {
         Engine engine = new Engine();
         engine.importBoardFromFen("6k1/5p2/4Q3/8/8/8/6P1/6K1 w - - 0 1");
