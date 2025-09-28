@@ -514,7 +514,75 @@ public class BitBoardTest {
 
     }
 
-/*    @Test
+    @Test
+    public void rookCaptureClearsWhiteQueensideRightAndUndoRestores() {
+        BitBoard board = FEN.translateFENtoBitBoard("4k3/8/8/8/8/8/r7/R3K3 b Q - 0 1");
+        long originalHash = board.getBoardStateHash();
+
+        IntArrayList moves = board.generateAllPossibleMoves(board.isWhitesTurn());
+        int from = convertStringToIndex("a2");
+        int to = convertStringToIndex("a1");
+
+        int captureMove = -1;
+        for (int i = 0; i < moves.size(); i++) {
+            int move = moves.getInt(i);
+            if (MoveHelper.deriveFromIndex(move) == from && MoveHelper.deriveToIndex(move) == to) {
+                captureMove = move;
+                break;
+            }
+        }
+        assertNotEquals(-1, captureMove);
+
+        int castlingRights = MoveHelper.deriveCastlingRights(captureMove);
+        assertTrue((castlingRights & 0x2) != 0);
+
+        board.performMove(captureMove);
+        assertTrue(board.isWhiteRookA1Moved());
+
+        board.undoMove(captureMove);
+        assertFalse(board.isWhiteRookA1Moved());
+        assertEquals(originalHash, board.getBoardStateHash());
+
+        board.performMove(captureMove);
+        board.undoMove(captureMove);
+        assertEquals(originalHash, board.getBoardStateHash());
+    }
+
+    @Test
+    public void rookCaptureClearsBlackKingsideRightAndUndoRestores() {
+        BitBoard board = FEN.translateFENtoBitBoard("r3k2r/8/8/8/8/8/7R/4K3 w k - 0 1");
+        long originalHash = board.getBoardStateHash();
+
+        IntArrayList moves = board.generateAllPossibleMoves(board.isWhitesTurn());
+        int from = convertStringToIndex("h2");
+        int to = convertStringToIndex("h8");
+
+        int captureMove = -1;
+        for (int i = 0; i < moves.size(); i++) {
+            int move = moves.getInt(i);
+            if (MoveHelper.deriveFromIndex(move) == from && MoveHelper.deriveToIndex(move) == to) {
+                captureMove = move;
+                break;
+            }
+        }
+        assertNotEquals(-1, captureMove);
+
+        int castlingRights = MoveHelper.deriveCastlingRights(captureMove);
+        assertTrue((castlingRights & 0x4) != 0);
+
+        board.performMove(captureMove);
+        assertTrue(board.isBlackRookH8Moved());
+
+        board.undoMove(captureMove);
+        assertFalse(board.isBlackRookH8Moved());
+        assertEquals(originalHash, board.getBoardStateHash());
+
+        board.performMove(captureMove);
+        board.undoMove(captureMove);
+        assertEquals(originalHash, board.getBoardStateHash());
+    }
+
+    /*    @Test
     public void checkRookFirstMove() {
         Engine engine = new Engine(); // The chess engine
 

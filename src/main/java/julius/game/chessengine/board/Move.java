@@ -181,8 +181,34 @@ public class Move {
             capturedPieceType = null; // No capture
         }
 
-        boolean isKingFirstMove = (moveInt & (1 << 24)) != 0; // Extract the king's first move bit
-        boolean isRookFirstMove = (moveInt & (1 << 25)) != 0; // Extract the rook's first move bit
+        int castlingStateBits = MoveHelper.deriveCastlingState(moveInt);
+        boolean whiteKingMoved = (castlingStateBits & 0x01) != 0;
+        boolean whiteRookA1Moved = (castlingStateBits & 0x02) != 0;
+        boolean whiteRookH1Moved = (castlingStateBits & 0x04) != 0;
+        boolean blackKingMoved = (castlingStateBits & 0x08) != 0;
+        boolean blackRookA8Moved = (castlingStateBits & 0x10) != 0;
+        boolean blackRookH8Moved = (castlingStateBits & 0x20) != 0;
+
+        boolean isKingFirstMove = pieceType == PieceType.KING &&
+                (isWhite ? !whiteKingMoved : !blackKingMoved);
+
+        boolean isRookFirstMove = false;
+        if (pieceType == PieceType.ROOK) {
+            int fromIndex = moveInt & 0x3F;
+            if (isWhite) {
+                if (fromIndex == 0) {
+                    isRookFirstMove = !whiteRookA1Moved;
+                } else if (fromIndex == 7) {
+                    isRookFirstMove = !whiteRookH1Moved;
+                }
+            } else {
+                if (fromIndex == 56) {
+                    isRookFirstMove = !blackRookA8Moved;
+                } else if (fromIndex == 63) {
+                    isRookFirstMove = !blackRookH8Moved;
+                }
+            }
+        }
 
         return new Move(from, to, pieceType, isWhite, isCapture, isCastlingMove, isEnPassantMove, promotionPieceType, capturedPieceType, isKingFirstMove, isRookFirstMove);
     }
