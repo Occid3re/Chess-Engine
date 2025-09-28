@@ -10,10 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class CastlingEvaluationTest {
 
-    private static final int CASTLING_BONUS = 20;
-    private static final int NOT_CASTLED_AND_ROOK_MOVE_PENALTY = -10;
-    private static final int BLEND_SCALE = 256;
-
     @Test
     void castledKingReceivesBonusInTaperedScores() {
         BitBoard castled = FEN.translateFENtoBitBoard("4k3/8/8/8/8/8/8/5RK1 w - - 0 1");
@@ -23,7 +19,7 @@ class CastlingEvaluationTest {
         ScoreSnapshot uncastledScore = evaluatePieceSquares(uncastled);
 
         int phase = castled.getPhase();
-        int expectedBonus = CASTLING_BONUS * (BLEND_SCALE - phase) / BLEND_SCALE;
+        int expectedBonus = PieceSquareModule.castlingBonus() * (PieceSquareModule.blendScale() - phase) / PieceSquareModule.blendScale();
 
         assertEquals(expectedBonus, castledScore.midgame() - uncastledScore.midgame());
         assertEquals(expectedBonus, castledScore.endgame() - uncastledScore.endgame());
@@ -39,7 +35,8 @@ class CastlingEvaluationTest {
         ScoreSnapshot exposedScore = evaluatePieceSquares(exposed);
 
         int phase = safe.getPhase();
-        int rookPenalty = NOT_CASTLED_AND_ROOK_MOVE_PENALTY * (BLEND_SCALE - phase) / BLEND_SCALE;
+        int rookPenalty = PieceSquareModule.notCastledRookMovePenalty()
+                * (PieceSquareModule.blendScale() - phase) / PieceSquareModule.blendScale();
         int expectedPenalty = 4 * rookPenalty;
 
         assertEquals(expectedPenalty, exposedScore.midgame() - safeScore.midgame());

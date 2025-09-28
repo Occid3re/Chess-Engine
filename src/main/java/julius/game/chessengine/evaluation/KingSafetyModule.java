@@ -6,6 +6,7 @@ import julius.game.chessengine.board.ImmutableBoardView;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.helper.BishopHelper;
 import julius.game.chessengine.helper.RookHelper;
+import julius.game.chessengine.tuning.TunableParameter;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -32,15 +33,27 @@ public final class KingSafetyModule implements EvaluationModule {
     private static final int QUEEN = MoveHelper.pieceTypeToInt(PieceType.QUEEN);
     private static final int KING = MoveHelper.pieceTypeToInt(PieceType.KING);
 
-    private static final int MISSING_PAWN_SHIELD_PENALTY = -15;
-    private static final int HALF_OPEN_FILE_PENALTY = -15;
-    private static final int OPEN_FILE_PENALTY = -25;
-    private static final int DEFENDER_BONUS = 5;
-    private static final int QUEEN_ATTACKED_PENALTY = -75;
-    private static final int BACKRANK_WEAKNESS_MIDGAME_PENALTY = -100;
-    private static final int BACKRANK_WEAKNESS_ENDGAME_PENALTY = -50;
+    private static final int DEFAULT_MISSING_PAWN_SHIELD_PENALTY = -15;
+    private static final int DEFAULT_HALF_OPEN_FILE_PENALTY = -15;
+    private static final int DEFAULT_OPEN_FILE_PENALTY = -25;
+    private static final int DEFAULT_DEFENDER_BONUS = 5;
+    private static final int DEFAULT_QUEEN_ATTACKED_PENALTY = -75;
+    private static final int DEFAULT_BACKRANK_WEAKNESS_MIDGAME_PENALTY = -100;
+    private static final int DEFAULT_BACKRANK_WEAKNESS_ENDGAME_PENALTY = -50;
 
-    private static final int[] ATTACK_WEIGHTS = new int[7];
+    private static final TunableParameter MISSING_PAWN_SHIELD_PENALTY = TunableParameter.of("kingSafety.missingPawnShieldPenalty", DEFAULT_MISSING_PAWN_SHIELD_PENALTY);
+    private static final TunableParameter HALF_OPEN_FILE_PENALTY = TunableParameter.of("kingSafety.halfOpenFilePenalty", DEFAULT_HALF_OPEN_FILE_PENALTY);
+    private static final TunableParameter OPEN_FILE_PENALTY = TunableParameter.of("kingSafety.openFilePenalty", DEFAULT_OPEN_FILE_PENALTY);
+    private static final TunableParameter DEFENDER_BONUS = TunableParameter.of("kingSafety.defenderBonus", DEFAULT_DEFENDER_BONUS);
+    private static final TunableParameter QUEEN_ATTACKED_PENALTY = TunableParameter.of("kingSafety.queenAttackedPenalty", DEFAULT_QUEEN_ATTACKED_PENALTY);
+    private static final TunableParameter BACKRANK_WEAKNESS_MIDGAME_PENALTY = TunableParameter.of("kingSafety.backrankWeaknessMidgamePenalty", DEFAULT_BACKRANK_WEAKNESS_MIDGAME_PENALTY);
+    private static final TunableParameter BACKRANK_WEAKNESS_ENDGAME_PENALTY = TunableParameter.of("kingSafety.backrankWeaknessEndgamePenalty", DEFAULT_BACKRANK_WEAKNESS_ENDGAME_PENALTY);
+
+    private static final TunableParameter PAWN_ATTACK_WEIGHT = TunableParameter.of("kingSafety.attackWeightPawn", 5);
+    private static final TunableParameter KNIGHT_ATTACK_WEIGHT = TunableParameter.of("kingSafety.attackWeightKnight", 10);
+    private static final TunableParameter BISHOP_ATTACK_WEIGHT = TunableParameter.of("kingSafety.attackWeightBishop", 10);
+    private static final TunableParameter ROOK_ATTACK_WEIGHT = TunableParameter.of("kingSafety.attackWeightRook", 15);
+    private static final TunableParameter QUEEN_ATTACK_WEIGHT = TunableParameter.of("kingSafety.attackWeightQueen", 20);
 
     private static final long NOT_A_FILE = ~FileMasks[0];
     private static final long NOT_H_FILE = ~FileMasks[7];
@@ -48,13 +61,14 @@ public final class KingSafetyModule implements EvaluationModule {
     private static final BishopHelper BISHOP_HELPER = BishopHelper.getInstance();
     private static final RookHelper ROOK_HELPER = RookHelper.getInstance();
 
-    static {
-        ATTACK_WEIGHTS[PAWN] = 5;
-        ATTACK_WEIGHTS[KNIGHT] = 10;
-        ATTACK_WEIGHTS[BISHOP] = 10;
-        ATTACK_WEIGHTS[ROOK] = 15;
-        ATTACK_WEIGHTS[QUEEN] = 20;
-    }
+    private final int missingPawnShieldPenalty;
+    private final int halfOpenFilePenalty;
+    private final int openFilePenalty;
+    private final int defenderBonus;
+    private final int queenAttackedPenalty;
+    private final int backrankWeaknessMidgamePenalty;
+    private final int backrankWeaknessEndgamePenalty;
+    private final int[] attackWeights = new int[7];
 
     private final SideState[] sideStates = {new SideState(), new SideState()};
     private KingSafetyView currentView = KingSafetyView.empty();
@@ -62,6 +76,21 @@ public final class KingSafetyModule implements EvaluationModule {
     private boolean dirty = true;
     private int midgameScoreCache;
     private int endgameScoreCache;
+
+    public KingSafetyModule() {
+        this.missingPawnShieldPenalty = MISSING_PAWN_SHIELD_PENALTY.getInt();
+        this.halfOpenFilePenalty = HALF_OPEN_FILE_PENALTY.getInt();
+        this.openFilePenalty = OPEN_FILE_PENALTY.getInt();
+        this.defenderBonus = DEFENDER_BONUS.getInt();
+        this.queenAttackedPenalty = QUEEN_ATTACKED_PENALTY.getInt();
+        this.backrankWeaknessMidgamePenalty = BACKRANK_WEAKNESS_MIDGAME_PENALTY.getInt();
+        this.backrankWeaknessEndgamePenalty = BACKRANK_WEAKNESS_ENDGAME_PENALTY.getInt();
+        attackWeights[PAWN] = PAWN_ATTACK_WEIGHT.getInt();
+        attackWeights[KNIGHT] = KNIGHT_ATTACK_WEIGHT.getInt();
+        attackWeights[BISHOP] = BISHOP_ATTACK_WEIGHT.getInt();
+        attackWeights[ROOK] = ROOK_ATTACK_WEIGHT.getInt();
+        attackWeights[QUEEN] = QUEEN_ATTACK_WEIGHT.getInt();
+    }
 
     @Override
     public void initialize(EvaluationContext context) {
@@ -263,7 +292,7 @@ public final class KingSafetyModule implements EvaluationModule {
 
         boolean friendlyPawnOnFile = (friendlyPawns & state.fileMask) != 0;
         if (!friendlyPawnOnFile) {
-            state.filePenalty = (enemyPawns & state.fileMask) != 0 ? HALF_OPEN_FILE_PENALTY : OPEN_FILE_PENALTY;
+            state.filePenalty = (enemyPawns & state.fileMask) != 0 ? halfOpenFilePenalty : openFilePenalty;
         }
 
         state.defenderCount = Long.bitCount(friendlyAttacks & state.kingZone);
@@ -284,9 +313,9 @@ public final class KingSafetyModule implements EvaluationModule {
         }
         state.totalAttackWeight = total;
 
-        int shieldPenalty = state.missingShield * MISSING_PAWN_SHIELD_PENALTY;
+        int shieldPenalty = state.missingShield * missingPawnShieldPenalty;
         int attackPenalty = -state.totalAttackWeight;
-        int defenderBonus = state.defenderCount * DEFENDER_BONUS;
+        int defenderBonus = state.defenderCount * this.defenderBonus;
         computeBackrankWeaknessPenalty(state, board, isWhite);
         int baseMidgame = shieldPenalty + state.filePenalty + attackPenalty + defenderBonus;
         state.midgameKingSafety = baseMidgame + state.backrankWeaknessMidgame;
@@ -299,8 +328,8 @@ public final class KingSafetyModule implements EvaluationModule {
         while (remaining != 0) {
             long q = remaining & -remaining;
             if ((enemyAttacks & q) != 0) {
-                queenMid += QUEEN_ATTACKED_PENALTY;
-                queenEnd += QUEEN_ATTACKED_PENALTY;
+                queenMid += queenAttackedPenalty;
+                queenEnd += queenAttackedPenalty;
             }
             remaining ^= q;
         }
@@ -336,8 +365,8 @@ public final class KingSafetyModule implements EvaluationModule {
             return;
         }
 
-        state.backrankWeaknessMidgame = BACKRANK_WEAKNESS_MIDGAME_PENALTY;
-        state.backrankWeaknessEndgame = BACKRANK_WEAKNESS_ENDGAME_PENALTY;
+        state.backrankWeaknessMidgame = backrankWeaknessMidgamePenalty;
+        state.backrankWeaknessEndgame = backrankWeaknessEndgamePenalty;
     }
 
     private static long computeEscapeSquares(long kingMask, boolean isWhite) {
@@ -443,7 +472,7 @@ public final class KingSafetyModule implements EvaluationModule {
             long pawn = remaining & -remaining;
             int index = Long.numberOfTrailingZeros(pawn);
             long attacks = PAWN_ATTACKS[color][index];
-            addAttacks(state, attacks, ATTACK_WEIGHTS[PAWN]);
+            addAttacks(state, attacks, attackWeights[PAWN]);
             remaining ^= pawn;
         }
     }
@@ -457,7 +486,7 @@ public final class KingSafetyModule implements EvaluationModule {
             long knight = remaining & -remaining;
             int index = Long.numberOfTrailingZeros(knight);
             long attacks = knightMoveTable[index];
-            addAttacks(state, attacks, ATTACK_WEIGHTS[KNIGHT]);
+            addAttacks(state, attacks, attackWeights[KNIGHT]);
             remaining ^= knight;
         }
     }
@@ -472,7 +501,7 @@ public final class KingSafetyModule implements EvaluationModule {
             int index = Long.numberOfTrailingZeros(bishop);
             long mask = BISHOP_HELPER.bishopMasks[index];
             long attacks = BISHOP_HELPER.calculateMovesUsingBishopMagic(index, occupancy & mask);
-            addAttacks(state, attacks, ATTACK_WEIGHTS[BISHOP]);
+            addAttacks(state, attacks, attackWeights[BISHOP]);
             remaining ^= bishop;
         }
     }
@@ -487,7 +516,7 @@ public final class KingSafetyModule implements EvaluationModule {
             int index = Long.numberOfTrailingZeros(rook);
             long mask = ROOK_HELPER.rookMasks[index];
             long attacks = ROOK_HELPER.calculateMovesUsingRookMagic(index, occupancy & mask);
-            addAttacks(state, attacks, ATTACK_WEIGHTS[ROOK]);
+            addAttacks(state, attacks, attackWeights[ROOK]);
             remaining ^= rook;
         }
     }
@@ -504,7 +533,7 @@ public final class KingSafetyModule implements EvaluationModule {
             long rookMask = ROOK_HELPER.rookMasks[index];
             long diagonal = BISHOP_HELPER.calculateMovesUsingBishopMagic(index, occupancy & bishopMask);
             long straight = ROOK_HELPER.calculateMovesUsingRookMagic(index, occupancy & rookMask);
-            addAttacks(state, diagonal | straight, ATTACK_WEIGHTS[QUEEN]);
+            addAttacks(state, diagonal | straight, attackWeights[QUEEN]);
             remaining ^= queen;
         }
     }

@@ -17,7 +17,7 @@ public class BishopPairBonusTest {
         BitBoard single = FEN.translateFENtoBitBoard("4k3/8/8/8/8/8/8/4KB2 w - - 0 1");
 
         int diff = materialScore(pair) - materialScore(single);
-        assertEquals(MaterialModule.BISHOP_VALUE + MaterialModule.BISHOP_PAIR_BONUS, diff);
+        assertEquals(MaterialModule.bishopValue() + MaterialModule.bishopPairBonus(), diff);
     }
 
     @Test
@@ -26,7 +26,7 @@ public class BishopPairBonusTest {
         BitBoard single = FEN.translateFENtoBitBoard("4kb2/8/8/8/8/8/8/4K3 w - - 0 1");
 
         int diff = materialScore(single) - materialScore(pair);
-        assertEquals(MaterialModule.BISHOP_VALUE + MaterialModule.BISHOP_PAIR_BONUS, diff);
+        assertEquals(MaterialModule.bishopValue() + MaterialModule.bishopPairBonus(), diff);
     }
 
     private static int materialScore(BitBoard board) {

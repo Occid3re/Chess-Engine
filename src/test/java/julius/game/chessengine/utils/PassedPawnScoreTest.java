@@ -14,7 +14,7 @@ public class PassedPawnScoreTest {
     void whitePassedPawnGetsBonus() {
         BitBoard board = FEN.translateFENtoBitBoard("4k3/8/8/4P3/8/8/8/4K3 w - - 0 1");
         PawnStructureView view = pawnStructure(board);
-        assertEquals(PawnStructureModule.PASSED_PAWN_BONUS * 4,
+        assertEquals(PawnStructureModule.passedPawnBonus() * 4,
                 view.whitePassed().blend(board.getPhase()));
         assertEquals(0, view.blackPassed().blend(board.getPhase()));
     }
@@ -23,7 +23,7 @@ public class PassedPawnScoreTest {
     void blackPassedPawnGetsBonus() {
         BitBoard board = FEN.translateFENtoBitBoard("4k3/8/8/8/3p4/8/8/4K3 w - - 0 1");
         PawnStructureView view = pawnStructure(board);
-        assertEquals(PawnStructureModule.PASSED_PAWN_BONUS * 4,
+        assertEquals(PawnStructureModule.passedPawnBonus() * 4,
                 view.blackPassed().blend(board.getPhase()));
         assertEquals(0, view.whitePassed().blend(board.getPhase()));
     }

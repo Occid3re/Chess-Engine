@@ -5,6 +5,7 @@ import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.ImmutableBoardView;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.helper.PawnHelper;
+import julius.game.chessengine.tuning.TunableParameter;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -23,25 +24,39 @@ import static julius.game.chessengine.helper.PawnMoveTables.PAWN_PUSHES;
  */
 public final class PawnStructureModule implements EvaluationModule, MaterialModule.PawnChangeListener {
 
-    public static final int CENTER_PAWN_BONUS = 15;
-    public static final int PASSED_PAWN_BONUS = 60;
-    public static final int CONNECTED_PAWN_BONUS = 8;
-    public static final int PAWN_ISLAND_PENALTY = -5;
-    public static final int DOUBLED_PAWN_PENALTY = -12;
-    public static final int ISOLATED_PAWN_PENALTY = -10;
-    public static final int ADVANCED_PAWN_BONUS = 8;
-    public static final int BLOCKED_PAWN_PENALTY = -10;
-    public static final int BACKWARD_PAWN_PENALTY = -12;
-    public static final int OWN_KING_BLOCKS_PASSED_PAWN_PENALTY = -150;
-    public static final int PASSED_PAWN_FREE_PATH_BONUS_PER_RANK = 12;
-    public static final int ROOK_HALF_OPEN_FILE_BONUS = 15;
-    public static final int ROOK_OPEN_FILE_BONUS = 25;
+    public static final int DEFAULT_CENTER_PAWN_BONUS = 15;
+    public static final int DEFAULT_PASSED_PAWN_BONUS = 60;
+    public static final int DEFAULT_CONNECTED_PAWN_BONUS = 8;
+    public static final int DEFAULT_PAWN_ISLAND_PENALTY = -5;
+    public static final int DEFAULT_DOUBLED_PAWN_PENALTY = -12;
+    public static final int DEFAULT_ISOLATED_PAWN_PENALTY = -10;
+    public static final int DEFAULT_ADVANCED_PAWN_BONUS = 8;
+    public static final int DEFAULT_BLOCKED_PAWN_PENALTY = -10;
+    public static final int DEFAULT_BACKWARD_PAWN_PENALTY = -12;
+    public static final int DEFAULT_OWN_KING_BLOCKS_PASSED_PAWN_PENALTY = -150;
+    public static final int DEFAULT_PASSED_PAWN_FREE_PATH_BONUS_PER_RANK = 12;
+    public static final int DEFAULT_ROOK_HALF_OPEN_FILE_BONUS = 15;
+    public static final int DEFAULT_ROOK_OPEN_FILE_BONUS = 25;
+
+    private static final TunableParameter CENTER_PAWN_BONUS = TunableParameter.of("pawnStructure.centerPawnBonus", DEFAULT_CENTER_PAWN_BONUS);
+    private static final TunableParameter PASSED_PAWN_BONUS = TunableParameter.of("pawnStructure.passedPawnBonus", DEFAULT_PASSED_PAWN_BONUS);
+    private static final TunableParameter CONNECTED_PAWN_BONUS = TunableParameter.of("pawnStructure.connectedPawnBonus", DEFAULT_CONNECTED_PAWN_BONUS);
+    private static final TunableParameter PAWN_ISLAND_PENALTY = TunableParameter.of("pawnStructure.islandPenalty", DEFAULT_PAWN_ISLAND_PENALTY);
+    private static final TunableParameter DOUBLED_PAWN_PENALTY = TunableParameter.of("pawnStructure.doubledPawnPenalty", DEFAULT_DOUBLED_PAWN_PENALTY);
+    private static final TunableParameter ISOLATED_PAWN_PENALTY = TunableParameter.of("pawnStructure.isolatedPawnPenalty", DEFAULT_ISOLATED_PAWN_PENALTY);
+    private static final TunableParameter ADVANCED_PAWN_BONUS = TunableParameter.of("pawnStructure.advancedPawnBonus", DEFAULT_ADVANCED_PAWN_BONUS);
+    private static final TunableParameter BLOCKED_PAWN_PENALTY = TunableParameter.of("pawnStructure.blockedPawnPenalty", DEFAULT_BLOCKED_PAWN_PENALTY);
+    private static final TunableParameter BACKWARD_PAWN_PENALTY = TunableParameter.of("pawnStructure.backwardPawnPenalty", DEFAULT_BACKWARD_PAWN_PENALTY);
+    private static final TunableParameter OWN_KING_BLOCKS_PASSED_PAWN_PENALTY = TunableParameter.of("pawnStructure.ownKingBlocksPassedPawnPenalty", DEFAULT_OWN_KING_BLOCKS_PASSED_PAWN_PENALTY);
+    private static final TunableParameter PASSED_PAWN_FREE_PATH_BONUS_PER_RANK = TunableParameter.of("pawnStructure.passedPawnFreePathBonusPerRank", DEFAULT_PASSED_PAWN_FREE_PATH_BONUS_PER_RANK);
+    private static final TunableParameter ROOK_HALF_OPEN_FILE_BONUS = TunableParameter.of("pawnStructure.rookHalfOpenFileBonus", DEFAULT_ROOK_HALF_OPEN_FILE_BONUS);
+    private static final TunableParameter ROOK_OPEN_FILE_BONUS = TunableParameter.of("pawnStructure.rookOpenFileBonus", DEFAULT_ROOK_OPEN_FILE_BONUS);
 
     private static final int WHITE = 0;
     private static final int BLACK = 1;
     private static final int PAWN = MoveHelper.pieceTypeToInt(PieceType.PAWN);
 
-    private static final ConcurrentMap<PawnStructureKey, CachedStructure> STRUCTURE_CACHE = new ConcurrentHashMap<>();
+    private final ConcurrentMap<PawnStructureKey, CachedStructure> structureCache = new ConcurrentHashMap<>();
 
     private final FileState[] fileStates = new FileState[8];
     private final boolean[] dirtyFiles = new boolean[8];
@@ -52,11 +67,90 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
     private boolean dirty = true;
     private boolean metadataDirty = true;
 
+    private final int centerPawnBonus;
+    private final int passedPawnBonus;
+    private final int connectedPawnBonus;
+    private final int pawnIslandPenalty;
+    private final int doubledPawnPenalty;
+    private final int isolatedPawnPenalty;
+    private final int advancedPawnBonus;
+    private final int blockedPawnPenalty;
+    private final int backwardPawnPenalty;
+    private final int ownKingBlocksPassedPawnPenalty;
+    private final int passedPawnFreePathBonusPerRank;
+    private final int rookHalfOpenFileBonus;
+    private final int rookOpenFileBonus;
+
     public PawnStructureModule() {
+        this.centerPawnBonus = centerPawnBonus();
+        this.passedPawnBonus = passedPawnBonus();
+        this.connectedPawnBonus = connectedPawnBonus();
+        this.pawnIslandPenalty = pawnIslandPenalty();
+        this.doubledPawnPenalty = doubledPawnPenalty();
+        this.isolatedPawnPenalty = isolatedPawnPenalty();
+        this.advancedPawnBonus = advancedPawnBonus();
+        this.blockedPawnPenalty = blockedPawnPenalty();
+        this.backwardPawnPenalty = backwardPawnPenalty();
+        this.ownKingBlocksPassedPawnPenalty = ownKingBlocksPassedPawnPenalty();
+        this.passedPawnFreePathBonusPerRank = passedPawnFreePathBonusPerRank();
+        this.rookHalfOpenFileBonus = rookHalfOpenFileBonus();
+        this.rookOpenFileBonus = rookOpenFileBonus();
         for (int file = 0; file < fileStates.length; file++) {
             fileStates[file] = new FileState(file);
             dirtyFiles[file] = true;
         }
+    }
+
+    public static int centerPawnBonus() {
+        return CENTER_PAWN_BONUS.getInt();
+    }
+
+    public static int passedPawnBonus() {
+        return PASSED_PAWN_BONUS.getInt();
+    }
+
+    public static int connectedPawnBonus() {
+        return CONNECTED_PAWN_BONUS.getInt();
+    }
+
+    public static int pawnIslandPenalty() {
+        return PAWN_ISLAND_PENALTY.getInt();
+    }
+
+    public static int doubledPawnPenalty() {
+        return DOUBLED_PAWN_PENALTY.getInt();
+    }
+
+    public static int isolatedPawnPenalty() {
+        return ISOLATED_PAWN_PENALTY.getInt();
+    }
+
+    public static int advancedPawnBonus() {
+        return ADVANCED_PAWN_BONUS.getInt();
+    }
+
+    public static int blockedPawnPenalty() {
+        return BLOCKED_PAWN_PENALTY.getInt();
+    }
+
+    public static int backwardPawnPenalty() {
+        return BACKWARD_PAWN_PENALTY.getInt();
+    }
+
+    public static int ownKingBlocksPassedPawnPenalty() {
+        return OWN_KING_BLOCKS_PASSED_PAWN_PENALTY.getInt();
+    }
+
+    public static int passedPawnFreePathBonusPerRank() {
+        return PASSED_PAWN_FREE_PATH_BONUS_PER_RANK.getInt();
+    }
+
+    public static int rookHalfOpenFileBonus() {
+        return ROOK_HALF_OPEN_FILE_BONUS.getInt();
+    }
+
+    public static int rookOpenFileBonus() {
+        return ROOK_OPEN_FILE_BONUS.getInt();
     }
 
     @Override
@@ -117,14 +211,14 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         PhaseScore blackIslands = PhaseScore.constant(structure.blackPawnIslandPenalty);
 
         PhaseScore whiteRookHalfOpen = PhaseScore.constant(
-                countHalfOpenFilesWithRooks(board, whiteRooks, true) * ROOK_HALF_OPEN_FILE_BONUS);
+                countHalfOpenFilesWithRooks(board, whiteRooks, true) * rookHalfOpenFileBonus);
         PhaseScore blackRookHalfOpen = PhaseScore.constant(
-                countHalfOpenFilesWithRooks(board, blackRooks, false) * ROOK_HALF_OPEN_FILE_BONUS);
+                countHalfOpenFilesWithRooks(board, blackRooks, false) * rookHalfOpenFileBonus);
 
         PhaseScore whiteRookOpen = PhaseScore.constant(
-                countOpenFilesWithRooks(board, whiteRooks) * ROOK_OPEN_FILE_BONUS);
+                countOpenFilesWithRooks(board, whiteRooks) * rookOpenFileBonus);
         PhaseScore blackRookOpen = PhaseScore.constant(
-                countOpenFilesWithRooks(board, blackRooks) * ROOK_OPEN_FILE_BONUS);
+                countOpenFilesWithRooks(board, blackRooks) * rookOpenFileBonus);
 
         PhaseScore whitePassed = PhaseScore.constant(
                 calculatePassedPawnBonus(whitePawns, blackPawns, allPieces, whiteKing, true));
@@ -399,12 +493,19 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         return MoveHelper.isWhitesMove(move) ? toIndex - 8 : toIndex + 8;
     }
 
-    private static CachedStructure getStructure(long whitePawns, long blackPawns) {
+    private CachedStructure getStructure(long whitePawns, long blackPawns) {
         PawnStructureKey key = new PawnStructureKey(whitePawns, blackPawns);
-        return STRUCTURE_CACHE.computeIfAbsent(key, k -> new CachedStructure(whitePawns, blackPawns));
+        return structureCache.computeIfAbsent(key, k -> new CachedStructure(
+                whitePawns,
+                blackPawns,
+                centerPawnBonus,
+                doubledPawnPenalty,
+                isolatedPawnPenalty,
+                connectedPawnBonus,
+                pawnIslandPenalty));
     }
 
-    private static int calculatePawnAdvanceBonus(long pawns, long allPieces, long enemyAttacks, boolean isWhite, int phase) {
+    private int calculatePawnAdvanceBonus(long pawns, long allPieces, long enemyAttacks, boolean isWhite, int phase) {
         int bonus = 0;
         long advancedRanks = isWhite
                 ? (RankMasks[3] | RankMasks[4] | RankMasks[5] | RankMasks[6])
@@ -416,21 +517,21 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
             if ((forward & (allPieces | enemyAttacks)) == 0) {
                 int rank = square / 8 + 1;
                 int rankBonus = isWhite ? (rank - 3) : (6 - rank);
-                bonus += ADVANCED_PAWN_BONUS * rankBonus;
+                bonus += advancedPawnBonus * rankBonus;
             }
             advancedPawns &= advancedPawns - 1;
         }
         return scaleByPhase(bonus, phase);
     }
 
-    private static int calculateBlockedPawnPenalty(long pawns, long allPieces, boolean isWhite, int phase) {
+    private int calculateBlockedPawnPenalty(long pawns, long allPieces, boolean isWhite, int phase) {
         int penalty = 0;
         long remaining = pawns;
         while (remaining != 0) {
             int square = Long.numberOfTrailingZeros(remaining);
             long forward = PAWN_PUSHES[isWhite ? WHITE : BLACK][square];
             if ((forward & allPieces) != 0) {
-                penalty += BLOCKED_PAWN_PENALTY;
+                penalty += blockedPawnPenalty;
             }
             remaining &= remaining - 1;
         }
@@ -481,7 +582,7 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         return total;
     }
 
-    private static int calculatePassedPawnBonus(long pawns, long opponentPawns, long allPieces, long ownKing, boolean isWhite) {
+    private int calculatePassedPawnBonus(long pawns, long opponentPawns, long allPieces, long ownKing, boolean isWhite) {
         int bonus = 0;
         long remaining = pawns;
 
@@ -518,18 +619,18 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
                 continue;
             }
 
-            int base = PASSED_PAWN_BONUS * (isWhite ? (rank - 1) : (8 - rank));
+            int base = passedPawnBonus * (isWhite ? (rank - 1) : (8 - rank));
 
             long filePathAhead = fileMask & forwardRanksMask;
             long oneStep = isWhite ? (pawn << 8) : (pawn >>> 8);
 
             if ((oneStep & ownKing) != 0L) {
-                base += OWN_KING_BLOCKS_PASSED_PAWN_PENALTY;
+                base += ownKingBlocksPassedPawnPenalty;
             }
 
             if ((filePathAhead & allPieces) == 0L) {
                 int distToPromo = isWhite ? (8 - rank) : (rank - 1);
-                base += PASSED_PAWN_FREE_PATH_BONUS_PER_RANK * distToPromo;
+                base += passedPawnFreePathBonusPerRank * distToPromo;
             }
 
             bonus += base;
@@ -557,17 +658,23 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         private final int whitePawnIslandPenalty;
         private final int blackPawnIslandPenalty;
 
-        private CachedStructure(long whitePawns, long blackPawns) {
-            this.whiteCenterPawnBonus = PawnHelper.countCenterPawns(whitePawns) * CENTER_PAWN_BONUS;
-            this.blackCenterPawnBonus = PawnHelper.countCenterPawns(blackPawns) * CENTER_PAWN_BONUS;
-            this.whiteDoubledPawnPenalty = PawnHelper.countDoubledPawns(whitePawns) * DOUBLED_PAWN_PENALTY;
-            this.blackDoubledPawnPenalty = PawnHelper.countDoubledPawns(blackPawns) * DOUBLED_PAWN_PENALTY;
-            this.whiteIsolatedPawnPenalty = PawnHelper.countIsolatedPawns(whitePawns) * ISOLATED_PAWN_PENALTY;
-            this.blackIsolatedPawnPenalty = PawnHelper.countIsolatedPawns(blackPawns) * ISOLATED_PAWN_PENALTY;
-            this.whiteConnectedPawnBonus = PawnHelper.countConnectedPawns(whitePawns) * CONNECTED_PAWN_BONUS;
-            this.blackConnectedPawnBonus = PawnHelper.countConnectedPawns(blackPawns) * CONNECTED_PAWN_BONUS;
-            this.whitePawnIslandPenalty = Math.max(0, PawnHelper.countPawnIslands(whitePawns) - 1) * PAWN_ISLAND_PENALTY;
-            this.blackPawnIslandPenalty = Math.max(0, PawnHelper.countPawnIslands(blackPawns) - 1) * PAWN_ISLAND_PENALTY;
+        private CachedStructure(long whitePawns,
+                                long blackPawns,
+                                int centerBonus,
+                                int doubledPenalty,
+                                int isolatedPenalty,
+                                int connectedBonus,
+                                int islandPenalty) {
+            this.whiteCenterPawnBonus = PawnHelper.countCenterPawns(whitePawns) * centerBonus;
+            this.blackCenterPawnBonus = PawnHelper.countCenterPawns(blackPawns) * centerBonus;
+            this.whiteDoubledPawnPenalty = PawnHelper.countDoubledPawns(whitePawns) * doubledPenalty;
+            this.blackDoubledPawnPenalty = PawnHelper.countDoubledPawns(blackPawns) * doubledPenalty;
+            this.whiteIsolatedPawnPenalty = PawnHelper.countIsolatedPawns(whitePawns) * isolatedPenalty;
+            this.blackIsolatedPawnPenalty = PawnHelper.countIsolatedPawns(blackPawns) * isolatedPenalty;
+            this.whiteConnectedPawnBonus = PawnHelper.countConnectedPawns(whitePawns) * connectedBonus;
+            this.blackConnectedPawnBonus = PawnHelper.countConnectedPawns(blackPawns) * connectedBonus;
+            this.whitePawnIslandPenalty = Math.max(0, PawnHelper.countPawnIslands(whitePawns) - 1) * islandPenalty;
+            this.blackPawnIslandPenalty = Math.max(0, PawnHelper.countPawnIslands(blackPawns) - 1) * islandPenalty;
         }
     }
 

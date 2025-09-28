@@ -85,7 +85,7 @@ public class ScoreEvaluationTest {
     void centerPawnsGrantBonusToWhite() {
         BitBoard board = FEN.translateFENtoBitBoard("4k3/8/8/8/4P3/8/8/4K3 w - - 0 1");
         PawnStructureView view = pawnStructure(board);
-        assertEquals(PawnStructureModule.CENTER_PAWN_BONUS, view.whiteCenter().blend(board.getPhase()));
+        assertEquals(PawnStructureModule.centerPawnBonus(), view.whiteCenter().blend(board.getPhase()));
         assertEquals(0, view.blackCenter().blend(board.getPhase()));
     }
 
@@ -93,7 +93,7 @@ public class ScoreEvaluationTest {
     void centerPawnsGrantBonusToBlack() {
         BitBoard board = FEN.translateFENtoBitBoard("4k3/8/8/4p3/8/8/8/4K3 w - - 0 1");
         PawnStructureView view = pawnStructure(board);
-        assertEquals(PawnStructureModule.CENTER_PAWN_BONUS, view.blackCenter().blend(board.getPhase()));
+        assertEquals(PawnStructureModule.centerPawnBonus(), view.blackCenter().blend(board.getPhase()));
         assertEquals(0, view.whiteCenter().blend(board.getPhase()));
     }
 

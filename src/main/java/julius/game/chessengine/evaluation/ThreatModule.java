@@ -3,6 +3,7 @@ package julius.game.chessengine.evaluation;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.ImmutableBoardView;
 import julius.game.chessengine.figures.PieceType;
+import julius.game.chessengine.tuning.TunableParameter;
 
 import java.util.Objects;
 
@@ -25,20 +26,31 @@ public final class ThreatModule implements EvaluationModule {
     private static final int QUEEN = MoveHelper.pieceTypeToInt(PieceType.QUEEN);
     private static final int KING = MoveHelper.pieceTypeToInt(PieceType.KING);
 
-    private static final int[] HANGING_PENALTIES = new int[7];
-    private static final int[] PAWN_THREAT_PENALTIES = new int[7];
+    private static final TunableParameter HANGING_PAWN_PENALTY = TunableParameter.of("threat.hangingPawnPenalty", -12);
+    private static final TunableParameter HANGING_KNIGHT_PENALTY = TunableParameter.of("threat.hangingKnightPenalty", -30);
+    private static final TunableParameter HANGING_BISHOP_PENALTY = TunableParameter.of("threat.hangingBishopPenalty", -30);
+    private static final TunableParameter HANGING_ROOK_PENALTY = TunableParameter.of("threat.hangingRookPenalty", -45);
+    private static final TunableParameter HANGING_QUEEN_PENALTY = TunableParameter.of("threat.hangingQueenPenalty", -70);
 
-    static {
-        HANGING_PENALTIES[PAWN] = -12;
-        HANGING_PENALTIES[KNIGHT] = -30;
-        HANGING_PENALTIES[BISHOP] = -30;
-        HANGING_PENALTIES[ROOK] = -45;
-        HANGING_PENALTIES[QUEEN] = -70;
+    private static final TunableParameter PAWN_THREAT_KNIGHT_PENALTY = TunableParameter.of("threat.pawnThreatKnightPenalty", -10);
+    private static final TunableParameter PAWN_THREAT_BISHOP_PENALTY = TunableParameter.of("threat.pawnThreatBishopPenalty", -10);
+    private static final TunableParameter PAWN_THREAT_ROOK_PENALTY = TunableParameter.of("threat.pawnThreatRookPenalty", -18);
+    private static final TunableParameter PAWN_THREAT_QUEEN_PENALTY = TunableParameter.of("threat.pawnThreatQueenPenalty", -25);
 
-        PAWN_THREAT_PENALTIES[KNIGHT] = -10;
-        PAWN_THREAT_PENALTIES[BISHOP] = -10;
-        PAWN_THREAT_PENALTIES[ROOK] = -18;
-        PAWN_THREAT_PENALTIES[QUEEN] = -25;
+    private final int[] hangingPenalties = new int[7];
+    private final int[] pawnThreatPenalties = new int[7];
+
+    public ThreatModule() {
+        hangingPenalties[PAWN] = HANGING_PAWN_PENALTY.getInt();
+        hangingPenalties[KNIGHT] = HANGING_KNIGHT_PENALTY.getInt();
+        hangingPenalties[BISHOP] = HANGING_BISHOP_PENALTY.getInt();
+        hangingPenalties[ROOK] = HANGING_ROOK_PENALTY.getInt();
+        hangingPenalties[QUEEN] = HANGING_QUEEN_PENALTY.getInt();
+
+        pawnThreatPenalties[KNIGHT] = PAWN_THREAT_KNIGHT_PENALTY.getInt();
+        pawnThreatPenalties[BISHOP] = PAWN_THREAT_BISHOP_PENALTY.getInt();
+        pawnThreatPenalties[ROOK] = PAWN_THREAT_ROOK_PENALTY.getInt();
+        pawnThreatPenalties[QUEEN] = PAWN_THREAT_QUEEN_PENALTY.getInt();
     }
 
     private int midgameScoreCache;
@@ -136,9 +148,9 @@ public final class ThreatModule implements EvaluationModule {
                 continue;
             }
 
-            penalty += HANGING_PENALTIES[typeBits];
+            penalty += hangingPenalties[typeBits];
             if (typeBits > PAWN && (enemyPawnAttacks & mask) != 0) {
-                penalty += PAWN_THREAT_PENALTIES[typeBits];
+                penalty += pawnThreatPenalties[typeBits];
             }
             remaining ^= bit;
         }

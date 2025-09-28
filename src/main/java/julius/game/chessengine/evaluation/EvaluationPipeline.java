@@ -2,6 +2,7 @@ package julius.game.chessengine.evaluation;
 
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.utils.Score;
+import julius.game.chessengine.tuning.TunableParameter;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -15,7 +16,7 @@ import java.util.Objects;
  */
 public final class EvaluationPipeline {
 
-    private static final int BLEND_SCALE = 256;
+    private static final TunableParameter BLEND_SCALE_PARAM = TunableParameter.of("evaluation.blendScale", 256, 1, 1024);
 
     private static final class ModuleState {
         private final EvaluationModule module;
@@ -32,6 +33,7 @@ public final class EvaluationPipeline {
 
     private final List<ModuleState> modules;
     private final EvaluationWeights weights;
+    private final int blendScale;
     private EvaluationContext context;
     private boolean initialized;
     private boolean aggregateDirty = true;
@@ -47,6 +49,7 @@ public final class EvaluationPipeline {
             throw new IllegalArgumentException("At least one evaluation module is required");
         }
         this.weights = (weights != null ? weights : EvaluationWeights.identity());
+        this.blendScale = BLEND_SCALE_PARAM.getInt();
         List<ModuleState> moduleStates = new ArrayList<>(modules.size());
         for (EvaluationModule module : modules) {
             EvaluationWeights.ModuleWeight weight = this.weights.weightFor(module.getClass());
@@ -107,10 +110,10 @@ public final class EvaluationPipeline {
             return 0;
         }
         int phase = clamp(context.getPhase());
-        int midgameWeight = BLEND_SCALE - phase;
+        int midgameWeight = blendScale - phase;
         int endgameWeight = phase;
         long blended = (long) midgameTotal * midgameWeight + (long) endgameTotal * endgameWeight;
-        return (int) (blended / BLEND_SCALE);
+        return (int) (blended / blendScale);
     }
 
     public double getScoreDifference() {
@@ -162,12 +165,12 @@ public final class EvaluationPipeline {
         aggregateDirty = true;
     }
 
-    private static int clamp(int phase) {
+    private int clamp(int phase) {
         if (phase < 0) {
             return 0;
         }
-        if (phase > BLEND_SCALE) {
-            return BLEND_SCALE;
+        if (phase > blendScale) {
+            return blendScale;
         }
         return phase;
     }
