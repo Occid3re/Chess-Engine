@@ -22,6 +22,8 @@
         <!-- Boot uses this to set the compiler release -->
         <java.version>25</java.version>
         <lombok.version>1.18.42</lombok.version>
+        <!-- Explicit version for dataformat-yaml so IDE builds pick it up reliably -->
+        <jackson-dataformat-yaml.version>2.18.2</jackson-dataformat-yaml.version>
     </properties>
 
     <dependencies>
@@ -86,6 +88,7 @@
         <dependency>
             <groupId>com.fasterxml.jackson.dataformat</groupId>
             <artifactId>jackson-dataformat-yaml</artifactId>
+            <version>${jackson-dataformat-yaml.version}</version>
         </dependency>
     </dependencies>
 
