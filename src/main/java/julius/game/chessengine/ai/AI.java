@@ -837,6 +837,26 @@ public class AI {
         }, 0, 50, TimeUnit.MILLISECONDS);
     }
 
+    public void shutdown() {
+        stopCalculation();
+
+        if (scheduler != null && !scheduler.isShutdown()) {
+            scheduler.shutdownNow();
+        }
+
+        if (searchPool != null) {
+            searchPool.shutdown();
+            try {
+                if (!searchPool.awaitTermination(5, TimeUnit.SECONDS)) {
+                    searchPool.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                searchPool.shutdownNow();
+            }
+        }
+    }
+
     public void performMove() {
         if (currentBestMove == -1) return;
 
