@@ -129,3 +129,26 @@ with identical thread counts, keeps the strongest performers, and mutates them
 into the next generation. This workflow makes it possible to evolve evaluation
 parameters while keeping the UCI engine executable unchanged.
 
+### Running the genetic tuner from the command line
+
+Build the project and point the bootable JAR at the new `GeneticTuningMain`
+entry point. Provide a seed YAML file (for example the
+`src/main/resources/tuning/sample-tunings.yaml` document) and adjust the
+arguments to control the optimisation loop:
+
+```bash
+./mvnw -DskipTests package
+java -Dloader.main=julius.game.chessengine.tuning.GeneticTuningMain \
+     -jar target/chess-engine-<version>-uci.jar \
+     --seed /path/to/seed-tunings.yaml \
+     --generations 10 \
+     --population 12 \
+     --matches  /path/to/match-log.csv
+```
+
+The command above evolves the population, prints a leaderboard of the strongest
+configurations, saves the new YAML file next to the seed (or to the location
+specified with `--output`), and optionally records every self-play result to the
+`--matches` CSV. Omit advanced flags to fall back to the defaults specified in
+`GeneticOptions.defaults()`.
+
