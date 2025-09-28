@@ -35,12 +35,13 @@ public class Engine {
     @Getter
     private MoveStack line = new MoveStack();
     private MoveStack redoLine = new MoveStack();
+    @Getter
     private BitBoard bitBoard = new BitBoard();
     @Getter
     private GameState gameState = new GameState(bitBoard);
 
-    private LongConsumer onPositionChanged = h -> {};
-
+    private volatile LongConsumer onPositionChanged = _ -> {
+    };
 
     public Engine() {
         startNewGame();
@@ -62,21 +63,21 @@ public class Engine {
     }
 
     public void setOnPositionChanged(LongConsumer cb) {
-        this.onPositionChanged = (cb != null ? cb : h -> {});
+        this.onPositionChanged = (cb != null ? cb : h -> {
+        });
     }
+
     private void notifyPositionChanged() {
         onPositionChanged.accept(getBoardStateHash());
     }
 
-    /** Expose BitBoard's SEE to callers (AI). */
+    /**
+     * Expose BitBoard's SEE to callers (AI).
+     */
     public int see(int move) {
         synchronized (boardLock) {
             return bitBoard.see(move);
         }
-    }
-
-    public BitBoard getBitBoard() {
-        return bitBoard;
     }
 
     public IntArrayList getAllLegalMoves() {
@@ -86,7 +87,7 @@ public class Engine {
                 if (gameState.isGameOver()) {
                     IntArrayList empty = new IntArrayList(0);
                     cacheLegalMoves(boardHash, empty);
-                    return new IntArrayList(0);
+                    return empty;
                 }
                 return generateLegalMoves();
             }
@@ -246,7 +247,7 @@ public class Engine {
                     );
                 }
             }
-
+            legalMoves.trim();
             cacheLegalMoves(boardStateHash, legalMoves);
             return legalMoves;
         }
@@ -277,16 +278,10 @@ public class Engine {
     }
 
     private boolean moveListsEqual(IntArrayList a, IntArrayList b) {
-        if (a.size() != b.size()) {
-            return false;
-        }
-        for (int i = 0; i < a.size(); i++) {
-            if (a.getInt(i) != b.getInt(i)) {
-                return false;
-            }
-        }
-        return true;
+        return a.size() == b.size()
+                && java.util.Arrays.equals(a.elements(), 0, a.size(), b.elements(), 0, b.size());
     }
+
 
     // Each of these methods would need to be implemented to handle the specific move generation for each piece type.
     public List<Move> getMovesFromIndex(int fromIndex) {
@@ -342,31 +337,25 @@ public class Engine {
 
             if (move == -1) {
                 log.warn("Move not legal!");
-            } else {
-                performMove(move);
+                return gameState;
             }
-
+            performMove(move);
             return gameState;
         }
     }
 
     private int getMove(int fromIndex, int toIndex, int promotionPiece) {
         IntArrayList legalMoves = getAllLegalMoves();
-
-        int move = -1;
-
         for (int i = 0; i < legalMoves.size(); i++) {
             int m = legalMoves.getInt(i);
-            int from = MoveHelper.deriveFromIndex(m); // Extract the first 6 bits
-            int to = MoveHelper.deriveToIndex(m);     // Extract the next 6 bits
-            int promotionPieceTypeBits = MoveHelper.derivePromotionPieceTypeBits(m);
-
-            if (from == fromIndex && to == toIndex && (promotionPieceTypeBits == 0 || promotionPieceTypeBits == promotionPiece)) {
-                move = m;
-            }
+            if (MoveHelper.deriveFromIndex(m) != fromIndex) continue;
+            if (MoveHelper.deriveToIndex(m) != toIndex) continue;
+            int promo = MoveHelper.derivePromotionPieceTypeBits(m);
+            if (promo == 0 || promo == promotionPiece) return m; // exact or non-promo
         }
-        return move;
+        return -1;
     }
+
 
     public List<Position> getPossibleMovesForPosition(int fromIndex) {
         return getMovesFromIndex(fromIndex).stream()
