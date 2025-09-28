@@ -55,8 +55,15 @@ public final class GeneticTuningMain {
         GeneticOptimizer.GeneticResult result = optimizer.evolve(seed, options);
         Duration duration = Duration.between(start, Instant.now());
 
+        // Build leaderboard and persist only the top performer
+        List<Map.Entry<EngineTuning, Double>> leaderboard = buildLeaderboard(result.matches());
+        EngineTuningSet evolvedPopulation = result.population();
+        if (!leaderboard.isEmpty()) {
+            evolvedPopulation = new EngineTuningSet(List.of(leaderboard.get(0).getKey()));
+        }
+
         try {
-            EngineTuningWriter.write(result.population(), cli.outputFile);
+            EngineTuningWriter.write(evolvedPopulation, cli.outputFile);
         } catch (IOException e) {
             System.err.printf("Failed to write evolved population to %s: %s%n", cli.outputFile, e.getMessage());
             return;
@@ -71,27 +78,31 @@ public final class GeneticTuningMain {
         }
 
         System.out.printf("Evolution completed in %d seconds.%n", Math.max(1, duration.getSeconds()));
-        System.out.printf("Saved %d configurations to %s%n", result.population().population().size(), cli.outputFile.toAbsolutePath());
-        printLeaderboard(result.matches());
+        System.out.printf("Saved %d configurations to %s%n", evolvedPopulation.population().size(), cli.outputFile.toAbsolutePath());
+        printLeaderboard(leaderboard);
     }
 
-    private static void printLeaderboard(List<MatchRunner.MatchResult> matches) {
-        if (matches.isEmpty()) {
+    private static List<Map.Entry<EngineTuning, Double>> buildLeaderboard(List<MatchRunner.MatchResult> matches) {
+        Map<EngineTuning, Double> scoreboard = new HashMap<>();
+        matches.forEach(match -> {
+            scoreboard.merge(match.whiteTuning(), match.whiteScore(), Double::sum);
+            scoreboard.merge(match.blackTuning(), match.blackScore(), Double::sum);
+        });
+        return scoreboard.entrySet().stream()
+                .sorted(Map.Entry.<EngineTuning, Double>comparingByValue(Comparator.reverseOrder()))
+                .toList();
+    }
+
+    private static void printLeaderboard(List<Map.Entry<EngineTuning, Double>> leaderboard) {
+        if (leaderboard.isEmpty()) {
             System.out.println("No matches were played.");
             return;
         }
 
-        Map<String, Double> scoreboard = new HashMap<>();
-        matches.forEach(match -> {
-            scoreboard.merge(match.whiteTuning().name(), match.whiteScore(), Double::sum);
-            scoreboard.merge(match.blackTuning().name(), match.blackScore(), Double::sum);
-        });
-
         System.out.println("Top performers (higher score is better):");
-        scoreboard.entrySet().stream()
-                .sorted(Map.Entry.<String, Double>comparingByValue(Comparator.reverseOrder()))
+        leaderboard.stream()
                 .limit(10)
-                .forEach(entry -> System.out.printf("  %-24s %.2f%n", entry.getKey(), entry.getValue()));
+                .forEach(entry -> System.out.printf("  %-24s %.2f%n", entry.getKey().name(), entry.getValue()));
     }
 
     private static void writeMatchLog(List<MatchRunner.MatchResult> matches, Path destination) throws IOException {
@@ -140,16 +151,16 @@ public final class GeneticTuningMain {
         private final int maxPlies;
 
         private CliArguments(Path seedFile,
-                              Path outputFile,
-                              Path matchLogFile,
-                              boolean helpRequested,
-                              int generations,
-                              int retain,
-                              int population,
-                              int matchesPerPair,
-                              double mutationStrength,
-                              long moveTimeMillis,
-                              int maxPlies) {
+                             Path outputFile,
+                             Path matchLogFile,
+                             boolean helpRequested,
+                             int generations,
+                             int retain,
+                             int population,
+                             int matchesPerPair,
+                             double mutationStrength,
+                             long moveTimeMillis,
+                             int maxPlies) {
             this.seedFile = seedFile;
             this.outputFile = outputFile;
             this.matchLogFile = matchLogFile;
@@ -250,4 +261,3 @@ public final class GeneticTuningMain {
         }
     }
 }
-
