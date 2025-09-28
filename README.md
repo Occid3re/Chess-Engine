@@ -129,3 +129,23 @@ with identical thread counts, keeps the strongest performers, and mutates them
 into the next generation. This workflow makes it possible to evolve evaluation
 parameters while keeping the UCI engine executable unchanged.
 
+### Running genetic tuning from the command line
+
+The project bundles a small CLI that drives the genetic optimiser directly
+against a YAML configuration:
+
+```bash
+./mvnw -DskipTests package
+java -cp target/chess-engine-<version>-uci.jar \
+  julius.game.chessengine.tuning.GeneticOptimizerMain \
+  --tunings=src/main/resources/tuning/sample-tunings.yaml \
+  --output=profiles/tuned-population.yaml \
+  --generations=10 --matches=4 --mutation=0.2
+```
+
+The command above loads the seed population, evolves it for ten generations,
+and writes the resulting population to `profiles/tuned-population.yaml`. Leave
+`--output` out to print the final YAML to standard output. Run the program with
+`--help` to see the complete list of tuning options (population size, mutation
+strength, move time, etc.).
+
