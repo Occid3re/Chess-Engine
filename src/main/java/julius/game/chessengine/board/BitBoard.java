@@ -1543,51 +1543,46 @@ public class BitBoard {
     }
 
     private boolean canCastleKingside(boolean colorWhite, int kingPositionIndex, PinState pinState) {
-        // Ensure the squares between the king and the rook are unoccupied and not under attack
-        int[] kingsideSquares = {kingPositionIndex + 1, kingPositionIndex + 2};
+        // Ensure the squares the KING crosses/lands on are empty and not attacked
+        int[] kingsideSquares = {kingPositionIndex + 1, kingPositionIndex + 2}; // f-file, g-file
         for (int square : kingsideSquares) {
             if (isOccupied(square) || isSquareUnderAttack(square, colorWhite)) {
                 return false;
             }
         }
 
+        // The rook must exist on the corner and must not have moved
         int rookIndex = colorWhite ? 7 : 63;
-
-        // Check if the rook has moved
         if (hasRookMoved(rookIndex)) {
             return false;
         }
 
-        if (pinState != null && pinState.whiteSide() == colorWhite
-                && (pinState.getAllPinned() & (1L << rookIndex)) != 0) {
-            return false;
-        }
-
-        // Check if the rook still exists
-
+        // Rook presence only (rook being attacked or "pinned" is irrelevant for castling rules)
         return isRookAtIndex(rookIndex);
     }
 
     private boolean canCastleQueenside(boolean colorWhite, int kingPositionIndex, PinState pinState) {
-        // Ensure the squares between the king and the rook are unoccupied and not under attack
-        int[] queensideSquares = {kingPositionIndex - 1, kingPositionIndex - 2, kingPositionIndex - 3};
+        // Ensure the squares the KING crosses/lands on are empty and not attacked.
+        // On queenside, the king goes e->d->c. Square b is only for rook travel and may be attacked.
+        int[] queensideSquares = {kingPositionIndex - 1, kingPositionIndex - 2, kingPositionIndex - 3}; // d, c, b
         for (int square : queensideSquares) {
-            if (isOccupied(square) || (square != kingPositionIndex - 3 && isSquareUnderAttack(square, colorWhite))) {
+            // The king path is d and c; b must be empty for rook travel but need not be safe for the king.
+            boolean isKingPath = (square != kingPositionIndex - 3); // exclude 'b' from attack check
+            if (isOccupied(square) || (isKingPath && isSquareUnderAttack(square, colorWhite))) {
                 return false;
             }
         }
 
+        // The rook must exist on the corner and must not have moved
         int rookIndex = colorWhite ? 0 : 56;
-
         if (hasRookMoved(rookIndex)) {
             return false;
         }
-        if (pinState != null && pinState.whiteSide() == colorWhite
-                && (pinState.getAllPinned() & (1L << rookIndex)) != 0) {
-            return false;
-        }
+
+        // Rook presence only (rook being attacked or "pinned" is irrelevant for castling rules)
         return isRookAtIndex(rookIndex);
     }
+
 
     private boolean isRookAtIndex(int index) {
         PieceType pieceAtPosition = getPieceTypeAtIndex(index);
@@ -2393,9 +2388,11 @@ public class BitBoard {
                 whiteRookH1Moved == bitBoard.whiteRookH1Moved &&
                 blackRookA8Moved == bitBoard.blackRookA8Moved &&
                 blackRookH8Moved == bitBoard.blackRookH8Moved &&
+                lastMoveDoubleStepPawnIndex == bitBoard.lastMoveDoubleStepPawnIndex &&   // ← added
                 halfmoveClock == bitBoard.halfmoveClock &&
                 fullmoveNumber == bitBoard.fullmoveNumber;
     }
+
 
     @Override
     public int hashCode() {
