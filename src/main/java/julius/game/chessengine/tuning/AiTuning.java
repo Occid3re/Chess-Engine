@@ -64,47 +64,7 @@ public final class AiTuning {
 
     public AiTuning mutate(Random random, double strength) {
         Objects.requireNonNull(random, "random");
-        if (strength <= 0.0) {
-            return this;
-        }
-        Builder mutated = toBuilder();
-        mutated.hashSizeMb = mutateInt(hashSizeMb, 1, 4096, random, strength);
-        mutated.maxDepth = mutateInt(maxDepth, 4, 96, random, strength);
-        mutated.timeLimitMillis = mutateLong(timeLimitMillis, 5L, 10_000L, random, strength);
-        mutated.nullMovePruning = random.nextDouble() < strength ? !nullMovePruning : nullMovePruning;
-        return mutated.build();
-    }
-
-    private static int mutateInt(int value, int min, int max, Random random, double strength) {
-        double factor = gaussianFactor(random, strength);
-        int mutated = (int) Math.round(value * factor);
-        if (mutated < min) {
-            mutated = min;
-        } else if (mutated > max) {
-            mutated = max;
-        }
-        return mutated;
-    }
-
-    private static long mutateLong(long value, long min, long max, Random random, double strength) {
-        double factor = gaussianFactor(random, strength);
-        long mutated = Math.round(value * factor);
-        if (mutated < min) {
-            mutated = min;
-        } else if (mutated > max) {
-            mutated = max;
-        }
-        return mutated;
-    }
-
-    private static double gaussianFactor(Random random, double strength) {
-        double variance = Math.max(0.05, strength);
-        double offset = random.nextGaussian() * variance;
-        double factor = 1.0 + offset;
-        if (factor < 0.25) {
-            factor = 0.25;
-        }
-        return factor;
+        return this;
     }
 
     public static final class Builder {

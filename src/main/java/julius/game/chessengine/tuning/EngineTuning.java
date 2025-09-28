@@ -2,6 +2,8 @@ package julius.game.chessengine.tuning;
 
 import julius.game.chessengine.evaluation.EvaluationWeights;
 
+import julius.game.chessengine.evaluation.EvaluationParameterRegistry;
+
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -96,9 +98,11 @@ public final class EngineTuning {
         private String name = "baseline";
         private AiTuning ai = AiTuning.defaults();
         private EvaluationTuning evaluation = EvaluationTuning.identity();
-        private Map<String, Double> numericParameters = Collections.emptyMap();
+        private Map<String, Double> numericParameters;
 
         private Builder() {
+            EvaluationParameterRegistry.initialize();
+            this.numericParameters = NumericTuningParameters.defaults();
         }
 
         private Builder(EngineTuning source) {
@@ -127,12 +131,13 @@ public final class EngineTuning {
 
         public Builder numericParameters(Map<String, Double> parameters) {
             if (parameters == null || parameters.isEmpty()) {
-                this.numericParameters = Collections.emptyMap();
+                this.numericParameters = NumericTuningParameters.defaults();
             } else {
                 Map<String, Double> normalized = new LinkedHashMap<>();
                 parameters.forEach((k, v) -> {
-                    if (k != null && !k.isBlank() && v != null) {
-                        normalized.put(k.toLowerCase(Locale.ROOT), v);
+                    if (k != null && !k.isBlank() && v != null && !v.isNaN()) {
+                        String key = NumericTuningParameters.normalizeKey(k);
+                        normalized.put(key, v);
                     }
                 });
                 this.numericParameters = Collections.unmodifiableMap(normalized);

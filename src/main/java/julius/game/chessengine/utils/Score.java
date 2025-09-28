@@ -13,9 +13,11 @@ import julius.game.chessengine.evaluation.MoveContext;
 import julius.game.chessengine.evaluation.PawnStructureModule;
 import julius.game.chessengine.evaluation.PieceSquareModule;
 import julius.game.chessengine.evaluation.ThreatModule;
+import julius.game.chessengine.tuning.NumericTuningParameters;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Map;
 
 /**
  * Central entry point for the evaluation pipeline.  The legacy score bookkeeping previously
@@ -116,6 +118,10 @@ public class Score {
 
     public static AutoCloseable useEvaluationWeights(EvaluationWeights weights) {
         return useFactory(forEvaluationWeights(weights));
+    }
+
+    public static AutoCloseable useNumericParameters(Map<String, Double> parameters) {
+        return NumericTuningParameters.use(parameters);
     }
 
     public static ScoreFactory forEvaluationWeights(EvaluationWeights weights) {
@@ -228,11 +234,11 @@ public class Score {
 
     public static int getPieceValue(int pieceTypeBits) {
         return switch (pieceTypeBits) {
-            case 1 -> MaterialModule.PAWN_VALUE / 100;
-            case 2 -> MaterialModule.KNIGHT_VALUE / 100;
-            case 3 -> MaterialModule.BISHOP_VALUE / 100;
-            case 4 -> MaterialModule.ROOK_VALUE / 100;
-            case 5 -> MaterialModule.QUEEN_VALUE / 100;
+            case 1 -> MaterialModule.pawnValue() / 100;
+            case 2 -> MaterialModule.knightValue() / 100;
+            case 3 -> MaterialModule.bishopValue() / 100;
+            case 4 -> MaterialModule.rookValue() / 100;
+            case 5 -> MaterialModule.queenValue() / 100;
             case 6 -> 1000;
             default -> throw new IllegalStateException("Unexpected value: " + pieceTypeBits);
         };
