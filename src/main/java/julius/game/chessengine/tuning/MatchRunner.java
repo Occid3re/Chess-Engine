@@ -28,46 +28,51 @@ public final class MatchRunner {
         AI whiteAi = new AI(whiteEngine, whiteTuning.ai());
         AI blackAi = new AI(blackEngine, blackTuning.ai());
 
-        int maxPlies = options.maxPlies() > 0 ? options.maxPlies() : 512;
-        long moveTime = options.moveTimeMillis() > 0 ? options.moveTimeMillis() : whiteTuning.ai().timeLimitMillis();
+        try {
+            int maxPlies = options.maxPlies() > 0 ? options.maxPlies() : 512;
+            long moveTime = options.moveTimeMillis() > 0 ? options.moveTimeMillis() : whiteTuning.ai().timeLimitMillis();
 
-        int plies = 0;
-        while (!whiteEngine.getGameState().isGameOver() && plies < maxPlies) {
-            boolean whiteToMove = whiteEngine.whitesTurn();
-            AI mover = whiteToMove ? whiteAi : blackAi;
-            MoveAndScore ms = mover.searchBestMoveBlocking(moveTime);
-            if (ms == null || ms.move == -1) {
-                break;
+            int plies = 0;
+            while (!whiteEngine.getGameState().isGameOver() && plies < maxPlies) {
+                boolean whiteToMove = whiteEngine.whitesTurn();
+                AI mover = whiteToMove ? whiteAi : blackAi;
+                MoveAndScore ms = mover.searchBestMoveBlocking(moveTime);
+                if (ms == null || ms.getMove() == -1) {
+                    break;
+                }
+                int move = ms.getMove();
+                whiteEngine.performMove(move);
+                blackEngine.performMove(move);
+                plies++;
             }
-            int move = ms.move;
-            whiteEngine.performMove(move);
-            blackEngine.performMove(move);
-            plies++;
+
+            GameStateEnum finalState = whiteEngine.getGameState().getState();
+            double whiteScore;
+            double blackScore;
+            switch (finalState) {
+                case WHITE_WON -> {
+                    whiteScore = 1.0;
+                    blackScore = 0.0;
+                }
+                case BLACK_WON -> {
+                    whiteScore = 0.0;
+                    blackScore = 1.0;
+                }
+                case DRAW -> {
+                    whiteScore = 0.5;
+                    blackScore = 0.5;
+                }
+                default -> {
+                    whiteScore = 0.5;
+                    blackScore = 0.5;
+                }
+            }
+
+            return new MatchResult(whiteTuning, blackTuning, whiteScore, blackScore, finalState, plies);
+        } finally {
+            whiteAi.shutdown();
+            blackAi.shutdown();
         }
-
-        GameStateEnum finalState = whiteEngine.getGameState().getState();
-        double whiteScore;
-        double blackScore;
-        switch (finalState) {
-            case WHITE_WON -> {
-                whiteScore = 1.0;
-                blackScore = 0.0;
-            }
-            case BLACK_WON -> {
-                whiteScore = 0.0;
-                blackScore = 1.0;
-            }
-            case DRAW -> {
-                whiteScore = 0.5;
-                blackScore = 0.5;
-            }
-            default -> {
-                whiteScore = 0.5;
-                blackScore = 0.5;
-            }
-        }
-
-        return new MatchResult(whiteTuning, blackTuning, whiteScore, blackScore, finalState, plies);
     }
 
     private void ensureThreadParity(EngineTuning white, EngineTuning black) {
