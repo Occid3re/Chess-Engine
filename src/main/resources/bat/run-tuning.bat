@@ -40,8 +40,9 @@ java ^
   -cp "%JARFILE%" ^
   org.springframework.boot.loader.launch.PropertiesLauncher ^
   --seed "%SEED%" ^
-  --generations 10 ^
-  --population 12 ^
+  --generations 2 ^
+  --population 2 ^
+  --move-time 1000 ^
   --matches "%MATCHES%"
 
 set "ERR=%ERRORLEVEL%"
