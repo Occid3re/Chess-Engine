@@ -24,6 +24,8 @@ import java.util.stream.Collectors;
  * <pre>{@code
  * population:
  *   - name: baseline
+ *     # The optional "ai" section is accepted for backwards compatibility but ignored,
+ *     # as engine-search parameters are no longer tuned via YAML definitions.
  *     ai:
  *       maxDepth: 32
  *       timeLimitMillis: 50
@@ -108,29 +110,10 @@ public final class EngineTuningLoader {
     }
 
     private static AiTuning toAiTuning(AiConfig config) {
-        if (config == null) {
-            return AiTuning.defaults();
-        }
-        AiTuning.Builder builder = AiTuning.builder();
-        if (config.searchThreads != null) {
-            builder.searchThreads(config.searchThreads);
-        }
-        if (config.lazySmpThreads != null) {
-            builder.lazySmpThreads(config.lazySmpThreads);
-        }
-        if (config.hashSizeMb != null) {
-            builder.hashSizeMb(config.hashSizeMb);
-        }
-        if (config.maxDepth != null) {
-            builder.maxDepth(config.maxDepth);
-        }
-        if (config.timeLimitMillis != null) {
-            builder.timeLimitMillis(config.timeLimitMillis);
-        }
-        if (config.nullMovePruning != null) {
-            builder.nullMovePruning(config.nullMovePruning);
-        }
-        return builder.build();
+        // Search configuration is intentionally kept outside of the genetic tuning pipeline to
+        // prevent accidental optimisation of engine runtime parameters. Any values present in the
+        // YAML document are therefore ignored in favour of the runtime defaults.
+        return AiTuning.defaults();
     }
 
     private static EvaluationTuning toEvaluation(EvaluationConfig config) {

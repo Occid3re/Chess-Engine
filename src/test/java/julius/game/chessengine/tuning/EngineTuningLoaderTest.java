@@ -29,8 +29,9 @@ class EngineTuningLoaderTest {
         assertThat(set.population()).hasSize(1);
         EngineTuning tuning = set.population().getFirst();
         assertThat(tuning.name()).isEqualTo("test");
-        assertThat(tuning.ai().maxDepth()).isEqualTo(24);
-        assertThat(tuning.ai().nullMovePruning()).isFalse();
+        AiTuning defaults = AiTuning.defaults();
+        assertThat(tuning.ai().maxDepth()).isEqualTo(defaults.maxDepth());
+        assertThat(tuning.ai().nullMovePruning()).isEqualTo(defaults.nullMovePruning());
         assertThat(tuning.evaluation().modules())
                 .containsKey("materialmodule");
     }
