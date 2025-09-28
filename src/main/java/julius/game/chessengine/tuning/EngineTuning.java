@@ -1,5 +1,6 @@
 package julius.game.chessengine.tuning;
 
+import julius.game.chessengine.evaluation.EvaluationParameters;
 import julius.game.chessengine.evaluation.EvaluationWeights;
 
 import java.util.Collections;
@@ -53,6 +54,10 @@ public final class EngineTuning {
 
     public EvaluationWeights evaluationWeights() {
         return evaluation.toWeights();
+    }
+
+    public EvaluationParameters evaluationParameters() {
+        return EvaluationParameters.of(numericParameters);
     }
 
     public EngineTuning mutate(Random random, double strength) {

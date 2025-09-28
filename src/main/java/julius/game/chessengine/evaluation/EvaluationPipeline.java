@@ -15,8 +15,6 @@ import java.util.Objects;
  */
 public final class EvaluationPipeline {
 
-    private static final int BLEND_SCALE = 256;
-
     private static final class ModuleState {
         private final EvaluationModule module;
         private final EvaluationWeights.ModuleWeight weight;
@@ -32,6 +30,7 @@ public final class EvaluationPipeline {
 
     private final List<ModuleState> modules;
     private final EvaluationWeights weights;
+    private final int blendScale;
     private EvaluationContext context;
     private boolean initialized;
     private boolean aggregateDirty = true;
@@ -39,14 +38,20 @@ public final class EvaluationPipeline {
     private int endgameTotal;
 
     public EvaluationPipeline(List<? extends EvaluationModule> modules) {
-        this(modules, EvaluationWeights.identity());
+        this(modules, EvaluationWeights.identity(), EvaluationParameters.defaults());
     }
 
     public EvaluationPipeline(List<? extends EvaluationModule> modules, EvaluationWeights weights) {
+        this(modules, weights, EvaluationParameters.defaults());
+    }
+
+    public EvaluationPipeline(List<? extends EvaluationModule> modules, EvaluationWeights weights, EvaluationParameters parameters) {
         if (modules == null || modules.isEmpty()) {
             throw new IllegalArgumentException("At least one evaluation module is required");
         }
         this.weights = (weights != null ? weights : EvaluationWeights.identity());
+        EvaluationParameters resolvedParameters = parameters != null ? parameters : EvaluationParameters.defaults();
+        this.blendScale = resolvedParameters.evaluationBlendScale();
         List<ModuleState> moduleStates = new ArrayList<>(modules.size());
         for (EvaluationModule module : modules) {
             EvaluationWeights.ModuleWeight weight = this.weights.weightFor(module.getClass());
@@ -107,10 +112,10 @@ public final class EvaluationPipeline {
             return 0;
         }
         int phase = clamp(context.getPhase());
-        int midgameWeight = BLEND_SCALE - phase;
+        int midgameWeight = blendScale - phase;
         int endgameWeight = phase;
         long blended = (long) midgameTotal * midgameWeight + (long) endgameTotal * endgameWeight;
-        return (int) (blended / BLEND_SCALE);
+        return (int) (blended / blendScale);
     }
 
     public double getScoreDifference() {
@@ -166,8 +171,8 @@ public final class EvaluationPipeline {
         if (phase < 0) {
             return 0;
         }
-        if (phase > BLEND_SCALE) {
-            return BLEND_SCALE;
+        if (phase > blendScale) {
+            return blendScale;
         }
         return phase;
     }

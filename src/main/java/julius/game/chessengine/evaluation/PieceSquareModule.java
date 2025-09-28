@@ -7,11 +7,6 @@ import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.ImmutableBoardView;
 import julius.game.chessengine.figures.PieceType;
 
-import static julius.game.chessengine.evaluation.MaterialModule.BISHOP_VALUE;
-import static julius.game.chessengine.evaluation.MaterialModule.KNIGHT_VALUE;
-import static julius.game.chessengine.evaluation.MaterialModule.PAWN_VALUE;
-import static julius.game.chessengine.evaluation.MaterialModule.QUEEN_VALUE;
-import static julius.game.chessengine.evaluation.MaterialModule.ROOK_VALUE;
 import static julius.game.chessengine.helper.BishopHelper.BISHOP_ENDGAME_POSITIONAL_VALUES;
 import static julius.game.chessengine.helper.BishopHelper.BISHOP_MIDGAME_POSITIONAL_VALUES;
 import static julius.game.chessengine.helper.BitHelper.FileMasks;
@@ -47,16 +42,6 @@ public final class PieceSquareModule implements EvaluationModule {
     private static final int QUEEN = MoveHelper.pieceTypeToInt(PieceType.QUEEN);
     private static final int KING = MoveHelper.pieceTypeToInt(PieceType.KING);
 
-    private static final int DEVELOPMENT_PHASE_THRESHOLD = 64;
-    private static final int QUEEN_DEVELOPMENT_PHASE_THRESHOLD = 80;
-    private static final int UNDEVELOPED_MINOR_PENALTY = -20;
-    private static final int EARLY_QUEEN_DEVELOPMENT_PENALTY_PER_MINOR = -15;
-    private static final int MIN_UNDEVELOPED_MINORS_FOR_QUEEN_PENALTY = 2;
-    private static final int START_POSITION_PENALTY = -40;
-    private static final int BLEND_SCALE = 256;
-    private static final int CASTLING_BONUS = 20;
-    private static final int NOT_CASTLED_AND_ROOK_MOVE_PENALTY = -10;
-
     private static final long NOT_A_FILE = ~FileMasks[0];
     private static final long NOT_H_FILE = ~FileMasks[7];
 
@@ -68,6 +53,21 @@ public final class PieceSquareModule implements EvaluationModule {
     private static final boolean[][] ROOK_HOME_SQUARE = new boolean[2][64];
 
     private static final int[] QUEEN_START_SQUARE = new int[2];
+
+    private final int developmentPhaseThreshold;
+    private final int queenDevelopmentPhaseThreshold;
+    private final int undevelopedMinorPenalty;
+    private final int earlyQueenDevelopmentPenaltyPerMinor;
+    private final int minUndevelopedMinorsForQueenPenalty;
+    private final int startPositionPenalty;
+    private final int blendScale;
+    private final int castlingBonus;
+    private final int notCastledAndRookMovePenalty;
+    private final int pawnValue;
+    private final int knightValue;
+    private final int bishopValue;
+    private final int rookValue;
+    private final int queenValue;
 
     static {
         MIDGAME_TABLES[WHITE][PAWN] = WHITE_PAWN_MIDGAME_POSITIONAL_VALUES;
@@ -141,6 +141,25 @@ public final class PieceSquareModule implements EvaluationModule {
     private boolean castlingDirty = true;
 
     public PieceSquareModule() {
+        this(EvaluationParameters.defaults());
+    }
+
+    public PieceSquareModule(EvaluationParameters parameters) {
+        Objects.requireNonNull(parameters, "parameters");
+        this.developmentPhaseThreshold = parameters.pieceSquareDevelopmentPhaseThreshold();
+        this.queenDevelopmentPhaseThreshold = parameters.pieceSquareQueenDevelopmentPhaseThreshold();
+        this.undevelopedMinorPenalty = parameters.pieceSquareUndevelopedMinorPenalty();
+        this.earlyQueenDevelopmentPenaltyPerMinor = parameters.pieceSquareEarlyQueenDevelopmentPenaltyPerMinor();
+        this.minUndevelopedMinorsForQueenPenalty = parameters.pieceSquareMinUndevelopedMinorsForQueenPenalty();
+        this.startPositionPenalty = parameters.pieceSquareStartPositionPenalty();
+        this.blendScale = parameters.pieceSquareBlendScale();
+        this.castlingBonus = parameters.pieceSquareCastlingBonus();
+        this.notCastledAndRookMovePenalty = parameters.pieceSquareNotCastledRookMovePenalty();
+        this.pawnValue = parameters.materialPawnValue();
+        this.knightValue = parameters.materialKnightValue();
+        this.bishopValue = parameters.materialBishopValue();
+        this.rookValue = parameters.materialRookValue();
+        this.queenValue = parameters.materialQueenValue();
         Arrays.fill(occupantColor, -1);
     }
 
@@ -465,25 +484,25 @@ public final class PieceSquareModule implements EvaluationModule {
     }
 
     private void recalculateDevelopmentContribution() {
-        int whiteStart = (minorPiecesAtHome[WHITE] + rooksAtHome[WHITE] == 6) ? START_POSITION_PENALTY : 0;
-        int blackStart = (minorPiecesAtHome[BLACK] + rooksAtHome[BLACK] == 6) ? START_POSITION_PENALTY : 0;
+        int whiteStart = (minorPiecesAtHome[WHITE] + rooksAtHome[WHITE] == 6) ? startPositionPenalty : 0;
+        int blackStart = (minorPiecesAtHome[BLACK] + rooksAtHome[BLACK] == 6) ? startPositionPenalty : 0;
 
-        int whiteMinor = currentPhase >= DEVELOPMENT_PHASE_THRESHOLD
-                ? minorPiecesAtHome[WHITE] * UNDEVELOPED_MINOR_PENALTY : 0;
-        int blackMinor = currentPhase >= DEVELOPMENT_PHASE_THRESHOLD
-                ? minorPiecesAtHome[BLACK] * UNDEVELOPED_MINOR_PENALTY : 0;
+        int whiteMinor = currentPhase >= developmentPhaseThreshold
+                ? minorPiecesAtHome[WHITE] * undevelopedMinorPenalty : 0;
+        int blackMinor = currentPhase >= developmentPhaseThreshold
+                ? minorPiecesAtHome[BLACK] * undevelopedMinorPenalty : 0;
 
         int whiteQueen = 0;
-        if (currentPhase <= QUEEN_DEVELOPMENT_PHASE_THRESHOLD && queenCount[WHITE] > 0 && !queenOnStart[WHITE]) {
-            if (minorPiecesAtHome[WHITE] >= MIN_UNDEVELOPED_MINORS_FOR_QUEEN_PENALTY) {
-                whiteQueen = minorPiecesAtHome[WHITE] * EARLY_QUEEN_DEVELOPMENT_PENALTY_PER_MINOR;
+        if (currentPhase <= queenDevelopmentPhaseThreshold && queenCount[WHITE] > 0 && !queenOnStart[WHITE]) {
+            if (minorPiecesAtHome[WHITE] >= minUndevelopedMinorsForQueenPenalty) {
+                whiteQueen = minorPiecesAtHome[WHITE] * earlyQueenDevelopmentPenaltyPerMinor;
             }
         }
 
         int blackQueen = 0;
-        if (currentPhase <= QUEEN_DEVELOPMENT_PHASE_THRESHOLD && queenCount[BLACK] > 0 && !queenOnStart[BLACK]) {
-            if (minorPiecesAtHome[BLACK] >= MIN_UNDEVELOPED_MINORS_FOR_QUEEN_PENALTY) {
-                blackQueen = minorPiecesAtHome[BLACK] * EARLY_QUEEN_DEVELOPMENT_PENALTY_PER_MINOR;
+        if (currentPhase <= queenDevelopmentPhaseThreshold && queenCount[BLACK] > 0 && !queenOnStart[BLACK]) {
+            if (minorPiecesAtHome[BLACK] >= minUndevelopedMinorsForQueenPenalty) {
+                blackQueen = minorPiecesAtHome[BLACK] * earlyQueenDevelopmentPenaltyPerMinor;
             }
         }
 
@@ -555,15 +574,15 @@ public final class PieceSquareModule implements EvaluationModule {
         if (king == 0L) {
             return 0;
         }
-        int castlingBonus = CASTLING_BONUS * (BLEND_SCALE - phase) / BLEND_SCALE;
-        int rookMovePenalty = NOT_CASTLED_AND_ROOK_MOVE_PENALTY * (BLEND_SCALE - phase) / BLEND_SCALE;
+        int castlingBonusScore = castlingBonus * (blendScale - phase) / blendScale;
+        int rookMovePenaltyScore = notCastledAndRookMovePenalty * (blendScale - phase) / blendScale;
         if (white) {
             if (materialBalance < 0) {
-                rookMovePenalty /= 2;
+                rookMovePenaltyScore /= 2;
             }
         } else {
             if (materialBalance > 0) {
-                rookMovePenalty /= 2;
+                rookMovePenaltyScore /= 2;
             }
         }
 
@@ -597,32 +616,32 @@ public final class PieceSquareModule implements EvaluationModule {
 
         int adjustment = 0;
         if (hasCastled) {
-            adjustment += castlingBonus;
+            adjustment += castlingBonusScore;
         } else if (applyPenalty) {
             if (rookAFileMoved) {
-                adjustment += rookMovePenalty;
+                adjustment += rookMovePenaltyScore;
             }
             if (rookHFileMoved) {
-                adjustment += rookMovePenalty;
+                adjustment += rookMovePenaltyScore;
             }
             if (kingMoved) {
-                adjustment += rookMovePenalty * 2;
+                adjustment += rookMovePenaltyScore * 2;
             }
         }
         return adjustment;
     }
 
     private static int computeMaterialBalance(ImmutableBoardView board) {
-        int whiteMaterial = Long.bitCount(board.getWhitePawns()) * PAWN_VALUE
-                + Long.bitCount(board.getWhiteKnights()) * KNIGHT_VALUE
-                + Long.bitCount(board.getWhiteBishops()) * BISHOP_VALUE
-                + Long.bitCount(board.getWhiteRooks()) * ROOK_VALUE
-                + Long.bitCount(board.getWhiteQueens()) * QUEEN_VALUE;
-        int blackMaterial = Long.bitCount(board.getBlackPawns()) * PAWN_VALUE
-                + Long.bitCount(board.getBlackKnights()) * KNIGHT_VALUE
-                + Long.bitCount(board.getBlackBishops()) * BISHOP_VALUE
-                + Long.bitCount(board.getBlackRooks()) * ROOK_VALUE
-                + Long.bitCount(board.getBlackQueens()) * QUEEN_VALUE;
+        int whiteMaterial = Long.bitCount(board.getWhitePawns()) * pawnValue
+                + Long.bitCount(board.getWhiteKnights()) * knightValue
+                + Long.bitCount(board.getWhiteBishops()) * bishopValue
+                + Long.bitCount(board.getWhiteRooks()) * rookValue
+                + Long.bitCount(board.getWhiteQueens()) * queenValue;
+        int blackMaterial = Long.bitCount(board.getBlackPawns()) * pawnValue
+                + Long.bitCount(board.getBlackKnights()) * knightValue
+                + Long.bitCount(board.getBlackBishops()) * bishopValue
+                + Long.bitCount(board.getBlackRooks()) * rookValue
+                + Long.bitCount(board.getBlackQueens()) * queenValue;
         return whiteMaterial - blackMaterial;
     }
 
