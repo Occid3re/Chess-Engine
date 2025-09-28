@@ -76,10 +76,6 @@ public final class EngineTuningWriter {
         if (tuning.name() != null && !tuning.name().isBlank()) {
             config.put("name", tuning.name());
         }
-        Map<String, Object> ai = toAiConfig(tuning.ai());
-        if (!ai.isEmpty()) {
-            config.put("ai", ai);
-        }
         Map<String, Object> evaluation = toEvaluationConfig(tuning.evaluation());
         if (!evaluation.isEmpty()) {
             config.put("evaluation", evaluation);
@@ -87,17 +83,6 @@ public final class EngineTuningWriter {
         if (!tuning.numericParameters().isEmpty()) {
             config.put("numericParameters", new LinkedHashMap<>(tuning.numericParameters()));
         }
-        return config;
-    }
-
-    private static Map<String, Object> toAiConfig(AiTuning tuning) {
-        Map<String, Object> config = new LinkedHashMap<>();
-        config.put("searchThreads", tuning.searchThreads());
-        config.put("lazySmpThreads", tuning.lazySmpThreads());
-        config.put("hashSizeMb", tuning.hashSizeMb());
-        config.put("maxDepth", tuning.maxDepth());
-        config.put("timeLimitMillis", tuning.timeLimitMillis());
-        config.put("nullMovePruning", tuning.nullMovePruning());
         return config;
     }
 
