@@ -56,7 +56,7 @@ public final class EngineTuningWriter {
         options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
         options.setPrettyFlow(true);
         options.setIndent(2);
-        options.setIndicatorIndent(2);
+        options.setIndicatorIndent(1);
         options.setSplitLines(false);
         return options;
     }
