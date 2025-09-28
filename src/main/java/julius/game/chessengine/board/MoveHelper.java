@@ -48,19 +48,7 @@ public class MoveHelper {
         return ((move >>> 16) & 0x3) == 0x2;
     }
 
-    public static boolean isKingFirstMove(int move) {
-        return (move & (1 << 24)) != 0;
-    }
-
-    public static boolean isRookFirstMove(int move) {
-        return (move & (1 << 25)) != 0;
-    }
-
-    public static int deriveLastMoveDoubleStepPawnIndex(int move) {
-        return (move >> 26) & 0x3F; // Extract the 6 bits starting from the 26th bit
-    }
-
-    public static int createMoveInt(int fromIndex, int toIndex, PieceType pieceType, boolean isWhite, boolean isCapture, boolean isCastlingMove, boolean isEnPassantMove, PieceType promotionPieceType, PieceType capturedPieceType, boolean isKingFirstMove, boolean isRookFirstMove, int lastMoveDoubleStepPawnIndex) {
+    public static int createMoveInt(int fromIndex, int toIndex, PieceType pieceType, boolean isWhite, boolean isCapture, boolean isCastlingMove, boolean isEnPassantMove, PieceType promotionPieceType, PieceType capturedPieceType, boolean isKingFirstMove, boolean isRookFirstMove, int castlingStateBits) {
         int moveInt = 0;
         moveInt |= fromIndex; // 6 bits for 'from' position
         moveInt |= toIndex << 6; // 6 bits for 'to' position, shifted by 6 bits
@@ -87,17 +75,31 @@ public class MoveHelper {
             moveInt &= ~(0x07 << 21); // Ensure captured piece bits are set to 000 if no piece is captured
         }
 
-        if (isKingFirstMove) {
-            moveInt |= 1 << 24; // 1 bit for king's first move, shifted by 24 bits
-        }
-
-        if (isRookFirstMove) {
-            moveInt |= 1 << 25; // 1 bit for rook's first move, shifted by 25 bits
-        }
-
-        moveInt |= lastMoveDoubleStepPawnIndex << 26; // Shifted by 26 bits
+        // Store six bits describing king/rook movement state prior to the move.
+        moveInt |= (castlingStateBits & 0x3F) << 24;
 
         return moveInt;
+    }
+
+    public static int deriveCastlingState(int move) {
+        return (move >> 24) & 0x3F;
+    }
+
+    public static int deriveCastlingRights(int move) {
+        int state = deriveCastlingState(move);
+        boolean whiteKingMoved = (state & 0x01) != 0;
+        boolean whiteRookA1Moved = (state & 0x02) != 0;
+        boolean whiteRookH1Moved = (state & 0x04) != 0;
+        boolean blackKingMoved = (state & 0x08) != 0;
+        boolean blackRookA8Moved = (state & 0x10) != 0;
+        boolean blackRookH8Moved = (state & 0x20) != 0;
+
+        int rights = 0;
+        if (!whiteKingMoved && !whiteRookH1Moved) rights |= 0x1;
+        if (!whiteKingMoved && !whiteRookA1Moved) rights |= 0x2;
+        if (!blackKingMoved && !blackRookH8Moved) rights |= 0x4;
+        if (!blackKingMoved && !blackRookA8Moved) rights |= 0x8;
+        return rights;
     }
 
     public static int convertStringToIndex(String positionStr) {
