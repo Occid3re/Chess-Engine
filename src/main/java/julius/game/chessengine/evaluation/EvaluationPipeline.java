@@ -15,7 +15,7 @@ import java.util.Objects;
  */
 public final class EvaluationPipeline {
 
-    private static final int BLEND_SCALE = 256;
+    private final int blendScale;
 
     private static final class ModuleState {
         private final EvaluationModule module;
@@ -39,14 +39,19 @@ public final class EvaluationPipeline {
     private int endgameTotal;
 
     public EvaluationPipeline(List<? extends EvaluationModule> modules) {
-        this(modules, EvaluationWeights.identity());
+        this(modules, EvaluationWeights.identity(), 256);
     }
 
     public EvaluationPipeline(List<? extends EvaluationModule> modules, EvaluationWeights weights) {
+        this(modules, weights, 256);
+    }
+
+    public EvaluationPipeline(List<? extends EvaluationModule> modules, EvaluationWeights weights, int blendScale) {
         if (modules == null || modules.isEmpty()) {
             throw new IllegalArgumentException("At least one evaluation module is required");
         }
         this.weights = (weights != null ? weights : EvaluationWeights.identity());
+        this.blendScale = Math.max(1, blendScale);
         List<ModuleState> moduleStates = new ArrayList<>(modules.size());
         for (EvaluationModule module : modules) {
             EvaluationWeights.ModuleWeight weight = this.weights.weightFor(module.getClass());
@@ -107,10 +112,10 @@ public final class EvaluationPipeline {
             return 0;
         }
         int phase = clamp(context.getPhase());
-        int midgameWeight = BLEND_SCALE - phase;
+        int midgameWeight = blendScale - phase;
         int endgameWeight = phase;
         long blended = (long) midgameTotal * midgameWeight + (long) endgameTotal * endgameWeight;
-        return (int) (blended / BLEND_SCALE);
+        return (int) (blended / blendScale);
     }
 
     public double getScoreDifference() {
@@ -166,8 +171,8 @@ public final class EvaluationPipeline {
         if (phase < 0) {
             return 0;
         }
-        if (phase > BLEND_SCALE) {
-            return BLEND_SCALE;
+        if (phase > blendScale) {
+            return blendScale;
         }
         return phase;
     }

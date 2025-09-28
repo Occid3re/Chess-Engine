@@ -4,6 +4,8 @@ import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.ImmutableBoardView;
 import julius.game.chessengine.figures.PieceType;
 
+import julius.game.chessengine.evaluation.EvaluationParameters;
+
 import java.util.Objects;
 
 import static julius.game.chessengine.helper.PawnMoveTables.PAWN_ATTACKS;
@@ -25,25 +27,34 @@ public final class ThreatModule implements EvaluationModule {
     private static final int QUEEN = MoveHelper.pieceTypeToInt(PieceType.QUEEN);
     private static final int KING = MoveHelper.pieceTypeToInt(PieceType.KING);
 
-    private static final int[] HANGING_PENALTIES = new int[7];
-    private static final int[] PAWN_THREAT_PENALTIES = new int[7];
-
-    static {
-        HANGING_PENALTIES[PAWN] = -12;
-        HANGING_PENALTIES[KNIGHT] = -30;
-        HANGING_PENALTIES[BISHOP] = -30;
-        HANGING_PENALTIES[ROOK] = -45;
-        HANGING_PENALTIES[QUEEN] = -70;
-
-        PAWN_THREAT_PENALTIES[KNIGHT] = -10;
-        PAWN_THREAT_PENALTIES[BISHOP] = -10;
-        PAWN_THREAT_PENALTIES[ROOK] = -18;
-        PAWN_THREAT_PENALTIES[QUEEN] = -25;
-    }
+    private final int[] hangingPenalties = new int[7];
+    private final int[] pawnThreatPenalties = new int[7];
 
     private int midgameScoreCache;
     private int endgameScoreCache;
     private boolean dirty = true;
+
+    public ThreatModule() {
+        this(EvaluationParameters.identity());
+    }
+
+    public ThreatModule(EvaluationParameters parameters) {
+        EvaluationParameters resolved = parameters != null ? parameters : EvaluationParameters.identity();
+        hangingPenalties[PAWN] = resolved.getInt(key("hangingPawn"), -12);
+        hangingPenalties[KNIGHT] = resolved.getInt(key("hangingKnight"), -30);
+        hangingPenalties[BISHOP] = resolved.getInt(key("hangingBishop"), -30);
+        hangingPenalties[ROOK] = resolved.getInt(key("hangingRook"), -45);
+        hangingPenalties[QUEEN] = resolved.getInt(key("hangingQueen"), -70);
+
+        pawnThreatPenalties[KNIGHT] = resolved.getInt(key("pawnThreatKnight"), -10);
+        pawnThreatPenalties[BISHOP] = resolved.getInt(key("pawnThreatBishop"), -10);
+        pawnThreatPenalties[ROOK] = resolved.getInt(key("pawnThreatRook"), -18);
+        pawnThreatPenalties[QUEEN] = resolved.getInt(key("pawnThreatQueen"), -25);
+    }
+
+    private static String key(String suffix) {
+        return "threat." + suffix.toLowerCase();
+    }
 
     @Override
     public void initialize(EvaluationContext context) {
@@ -136,9 +147,9 @@ public final class ThreatModule implements EvaluationModule {
                 continue;
             }
 
-            penalty += HANGING_PENALTIES[typeBits];
+            penalty += hangingPenalties[typeBits];
             if (typeBits > PAWN && (enemyPawnAttacks & mask) != 0) {
-                penalty += PAWN_THREAT_PENALTIES[typeBits];
+                penalty += pawnThreatPenalties[typeBits];
             }
             remaining ^= bit;
         }

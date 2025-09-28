@@ -8,6 +8,8 @@ import julius.game.chessengine.helper.KingHelper;
 import julius.game.chessengine.helper.KnightHelper;
 import julius.game.chessengine.helper.RookHelper;
 
+import julius.game.chessengine.evaluation.EvaluationParameters;
+
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -28,10 +30,10 @@ public final class ActivityModule implements EvaluationModule {
     private static final int QUEEN = MoveHelper.pieceTypeToInt(PieceType.QUEEN);
     private static final int KING = MoveHelper.pieceTypeToInt(PieceType.KING);
 
-    private static final int[] MIDGAME_MOBILITY_WEIGHTS = new int[7];
-    private static final int[] ENDGAME_MOBILITY_WEIGHTS = new int[7];
-    private static final int[] MIDGAME_CENTER_WEIGHTS = new int[7];
-    private static final int[] ENDGAME_CENTER_WEIGHTS = new int[7];
+    private final int[] midgameMobilityWeights = new int[7];
+    private final int[] endgameMobilityWeights = new int[7];
+    private final int[] midgameCenterWeights = new int[7];
+    private final int[] endgameCenterWeights = new int[7];
 
     private static final long CENTRAL_SQUARES;
 
@@ -50,30 +52,6 @@ public final class ActivityModule implements EvaluationModule {
     private static final RookHelper ROOK_HELPER = RookHelper.getInstance();
 
     static {
-        MIDGAME_MOBILITY_WEIGHTS[KNIGHT] = 2;
-        MIDGAME_MOBILITY_WEIGHTS[BISHOP] = 4;
-        MIDGAME_MOBILITY_WEIGHTS[ROOK] = 2;
-        MIDGAME_MOBILITY_WEIGHTS[QUEEN] = 1;
-        MIDGAME_MOBILITY_WEIGHTS[KING] = 0;
-
-        ENDGAME_MOBILITY_WEIGHTS[KNIGHT] = 2;
-        ENDGAME_MOBILITY_WEIGHTS[BISHOP] = 4;
-        ENDGAME_MOBILITY_WEIGHTS[ROOK] = 2;
-        ENDGAME_MOBILITY_WEIGHTS[QUEEN] = 1;
-        ENDGAME_MOBILITY_WEIGHTS[KING] = 2;
-
-        MIDGAME_CENTER_WEIGHTS[KNIGHT] = 3;
-        MIDGAME_CENTER_WEIGHTS[BISHOP] = 3;
-        MIDGAME_CENTER_WEIGHTS[ROOK] = 3;
-        MIDGAME_CENTER_WEIGHTS[QUEEN] = 3;
-        MIDGAME_CENTER_WEIGHTS[KING] = 0;
-
-        ENDGAME_CENTER_WEIGHTS[KNIGHT] = 3;
-        ENDGAME_CENTER_WEIGHTS[BISHOP] = 3;
-        ENDGAME_CENTER_WEIGHTS[ROOK] = 3;
-        ENDGAME_CENTER_WEIGHTS[QUEEN] = 3;
-        ENDGAME_CENTER_WEIGHTS[KING] = 2;
-
         CENTRAL_SQUARES = (1L << squareIndex('d', 4))
                 | (1L << squareIndex('e', 4))
                 | (1L << squareIndex('d', 5))
@@ -128,9 +106,42 @@ public final class ActivityModule implements EvaluationModule {
     private boolean initialized;
 
     public ActivityModule() {
+        this(EvaluationParameters.identity());
+    }
+
+    public ActivityModule(EvaluationParameters parameters) {
+        EvaluationParameters resolved = parameters != null ? parameters : EvaluationParameters.identity();
+        midgameMobilityWeights[KNIGHT] = resolved.getInt(key("midgameMobilityKnight"), 2);
+        midgameMobilityWeights[BISHOP] = resolved.getInt(key("midgameMobilityBishop"), 4);
+        midgameMobilityWeights[ROOK] = resolved.getInt(key("midgameMobilityRook"), 2);
+        midgameMobilityWeights[QUEEN] = resolved.getInt(key("midgameMobilityQueen"), 1);
+        midgameMobilityWeights[KING] = resolved.getInt(key("midgameMobilityKing"), 0);
+
+        endgameMobilityWeights[KNIGHT] = resolved.getInt(key("endgameMobilityKnight"), 2);
+        endgameMobilityWeights[BISHOP] = resolved.getInt(key("endgameMobilityBishop"), 4);
+        endgameMobilityWeights[ROOK] = resolved.getInt(key("endgameMobilityRook"), 2);
+        endgameMobilityWeights[QUEEN] = resolved.getInt(key("endgameMobilityQueen"), 1);
+        endgameMobilityWeights[KING] = resolved.getInt(key("endgameMobilityKing"), 2);
+
+        midgameCenterWeights[KNIGHT] = resolved.getInt(key("midgameCenterKnight"), 3);
+        midgameCenterWeights[BISHOP] = resolved.getInt(key("midgameCenterBishop"), 3);
+        midgameCenterWeights[ROOK] = resolved.getInt(key("midgameCenterRook"), 3);
+        midgameCenterWeights[QUEEN] = resolved.getInt(key("midgameCenterQueen"), 3);
+        midgameCenterWeights[KING] = resolved.getInt(key("midgameCenterKing"), 0);
+
+        endgameCenterWeights[KNIGHT] = resolved.getInt(key("endgameCenterKnight"), 3);
+        endgameCenterWeights[BISHOP] = resolved.getInt(key("endgameCenterBishop"), 3);
+        endgameCenterWeights[ROOK] = resolved.getInt(key("endgameCenterRook"), 3);
+        endgameCenterWeights[QUEEN] = resolved.getInt(key("endgameCenterQueen"), 3);
+        endgameCenterWeights[KING] = resolved.getInt(key("endgameCenterKing"), 2);
+
         for (int i = 0; i < activities.length; i++) {
             activities[i] = new PieceActivity();
         }
+    }
+
+    private static String key(String suffix) {
+        return "activity." + suffix.toLowerCase();
     }
 
     @Override
@@ -559,10 +570,10 @@ public final class ActivityModule implements EvaluationModule {
         int mobility = Long.bitCount(legalTargets);
         int center = Long.bitCount(legalTargets & CENTRAL_SQUARES);
 
-        int midgameContribution = mobility * MIDGAME_MOBILITY_WEIGHTS[pieceType]
-                + center * MIDGAME_CENTER_WEIGHTS[pieceType];
-        int endgameContribution = mobility * ENDGAME_MOBILITY_WEIGHTS[pieceType]
-                + center * ENDGAME_CENTER_WEIGHTS[pieceType];
+        int midgameContribution = mobility * midgameMobilityWeights[pieceType]
+                + center * midgameCenterWeights[pieceType];
+        int endgameContribution = mobility * endgameMobilityWeights[pieceType]
+                + center * endgameCenterWeights[pieceType];
 
         midgameTotals[activity.color] += midgameContribution - activity.midgameScore;
         endgameTotals[activity.color] += endgameContribution - activity.endgameScore;

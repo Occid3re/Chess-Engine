@@ -5,6 +5,7 @@ import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.evaluation.ActivityModule;
 import julius.game.chessengine.evaluation.EvaluationContext;
+import julius.game.chessengine.evaluation.EvaluationParameters;
 import julius.game.chessengine.evaluation.EvaluationPipeline;
 import julius.game.chessengine.evaluation.EvaluationWeights;
 import julius.game.chessengine.evaluation.KingSafetyModule;
@@ -26,22 +27,25 @@ import java.util.Objects;
 public class Score {
 
     private static final ThreadLocal<ScoreFactory> THREAD_FACTORY = new ThreadLocal<>();
+    private static final ThreadLocal<EvaluationParameters> THREAD_PARAMETERS = new ThreadLocal<>();
     private static volatile ScoreFactory GLOBAL_FACTORY = bitBoard -> new Score(bitBoard, EvaluationWeights.identity());
+    private static volatile EvaluationParameters GLOBAL_PARAMETERS = EvaluationParameters.identity();
 
     public static final int CHECKMATE = 100000;
     public static final int CHECK = 50;
     public static final int DRAW = 0;
     public static final int KILLER_MOVE_SCORE = 10000;
 
-    private final MaterialModule materialModule = new MaterialModule();
-    private final PawnStructureModule pawnStructureModule = new PawnStructureModule();
-    private final PieceSquareModule pieceSquareModule = new PieceSquareModule();
-    private final ActivityModule activityModule = new ActivityModule();
-    private final KingSafetyModule kingSafetyModule = new KingSafetyModule();
-    private final ThreatModule threatModule = new ThreatModule();
+    private final MaterialModule materialModule;
+    private final PawnStructureModule pawnStructureModule;
+    private final PieceSquareModule pieceSquareModule;
+    private final ActivityModule activityModule;
+    private final KingSafetyModule kingSafetyModule;
+    private final ThreatModule threatModule;
 
     @JsonIgnore
     private final EvaluationWeights weights;
+    private final EvaluationParameters parameters;
     private final EvaluationPipeline evaluationPipeline;
     @JsonIgnore
     private EvaluationContext evaluationContext;
@@ -53,8 +57,20 @@ public class Score {
     }
 
     public Score(EvaluationWeights weights) {
+        this(weights, resolveParameters());
+    }
+
+    public Score(EvaluationWeights weights, EvaluationParameters parameters) {
         this.weights = weights != null ? weights : EvaluationWeights.identity();
+        this.parameters = parameters != null ? parameters : resolveParameters();
+        this.materialModule = new MaterialModule(this.parameters);
+        this.pawnStructureModule = new PawnStructureModule(this.parameters);
+        this.pieceSquareModule = new PieceSquareModule(this.parameters);
+        this.activityModule = new ActivityModule(this.parameters);
+        this.kingSafetyModule = new KingSafetyModule(this.parameters);
+        this.threatModule = new ThreatModule(this.parameters);
         materialModule.setPawnChangeListener(pawnStructureModule);
+        int blendScale = this.parameters.getInt("evaluation.blendscale", 256);
         this.evaluationPipeline = new EvaluationPipeline(List.of(
                 materialModule,
                 pawnStructureModule,
@@ -62,16 +78,16 @@ public class Score {
                 activityModule,
                 kingSafetyModule,
                 threatModule
-        ), this.weights);
+        ), this.weights, blendScale);
     }
 
     public Score(BitBoard bitBoard, EvaluationWeights weights) {
-        this(weights);
+        this(weights, resolveParameters());
         initializeFrom(bitBoard);
     }
 
     public Score(Score other) {
-        this(other != null ? other.weights : null);
+        this(other != null ? other.weights : null, other != null ? other.parameters : null);
         if (other != null && other.evaluationContext != null) {
             this.evaluationContext = other.evaluationContext.copy();
             if (other.spareEvaluationContext != null) {
@@ -101,6 +117,11 @@ public class Score {
         return (local != null) ? local : GLOBAL_FACTORY;
     }
 
+    private static EvaluationParameters resolveParameters() {
+        EvaluationParameters local = THREAD_PARAMETERS.get();
+        return (local != null) ? local : GLOBAL_PARAMETERS;
+    }
+
     public static AutoCloseable useFactory(ScoreFactory factory) {
         Objects.requireNonNull(factory, "factory");
         ScoreFactory previous = THREAD_FACTORY.get();
@@ -115,7 +136,29 @@ public class Score {
     }
 
     public static AutoCloseable useEvaluationWeights(EvaluationWeights weights) {
-        return useFactory(forEvaluationWeights(weights));
+        return useEvaluationConfiguration(weights, null);
+    }
+
+    public static AutoCloseable useEvaluationConfiguration(EvaluationWeights weights, EvaluationParameters parameters) {
+        EvaluationWeights resolvedWeights = (weights != null ? weights : EvaluationWeights.identity());
+        EvaluationParameters resolvedParameters = (parameters != null ? parameters : EvaluationParameters.identity());
+        ScoreFactory factory = forEvaluationWeights(resolvedWeights);
+        ScoreFactory previousFactory = THREAD_FACTORY.get();
+        EvaluationParameters previousParameters = THREAD_PARAMETERS.get();
+        THREAD_FACTORY.set(factory);
+        THREAD_PARAMETERS.set(resolvedParameters);
+        return () -> {
+            if (previousFactory == null) {
+                THREAD_FACTORY.remove();
+            } else {
+                THREAD_FACTORY.set(previousFactory);
+            }
+            if (previousParameters == null) {
+                THREAD_PARAMETERS.remove();
+            } else {
+                THREAD_PARAMETERS.set(previousParameters);
+            }
+        };
     }
 
     public static ScoreFactory forEvaluationWeights(EvaluationWeights weights) {
@@ -125,6 +168,10 @@ public class Score {
 
     public static void setGlobalFactory(ScoreFactory factory) {
         GLOBAL_FACTORY = Objects.requireNonNull(factory, "factory");
+    }
+
+    public static void setGlobalEvaluationParameters(EvaluationParameters parameters) {
+        GLOBAL_PARAMETERS = parameters != null ? parameters : EvaluationParameters.identity();
     }
 
     public void refresh(BitBoard bitBoard, GameStateEnum state) {
@@ -227,12 +274,18 @@ public class Score {
     }
 
     public static int getPieceValue(int pieceTypeBits) {
+        EvaluationParameters params = resolveParameters();
+        int pawn = params.getInt("material.pawnvalue", MaterialModule.PAWN_VALUE) / 100;
+        int knight = params.getInt("material.knightvalue", MaterialModule.KNIGHT_VALUE) / 100;
+        int bishop = params.getInt("material.bishopvalue", MaterialModule.BISHOP_VALUE) / 100;
+        int rook = params.getInt("material.rookvalue", MaterialModule.ROOK_VALUE) / 100;
+        int queen = params.getInt("material.queenvalue", MaterialModule.QUEEN_VALUE) / 100;
         return switch (pieceTypeBits) {
-            case 1 -> MaterialModule.PAWN_VALUE / 100;
-            case 2 -> MaterialModule.KNIGHT_VALUE / 100;
-            case 3 -> MaterialModule.BISHOP_VALUE / 100;
-            case 4 -> MaterialModule.ROOK_VALUE / 100;
-            case 5 -> MaterialModule.QUEEN_VALUE / 100;
+            case 1 -> pawn;
+            case 2 -> knight;
+            case 3 -> bishop;
+            case 4 -> rook;
+            case 5 -> queen;
             case 6 -> 1000;
             default -> throw new IllegalStateException("Unexpected value: " + pieceTypeBits);
         };

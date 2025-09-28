@@ -1,10 +1,10 @@
 package julius.game.chessengine.tuning;
 
+import julius.game.chessengine.evaluation.EvaluationParameters;
 import julius.game.chessengine.evaluation.EvaluationWeights;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
@@ -18,13 +18,13 @@ public final class EngineTuning {
     private final String name;
     private final AiTuning ai;
     private final EvaluationTuning evaluation;
-    private final Map<String, Double> numericParameters;
+    private final EvaluationParameters evaluationParameters;
 
     private EngineTuning(Builder builder) {
         this.name = builder.name;
         this.ai = builder.ai;
         this.evaluation = builder.evaluation;
-        this.numericParameters = builder.numericParameters;
+        this.evaluationParameters = builder.evaluationParameters;
     }
 
     public static Builder builder() {
@@ -48,7 +48,11 @@ public final class EngineTuning {
     }
 
     public Map<String, Double> numericParameters() {
-        return numericParameters;
+        return evaluationParameters.parameters();
+    }
+
+    public EvaluationParameters evaluationParameters() {
+        return evaluationParameters;
     }
 
     public EvaluationWeights evaluationWeights() {
@@ -60,7 +64,7 @@ public final class EngineTuning {
         if (strength <= 0.0) {
             return this;
         }
-        AiTuning mutatedAi = ai.mutate(random, strength);
+        AiTuning mutatedAi = ai; // search parameters remain fixed during tuning
         EvaluationTuning mutatedEval = evaluation.mutate(random, strength);
         Map<String, Double> mutatedNumeric = mutateNumericParameters(random, strength);
         return EngineTuning.builder()
@@ -72,6 +76,7 @@ public final class EngineTuning {
     }
 
     private Map<String, Double> mutateNumericParameters(Random random, double strength) {
+        Map<String, Double> numericParameters = evaluationParameters.parameters();
         if (numericParameters.isEmpty()) {
             return numericParameters;
         }
@@ -96,7 +101,7 @@ public final class EngineTuning {
         private String name = "baseline";
         private AiTuning ai = AiTuning.defaults();
         private EvaluationTuning evaluation = EvaluationTuning.identity();
-        private Map<String, Double> numericParameters = Collections.emptyMap();
+        private EvaluationParameters evaluationParameters = EvaluationParameters.identity();
 
         private Builder() {
         }
@@ -105,7 +110,7 @@ public final class EngineTuning {
             this.name = source.name;
             this.ai = source.ai;
             this.evaluation = source.evaluation;
-            this.numericParameters = source.numericParameters;
+            this.evaluationParameters = source.evaluationParameters;
         }
 
         public Builder name(String name) {
@@ -126,17 +131,7 @@ public final class EngineTuning {
         }
 
         public Builder numericParameters(Map<String, Double> parameters) {
-            if (parameters == null || parameters.isEmpty()) {
-                this.numericParameters = Collections.emptyMap();
-            } else {
-                Map<String, Double> normalized = new LinkedHashMap<>();
-                parameters.forEach((k, v) -> {
-                    if (k != null && !k.isBlank() && v != null) {
-                        normalized.put(k.toLowerCase(Locale.ROOT), v);
-                    }
-                });
-                this.numericParameters = Collections.unmodifiableMap(normalized);
-            }
+            this.evaluationParameters = EvaluationParameters.of(parameters);
             return this;
         }
 

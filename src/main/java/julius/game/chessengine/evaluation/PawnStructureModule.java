@@ -6,6 +6,8 @@ import julius.game.chessengine.board.ImmutableBoardView;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.helper.PawnHelper;
 
+import julius.game.chessengine.evaluation.EvaluationParameters;
+
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -37,6 +39,20 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
     public static final int ROOK_HALF_OPEN_FILE_BONUS = 15;
     public static final int ROOK_OPEN_FILE_BONUS = 25;
 
+    private final int centerPawnBonus;
+    private final int passedPawnBonus;
+    private final int connectedPawnBonus;
+    private final int pawnIslandPenalty;
+    private final int doubledPawnPenalty;
+    private final int isolatedPawnPenalty;
+    private final int advancedPawnBonus;
+    private final int blockedPawnPenalty;
+    private final int backwardPawnPenalty;
+    private final int ownKingBlocksPassedPawnPenalty;
+    private final int passedPawnFreePathBonusPerRank;
+    private final int rookHalfOpenFileBonus;
+    private final int rookOpenFileBonus;
+
     private static final int WHITE = 0;
     private static final int BLACK = 1;
     private static final int PAWN = MoveHelper.pieceTypeToInt(PieceType.PAWN);
@@ -53,10 +69,32 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
     private boolean metadataDirty = true;
 
     public PawnStructureModule() {
+        this(EvaluationParameters.identity());
+    }
+
+    public PawnStructureModule(EvaluationParameters parameters) {
+        EvaluationParameters resolved = parameters != null ? parameters : EvaluationParameters.identity();
+        this.centerPawnBonus = resolved.getInt(key("centerPawnBonus"), CENTER_PAWN_BONUS);
+        this.passedPawnBonus = resolved.getInt(key("passedPawnBonus"), PASSED_PAWN_BONUS);
+        this.connectedPawnBonus = resolved.getInt(key("connectedPawnBonus"), CONNECTED_PAWN_BONUS);
+        this.pawnIslandPenalty = resolved.getInt(key("pawnIslandPenalty"), PAWN_ISLAND_PENALTY);
+        this.doubledPawnPenalty = resolved.getInt(key("doubledPawnPenalty"), DOUBLED_PAWN_PENALTY);
+        this.isolatedPawnPenalty = resolved.getInt(key("isolatedPawnPenalty"), ISOLATED_PAWN_PENALTY);
+        this.advancedPawnBonus = resolved.getInt(key("advancedPawnBonus"), ADVANCED_PAWN_BONUS);
+        this.blockedPawnPenalty = resolved.getInt(key("blockedPawnPenalty"), BLOCKED_PAWN_PENALTY);
+        this.backwardPawnPenalty = resolved.getInt(key("backwardPawnPenalty"), BACKWARD_PAWN_PENALTY);
+        this.ownKingBlocksPassedPawnPenalty = resolved.getInt(key("ownKingBlocksPassedPawnPenalty"), OWN_KING_BLOCKS_PASSED_PAWN_PENALTY);
+        this.passedPawnFreePathBonusPerRank = resolved.getInt(key("passedPawnFreePathBonusPerRank"), PASSED_PAWN_FREE_PATH_BONUS_PER_RANK);
+        this.rookHalfOpenFileBonus = resolved.getInt(key("rookHalfOpenFileBonus"), ROOK_HALF_OPEN_FILE_BONUS);
+        this.rookOpenFileBonus = resolved.getInt(key("rookOpenFileBonus"), ROOK_OPEN_FILE_BONUS);
         for (int file = 0; file < fileStates.length; file++) {
             fileStates[file] = new FileState(file);
             dirtyFiles[file] = true;
         }
+    }
+
+    private static String key(String suffix) {
+        return "pawnstructure." + suffix.toLowerCase();
     }
 
     @Override
@@ -117,14 +155,14 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         PhaseScore blackIslands = PhaseScore.constant(structure.blackPawnIslandPenalty);
 
         PhaseScore whiteRookHalfOpen = PhaseScore.constant(
-                countHalfOpenFilesWithRooks(board, whiteRooks, true) * ROOK_HALF_OPEN_FILE_BONUS);
+                countHalfOpenFilesWithRooks(board, whiteRooks, true) * rookHalfOpenFileBonus);
         PhaseScore blackRookHalfOpen = PhaseScore.constant(
-                countHalfOpenFilesWithRooks(board, blackRooks, false) * ROOK_HALF_OPEN_FILE_BONUS);
+                countHalfOpenFilesWithRooks(board, blackRooks, false) * rookHalfOpenFileBonus);
 
         PhaseScore whiteRookOpen = PhaseScore.constant(
-                countOpenFilesWithRooks(board, whiteRooks) * ROOK_OPEN_FILE_BONUS);
+                countOpenFilesWithRooks(board, whiteRooks) * rookOpenFileBonus);
         PhaseScore blackRookOpen = PhaseScore.constant(
-                countOpenFilesWithRooks(board, blackRooks) * ROOK_OPEN_FILE_BONUS);
+                countOpenFilesWithRooks(board, blackRooks) * rookOpenFileBonus);
 
         PhaseScore whitePassed = PhaseScore.constant(
                 calculatePassedPawnBonus(whitePawns, blackPawns, allPieces, whiteKing, true));
@@ -416,7 +454,7 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
             if ((forward & (allPieces | enemyAttacks)) == 0) {
                 int rank = square / 8 + 1;
                 int rankBonus = isWhite ? (rank - 3) : (6 - rank);
-                bonus += ADVANCED_PAWN_BONUS * rankBonus;
+                bonus += advancedPawnBonus * rankBonus;
             }
             advancedPawns &= advancedPawns - 1;
         }
@@ -430,7 +468,7 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
             int square = Long.numberOfTrailingZeros(remaining);
             long forward = PAWN_PUSHES[isWhite ? WHITE : BLACK][square];
             if ((forward & allPieces) != 0) {
-                penalty += BLOCKED_PAWN_PENALTY;
+                penalty += blockedPawnPenalty;
             }
             remaining &= remaining - 1;
         }
@@ -447,7 +485,7 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
                 int forwardIndex = Long.numberOfTrailingZeros(forward);
                 long enemyAttack = PAWN_ATTACKS[isWhite ? WHITE : BLACK][forwardIndex] & enemyPawns;
                 if (enemyAttack != 0) {
-                    penalty += BACKWARD_PAWN_PENALTY;
+                    penalty += backwardPawnPenalty;
                 }
             }
             remaining &= remaining - 1;
@@ -518,18 +556,18 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
                 continue;
             }
 
-            int base = PASSED_PAWN_BONUS * (isWhite ? (rank - 1) : (8 - rank));
+            int base = passedPawnBonus * (isWhite ? (rank - 1) : (8 - rank));
 
             long filePathAhead = fileMask & forwardRanksMask;
             long oneStep = isWhite ? (pawn << 8) : (pawn >>> 8);
 
             if ((oneStep & ownKing) != 0L) {
-                base += OWN_KING_BLOCKS_PASSED_PAWN_PENALTY;
+                base += ownKingBlocksPassedPawnPenalty;
             }
 
             if ((filePathAhead & allPieces) == 0L) {
                 int distToPromo = isWhite ? (8 - rank) : (rank - 1);
-                base += PASSED_PAWN_FREE_PATH_BONUS_PER_RANK * distToPromo;
+                base += passedPawnFreePathBonusPerRank * distToPromo;
             }
 
             bonus += base;
@@ -558,16 +596,16 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         private final int blackPawnIslandPenalty;
 
         private CachedStructure(long whitePawns, long blackPawns) {
-            this.whiteCenterPawnBonus = PawnHelper.countCenterPawns(whitePawns) * CENTER_PAWN_BONUS;
-            this.blackCenterPawnBonus = PawnHelper.countCenterPawns(blackPawns) * CENTER_PAWN_BONUS;
-            this.whiteDoubledPawnPenalty = PawnHelper.countDoubledPawns(whitePawns) * DOUBLED_PAWN_PENALTY;
-            this.blackDoubledPawnPenalty = PawnHelper.countDoubledPawns(blackPawns) * DOUBLED_PAWN_PENALTY;
-            this.whiteIsolatedPawnPenalty = PawnHelper.countIsolatedPawns(whitePawns) * ISOLATED_PAWN_PENALTY;
-            this.blackIsolatedPawnPenalty = PawnHelper.countIsolatedPawns(blackPawns) * ISOLATED_PAWN_PENALTY;
-            this.whiteConnectedPawnBonus = PawnHelper.countConnectedPawns(whitePawns) * CONNECTED_PAWN_BONUS;
-            this.blackConnectedPawnBonus = PawnHelper.countConnectedPawns(blackPawns) * CONNECTED_PAWN_BONUS;
-            this.whitePawnIslandPenalty = Math.max(0, PawnHelper.countPawnIslands(whitePawns) - 1) * PAWN_ISLAND_PENALTY;
-            this.blackPawnIslandPenalty = Math.max(0, PawnHelper.countPawnIslands(blackPawns) - 1) * PAWN_ISLAND_PENALTY;
+            this.whiteCenterPawnBonus = PawnHelper.countCenterPawns(whitePawns) * centerPawnBonus;
+            this.blackCenterPawnBonus = PawnHelper.countCenterPawns(blackPawns) * centerPawnBonus;
+            this.whiteDoubledPawnPenalty = PawnHelper.countDoubledPawns(whitePawns) * doubledPawnPenalty;
+            this.blackDoubledPawnPenalty = PawnHelper.countDoubledPawns(blackPawns) * doubledPawnPenalty;
+            this.whiteIsolatedPawnPenalty = PawnHelper.countIsolatedPawns(whitePawns) * isolatedPawnPenalty;
+            this.blackIsolatedPawnPenalty = PawnHelper.countIsolatedPawns(blackPawns) * isolatedPawnPenalty;
+            this.whiteConnectedPawnBonus = PawnHelper.countConnectedPawns(whitePawns) * connectedPawnBonus;
+            this.blackConnectedPawnBonus = PawnHelper.countConnectedPawns(blackPawns) * connectedPawnBonus;
+            this.whitePawnIslandPenalty = Math.max(0, PawnHelper.countPawnIslands(whitePawns) - 1) * pawnIslandPenalty;
+            this.blackPawnIslandPenalty = Math.max(0, PawnHelper.countPawnIslands(blackPawns) - 1) * pawnIslandPenalty;
         }
     }
 

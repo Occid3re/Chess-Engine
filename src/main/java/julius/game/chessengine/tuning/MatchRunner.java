@@ -84,7 +84,7 @@ public final class MatchRunner {
     }
 
     private Engine createEngineForTuning(EngineTuning tuning) {
-        try (AutoCloseable ignored = Score.useEvaluationWeights(tuning.evaluationWeights())) {
+        try (AutoCloseable ignored = Score.useEvaluationConfiguration(tuning.evaluationWeights(), tuning.evaluationParameters())) {
             return new Engine();
         } catch (Exception e) {
             if (e instanceof RuntimeException runtime) {
