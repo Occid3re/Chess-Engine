@@ -2,6 +2,7 @@ package julius.game.chessengine.board;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.engine.Engine;
+import julius.game.chessengine.helper.ZobristTable;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.utils.Color;
 import lombok.extern.log4j.Log4j2;
@@ -50,6 +51,31 @@ public class BitBoardTest {
         b.logBoard();
 
         assertEquals(a.getBoardStateHash(), b.getBoardStateHash());
+    }
+
+    @Test
+    void zobristSideToMoveMatchesBlackTurnBit() {
+        BitBoard whiteToMove = FEN.translateFENtoBitBoard("4k3/8/8/8/8/8/8/4K3 w - - 0 1");
+        BitBoard blackToMove = FEN.translateFENtoBitBoard("4k3/8/8/8/8/8/8/4K3 b - - 0 1");
+
+        long whiteHash = whiteToMove.getBoardStateHash();
+        long blackHash = blackToMove.getBoardStateHash();
+
+        assertNotEquals(whiteHash, blackHash, "Side to move should change the Zobrist hash");
+        assertEquals(whiteHash ^ ZobristTable.getBlackTurnHash(), blackHash,
+                "Black side-to-move hash should equal the white hash XORed with the black-turn key");
+    }
+
+    @Test
+    void flippingSideUpdatesZobristKey() {
+        BitBoard board = FEN.translateFENtoBitBoard("4k3/8/8/8/8/8/8/4K3 w - - 0 1");
+        long whiteHash = board.getBoardStateHash();
+
+        board.flipSideToMove();
+
+        assertFalse(board.isWhitesTurn());
+        assertEquals(whiteHash ^ ZobristTable.getBlackTurnHash(), board.getBoardStateHash(),
+                "Flipping side should xor the black-turn key");
     }
 
     @Test

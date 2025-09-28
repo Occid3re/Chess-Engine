@@ -215,7 +215,8 @@ public class BitBoard {
 
     private void recomputeZobristKey() {
         zKey = 0;
-        if (whitesTurn) {
+        // The Zobrist side-to-move bit is set only when it is Black's turn.
+        if (!whitesTurn) {
             xorSide();
         }
         for (int sq = 0; sq < 64; sq++) {
