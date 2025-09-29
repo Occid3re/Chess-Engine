@@ -165,6 +165,7 @@ public class Engine {
             if (gameState.isFiftyMoveRule() || gameState.isThreefoldRepetition()) {
                 cacheLegalMoves(getBoardStateHash(), new IntArrayList(0));
                 gameState.setState(GameStateEnum.DRAW);
+                gameState.setDrawByInsufficientMaterial(bitBoard.hasInsufficientMaterial());
             } else {
                 IntArrayList legalMoves = generateLegalMoves();
                 gameState.updateState(bitBoard, legalMoves, false);
