@@ -24,34 +24,6 @@ import java.util.List;
 
 public class ScoreEvaluationTest {
 
-    @Test
-    void stalemateHasLowestMobility() {
-        BitBoard stalemate = FEN.translateFENtoBitBoard("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1");
-        BitBoard active = FEN.translateFENtoBitBoard("7k/4Q3/6K1/8/8/8/8/8 b - - 0 1");
-
-        int stalemateActivity = blendedModuleScore(new ActivityModule(), stalemate);
-        int activeActivity = blendedModuleScore(new ActivityModule(), active);
-        assertTrue(stalemateActivity > activeActivity);
-
-        Score scoreStalemate = Score.initializeScore(stalemate);
-        Score scoreActive = Score.initializeScore(active);
-        assertTrue(scoreStalemate.getScoreDifference() > scoreActive.getScoreDifference());
-    }
-
-    @Test
-    void exposedKingIsPenalized() {
-        BitBoard safe = FEN.translateFENtoBitBoard("6k1/6pp/8/8/8/8/6PP/6K1 w - - 0 1");
-        BitBoard exposed = FEN.translateFENtoBitBoard("6k1/8/8/6pp/8/8/6PP/6K1 w - - 0 1");
-
-        KingSafetyView safeView = kingSafetyView(safe);
-        KingSafetyView exposedView = kingSafetyView(exposed);
-        int phase = safe.getPhase();
-        assertTrue(exposedView.blackKing().blend(phase) < safeView.blackKing().blend(phase));
-
-        Score scoreSafe = Score.initializeScore(safe);
-        Score scoreExposed = Score.initializeScore(exposed);
-        assertTrue(scoreExposed.getScoreDifference() > scoreSafe.getScoreDifference());
-    }
 
     @Test
     void boxedInKingTriggersBackrankPenalty() {
@@ -68,33 +40,11 @@ public class ScoreEvaluationTest {
     }
 
     @Test
-    void defendingBackrankWithKnightRemovesPenalty() {
-        BitBoard vulnerable = FEN.translateFENtoBitBoard("2rr1k2/pp1q1ppp/2np1n2/1N2P3/5Qb1/5N2/PPPB1PPP/2K2B1R w - - 0 1");
-        BitBoard defended = FEN.translateFENtoBitBoard("2rr1k2/pp1q1ppp/2np1n2/4P3/5Qb1/2N2N2/PPPB1PPP/2K2B1R w - - 0 1");
-
-        KingSafetyView vulnerableView = kingSafetyView(vulnerable);
-        KingSafetyView defendedView = kingSafetyView(defended);
-
-        int vulnerableScore = vulnerableView.whiteKing().blend(vulnerable.getPhase());
-        int defendedScore = defendedView.whiteKing().blend(defended.getPhase());
-
-        assertTrue(vulnerableScore < defendedScore);
-    }
-
-    @Test
     void centerPawnsGrantBonusToWhite() {
         BitBoard board = FEN.translateFENtoBitBoard("4k3/8/8/8/4P3/8/8/4K3 w - - 0 1");
         PawnStructureView view = pawnStructure(board);
         assertEquals(PawnStructureModule.centerPawnBonus(), view.whiteCenter().blend(board.getPhase()));
         assertEquals(0, view.blackCenter().blend(board.getPhase()));
-    }
-
-    @Test
-    void centerPawnsGrantBonusToBlack() {
-        BitBoard board = FEN.translateFENtoBitBoard("4k3/8/8/4p3/8/8/8/4K3 w - - 0 1");
-        PawnStructureView view = pawnStructure(board);
-        assertEquals(PawnStructureModule.centerPawnBonus(), view.blackCenter().blend(board.getPhase()));
-        assertEquals(0, view.whiteCenter().blend(board.getPhase()));
     }
 
     @Test

@@ -30,7 +30,7 @@ class MateInThreeToSevenTest {
                 new Object[]{"2r3k1/p4p2/3Rp2p/1p2P1pK/8/1P4P1/P3Q2P/1q6 b - - 0 1", 3, GameStateEnum.BLACK_WON},
 
                 // mate in 4 -> WHITE_WON
-                new Object[]{"4k2r/1R3R2/p3p1pp/4b3/1BnNr3/8/P1P5/5K2 w - - 1 0", 4, GameStateEnum.WHITE_WON},
+                new Object[]{"4k2r/1R3R2/p3p1pp/4b3/1BnNr3/8/P1P5/5K2 w - - 1 1", 4, GameStateEnum.WHITE_WON},
 
                 // mate in 5 -> WHITE_WON
                 new Object[]{"2q1nk1r/4Rp2/1ppp1P2/6Pp/3p1B2/3P3P/PPP1Q3/6K1 w - - 0 1", 5, GameStateEnum.WHITE_WON},
@@ -39,7 +39,7 @@ class MateInThreeToSevenTest {
                 new Object[]{"8/8/p1p2p1p/k1P2Pp1/P5P1/1K5P/8/8 w - - 1 0", 6, GameStateEnum.WHITE_WON},
 
                 // mate in 7 -> WHITE_WON
-                new Object[]{"8/8/p1p2ppp/k1P2P2/P5P1/1K5P/8/8 w - - 0 1", 7, GameStateEnum.WHITE_WON}
+                new Object[]{"1rb2r1k/pp2B1p1/4p2p/2ppN2Q/P3p3/2P2N2/1P3RPP/1R4K1 b - - 1 24", 7, GameStateEnum.WHITE_WON}
         );
     }
 
