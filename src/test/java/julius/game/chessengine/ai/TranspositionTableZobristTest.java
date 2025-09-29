@@ -1,6 +1,7 @@
 package julius.game.chessengine.ai;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
+import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.figures.PieceType;
@@ -12,10 +13,15 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -207,6 +213,47 @@ class TranspositionTableZobristTest {
         assertEquals(moves.size(), ordered.size(), "Ordering should not lose or duplicate moves");
     }
 
+    @Test
+    @DisplayName("Zobrist hash is stable under make/undo of all legal moves")
+    void zobristHashStableUnderMakeUndo() {
+        List<String> fens = List.of(
+                "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+                "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2",
+                "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
+                "rnbq1rk1/ppppbppp/5n2/4p3/2B1P3/2NP1N2/PPP2PPP/R1BQ1RK1 w - - 5 7",
+                "rnbq1rk1/ppppbppp/5n2/4p3/2B1P3/2NP1N2/PPP2PPP/R1BQ1RK1 b - - 5 7",
+                "r2q1rk1/ppp2ppp/2n1bn2/3p4/3P4/2NBPN2/PP3PPP/R1BQR1K1 w - - 0 12",
+                "r2q1rk1/ppp2ppp/2n1bn2/3p4/3P4/2NBPN2/PP3PPP/R1BQR1K1 b - - 0 12",
+                "r4rk1/pp1b1ppp/2n1pn2/2qp4/3P4/2N1PN2/PP2QPPP/R2R2K1 w - - 2 16",
+                "2r2rk1/pp2bppp/2n1pn2/2qp4/3P4/2N1PN2/PPQ2PPP/2RR2K1 w - - 0 15",
+                "r1bq1rk1/pp1nbppp/2n1p3/2ppP3/3P1P2/2PBBN2/PP3PPP/RN1Q1RK1 w - - 0 10",
+                "r2q1rk1/pb1nbppp/1pn1p3/2ppP3/3P1P2/2PBBN2/PP3PPP/RN1Q1RK1 w - - 2 11",
+                "r3k2r/ppp2ppp/2n1bn2/3p4/3P4/2N1PN2/PPQ1BPPP/R3K2R w KQkq - 0 12",
+                "r4rk1/1bqnbppp/p2ppn2/1p4B1/3PP3/2N1BN2/PPQ1BPPP/2RR2K1 w - - 0 13",
+                "3r2k1/pp3ppp/2n1pn2/2qp4/3P4/2N1PN2/PPQ2PPP/2RR2K1 w - - 0 18",
+                "r2q1rk1/pp3ppp/2n1bn2/3pp3/3P4/2NBPN2/PP3PPP/R1BQR1K1 w - - 0 13",
+                "8/5pkp/6p1/3p4/3P4/2P3P1/5PK1/8 w - - 0 30",
+                "8/1p3pp1/3kp3/2p1n3/2P1P3/1P1K2P1/6P1/8 w - - 0 35",
+                "4k3/1pp2ppp/p1n1pn2/3p4/3P4/1PN1PN2/P1P2PPP/2K4R w K - 0 10",
+                "r1bq1rk1/pppp1ppp/2n2n2/2b1p3/2B1P3/2NP1N2/PPPQ1PPP/R3KB1R w KQ - 4 6",
+                "2kr3r/ppp2ppp/2n1bn2/3p4/3P4/2N1PN2/PPQ1BPPP/2RR2K1 w - - 0 14",
+                "r1bqk2r/pp1n1ppp/2p1pn2/2bp4/2PP4/2N1PN2/PP1QBPPP/R3KB1R w KQkq - 6 8",
+                "4rrk1/1bp2ppp/p1np1q2/1p1N4/3P4/2N1P3/PPQ2PPP/3RR1K1 w - - 0 19"
+        );
+
+        Engine engine = new Engine();
+        Random random = new Random(0xC0FFEE);
+
+        for (String fen : fens) {
+            engine.importBoardFromFen(fen);
+            verifySingleMoveUndoRestoresState(engine, fen);
+
+            engine.importBoardFromFen(fen);
+            verifyRandomSequenceUndoRestoresState(engine, fen, random, 3, 5);
+        }
+    }
+
     private static int findMove(IntArrayList moves, String from, String to) {
         int fromIdx = MoveHelper.convertStringToIndex(from);
         int toIdx = MoveHelper.convertStringToIndex(to);
@@ -230,6 +277,136 @@ class TranspositionTableZobristTest {
         boolean promo = MoveHelper.derivePromotionPieceTypeBits(move) != 0;
         return String.format("%s %s %s%s%s", color, mover, fromStr + toStr,
                 capture ? "x" : "", promo ? "=" + MoveHelper.intToPieceType(MoveHelper.derivePromotionPieceTypeBits(move)) : "");
+    }
+
+    private static void verifySingleMoveUndoRestoresState(Engine engine, String fen) {
+        long initialHash = engine.getBoardStateHash();
+        BitBoard board = engine.getBitBoard();
+        PieceType[] initialPieceBoard = Arrays.copyOf(board.getPieceBoard(), board.getPieceBoard().length);
+        Map<String, Long> initialBitboards = snapshotBitboards(board);
+
+        IntArrayList legalMoves = engine.getAllLegalMoves();
+        assertFalse(legalMoves.isEmpty(), "Generated position must have at least one legal move for FEN: " + fen);
+
+        for (int i = 0; i < legalMoves.size(); i++) {
+            int move = legalMoves.getInt(i);
+            engine.performMove(move);
+            engine.undoLastMove();
+            assertStateRestored(fen, initialHash, initialPieceBoard, initialBitboards, engine, move, null);
+        }
+    }
+
+    private static void verifyRandomSequenceUndoRestoresState(Engine engine, String fen, Random random, int depth, int sequences) {
+        long initialHash = engine.getBoardStateHash();
+        BitBoard board = engine.getBitBoard();
+        PieceType[] initialPieceBoard = Arrays.copyOf(board.getPieceBoard(), board.getPieceBoard().length);
+        Map<String, Long> initialBitboards = snapshotBitboards(board);
+
+        for (int s = 0; s < sequences; s++) {
+            List<Integer> movesMade = new ArrayList<>();
+            for (int ply = 0; ply < depth; ply++) {
+                IntArrayList moves = engine.getAllLegalMoves();
+                if (moves.isEmpty()) {
+                    break;
+                }
+                int choice = random.nextInt(moves.size());
+                int move = moves.getInt(choice);
+                movesMade.add(move);
+                engine.performMove(move);
+            }
+
+            for (int i = movesMade.size() - 1; i >= 0; i--) {
+                engine.undoLastMove();
+            }
+
+            assertStateRestored(fen, initialHash, initialPieceBoard, initialBitboards, engine, null, movesMade);
+        }
+    }
+
+    private static Map<String, Long> snapshotBitboards(BitBoard board) {
+        Map<String, Long> snapshot = new LinkedHashMap<>();
+        snapshot.put("whitePawns", board.getWhitePawns());
+        snapshot.put("blackPawns", board.getBlackPawns());
+        snapshot.put("whiteKnights", board.getWhiteKnights());
+        snapshot.put("blackKnights", board.getBlackKnights());
+        snapshot.put("whiteBishops", board.getWhiteBishops());
+        snapshot.put("blackBishops", board.getBlackBishops());
+        snapshot.put("whiteRooks", board.getWhiteRooks());
+        snapshot.put("blackRooks", board.getBlackRooks());
+        snapshot.put("whiteQueens", board.getWhiteQueens());
+        snapshot.put("blackQueens", board.getBlackQueens());
+        snapshot.put("whiteKing", board.getWhiteKing());
+        snapshot.put("blackKing", board.getBlackKing());
+        snapshot.put("whitePieces", board.getWhitePieces());
+        snapshot.put("blackPieces", board.getBlackPieces());
+        snapshot.put("allPieces", board.getAllPieces());
+        return snapshot;
+    }
+
+    private static void assertStateRestored(String fen, long initialHash, PieceType[] initialPieceBoard,
+                                            Map<String, Long> initialBitboards, Engine engine, Integer singleMove,
+                                            List<Integer> sequence) {
+        long restoredHash = engine.getBoardStateHash();
+        BitBoard restoredBoard = engine.getBitBoard();
+        PieceType[] restoredPieceBoard = restoredBoard.getPieceBoard();
+        Map<String, Long> restoredBitboards = snapshotBitboards(restoredBoard);
+
+        List<String> squareDrift = detectPieceBoardDrift(initialPieceBoard, restoredPieceBoard);
+        List<String> bitboardDrift = detectBitboardDrift(initialBitboards, restoredBitboards);
+
+        if (initialHash != restoredHash || !squareDrift.isEmpty() || !bitboardDrift.isEmpty()) {
+            log.error("Zobrist stability failure for FEN: {}", fen);
+            log.error("Initial hash: 0x{} | Restored hash: 0x{}", Long.toHexString(initialHash), Long.toHexString(restoredHash));
+            if (singleMove != null) {
+                log.error("Move: {}", describeMove(singleMove));
+            }
+            if (sequence != null && !sequence.isEmpty()) {
+                log.error("Sequence: {}", sequence.stream().map(TranspositionTableZobristTest::describeMove).collect(Collectors.joining(", ")));
+            }
+            if (!squareDrift.isEmpty()) {
+                log.error("Piece board mismatches: {}", squareDrift);
+            }
+            if (!bitboardDrift.isEmpty()) {
+                log.error("Bitboard mismatches: {}", bitboardDrift);
+            }
+            fail("Board state drift detected after undo");
+        }
+    }
+
+    private static List<String> detectPieceBoardDrift(PieceType[] initial, PieceType[] restored) {
+        List<String> mismatches = new ArrayList<>();
+        int len = Math.min(initial.length, restored.length);
+        for (int i = 0; i < len; i++) {
+            PieceType before = initial[i];
+            PieceType after = restored[i];
+            if (!Objects.equals(before, after)) {
+                mismatches.add(MoveHelper.convertIndexToString(i) + ':' + pieceTypeToString(before) + "->" + pieceTypeToString(after));
+            }
+        }
+        if (initial.length != restored.length) {
+            mismatches.add("pieceBoard length " + initial.length + "->" + restored.length);
+        }
+        return mismatches;
+    }
+
+    private static List<String> detectBitboardDrift(Map<String, Long> initial, Map<String, Long> restored) {
+        List<String> mismatches = new ArrayList<>();
+        for (Map.Entry<String, Long> entry : initial.entrySet()) {
+            String key = entry.getKey();
+            long expected = entry.getValue();
+            long actual = restored.getOrDefault(key, Long.MIN_VALUE);
+            if (expected != actual) {
+                mismatches.add(key + ":0x" + Long.toHexString(expected) + "->0x" + Long.toHexString(actual));
+            }
+        }
+        if (initial.size() != restored.size()) {
+            mismatches.add("bitboard map size " + initial.size() + "->" + restored.size());
+        }
+        return mismatches;
+    }
+
+    private static String pieceTypeToString(PieceType pieceType) {
+        return pieceType == null ? "empty" : pieceType.name();
     }
 
     private static String dumpTableState(PlainFixedSizeTranspositionTable<TranspositionTableEntry> table) {
