@@ -1230,7 +1230,11 @@ public class BitBoard {
             int toIndex = Long.numberOfTrailingZeros(temp);
             int fromIndex = whitesTurn ? toIndex - 7 : toIndex + 7;
             PieceType capturedType = pieceBoard[toIndex]; // O(1)
-            if (capturedType != PieceType.KING && isMoveAllowedByPin(pinState, fromIndex, toIndex)) {
+            if (capturedType == null) {
+                if (log.isWarnEnabled()) {
+                    log.warn("Missing captured piece for pawn capture from {} to {}", fromIndex, toIndex);
+                }
+            } else if (capturedType != PieceType.KING && isMoveAllowedByPin(pinState, fromIndex, toIndex)) {
                 moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn,
                         true, false, false, null, capturedType, false, false, cs));
             }
@@ -1243,7 +1247,11 @@ public class BitBoard {
             int toIndex = Long.numberOfTrailingZeros(temp);
             int fromIndex = whitesTurn ? toIndex - 9 : toIndex + 9;
             PieceType capturedType = pieceBoard[toIndex]; // O(1)
-            if (capturedType != PieceType.KING && isMoveAllowedByPin(pinState, fromIndex, toIndex)) {
+            if (capturedType == null) {
+                if (log.isWarnEnabled()) {
+                    log.warn("Missing captured piece for pawn capture from {} to {}", fromIndex, toIndex);
+                }
+            } else if (capturedType != PieceType.KING && isMoveAllowedByPin(pinState, fromIndex, toIndex)) {
                 moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn,
                         true, false, false, null, capturedType, false, false, cs));
             }
@@ -1256,7 +1264,11 @@ public class BitBoard {
             int toIndex = Long.numberOfTrailingZeros(temp);
             int fromIndex = whitesTurn ? toIndex - 7 : toIndex + 7;
             PieceType capturedType = pieceBoard[toIndex]; // O(1)
-            if (capturedType != PieceType.KING && isMoveAllowedByPin(pinState, fromIndex, toIndex)) {
+            if (capturedType == null) {
+                if (log.isWarnEnabled()) {
+                    log.warn("Missing captured piece for pawn promotion capture from {} to {}", fromIndex, toIndex);
+                }
+            } else if (capturedType != PieceType.KING && isMoveAllowedByPin(pinState, fromIndex, toIndex)) {
                 addPromotionMoves(moves, fromIndex, toIndex, whitesTurn, true, capturedType, cs);
             }
             temp &= temp - 1;
@@ -1267,7 +1279,11 @@ public class BitBoard {
             int toIndex = Long.numberOfTrailingZeros(temp);
             int fromIndex = whitesTurn ? toIndex - 9 : toIndex + 9;
             PieceType capturedType = pieceBoard[toIndex]; // O(1)
-            if (capturedType != PieceType.KING && isMoveAllowedByPin(pinState, fromIndex, toIndex)) {
+            if (capturedType == null) {
+                if (log.isWarnEnabled()) {
+                    log.warn("Missing captured piece for pawn promotion capture from {} to {}", fromIndex, toIndex);
+                }
+            } else if (capturedType != PieceType.KING && isMoveAllowedByPin(pinState, fromIndex, toIndex)) {
                 addPromotionMoves(moves, fromIndex, toIndex, whitesTurn, true, capturedType, cs);
             }
             temp &= temp - 1;
@@ -1351,6 +1367,12 @@ public class BitBoard {
 
                 boolean isCapture = (opponentPieces & (1L << to)) != 0;
                 PieceType captured = isCapture ? pieceBoard[to] : null; // O(1)
+                if (isCapture && captured == null) {
+                    if (log.isWarnEnabled()) {
+                        log.warn("Missing captured piece for knight capture from {} to {}", from, to);
+                    }
+                    continue;
+                }
                 if (captured != PieceType.KING) {
                     moves.add(createMoveInt(from, to, PieceType.KNIGHT, whitesTurn,
                             isCapture, false, false, null, captured, false, false, cs));
@@ -1387,6 +1409,12 @@ public class BitBoard {
 
                 boolean isCapture = (oppPieces & (1L << to)) != 0;
                 PieceType captured = isCapture ? pieceBoard[to] : null; // O(1)
+                if (isCapture && captured == null) {
+                    if (log.isWarnEnabled()) {
+                        log.warn("Missing captured piece for bishop capture from {} to {}", from, to);
+                    }
+                    continue;
+                }
                 if (captured != PieceType.KING) {
                     if (pinned && isCapture && pri.pinnerSquare() != to) continue;
                     moves.add(createMoveInt(from, to, PieceType.BISHOP, isWhite,
@@ -1426,6 +1454,12 @@ public class BitBoard {
 
                 boolean isCapture = (oppPieces & (1L << to)) != 0;
                 PieceType captured = isCapture ? pieceBoard[to] : null; // O(1)
+                if (isCapture && captured == null) {
+                    if (log.isWarnEnabled()) {
+                        log.warn("Missing captured piece for rook capture from {} to {}", from, to);
+                    }
+                    continue;
+                }
                 if (captured != PieceType.KING) {
                     if (pinned && isCapture && pri.pinnerSquare() != to) continue;
                     moves.add(createMoveInt(from, to, PieceType.ROOK, whitesTurn,
@@ -1465,6 +1499,12 @@ public class BitBoard {
 
                 boolean isCapture = (oppPieces & (1L << to)) != 0;
                 PieceType captured = isCapture ? pieceBoard[to] : null; // O(1)
+                if (isCapture && captured == null) {
+                    if (log.isWarnEnabled()) {
+                        log.warn("Missing captured piece for queen capture from {} to {}", from, to);
+                    }
+                    continue;
+                }
                 if (captured != PieceType.KING) {
                     if (pinned && isCapture && pri.pinnerSquare() != to) continue;
                     moves.add(createMoveInt(from, to, PieceType.QUEEN, whitesTurn,
@@ -1497,6 +1537,12 @@ public class BitBoard {
 
             boolean isCapture = (captureMask & (1L << to)) != 0;
             PieceType captured = isCapture ? pieceBoard[to] : null; // O(1)
+            if (isCapture && captured == null) {
+                if (log.isWarnEnabled()) {
+                    log.warn("Missing captured piece for king capture from {} to {}", from, to);
+                }
+                continue;
+            }
             if (captured != PieceType.KING) {
                 moves.add(createMoveInt(from, to, PieceType.KING, whitesTurn,
                         isCapture, false, false, null, captured, isFirstKingMove, false, cs));
