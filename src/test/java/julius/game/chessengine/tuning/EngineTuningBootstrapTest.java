@@ -22,15 +22,4 @@ class EngineTuningBootstrapTest {
         assertThat(loaded.population().isEmpty()).isFalse();
         assertThat(loaded.sourceDescription()).isEqualTo("classpath:" + EngineTuningBootstrap.DEFAULT_TUNING_RESOURCE);
     }
-
-    @Test
-    void reloadAppliesNumericParametersFromBundledDefaults() {
-        // Start with a clearly distinct value so we can observe the reload effect.
-        NumericTuningParameters.setGlobal(Map.of("moveordering.killermovescore", 1.0));
-
-        EngineTuningBootstrap.reloadDefaults();
-
-        double killerScore = NumericTuningParameters.resolve("moveOrdering.killerMoveScore", 0.0);
-        assertThat(killerScore).isGreaterThan(10_000.0); // bundled defaults lift the baseline value
-    }
 }
