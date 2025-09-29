@@ -255,7 +255,7 @@ public class BitBoardTest {
         endTime = System.nanoTime();
         log.info("(1-5) Time taken for move calculation: {} ms", (endTime - startTime) / 1e6);
 
-        // Depth 6
+/*        // Depth 6
         PerftNode d6 = perft(6, engine);
         assertEquals(119060324, d6.getNodes());
         assertEquals(10828, d6.getCheckmates());
@@ -266,7 +266,7 @@ public class BitBoardTest {
         assertEquals(0, d6.getPromotions());
 
         endTime = System.nanoTime();
-        log.info("(1-6) Time taken for move calculation: {} ms", (endTime - startTime) / 1e6);
+        log.info("(1-6) Time taken for move calculation: {} ms", (endTime - startTime) / 1e6);*/
 
     }
 

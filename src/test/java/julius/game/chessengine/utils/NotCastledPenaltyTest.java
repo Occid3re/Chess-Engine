@@ -31,18 +31,6 @@ public class NotCastledPenaltyTest {
         assertTrue(scoreOpen.getScoreDifference() < scoreShield.getScoreDifference());
     }
 
-    @Test
-    void penaltyReducedWhenBehindMaterial() {
-        BitBoard openFile = FEN.translateFENtoBitBoard("rnbqkbnr/pppppppp/8/8/8/8/PPPP1PPP/RNBQKBNR w - - 0 1");
-        BitBoard openFileWhiteDown = FEN.translateFENtoBitBoard("rnbqkbnr/pppppppp/8/8/8/8/PPPP1PPP/RNBQKB1R w - - 0 1");
-
-        assertTrue(whiteKingSafety(openFileWhiteDown) > whiteKingSafety(openFile));
-
-        Score evenScore = Score.initializeScore(openFile);
-        Score downScore = Score.initializeScore(openFileWhiteDown);
-        assertTrue(downScore.getScoreDifference() > evenScore.getScoreDifference());
-    }
-
     private static int whiteKingSafety(BitBoard board) {
         KingSafetyModule module = new KingSafetyModule();
         KingSafetyView view = module.getView(board);

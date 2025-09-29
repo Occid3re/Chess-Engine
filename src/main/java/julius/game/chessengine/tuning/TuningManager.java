@@ -27,6 +27,7 @@ public class TuningManager {
     public TuningManager(@Value("${chessengine.tuning.file:}") String tuningFilePath) {
         if (tuningFilePath == null || tuningFilePath.isBlank()) {
             this.tuningFile = null;
+            log.info("No chessengine.tuning.file configured; loading bundled defaults from {}", DEFAULT_TUNING_RESOURCE);
             loadDefaultPopulation();
             return;
         }
@@ -45,6 +46,7 @@ public class TuningManager {
 
     public synchronized EngineTuningSet reload() {
         if (tuningFile == null) {
+            log.info("Reload requested without external tuning file; reloading bundled defaults from {}", DEFAULT_TUNING_RESOURCE);
             loadDefaultPopulation();
             return population;
         }
