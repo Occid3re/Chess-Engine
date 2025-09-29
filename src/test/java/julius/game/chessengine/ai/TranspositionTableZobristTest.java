@@ -6,6 +6,7 @@ import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.helper.ZobristTable;
+import julius.game.chessengine.utils.Color;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.DisplayName;
@@ -16,10 +17,12 @@ import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -254,6 +257,372 @@ class TranspositionTableZobristTest {
         }
     }
 
+    @Test
+    @DisplayName("No stale capture flags on generated moves (single-ply)")
+    void noStaleCaptureFlagsSinglePly() {
+        List<String> fens = buildFenCorpus();
+        Engine engine = new Engine();
+
+        for (String fen : fens) {
+            engine.importBoardFromFen(fen);
+            BitBoard board = engine.getBitBoard();
+            long initialHash = engine.getBoardStateHash();
+            PieceType[] referencePieceBoard = Arrays.copyOf(board.getPieceBoard(), board.getPieceBoard().length);
+            Map<String, Long> referenceBitboards = snapshotBitboards(board);
+
+            IntArrayList moves = engine.getAllLegalMoves();
+            for (int i = 0; i < moves.size(); i++) {
+                int move = moves.getInt(i);
+                verifyCaptureIntegrity(engine, fen, move, "single-ply", null, referencePieceBoard, referenceBitboards, initialHash);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("Capture flag/type remains consistent across make/undo sequences")
+    void captureFlagsRemainConsistentAcrossMakeUndoSequences() {
+        List<String> fens = buildFenCorpus();
+        Random random = new Random(0x5A77F00DL);
+
+        for (String fen : fens) {
+            Engine engine = new Engine();
+            engine.importBoardFromFen(fen);
+
+            BitBoard board = engine.getBitBoard();
+            long initialHash = engine.getBoardStateHash();
+            PieceType[] initialPieceBoard = Arrays.copyOf(board.getPieceBoard(), board.getPieceBoard().length);
+            Map<String, Long> initialBitboards = snapshotBitboards(board);
+
+            IntArrayList rootMoves = engine.getAllLegalMoves();
+            Map<MoveSignature, CaptureExpectation> rootExpectations = new LinkedHashMap<>();
+            for (int i = 0; i < rootMoves.size(); i++) {
+                int move = rootMoves.getInt(i);
+                CaptureExpectation expectation = verifyCaptureIntegrity(engine, fen, move, "root", null, null, null, initialHash);
+                rootExpectations.put(new MoveSignature(
+                        MoveHelper.deriveFromIndex(move),
+                        MoveHelper.deriveToIndex(move),
+                        MoveHelper.derivePromotionPieceTypeBits(move)), expectation);
+            }
+
+            PlainFixedSizeTranspositionTable<TranspositionTableEntry> table =
+                    new PlainFixedSizeTranspositionTable<>(32, TranspositionTableEntry.class);
+            int seededMove = rootMoves.isEmpty() ? -1 : rootMoves.getInt(0);
+            if (seededMove != -1) {
+                table.put(initialHash, new TranspositionTableEntry(0.0, 1, NodeType.EXACT, seededMove), 1);
+            }
+
+            for (int depth = 1; depth <= 4; depth++) {
+                for (int sequenceIndex = 0; sequenceIndex < 8; sequenceIndex++) {
+                    List<Integer> sequence = new ArrayList<>();
+
+                    for (int ply = 0; ply < depth; ply++) {
+                        IntArrayList moves = engine.getAllLegalMoves();
+                        if (moves.isEmpty()) {
+                            break;
+                        }
+                        int choice = random.nextInt(moves.size());
+                        int move = moves.getInt(choice);
+                        verifyCaptureIntegrity(engine, fen,
+                                move,
+                                "depth " + depth + " seq " + sequenceIndex + " ply " + ply,
+                                sequence,
+                                null,
+                                null,
+                                initialHash);
+                        sequence.add(move);
+                        engine.performMove(move);
+                    }
+
+                    for (int i = sequence.size() - 1; i >= 0; i--) {
+                        engine.undoLastMove();
+                    }
+
+                    assertStateRestored(fen, initialHash, initialPieceBoard, initialBitboards, engine, null, sequence);
+
+                    long restoredHash = engine.getBoardStateHash();
+                    assertEquals(initialHash, restoredHash, "Zobrist hash should restore after undo for FEN: " + fen);
+
+                    Engine roundTrip = new Engine();
+                    roundTrip.importBoardFromFen(engine.translateBoardToFen().getRenderBoard());
+                    assertEquals(restoredHash, roundTrip.getBoardStateHash(),
+                            "Round-trip FEN import must reproduce hash for FEN: " + fen);
+
+                    if (seededMove != -1) {
+                        TranspositionTableEntry stored = table.get(initialHash);
+                        assertNotNull(stored, "TT entry for root hash must remain accessible for FEN: " + fen);
+                        assertEquals(seededMove, stored.getBestMove(),
+                                "Stored TT best move must remain unchanged for root hash in FEN: " + fen);
+                    }
+
+                    IntArrayList restoredMoves = engine.getAllLegalMoves();
+                    Map<MoveSignature, CaptureExpectation> restoredExpectations = new LinkedHashMap<>();
+                    for (int i = 0; i < restoredMoves.size(); i++) {
+                        int move = restoredMoves.getInt(i);
+                        CaptureExpectation expectation = verifyCaptureIntegrity(engine, fen, move, "post-undo", sequence,
+                                initialPieceBoard, initialBitboards, initialHash);
+                        restoredExpectations.put(new MoveSignature(
+                                MoveHelper.deriveFromIndex(move),
+                                MoveHelper.deriveToIndex(move),
+                                MoveHelper.derivePromotionPieceTypeBits(move)), expectation);
+                    }
+
+                    assertEquals(rootExpectations.size(), restoredExpectations.size(),
+                            "Root move count drift after undo for FEN: " + fen);
+
+                    rootExpectations.forEach((signature, expected) -> {
+                        CaptureExpectation restored = restoredExpectations.get(signature);
+                        assertNotNull(restored, () -> "Missing restored move for signature " + signature + " in FEN: " + fen);
+                        assertEquals(expected.capture, restored.capture,
+                                () -> "Capture flag drift for move signature " + signature + " in FEN: " + fen);
+                        assertEquals(expected.enPassant, restored.enPassant,
+                                () -> "En passant flag drift for move signature " + signature + " in FEN: " + fen);
+                        assertEquals(expected.expectedCapturedPieceBits, restored.expectedCapturedPieceBits,
+                                () -> "Captured piece type bits drift for move signature " + signature + " in FEN: " + fen);
+                    });
+                }
+            }
+
+            if (seededMove != -1) {
+                TranspositionTableEntry stored = table.get(initialHash);
+                assertNotNull(stored, "TT entry should persist after all sequences for FEN: " + fen);
+                assertEquals(seededMove, stored.getBestMove(),
+                        "Best move stored in TT must remain intact after all sequences for FEN: " + fen);
+            }
+        }
+    }
+
+    private static List<String> buildFenCorpus() {
+        List<String> curated = new ArrayList<>(List.of(
+                "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+                "rnbqkbnr/ppp1pppp/8/3p4/2P5/8/PP1PPPPP/RNBQKBNR b KQkq c3 0 2",
+                "rnbqkbnr/pppp1ppp/8/4p3/3P4/8/PPP1PPPP/RNBQKBNR b KQkq d3 0 2",
+                "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2",
+                "rnbqkbnr/pppp1ppp/5n2/4p3/3PP3/5N2/PPP2PPP/RNBQKB1R w KQkq - 2 3",
+                "r1bqkbnr/pppp1ppp/2n5/4p3/3PP1b1/2N2N2/PPP2PPP/R1BQKB1R w KQkq - 3 4",
+                "r1bq1rk1/ppppbppp/2n5/4p3/3PP1b1/2N2N2/PPP1BPPP/R1BQ1RK1 w - - 6 7",
+                "rnbq1rk1/ppppbppp/5n2/4p3/2BPP1b1/2N2N2/PPPQ1PPP/R3K1NR w KQ - 5 7",
+                "r1bq1rk1/1pp1bppp/p1np1n2/4p3/3P4/1PN1PN2/PBP1BPPP/R2Q1RK1 w - - 6 9",
+                "r2q1rk1/pp2bppp/2n1pn2/3p4/3P4/2N1PN2/PPQ1BPPP/R1B2RK1 w - - 0 10",
+                "r2q1rk1/pp3ppp/2n1bn2/3pp3/3P4/2NBPN2/PP3PPP/R1BQR1K1 w - - 0 13",
+                "rnbq1rk1/pp3ppp/2p1pn2/2bp4/2PP4/2N1PN2/PP1QBPPP/R3KB1R w KQ - 4 8",
+                "r1bq1rk1/pppp1ppp/2n2n2/2b1p3/2B1P3/2NP1N2/PPPQ1PPP/R3KB1R w KQ - 4 6",
+                "r1bq1rk1/pp1nbppp/2n1p3/2ppP3/3P1P2/2PBBN2/PP3PPP/RN1Q1RK1 w - - 0 10",
+                "r3k2r/ppp2ppp/2n1bn2/3p4/3P4/2N1PN2/PPQ1BPPP/R3K2R w KQkq - 0 12",
+                "r4rk1/1bqnbppp/p2ppn2/1p4B1/3PP3/2N1BN2/PPQ1BPPP/2RR2K1 w - - 0 13",
+                "3r2k1/pp3ppp/2n1pn2/2qp4/3P4/2N1PN2/PPQ2PPP/2RR2K1 w - - 0 18",
+                "r4rk1/pp1b1ppp/2n1pn2/2qp4/3P4/2N1PN2/PP2QPPP/R2R2K1 w - - 2 16",
+                "r2q1rk1/ppp2ppp/2n1bn2/3p4/3P4/2NBPN2/PP3PPP/R1BQR1K1 w - - 0 12",
+                "8/5pkp/6p1/3p4/3P4/2P3P1/5PK1/8 w - - 0 30",
+                "8/1p3pp1/3kp3/2p1n3/2P1P3/1P1K2P1/6P1/8 w - - 0 35",
+                "4k3/1pp2ppp/p1n1pn2/3p4/3P4/1PN1PN2/P1P2PPP/2K4R w K - 0 10",
+                "2kr3r/ppp2ppp/2n1bn2/3p4/3P4/2N1PN2/PPQ1BPPP/2RR2K1 w - - 0 14",
+                "4rrk1/1bp2ppp/p1np1q2/1p1N4/3P4/2N1P3/PPQ2PPP/3RR1K1 w - - 0 19",
+                "rnbqk2r/pp2ppbp/2pp1np1/4P3/1PPP4/2N2N2/PB1P1PPP/R2QKB1R b KQkq - 0 9",
+                "r1bq1rk1/ppp1bppp/2np1n2/3Pp3/2P1P3/2N2N2/PP2BPPP/R1BQ1RK1 w - - 0 9",
+                "rnbqkbnr/pppp1ppp/8/4p3/3P4/8/PPP1PPPP/RNBQKBNR w KQkq e6 0 2",
+                "rnbqkbnr/ppp1pppp/8/3p4/2P5/8/PP1PPPPP/RNBQKBNR b KQkq c3 0 2",
+                "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+                "r3k2r/8/8/8/8/8/8/R3K2R w KQ - 0 1",
+                "r3k2r/8/8/8/8/8/8/R3K2R w K - 0 1",
+                "r3k2r/8/8/8/8/8/8/R3K2R w Q - 0 1",
+                "r3k2r/8/8/8/8/8/8/R3K2R b kq - 0 1",
+                "r3k2r/8/8/8/8/8/8/R3K2R w - - 0 1",
+                "8/5k2/8/8/8/8/5K2/8 w - - 0 1",
+                "6k1/5ppp/8/1p1P4/1P6/6PP/6K1/8 w - - 0 40",
+                "4k3/P6P/8/8/8/8/8/4K3 w - - 0 1",
+                "4k3/8/8/8/8/8/p6p/4K3 b - - 0 1",
+                "1r2k3/P5pp/8/8/8/8/6PP/4K3 w - - 0 1",
+                "4k3/pp5P/8/8/8/8/P6p/4K1R1 b - - 0 1",
+                "r3r1k1/pp3ppp/8/3B4/8/8/PP3PPP/3QR1K1 w - - 0 20",
+                "rnbqkb1r/ppp2ppp/3p1n2/4p3/3PP1b1/2N2N2/PPP2PPP/R1BQKB1R w KQkq - 2 5",
+                "rnbqkb1r/pppppppp/5n2/8/3P4/5N2/PPP1PPPP/RNBQKB1R b KQkq - 1 2",
+                "rnbq1rk1/pppp1ppp/5n2/4p3/3PP1b1/2N2N2/PPPB1PPP/R2QK2R w KQ - 6 7",
+                "r2q1rk1/ppp2ppp/2n1bn2/3p4/2PP4/2N2N2/PP2BPPP/R1BQR1K1 w - - 4 11",
+                "8/6pk/6pp/8/1P3P2/6P1/6K1/8 w - - 0 44",
+                "2r2rk1/pp2bppp/2n1pn2/2qp4/3P4/2N1PN2/PPQ2PPP/2RR2K1 w - - 0 15",
+                "rnbq1rk1/ppp2ppp/3bp3/3p4/3P4/2N1PN2/PPQ1BPPP/R3K2R w KQ - 0 10",
+                "r4rk1/ppp2ppp/2n1bn2/3p4/3P4/2N1PN2/PPQ2PPP/R4RK1 w - - 0 14",
+                "8/5p2/5Ppk/8/4P3/8/6K1/8 w - - 0 52",
+                "4k3/8/8/3K4/8/8/8/8 w - - 0 1",
+                "4k3/8/8/8/8/8/3K4/8 b - - 0 1",
+                "4k3/3r4/8/8/8/8/4R3/4K3 w - - 0 1",
+                "8/8/8/8/2k5/8/8/4K3 w - - 0 1"
+        ));
+
+        Set<String> unique = new LinkedHashSet<>(curated);
+        Random rng = new Random(0xC0FFEE42L);
+        unique.addAll(generateRandomFens(rng, 200));
+        return new ArrayList<>(unique);
+    }
+
+    private static List<String> generateRandomFens(Random rng, int desiredCount) {
+        Set<String> results = new LinkedHashSet<>();
+        int attempts = 0;
+        while (results.size() < desiredCount && attempts < desiredCount * 20) {
+            attempts++;
+            Engine engine = new Engine();
+            int plies = 6 + rng.nextInt(7);
+            for (int ply = 0; ply < plies; ply++) {
+                IntArrayList moves = engine.getAllLegalMoves();
+                if (moves.isEmpty()) {
+                    break;
+                }
+                int choice = rng.nextInt(moves.size());
+                engine.performMove(moves.getInt(choice));
+            }
+            String fen = engine.translateBoardToFen().getRenderBoard();
+            results.add(fen);
+        }
+        if (results.size() < desiredCount) {
+            throw new IllegalStateException("Unable to generate the requested number of random FEN positions");
+        }
+        return new ArrayList<>(results);
+    }
+
+    private static CaptureExpectation verifyCaptureIntegrity(Engine engine, String fen, int move, String phase,
+                                                             List<Integer> sequence,
+                                                             PieceType[] referencePieceBoard,
+                                                             Map<String, Long> referenceBitboards,
+                                                             long initialHash) {
+        BitBoard board = engine.getBitBoard();
+        int toIndex = MoveHelper.deriveToIndex(move);
+        PieceType destinationPiece = board.getPieceTypeAtIndex(toIndex);
+        boolean isCapture = MoveHelper.isCapture(move);
+        boolean isEnPassant = MoveHelper.isEnPassantMove(move);
+        int capturedBits = MoveHelper.deriveCapturedPieceTypeBits(move);
+        Color moverColor = MoveHelper.isWhitesMove(move) ? Color.WHITE : Color.BLACK;
+
+        int captureSquare = -1;
+        PieceType expectedCapturedPiece = null;
+        PieceType actualPieceAtCaptureSquare = null;
+        PieceType enPassantVictimPiece = null;
+
+        if (isCapture) {
+            if (isEnPassant) {
+                captureSquare = toIndex + (MoveHelper.isWhitesMove(move) ? -8 : 8);
+                if (captureSquare < 0 || captureSquare >= 64) {
+                    reportCaptureFailure(fen, engine, move, phase, "En passant capture square out of bounds",
+                            captureSquare, PieceType.PAWN, null, destinationPiece, null,
+                            sequence, referencePieceBoard, referenceBitboards, initialHash);
+                }
+                expectedCapturedPiece = PieceType.PAWN;
+                actualPieceAtCaptureSquare = board.getPieceTypeAtIndex(captureSquare);
+                enPassantVictimPiece = actualPieceAtCaptureSquare;
+                if (destinationPiece != null) {
+                    reportCaptureFailure(fen, engine, move, phase, "Destination square occupied on en passant move",
+                            captureSquare, expectedCapturedPiece, actualPieceAtCaptureSquare, destinationPiece,
+                            enPassantVictimPiece, sequence, referencePieceBoard, referenceBitboards, initialHash);
+                }
+            } else {
+                captureSquare = toIndex;
+                actualPieceAtCaptureSquare = destinationPiece;
+                expectedCapturedPiece = destinationPiece;
+            }
+
+            if (actualPieceAtCaptureSquare == null) {
+                reportCaptureFailure(fen, engine, move, phase, "Capture flag set but target square empty",
+                        captureSquare, expectedCapturedPiece, null, destinationPiece, enPassantVictimPiece,
+                        sequence, referencePieceBoard, referenceBitboards, initialHash);
+            }
+
+            if (actualPieceAtCaptureSquare == PieceType.KING) {
+                reportCaptureFailure(fen, engine, move, phase, "Capture claims a king piece",
+                        captureSquare, expectedCapturedPiece, actualPieceAtCaptureSquare, destinationPiece,
+                        enPassantVictimPiece, sequence, referencePieceBoard, referenceBitboards, initialHash);
+            }
+
+            Color victimColor = board.getPieceColorAtIndex(captureSquare);
+            if (victimColor == moverColor) {
+                reportCaptureFailure(fen, engine, move, phase, "Capture targets same-color piece",
+                        captureSquare, expectedCapturedPiece, actualPieceAtCaptureSquare, destinationPiece,
+                        enPassantVictimPiece, sequence, referencePieceBoard, referenceBitboards, initialHash);
+            }
+
+            int expectedBits = MoveHelper.pieceTypeToInt(expectedCapturedPiece);
+            if (capturedBits != expectedBits) {
+                reportCaptureFailure(fen, engine, move, phase,
+                        "Captured piece type bits mismatch (expected=" + expectedBits + ", actual=" + capturedBits + ")",
+                        captureSquare, expectedCapturedPiece, actualPieceAtCaptureSquare, destinationPiece,
+                        enPassantVictimPiece, sequence, referencePieceBoard, referenceBitboards, initialHash);
+            }
+        } else {
+            if (capturedBits != 0) {
+                reportCaptureFailure(fen, engine, move, phase, "Quiet move encodes captured piece bits",
+                        -1, null, null, destinationPiece, null,
+                        sequence, referencePieceBoard, referenceBitboards, initialHash);
+            }
+            if (destinationPiece != null) {
+                Color destinationColor = board.getPieceColorAtIndex(toIndex);
+                if (destinationColor != moverColor) {
+                    reportCaptureFailure(fen, engine, move, phase,
+                            "Quiet move lands on enemy piece without capture flag",
+                            toIndex, null, destinationPiece, destinationPiece, null,
+                            sequence, referencePieceBoard, referenceBitboards, initialHash);
+                }
+            }
+        }
+
+        return new CaptureExpectation(isCapture, isEnPassant, captureSquare,
+                expectedCapturedPiece, isCapture ? MoveHelper.pieceTypeToInt(expectedCapturedPiece) : 0);
+    }
+
+    private static void reportCaptureFailure(String fen, Engine engine, int move, String phase, String message,
+                                             int expectedCaptureSquare, PieceType expectedCapturedPiece,
+                                             PieceType actualCapturedPiece, PieceType destinationPiece,
+                                             PieceType enPassantVictimPiece, List<Integer> sequence,
+                                             PieceType[] referencePieceBoard, Map<String, Long> referenceBitboards,
+                                             long initialHash) {
+        BitBoard board = engine.getBitBoard();
+        long currentHash = engine.getBoardStateHash();
+        List<String> pieceDrift = referencePieceBoard != null
+                ? detectPieceBoardDrift(referencePieceBoard, board.getPieceBoard())
+                : List.of();
+        List<String> bitboardDrift = referenceBitboards != null
+                ? detectBitboardDrift(referenceBitboards, snapshotBitboards(board))
+                : List.of();
+        List<Integer> sequenceSnapshot = sequence == null ? List.of() : List.copyOf(sequence);
+
+        log.error("Capture integrity failure during {}: {}", phase, message);
+        log.error("  FEN: {}", fen);
+        log.error("  Side to move: {}", board.isWhitesTurn() ? "white" : "black");
+        log.error("  Move: {}", describeMove(move));
+        log.error("  Fields: from={}, to={}, isCapture={}, isEnPassant={}, promo={}, capturedPieceTypeBits={} ({})",
+                MoveHelper.deriveFromIndex(move), MoveHelper.deriveToIndex(move),
+                MoveHelper.isCapture(move), MoveHelper.isEnPassantMove(move),
+                MoveHelper.derivePromotionPieceTypeBits(move),
+                MoveHelper.deriveCapturedPieceTypeBits(move),
+                capturedBitsToString(MoveHelper.deriveCapturedPieceTypeBits(move)));
+        if (expectedCaptureSquare >= 0) {
+            log.error("  Expected capture square: {} ({})", expectedCaptureSquare,
+                    MoveHelper.convertIndexToString(expectedCaptureSquare));
+        } else {
+            log.error("  Expected capture square: <none>");
+        }
+        log.error("  Expected captured piece: {}", pieceTypeToString(expectedCapturedPiece));
+        log.error("  Actual piece at expected square: {}", pieceTypeToString(actualCapturedPiece));
+        log.error("  pieceBoard[to]: {}", pieceTypeToString(destinationPiece));
+        if (enPassantVictimPiece != null) {
+            log.error("  En-passant victim square piece: {}", pieceTypeToString(enPassantVictimPiece));
+        }
+        if (!sequenceSnapshot.isEmpty()) {
+            log.error("  Sequence: {}", sequenceSnapshot.stream()
+                    .map(TranspositionTableZobristTest::describeMove)
+                    .collect(Collectors.joining(", ")));
+        }
+        log.error("  Zobrist initial/restored: 0x{} / 0x{}", Long.toHexString(initialHash), Long.toHexString(currentHash));
+        log.error("  Piece board mismatches: {}", pieceDrift);
+        log.error("  Bitboard mismatches: {}", bitboardDrift);
+        fail(message + " (phase=" + phase + ", fen=" + fen + ")");
+    }
+
+    private record MoveSignature(int from, int to, int promotionBits) {
+    }
+
+    private record CaptureExpectation(boolean capture, boolean enPassant, int captureSquare,
+                                      PieceType expectedCapturedPiece, int expectedCapturedPieceBits) {
+    }
+
     private static int findMove(IntArrayList moves, String from, String to) {
         int fromIdx = MoveHelper.convertStringToIndex(from);
         int toIdx = MoveHelper.convertStringToIndex(to);
@@ -403,6 +772,17 @@ class TranspositionTableZobristTest {
             mismatches.add("bitboard map size " + initial.size() + "->" + restored.size());
         }
         return mismatches;
+    }
+
+    private static String capturedBitsToString(int bits) {
+        if (bits == 0) {
+            return "none";
+        }
+        try {
+            return MoveHelper.intToPieceType(bits).name();
+        } catch (IllegalArgumentException ex) {
+            return "invalid(" + bits + ")";
+        }
     }
 
     private static String pieceTypeToString(PieceType pieceType) {
