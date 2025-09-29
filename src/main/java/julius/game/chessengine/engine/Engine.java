@@ -6,6 +6,7 @@ import julius.game.chessengine.board.*;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.utils.Color;
 import julius.game.chessengine.utils.MoveStack;
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
@@ -35,7 +36,7 @@ public class Engine {
     @Getter
     private MoveStack line = new MoveStack();
     private MoveStack redoLine = new MoveStack();
-    @Getter
+    @Getter(AccessLevel.NONE)
     private BitBoard bitBoard = new BitBoard();
     @Getter
     private GameState gameState = new GameState(bitBoard);
@@ -65,6 +66,18 @@ public class Engine {
     public void setOnPositionChanged(LongConsumer cb) {
         this.onPositionChanged = (cb != null ? cb : h -> {
         });
+    }
+
+    public BitBoard getBitBoard() {
+        synchronized (boardLock) {
+            return new BitBoard(bitBoard);
+        }
+    }
+
+    public ImmutableBoardView snapshotBoard() {
+        synchronized (boardLock) {
+            return ImmutableBoardView.from(bitBoard);
+        }
     }
 
     private void notifyPositionChanged() {

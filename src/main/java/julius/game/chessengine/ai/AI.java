@@ -1,7 +1,7 @@
 package julius.game.chessengine.ai;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
-import julius.game.chessengine.board.BitBoard;
+import julius.game.chessengine.board.ImmutableBoardView;
 import julius.game.chessengine.board.Move;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
@@ -1405,7 +1405,7 @@ public class AI {
         // -------- Safer Null-move pruning (same as before, but use depthHere) --------
         IntArrayList moves = simulatorEngine.getAllLegalMoves();
         int mobility = moves.size();
-        BitBoard bitBoard = simulatorEngine.getBitBoard();
+        ImmutableBoardView boardView = simulatorEngine.snapshotBoard();
         boolean allowNullMove = useNullMovePruning
                 && !inCheck
                 && !simulatorEngine.isEndgame()
@@ -1419,7 +1419,7 @@ public class AI {
         }
 
         if (allowNullMove) {
-            int reduction = computeNullMoveReduction(bitBoard, depth, isWhite, mobility);
+            int reduction = computeNullMoveReduction(boardView, depth, isWhite, mobility);
             int savedEp = simulatorEngine.doNullMoveForSearch();
             nullMoveCount++;
             double nullScore = alphaBeta(simulatorEngine, depth - 1 - reduction, alpha, beta, !isWhite, deadline, -1, plyFromRoot + 1, 0);
@@ -1469,27 +1469,25 @@ public class AI {
         return (isWhite && state == GameStateEnum.WHITE_IN_CHECK) || (!isWhite && state == GameStateEnum.BLACK_IN_CHECK);
     }
 
-    private boolean attacksOpponentQueenNow(Engine e, boolean moverIsWhite) {
-        BitBoard bb = e.getBitBoard();
-        long enemyQueen = moverIsWhite ? bb.getBlackQueens() : bb.getWhiteQueens();
+    private boolean attacksOpponentQueenNow(ImmutableBoardView board, boolean moverIsWhite) {
+        long enemyQueen = moverIsWhite ? board.getBlackQueens() : board.getWhiteQueens();
         if (enemyQueen == 0) return false;
-        long myAttacks = bb.getAttackBitboard(moverIsWhite);
+        long myAttacks = moverIsWhite ? board.getWhiteAttackMap() : board.getBlackAttackMap();
         return (myAttacks & enemyQueen) != 0L;
     }
 
-    private boolean attacksOpponentKingZone(Engine e, boolean moverIsWhite) {
-        BitBoard bb = e.getBitBoard();
-        long enemyKing = moverIsWhite ? bb.getBlackKing() : bb.getWhiteKing();
+    private boolean attacksOpponentKingZone(ImmutableBoardView board, boolean moverIsWhite) {
+        long enemyKing = moverIsWhite ? board.getBlackKing() : board.getWhiteKing();
         if (enemyKing == 0L) {
             return false;
         }
         int kingIndex = Long.numberOfTrailingZeros(enemyKing);
         long kingZone = KING_ATTACKS[kingIndex];
-        long myAttacks = bb.getAttackBitboard(moverIsWhite);
+        long myAttacks = moverIsWhite ? board.getWhiteAttackMap() : board.getBlackAttackMap();
         return (myAttacks & kingZone) != 0L;
     }
 
-    private int computeNullMoveReduction(BitBoard board, int depth, boolean isWhite, int mobility) {
+    private int computeNullMoveReduction(ImmutableBoardView board, int depth, boolean isWhite, int mobility) {
         int maxReduction = depth - 2;
         if (maxReduction <= 0) {
             return 0;
@@ -1522,7 +1520,7 @@ public class AI {
         return Math.min(reduction, maxReduction);
     }
 
-    private int countPawnsOnFile(BitBoard board, long fileMask) {
+    private int countPawnsOnFile(ImmutableBoardView board, long fileMask) {
         if (fileMask == 0L) {
             return 0;
         }
@@ -1530,7 +1528,7 @@ public class AI {
         return Long.bitCount(pawns);
     }
 
-    private boolean openedFileTowardKing(BitBoard boardAfterMove, long kingFileMask,
+    private boolean openedFileTowardKing(ImmutableBoardView boardAfterMove, long kingFileMask,
                                          int pawnsBefore, boolean interactsWithKingFile) {
         if (!interactsWithKingFile || kingFileMask == 0L || pawnsBefore <= 0) {
             return false;
@@ -1633,7 +1631,7 @@ public class AI {
                 seeWinsMaterial = seeGain > 0;
             }
 
-            BitBoard boardBefore = simulatorEngine.getBitBoard();
+            ImmutableBoardView boardBefore = simulatorEngine.snapshotBoard();
             long enemyKingBB = isWhite ? boardBefore.getBlackKing() : boardBefore.getWhiteKing();
             int enemyKingSquare = enemyKingBB != 0L ? Long.numberOfTrailingZeros(enemyKingBB) : -1;
             int enemyKingFile = enemyKingSquare >= 0 ? (enemyKingSquare & 7) : -1;
@@ -1647,7 +1645,8 @@ public class AI {
             if (!inCheckAtNode && !isTactical && depth <= 3 && index > lmpThreshold) {
                 simulatorEngine.performMove(move);
                 boolean givesCheckTmp = isSideInCheck(simulatorEngine, !isWhite);
-                boolean attacksQueenTmp = attacksOpponentQueenNow(simulatorEngine, isWhite);
+                ImmutableBoardView tmpView = simulatorEngine.snapshotBoard();
+                boolean attacksQueenTmp = attacksOpponentQueenNow(tmpView, isWhite);
                 simulatorEngine.undoLastMove();
                 if (!givesCheckTmp && !attacksQueenTmp) continue;
             }
@@ -1656,9 +1655,10 @@ public class AI {
             long newBoardHash = simulatorEngine.getBoardStateHash();
 
             boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
-            boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, isWhite);
-            boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, isWhite);
-            boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
+            ImmutableBoardView boardAfterMove = simulatorEngine.snapshotBoard();
+            boolean attacksQueen = attacksOpponentQueenNow(boardAfterMove, isWhite);
+            boolean attacksKingZone = attacksOpponentKingZone(boardAfterMove, isWhite);
+            boolean opensKingFile = openedFileTowardKing(boardAfterMove, kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
 
             int nextDepth = depth - 1;
             boolean forcing = givesCheck || attacksQueen;
@@ -1823,7 +1823,7 @@ public class AI {
                 seeWinsMaterial = seeGain > 0;
             }
 
-            BitBoard boardBefore = simulatorEngine.getBitBoard();
+            ImmutableBoardView boardBefore = simulatorEngine.snapshotBoard();
             long enemyKingBB = isWhite ? boardBefore.getBlackKing() : boardBefore.getWhiteKing();
             int enemyKingSquare = enemyKingBB != 0L ? Long.numberOfTrailingZeros(enemyKingBB) : -1;
             int enemyKingFile = enemyKingSquare >= 0 ? (enemyKingSquare & 7) : -1;
@@ -1838,9 +1838,10 @@ public class AI {
             long newBoardHash = simulatorEngine.getBoardStateHash();
 
             boolean givesCheck = isSideInCheck(simulatorEngine, !isWhite);
-            boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, isWhite);
-            boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, isWhite);
-            boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
+            ImmutableBoardView boardAfterMove = simulatorEngine.snapshotBoard();
+            boolean attacksQueen = attacksOpponentQueenNow(boardAfterMove, isWhite);
+            boolean attacksKingZone = attacksOpponentKingZone(boardAfterMove, isWhite);
+            boolean opensKingFile = openedFileTowardKing(boardAfterMove, kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
 
             int nextDepth = depth - 1;
             boolean forcing = givesCheck || attacksQueen;
