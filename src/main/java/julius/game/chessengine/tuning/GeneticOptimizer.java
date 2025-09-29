@@ -8,6 +8,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
@@ -35,6 +36,10 @@ public final class GeneticOptimizer {
         this.random = Objects.requireNonNull(random, "random");
     }
 
+    private static String newName() {
+        return UUID.randomUUID().toString();
+    }
+
     public GeneticResult evolve(EngineTuningSet seedPopulation, GeneticOptions options) {
         Objects.requireNonNull(seedPopulation, "seedPopulation");
         Objects.requireNonNull(options, "options");
@@ -56,7 +61,7 @@ public final class GeneticOptimizer {
         }
         while (population.size() < options.populationSize()) {
             EngineTuning parent = population.get(random.nextInt(population.size()));
-            population.add(parent.mutate(random, options.mutationStrength()).rename(parent.name() + "_seed"));
+            population.add(parent.mutate(random, options.mutationStrength()).rename(newName()));
         }
         if (log.isDebugEnabled()) {
             log.debug("Expanded initial population to {} entries: {}", population.size(),
@@ -145,7 +150,7 @@ public final class GeneticOptimizer {
                 while (population.size() < options.populationSize()) {
                     EngineTuning parent = population.get(random.nextInt(population.size()));
                     EngineTuning offspring = parent.mutate(random, options.mutationStrength())
-                            .rename(parent.name() + "_g" + generation + "_mut");
+                            .rename(newName());
                     population.add(offspring);
                     if (log.isDebugEnabled()) {
                         log.debug("Generation {}: created offspring {} from parent {}", generationIndex,
