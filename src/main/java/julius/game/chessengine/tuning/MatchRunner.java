@@ -5,7 +5,9 @@ import julius.game.chessengine.ai.MoveAndScore;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.utils.Score;
+import lombok.extern.log4j.Log4j2;
 
+import java.util.Locale;
 import java.util.Objects;
 
 /**
@@ -13,6 +15,7 @@ import java.util.Objects;
  * runner keeps the board state of both engines synchronised and returns a lightweight summary of
  * the encounter.
  */
+@Log4j2
 public final class MatchRunner {
 
     public MatchResult playMatch(EngineTuning whiteTuning, EngineTuning blackTuning, MatchOptions options) {
@@ -25,14 +28,27 @@ public final class MatchRunner {
         Engine whiteEngine = createEngineForTuning(whiteTuning);
         Engine blackEngine = createEngineForTuning(blackTuning);
 
-        AI whiteAi = new AI(whiteEngine, whiteTuning.ai());
-        AI blackAi = new AI(blackEngine, blackTuning.ai());
+        AI whiteAi;
+        AI blackAi;
+        try (AutoCloseable numeric = Score.useNumericParameters(whiteTuning.numericParameters())) {
+            whiteAi = new AI(whiteEngine, whiteTuning.ai());
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to initialise white AI for " + whiteTuning.name(), e);
+        }
+        try (AutoCloseable numeric = Score.useNumericParameters(blackTuning.numericParameters())) {
+            blackAi = new AI(blackEngine, blackTuning.ai());
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to initialise black AI for " + blackTuning.name(), e);
+        }
 
         try {
             int maxPlies = options.maxPlies() > 0 ? options.maxPlies() : 512;
             long moveTime = options.moveTimeMillis() > 0 ? options.moveTimeMillis() : whiteTuning.ai().timeLimitMillis();
 
             int plies = 0;
+            log.info("Starting self-play match: white={} black={} moveTime={}ms maxPlies={}",
+                    whiteTuning.name(), blackTuning.name(), moveTime, maxPlies);
+
             while (!whiteEngine.getGameState().isGameOver() && plies < maxPlies) {
                 boolean whiteToMove = whiteEngine.whitesTurn();
                 AI mover = whiteToMove ? whiteAi : blackAi;
@@ -68,7 +84,15 @@ public final class MatchRunner {
                 }
             }
 
-            return new MatchResult(whiteTuning, blackTuning, whiteScore, blackScore, finalState, plies);
+            MatchResult result = new MatchResult(whiteTuning, blackTuning, whiteScore, blackScore, finalState, plies);
+            if (log.isInfoEnabled()) {
+                log.info("Match completed: white={} black={} score={} - {} result={} plies={}",
+                        whiteTuning.name(), blackTuning.name(),
+                        String.format(Locale.ROOT, "%.2f", whiteScore),
+                        String.format(Locale.ROOT, "%.2f", blackScore),
+                        finalState, plies);
+            }
+            return result;
         } finally {
             whiteAi.shutdown();
             blackAi.shutdown();

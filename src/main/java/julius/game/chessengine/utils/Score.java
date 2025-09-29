@@ -13,6 +13,7 @@ import julius.game.chessengine.evaluation.MoveContext;
 import julius.game.chessengine.evaluation.PawnStructureModule;
 import julius.game.chessengine.evaluation.PieceSquareModule;
 import julius.game.chessengine.evaluation.ThreatModule;
+import julius.game.chessengine.tuning.MoveOrderingParameters;
 import julius.game.chessengine.tuning.NumericTuningParameters;
 
 import java.util.List;
@@ -33,7 +34,6 @@ public class Score {
     public static final int CHECKMATE = 100000;
     public static final int CHECK = 50;
     public static final int DRAW = 0;
-    public static final int KILLER_MOVE_SCORE = 10000;
 
     private final MaterialModule materialModule = new MaterialModule();
     private final PawnStructureModule pawnStructureModule = new PawnStructureModule();
@@ -122,6 +122,10 @@ public class Score {
 
     public static AutoCloseable useNumericParameters(Map<String, Double> parameters) {
         return NumericTuningParameters.use(parameters);
+    }
+
+    public static int killerMoveScore() {
+        return MoveOrderingParameters.killerMoveScore();
     }
 
     public static ScoreFactory forEvaluationWeights(EvaluationWeights weights) {
