@@ -13,6 +13,7 @@ import julius.game.chessengine.evaluation.MoveContext;
 import julius.game.chessengine.evaluation.PawnStructureModule;
 import julius.game.chessengine.evaluation.PieceSquareModule;
 import julius.game.chessengine.evaluation.ThreatModule;
+import julius.game.chessengine.tuning.EngineTuningBootstrap;
 import julius.game.chessengine.tuning.MoveOrderingParameters;
 import julius.game.chessengine.tuning.NumericTuningParameters;
 
@@ -30,6 +31,10 @@ public class Score {
 
     private static final ThreadLocal<ScoreFactory> THREAD_FACTORY = new ThreadLocal<>();
     private static volatile ScoreFactory GLOBAL_FACTORY = bitBoard -> new Score(bitBoard, EvaluationWeights.identity());
+
+    static {
+        EngineTuningBootstrap.ensureDefaultTuning();
+    }
 
     public static final int CHECKMATE = 100000;
     public static final int CHECK = 50;
