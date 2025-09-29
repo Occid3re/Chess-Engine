@@ -11,9 +11,12 @@ import lombok.Setter;
 import lombok.extern.log4j.Log4j2;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
+import java.util.List;
 
+import static julius.game.chessengine.board.MoveHelper.convertIndexToString;
 import static julius.game.chessengine.board.MoveHelper.createMoveInt;
 import static julius.game.chessengine.helper.BitHelper.*;
 import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
@@ -166,6 +169,196 @@ public class BitBoard {
             black.load(board.blackPawns, board.blackKnights, board.blackBishops, board.blackRooks, board.blackQueens, board.blackKing);
             occ = board.allPieces;
         }
+    }
+
+    private void logCaptureInconsistency(String context, PieceType moverType, int fromIndex, int targetIndex) {
+        logCaptureInconsistency(context, moverType, fromIndex, targetIndex, null);
+    }
+
+    private void logCaptureInconsistency(String context, PieceType moverType, int fromIndex, int targetIndex, PieceType expectedCaptured) {
+        if (log.isErrorEnabled()) {
+            log.error("{}", () -> buildCaptureInconsistencyReport(context, moverType, fromIndex, targetIndex, expectedCaptured));
+        } else if (log.isWarnEnabled()) {
+            log.warn("Capture inconsistency detected during {} for {} from {} to {}", context, moverType, fromIndex, targetIndex);
+        }
+    }
+
+    private String buildCaptureInconsistencyReport(String context, PieceType moverType, int fromIndex, int targetIndex, PieceType expectedCaptured) {
+        StringBuilder sb = new StringBuilder(512);
+        sb.append("Capture inconsistency detected during ").append(context).append('\n');
+        sb.append("  thread=").append(Thread.currentThread().getName()).append('\n');
+        sb.append("  mover=").append(moverType)
+                .append(" (").append(describePieceAt(fromIndex)).append(")")
+                .append(" from=").append(formatSquare(fromIndex))
+                .append(" -> to=").append(formatSquare(targetIndex)).append('\n');
+
+        sb.append("  pieceBoard[from]=").append(describePieceAt(fromIndex))
+                .append(", pieceBoard[to]=").append(describePieceAt(targetIndex)).append('\n');
+
+        sb.append("  expectedCaptured=").append(expectedCaptured != null ? expectedCaptured : "unknown").append('\n');
+
+        sb.append("  bitboards[from]=").append(describeBitboardsForIndex(fromIndex))
+                .append(", bitboards[to]=").append(describeBitboardsForIndex(targetIndex)).append('\n');
+
+        sb.append("  occupancy[from]={").append(describeOccupancy(fromIndex)).append("}, occupancy[to]={")
+                .append(describeOccupancy(targetIndex)).append("}\n");
+
+        sb.append("  fen=").append(buildFenSnapshot()).append('\n');
+
+        sb.append("  meta={sideToMove=").append(whitesTurn ? "white" : "black")
+                .append(", halfmoveClock=").append(halfmoveClock)
+                .append(", fullmoveNumber=").append(fullmoveNumber)
+                .append(", enPassantTarget=").append(formatOptionalSquare(getEnPassantTargetIndex()))
+                .append(", lastDoubleStep=").append(describeLastDoubleStepSquare())
+                .append(", zobrist=0x").append(Long.toHexString(zKey)).append('}').append('\n');
+
+        sb.append("  castlingFlags={whiteKingMoved=").append(whiteKingMoved)
+                .append(", whiteRookA1Moved=").append(whiteRookA1Moved)
+                .append(", whiteRookH1Moved=").append(whiteRookH1Moved)
+                .append(", blackKingMoved=").append(blackKingMoved)
+                .append(", blackRookA8Moved=").append(blackRookA8Moved)
+                .append(", blackRookH8Moved=").append(blackRookH8Moved)
+                .append(", whiteKingHasCastled=").append(whiteKingHasCastled)
+                .append(", blackKingHasCastled=").append(blackKingHasCastled).append('}').append('\n');
+
+        sb.append("  population={WP=").append(Long.bitCount(whitePawns))
+                .append(", BP=").append(Long.bitCount(blackPawns))
+                .append(", WN=").append(Long.bitCount(whiteKnights))
+                .append(", BN=").append(Long.bitCount(blackKnights))
+                .append(", WB=").append(Long.bitCount(whiteBishops))
+                .append(", BB=").append(Long.bitCount(blackBishops))
+                .append(", WR=").append(Long.bitCount(whiteRooks))
+                .append(", BR=").append(Long.bitCount(blackRooks))
+                .append(", WQ=").append(Long.bitCount(whiteQueens))
+                .append(", BQ=").append(Long.bitCount(blackQueens))
+                .append(", WK=").append(Long.bitCount(whiteKing))
+                .append(", BK=").append(Long.bitCount(blackKing)).append('}');
+
+        return sb.toString();
+    }
+
+    private String describeLastDoubleStepSquare() {
+        if (lastMoveDoubleStepPawnIndex == 0 && getEnPassantTargetIndex() == -1) {
+            return "-";
+        }
+        return formatSquare(lastMoveDoubleStepPawnIndex);
+    }
+
+    private String formatOptionalSquare(int index) {
+        return index == -1 ? "-" : formatSquare(index);
+    }
+
+    private String formatSquare(int index) {
+        if (index < 0 || index >= 64) {
+            return index + " (out-of-range)";
+        }
+        return convertIndexToString(index) + "[" + index + "]";
+    }
+
+    private String describePieceAt(int index) {
+        if (index < 0 || index >= 64) {
+            return "out-of-range";
+        }
+        PieceType type = pieceBoard[index];
+        if (type == null) {
+            return "empty";
+        }
+        Color color = getPieceColorAtIndex(index);
+        return (color != null ? color + " " : "") + type;
+    }
+
+    private String describeBitboardsForIndex(int index) {
+        if (index < 0 || index >= 64) {
+            return "out-of-range";
+        }
+        long mask = 1L << index;
+        List<String> carriers = new ArrayList<>();
+        if ((whitePawns & mask) != 0) carriers.add("WP");
+        if ((blackPawns & mask) != 0) carriers.add("BP");
+        if ((whiteKnights & mask) != 0) carriers.add("WN");
+        if ((blackKnights & mask) != 0) carriers.add("BN");
+        if ((whiteBishops & mask) != 0) carriers.add("WB");
+        if ((blackBishops & mask) != 0) carriers.add("BB");
+        if ((whiteRooks & mask) != 0) carriers.add("WR");
+        if ((blackRooks & mask) != 0) carriers.add("BR");
+        if ((whiteQueens & mask) != 0) carriers.add("WQ");
+        if ((blackQueens & mask) != 0) carriers.add("BQ");
+        if ((whiteKing & mask) != 0) carriers.add("WK");
+        if ((blackKing & mask) != 0) carriers.add("BK");
+        if (carriers.isEmpty()) {
+            return "none";
+        }
+        return String.join(", ", carriers);
+    }
+
+    private String describeOccupancy(int index) {
+        if (index < 0 || index >= 64) {
+            return "out-of-range";
+        }
+        long mask = 1L << index;
+        return "white=" + ((whitePieces & mask) != 0)
+                + ", black=" + ((blackPieces & mask) != 0)
+                + ", all=" + ((allPieces & mask) != 0);
+    }
+
+    private String buildFenSnapshot() {
+        StringBuilder fenBuilder = new StringBuilder();
+        for (int rank = 7; rank >= 0; rank--) {
+            int emptyCount = 0;
+            for (int file = 0; file < 8; file++) {
+                int index = rank * 8 + file;
+                PieceType pieceType = pieceBoard[index];
+                if (pieceType != null) {
+                    if (emptyCount > 0) {
+                        fenBuilder.append(emptyCount);
+                        emptyCount = 0;
+                    }
+                    Color color = getPieceColorAtIndex(index);
+                    char fenChar = pieceType.getNotation();
+                    if (color == Color.BLACK) {
+                        fenChar = Character.toLowerCase(fenChar);
+                    }
+                    fenBuilder.append(fenChar);
+                } else {
+                    emptyCount++;
+                }
+            }
+            if (emptyCount > 0) {
+                fenBuilder.append(emptyCount);
+            }
+            if (rank > 0) {
+                fenBuilder.append('/');
+            }
+        }
+        fenBuilder.append(' ');
+        fenBuilder.append(whitesTurn ? 'w' : 'b');
+        fenBuilder.append(' ');
+        String castling = buildCastlingRightsForDiagnostics();
+        fenBuilder.append(castling.isEmpty() ? "-" : castling);
+        fenBuilder.append(' ');
+        fenBuilder.append(formatOptionalSquare(getEnPassantTargetIndex()));
+        fenBuilder.append(' ');
+        fenBuilder.append(halfmoveClock);
+        fenBuilder.append(' ');
+        fenBuilder.append(fullmoveNumber);
+        return fenBuilder.toString();
+    }
+
+    private String buildCastlingRightsForDiagnostics() {
+        StringBuilder castling = new StringBuilder();
+        if (!whiteKingMoved && !whiteRookH1Moved) {
+            castling.append('K');
+        }
+        if (!whiteKingMoved && !whiteRookA1Moved) {
+            castling.append('Q');
+        }
+        if (!blackKingMoved && !blackRookH8Moved) {
+            castling.append('k');
+        }
+        if (!blackKingMoved && !blackRookA8Moved) {
+            castling.append('q');
+        }
+        return castling.toString();
     }
 
     @Getter(AccessLevel.NONE)
@@ -1231,9 +1424,7 @@ public class BitBoard {
             int fromIndex = whitesTurn ? toIndex - 7 : toIndex + 7;
             PieceType capturedType = pieceBoard[toIndex]; // O(1)
             if (capturedType == null) {
-                if (log.isWarnEnabled()) {
-                    log.warn("Missing captured piece for pawn capture from {} to {}", fromIndex, toIndex);
-                }
+                logCaptureInconsistency("pawn-capture-left", PieceType.PAWN, fromIndex, toIndex);
             } else if (capturedType != PieceType.KING && isMoveAllowedByPin(pinState, fromIndex, toIndex)) {
                 moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn,
                         true, false, false, null, capturedType, false, false, cs));
@@ -1248,9 +1439,7 @@ public class BitBoard {
             int fromIndex = whitesTurn ? toIndex - 9 : toIndex + 9;
             PieceType capturedType = pieceBoard[toIndex]; // O(1)
             if (capturedType == null) {
-                if (log.isWarnEnabled()) {
-                    log.warn("Missing captured piece for pawn capture from {} to {}", fromIndex, toIndex);
-                }
+                logCaptureInconsistency("pawn-capture-right", PieceType.PAWN, fromIndex, toIndex);
             } else if (capturedType != PieceType.KING && isMoveAllowedByPin(pinState, fromIndex, toIndex)) {
                 moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn,
                         true, false, false, null, capturedType, false, false, cs));
@@ -1265,9 +1454,7 @@ public class BitBoard {
             int fromIndex = whitesTurn ? toIndex - 7 : toIndex + 7;
             PieceType capturedType = pieceBoard[toIndex]; // O(1)
             if (capturedType == null) {
-                if (log.isWarnEnabled()) {
-                    log.warn("Missing captured piece for pawn promotion capture from {} to {}", fromIndex, toIndex);
-                }
+                logCaptureInconsistency("pawn-promotion-capture-left", PieceType.PAWN, fromIndex, toIndex);
             } else if (capturedType != PieceType.KING && isMoveAllowedByPin(pinState, fromIndex, toIndex)) {
                 addPromotionMoves(moves, fromIndex, toIndex, whitesTurn, true, capturedType, cs);
             }
@@ -1280,9 +1467,7 @@ public class BitBoard {
             int fromIndex = whitesTurn ? toIndex - 9 : toIndex + 9;
             PieceType capturedType = pieceBoard[toIndex]; // O(1)
             if (capturedType == null) {
-                if (log.isWarnEnabled()) {
-                    log.warn("Missing captured piece for pawn promotion capture from {} to {}", fromIndex, toIndex);
-                }
+                logCaptureInconsistency("pawn-promotion-capture-right", PieceType.PAWN, fromIndex, toIndex);
             } else if (capturedType != PieceType.KING && isMoveAllowedByPin(pinState, fromIndex, toIndex)) {
                 addPromotionMoves(moves, fromIndex, toIndex, whitesTurn, true, capturedType, cs);
             }
@@ -1368,9 +1553,7 @@ public class BitBoard {
                 boolean isCapture = (opponentPieces & (1L << to)) != 0;
                 PieceType captured = isCapture ? pieceBoard[to] : null; // O(1)
                 if (isCapture && captured == null) {
-                    if (log.isWarnEnabled()) {
-                        log.warn("Missing captured piece for knight capture from {} to {}", from, to);
-                    }
+                    logCaptureInconsistency("knight-capture", PieceType.KNIGHT, from, to);
                     continue;
                 }
                 if (captured != PieceType.KING) {
@@ -1410,9 +1593,7 @@ public class BitBoard {
                 boolean isCapture = (oppPieces & (1L << to)) != 0;
                 PieceType captured = isCapture ? pieceBoard[to] : null; // O(1)
                 if (isCapture && captured == null) {
-                    if (log.isWarnEnabled()) {
-                        log.warn("Missing captured piece for bishop capture from {} to {}", from, to);
-                    }
+                    logCaptureInconsistency("bishop-capture", PieceType.BISHOP, from, to);
                     continue;
                 }
                 if (captured != PieceType.KING) {
@@ -1455,9 +1636,7 @@ public class BitBoard {
                 boolean isCapture = (oppPieces & (1L << to)) != 0;
                 PieceType captured = isCapture ? pieceBoard[to] : null; // O(1)
                 if (isCapture && captured == null) {
-                    if (log.isWarnEnabled()) {
-                        log.warn("Missing captured piece for rook capture from {} to {}", from, to);
-                    }
+                    logCaptureInconsistency("rook-capture", PieceType.ROOK, from, to);
                     continue;
                 }
                 if (captured != PieceType.KING) {
@@ -1500,9 +1679,7 @@ public class BitBoard {
                 boolean isCapture = (oppPieces & (1L << to)) != 0;
                 PieceType captured = isCapture ? pieceBoard[to] : null; // O(1)
                 if (isCapture && captured == null) {
-                    if (log.isWarnEnabled()) {
-                        log.warn("Missing captured piece for queen capture from {} to {}", from, to);
-                    }
+                    logCaptureInconsistency("queen-capture", PieceType.QUEEN, from, to);
                     continue;
                 }
                 if (captured != PieceType.KING) {
@@ -1538,9 +1715,7 @@ public class BitBoard {
             boolean isCapture = (captureMask & (1L << to)) != 0;
             PieceType captured = isCapture ? pieceBoard[to] : null; // O(1)
             if (isCapture && captured == null) {
-                if (log.isWarnEnabled()) {
-                    log.warn("Missing captured piece for king capture from {} to {}", from, to);
-                }
+                logCaptureInconsistency("king-capture", PieceType.KING, from, to);
                 continue;
             }
             if (captured != PieceType.KING) {
@@ -1773,6 +1948,7 @@ public class BitBoard {
         boolean isEnPassant = MoveHelper.isEnPassantMove(move);
         boolean isCastling = MoveHelper.isCastlingMove(move);
         int promoBits = MoveHelper.derivePromotionPieceTypeBits(move);
+        int capturedBits = MoveHelper.deriveCapturedPieceTypeBits(move);
 
         long fromMask = 1L << fromIndex;
         long toMask = 1L << toIndex;
@@ -1794,6 +1970,7 @@ public class BitBoard {
             int capIndex = isEnPassant ? (isWhite ? toIndex - 8 : toIndex + 8) : toIndex;
             PieceType capType = isEnPassant ? PieceType.PAWN : pieceBoard[capIndex];
             if (capType == null) {
+                logCaptureInconsistency("perform-move", movingPiece, fromIndex, capIndex, pieceTypeFromBits(capturedBits));
                 throw new IllegalStateException("No captured piece present at index " + capIndex);
             }
             Color capColor = isWhite ? Color.BLACK : Color.WHITE;
