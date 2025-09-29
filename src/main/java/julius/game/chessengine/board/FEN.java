@@ -66,55 +66,20 @@ public class FEN {
     private static String buildCastlingAvailability(BitBoard board) {
         StringBuilder castling = new StringBuilder();
 
-        if (canCastleKingSide(board, true)) {
+        if (!board.isWhiteKingMoved() && !board.isWhiteRookH1Moved()) {
             castling.append('K');
         }
-        if (canCastleQueenSide(board, true)) {
+        if (!board.isWhiteKingMoved() && !board.isWhiteRookA1Moved()) {
             castling.append('Q');
         }
-        if (canCastleKingSide(board, false)) {
+        if (!board.isBlackKingMoved() && !board.isBlackRookH8Moved()) {
             castling.append('k');
         }
-        if (canCastleQueenSide(board, false)) {
+        if (!board.isBlackKingMoved() && !board.isBlackRookA8Moved()) {
             castling.append('q');
         }
 
         return castling.toString();
-    }
-
-    private static boolean canCastleKingSide(BitBoard board, boolean white) {
-        if (white) {
-            return !board.isWhiteKingMoved()
-                    && !board.isWhiteRookH1Moved()
-                    && hasHomeKingAndRook(board, 4, 7, Color.WHITE);
-        }
-        return !board.isBlackKingMoved()
-                && !board.isBlackRookH8Moved()
-                && hasHomeKingAndRook(board, 60, 63, Color.BLACK);
-    }
-
-    private static boolean canCastleQueenSide(BitBoard board, boolean white) {
-        if (white) {
-            return !board.isWhiteKingMoved()
-                    && !board.isWhiteRookA1Moved()
-                    && hasHomeKingAndRook(board, 4, 0, Color.WHITE);
-        }
-        return !board.isBlackKingMoved()
-                && !board.isBlackRookA8Moved()
-                && hasHomeKingAndRook(board, 60, 56, Color.BLACK);
-    }
-
-    private static boolean hasHomeKingAndRook(BitBoard board, int kingIndex, int rookIndex,
-                                              Color color) {
-        PieceType kingPiece = board.getPieceTypeAtIndex(kingIndex);
-        Color kingColor = board.getPieceColorAtIndex(kingIndex);
-        PieceType rookPiece = board.getPieceTypeAtIndex(rookIndex);
-        Color rookColor = board.getPieceColorAtIndex(rookIndex);
-
-        return kingPiece == PieceType.KING
-                && kingColor == color
-                && rookPiece == PieceType.ROOK
-                && rookColor == color;
     }
 
     private static char getFenCharacter(PieceType pieceType, Color color) {
