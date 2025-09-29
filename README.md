@@ -152,3 +152,8 @@ specified with `--output`), and optionally records every self-play result to the
 `--matches` CSV. Omit advanced flags to fall back to the defaults specified in
 `GeneticOptions.defaults()`.
 
+Use the optional `--match-threads` flag to run multiple self-play games at the
+same time when you have spare CPU cores. The tuner defaults to the number of
+available processors so you can fully utilise the machine without additional
+arguments.
+

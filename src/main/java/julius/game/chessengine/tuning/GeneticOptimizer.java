@@ -7,6 +7,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 
 /**
  * Runs a simple genetic algorithm on top of the chess engine by repeatedly letting configurations
@@ -41,45 +46,58 @@ public final class GeneticOptimizer {
 
         List<MatchRunner.MatchResult> allMatches = new ArrayList<>();
 
-        for (int generation = 0; generation < options.generations(); generation++) {
-            Map<EngineTuning, Double> scoreboard = new HashMap<>();
+        MatchRunner.MatchOptions matchOptions = new MatchRunner.MatchOptions(options.maxPlies(), options.moveTimeMillis());
+        int parallelism = Math.max(1, options.matchParallelism());
+        ExecutorService executor = parallelism > 1 ? Executors.newFixedThreadPool(parallelism, matchThreadFactory()) : null;
 
-            for (int i = 0; i < population.size(); i++) {
-                for (int j = i + 1; j < population.size(); j++) {
-                    EngineTuning a = population.get(i);
-                    EngineTuning b = population.get(j);
-                    for (int match = 0; match < options.matchesPerPair(); match++) {
-                        boolean swap = (match % 2) == 1;
-                        EngineTuning white = swap ? b : a;
-                        EngineTuning black = swap ? a : b;
-                        MatchRunner.MatchResult result = matchRunner.playMatch(
-                                white,
-                                black,
-                                new MatchRunner.MatchOptions(options.maxPlies(), options.moveTimeMillis())
-                        );
-                        allMatches.add(result);
-                        if (swap) {
-                            scoreboard.merge(a, result.blackScore(), Double::sum);
-                            scoreboard.merge(b, result.whiteScore(), Double::sum);
-                        } else {
-                            scoreboard.merge(a, result.whiteScore(), Double::sum);
-                            scoreboard.merge(b, result.blackScore(), Double::sum);
+        try {
+            for (int generation = 0; generation < options.generations(); generation++) {
+                Map<EngineTuning, Double> scoreboard = new HashMap<>();
+                List<ScheduledMatch> scheduledMatches = new ArrayList<>();
+
+                for (int i = 0; i < population.size(); i++) {
+                    for (int j = i + 1; j < population.size(); j++) {
+                        EngineTuning a = population.get(i);
+                        EngineTuning b = population.get(j);
+                        for (int match = 0; match < options.matchesPerPair(); match++) {
+                            boolean swap = (match % 2) == 1;
+                            scheduledMatches.add(new ScheduledMatch(a, b, swap));
                         }
                     }
                 }
+
+                List<CompletedMatch> completedMatches = runScheduledMatches(scheduledMatches, matchOptions, executor);
+
+                for (CompletedMatch completed : completedMatches) {
+                    allMatches.add(completed.result());
+                    EngineTuning a = completed.assignment().first();
+                    EngineTuning b = completed.assignment().second();
+                    MatchRunner.MatchResult result = completed.result();
+                    if (completed.assignment().swapped()) {
+                        scoreboard.merge(a, result.blackScore(), Double::sum);
+                        scoreboard.merge(b, result.whiteScore(), Double::sum);
+                    } else {
+                        scoreboard.merge(a, result.whiteScore(), Double::sum);
+                        scoreboard.merge(b, result.blackScore(), Double::sum);
+                    }
+                }
+
+                population = scoreboard.entrySet().stream()
+                        .sorted(Map.Entry.<EngineTuning, Double>comparingByValue(Comparator.reverseOrder()))
+                        .limit(Math.max(options.retainCount(), 2))
+                        .map(Map.Entry::getKey)
+                        .collect(ArrayList::new, ArrayList::add, ArrayList::addAll);
+
+                while (population.size() < options.populationSize()) {
+                    EngineTuning parent = population.get(random.nextInt(population.size()));
+                    EngineTuning offspring = parent.mutate(random, options.mutationStrength())
+                            .rename(parent.name() + "_g" + generation + "_mut");
+                    population.add(offspring);
+                }
             }
-
-            population = scoreboard.entrySet().stream()
-                    .sorted(Map.Entry.<EngineTuning, Double>comparingByValue(Comparator.reverseOrder()))
-                    .limit(Math.max(options.retainCount(), 2))
-                    .map(Map.Entry::getKey)
-                    .collect(ArrayList::new, ArrayList::add, ArrayList::addAll);
-
-            while (population.size() < options.populationSize()) {
-                EngineTuning parent = population.get(random.nextInt(population.size()));
-                EngineTuning offspring = parent.mutate(random, options.mutationStrength())
-                        .rename(parent.name() + "_g" + generation + "_mut");
-                population.add(offspring);
+        } finally {
+            if (executor != null) {
+                executor.shutdown();
             }
         }
 
@@ -87,5 +105,68 @@ public final class GeneticOptimizer {
     }
 
     public record GeneticResult(EngineTuningSet population, List<MatchRunner.MatchResult> matches) {
+    }
+
+    private List<CompletedMatch> runScheduledMatches(List<ScheduledMatch> scheduledMatches,
+                                                     MatchRunner.MatchOptions matchOptions,
+                                                     ExecutorService executor) {
+        if (scheduledMatches.isEmpty()) {
+            return List.of();
+        }
+
+        if (executor == null) {
+            List<CompletedMatch> results = new ArrayList<>(scheduledMatches.size());
+            for (ScheduledMatch scheduled : scheduledMatches) {
+                results.add(runSingleMatch(scheduled, matchOptions));
+            }
+            return results;
+        }
+
+        List<CompletableFuture<CompletedMatch>> futures = new ArrayList<>(scheduledMatches.size());
+        for (ScheduledMatch scheduled : scheduledMatches) {
+            futures.add(CompletableFuture.supplyAsync(() -> runSingleMatch(scheduled, matchOptions), executor));
+        }
+
+        List<CompletedMatch> results = new ArrayList<>(scheduledMatches.size());
+        for (CompletableFuture<CompletedMatch> future : futures) {
+            try {
+                results.add(future.join());
+            } catch (CompletionException e) {
+                Throwable cause = e.getCause();
+                if (cause instanceof RuntimeException runtime) {
+                    throw runtime;
+                }
+                throw new IllegalStateException("Failed to complete self-play match", cause);
+            }
+        }
+        return results;
+    }
+
+    private CompletedMatch runSingleMatch(ScheduledMatch scheduledMatch, MatchRunner.MatchOptions matchOptions) {
+        EngineTuning a = scheduledMatch.first();
+        EngineTuning b = scheduledMatch.second();
+        EngineTuning white = scheduledMatch.swapped() ? b : a;
+        EngineTuning black = scheduledMatch.swapped() ? a : b;
+        MatchRunner.MatchResult result = matchRunner.playMatch(white, black, matchOptions);
+        return new CompletedMatch(scheduledMatch, result);
+    }
+
+    private ThreadFactory matchThreadFactory() {
+        return new ThreadFactory() {
+            private int counter;
+
+            @Override
+            public synchronized Thread newThread(Runnable r) {
+                Thread thread = new Thread(r, "genetic-match-" + (++counter));
+                thread.setDaemon(true);
+                return thread;
+            }
+        };
+    }
+
+    private record ScheduledMatch(EngineTuning first, EngineTuning second, boolean swapped) {
+    }
+
+    private record CompletedMatch(ScheduledMatch assignment, MatchRunner.MatchResult result) {
     }
 }

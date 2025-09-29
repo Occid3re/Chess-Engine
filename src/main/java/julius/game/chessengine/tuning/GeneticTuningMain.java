@@ -134,6 +134,7 @@ public final class GeneticTuningMain {
                 "  --mutation <value>     Mutation strength in the [0, 1] range (default 0.15).\n" +
                 "  --move-time <ms>       Move time in milliseconds for each search (default 50).\n" +
                 "  --max-plies <n>        Hard cap on plies per game (default 512).\n" +
+                "  --match-threads <n>    Concurrent self-play games during evaluation (default available processors).\n" +
                 "  -h, --help             Display this help message.\n");
     }
 
@@ -149,6 +150,7 @@ public final class GeneticTuningMain {
         private final double mutationStrength;
         private final long moveTimeMillis;
         private final int maxPlies;
+        private final int matchParallelism;
 
         private CliArguments(Path seedFile,
                              Path outputFile,
@@ -160,7 +162,8 @@ public final class GeneticTuningMain {
                              int matchesPerPair,
                              double mutationStrength,
                              long moveTimeMillis,
-                             int maxPlies) {
+                             int maxPlies,
+                             int matchParallelism) {
             this.seedFile = seedFile;
             this.outputFile = outputFile;
             this.matchLogFile = matchLogFile;
@@ -172,6 +175,7 @@ public final class GeneticTuningMain {
             this.mutationStrength = mutationStrength;
             this.moveTimeMillis = moveTimeMillis;
             this.maxPlies = maxPlies;
+            this.matchParallelism = matchParallelism;
         }
 
         private static CliArguments parse(String[] args) {
@@ -194,6 +198,7 @@ public final class GeneticTuningMain {
             double mutation = GeneticOptions.defaults().mutationStrength();
             long moveTime = GeneticOptions.defaults().moveTimeMillis();
             int maxPlies = GeneticOptions.defaults().maxPlies();
+            int matchParallelism = GeneticOptions.defaults().matchParallelism();
 
             for (int i = 0; i < args.length; i++) {
                 String arg = args[i];
@@ -228,12 +233,13 @@ public final class GeneticTuningMain {
                     case "mutation" -> mutation = Double.parseDouble(value);
                     case "move-time" -> moveTime = Long.parseLong(value);
                     case "max-plies" -> maxPlies = Integer.parseInt(value);
+                    case "match-threads" -> matchParallelism = Integer.parseInt(value);
                     default -> throw new IllegalArgumentException("Unknown option --" + name);
                 }
             }
 
             if (help) {
-                return new CliArguments(null, null, matches, true, generations, retain, population, matchesPerPair, mutation, moveTime, maxPlies);
+                return new CliArguments(null, null, matches, true, generations, retain, population, matchesPerPair, mutation, moveTime, maxPlies, matchParallelism);
             }
 
             if (seed == null) {
@@ -244,11 +250,11 @@ public final class GeneticTuningMain {
             }
 
             Path resolvedOutput = output != null ? output : defaultOutput(seed);
-            return new CliArguments(seed, resolvedOutput, matches, false, generations, retain, population, matchesPerPair, mutation, moveTime, maxPlies);
+            return new CliArguments(seed, resolvedOutput, matches, false, generations, retain, population, matchesPerPair, mutation, moveTime, maxPlies, matchParallelism);
         }
 
         private GeneticOptions toOptions() {
-            return new GeneticOptions(generations, retain, population, matchesPerPair, mutationStrength, moveTimeMillis, maxPlies);
+            return new GeneticOptions(generations, retain, population, matchesPerPair, mutationStrength, moveTimeMillis, maxPlies, matchParallelism);
         }
 
         private static Path defaultOutput(Path seedFile) {
