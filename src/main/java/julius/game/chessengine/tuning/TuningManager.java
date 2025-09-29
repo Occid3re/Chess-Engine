@@ -2,9 +2,12 @@ package julius.game.chessengine.tuning;
 
 import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -17,11 +20,14 @@ import java.nio.file.Path;
 public class TuningManager {
 
     private final Path tuningFile;
+    private static final String DEFAULT_TUNING_RESOURCE = "tuning/seed-tunings.yaml";
+
     private volatile EngineTuningSet population = EngineTuningSet.empty();
 
     public TuningManager(@Value("${chessengine.tuning.file:}") String tuningFilePath) {
         if (tuningFilePath == null || tuningFilePath.isBlank()) {
             this.tuningFile = null;
+            loadDefaultPopulation();
             return;
         }
         this.tuningFile = Path.of(tuningFilePath);
@@ -39,7 +45,7 @@ public class TuningManager {
 
     public synchronized EngineTuningSet reload() {
         if (tuningFile == null) {
-            population = EngineTuningSet.empty();
+            loadDefaultPopulation();
             return population;
         }
         try {
@@ -57,5 +63,21 @@ public class TuningManager {
 
     public boolean hasPopulation() {
         return !population.isEmpty();
+    }
+
+    private void loadDefaultPopulation() {
+        Resource resource = new ClassPathResource(DEFAULT_TUNING_RESOURCE);
+        if (!resource.exists()) {
+            log.warn("Default tuning resource {} not found on classpath", DEFAULT_TUNING_RESOURCE);
+            population = EngineTuningSet.empty();
+            return;
+        }
+        try (InputStream in = resource.getInputStream()) {
+            population = EngineTuningLoader.load(in);
+            log.info("Loaded {} tuning configurations from classpath resource {}", population.population().size(), DEFAULT_TUNING_RESOURCE);
+        } catch (IOException e) {
+            log.warn("Failed to load default tuning resource {}", DEFAULT_TUNING_RESOURCE, e);
+            population = EngineTuningSet.empty();
+        }
     }
 }
