@@ -112,10 +112,6 @@ public class GameState {
      * State mechanisms of the Game
      */
 
-    public boolean isGameOver() {
-        return isInStateCheckMate() || state.equals(GameStateEnum.DRAW);
-    }
-
     public boolean isInStateCheck() {
         // The BitBoard class already has a method to check if a king is in check
         return state.equals(GameStateEnum.BLACK_IN_CHECK) || state.equals(GameStateEnum.WHITE_IN_CHECK);
@@ -125,9 +121,29 @@ public class GameState {
         return state.equals(GameStateEnum.WHITE_WON) || state.equals(GameStateEnum.BLACK_WON);
     }
 
+    // NEW: use this everywhere to decide if the node is terminal for move-handling.
+    public boolean isTerminal() {
+        if (isInStateCheckMate()) return true;
+        if (state.equals(GameStateEnum.DRAW)) return true; // stalemate, 50-move, threefold set this
+        // IMPORTANT: insufficient material is NOT terminal
+        return false;
+    }
+
+    // Keep this strictly as "terminal draw?"
     public boolean isInStateDraw() {
+        return state.equals(GameStateEnum.DRAW); // do NOT include insufficient material here
+    }
+
+    // For UI/evaluation: safe to show draw symbol/score without stopping search.
+    public boolean isDrawForUIOrEval() {
         return state.equals(GameStateEnum.DRAW) || drawByInsufficientMaterial;
     }
+
+    // Optional: keep isGameOver as a thin wrapper to avoid misuse elsewhere.
+    public boolean isGameOver() {
+        return isTerminal();
+    }
+
 
     private boolean whiteInCheck(BitBoard bitBoard) {
         return bitBoard.isInCheck(true);

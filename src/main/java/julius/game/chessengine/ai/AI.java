@@ -1074,12 +1074,11 @@ public class AI {
         double firstScore;
         if (simulatorEngine.getGameState().isInStateCheckMate()) {
             firstScore = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
-        } else if (simulatorEngine.getGameState().isInStateDraw()) {
+        } else if (simulatorEngine.getGameState().isTerminal()) { // <-- terminal only (stalemate/50/3fold)
             firstScore = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, depth);
-            if (isWhitesTurn) {
-                firstScore = -firstScore;
-            }
+            if (isWhitesTurn) firstScore = -firstScore;
         } else {
+            // Non-terminal (incl. insufficient material): keep searching
             firstScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, firstMove, 1, 0);
             if (firstScore == EXIT_FLAG || abortRequested(deadline)) {
                 simulatorEngine.undoLastMove();
@@ -1120,22 +1119,15 @@ public class AI {
                     double currentAlpha = alphaRef.get();
                     double currentBeta = betaRef.get();
                     double pAlpha, pBeta;
-                    if (isWhitesTurn) {
-                        pAlpha = currentAlpha;
-                        pBeta = currentAlpha + 1;
-                    } else {
-                        pAlpha = currentBeta - 1;
-                        pBeta = currentBeta;
-                    }
+                    if (isWhitesTurn) { pAlpha = currentAlpha; pBeta = currentAlpha + 1; }
+                    else { pAlpha = currentBeta - 1; pBeta = currentBeta; }
 
                     double probe;
                     if (e.getGameState().isInStateCheckMate()) {
                         probe = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
-                    } else if (e.getGameState().isInStateDraw()) {
+                    } else if (e.getGameState().isTerminal()) { // <-- terminal only
                         probe = evaluateStaticPosition(e.getGameState(), !isWhitesTurn, depth);
-                        if (isWhitesTurn) {
-                            probe = -probe;
-                        }
+                        if (isWhitesTurn) probe = -probe;
                     } else {
                         probe = alphaBeta(e, depth - 1, pAlpha, pBeta, !isWhitesTurn, deadline, moveInt, 1, 0);
                         if (probe == EXIT_FLAG || abortRequested(deadline)) return null;
@@ -1152,11 +1144,8 @@ public class AI {
                                 double full = alphaBeta(e, depth - 1, aNow, bNow, !isWhitesTurn, deadline, moveInt, 1, 0);
                                 if (full != EXIT_FLAG) {
                                     finalScore = full;
-                                    if (isWhitesTurn) {
-                                        if (full > aNow) alphaRef.set(full);
-                                    } else {
-                                        if (full < bNow) betaRef.set(full);
-                                    }
+                                    if (isWhitesTurn) { if (full > aNow) alphaRef.set(full); }
+                                    else { if (full < bNow) betaRef.set(full); }
                                     Double curBest = bestScoreRef.get();
                                     if (isBetterScore(isWhitesTurn, full, curBest)) {
                                         bestScoreRef.set(full);
@@ -1181,11 +1170,8 @@ public class AI {
 
                     return new MoveAndScore(moveInt, finalScore);
                 } finally {
-                    if (helperHeuristics.hasUpdates()) {
-                        mergeThreadHeuristics(helperHeuristics);
-                    } else {
-                        helperHeuristics.resetUpdates();
-                    }
+                    if (helperHeuristics.hasUpdates()) mergeThreadHeuristics(helperHeuristics);
+                    else helperHeuristics.resetUpdates();
                 }
             }));
         }
@@ -1219,6 +1205,7 @@ public class AI {
 
         return bestMove != -1 ? new MoveAndScore(bestMove, bestScore) : null;
     }
+
 
 
     private boolean shouldStopCalculating(long deadline) {
@@ -1322,12 +1309,11 @@ public class AI {
             double score;
             if (simulatorEngine.getGameState().isInStateCheckMate()) {
                 score = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
-            } else if (simulatorEngine.getGameState().isInStateDraw()) {
+            } else if (simulatorEngine.getGameState().isTerminal()) { // <-- terminal only
                 score = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, depth);
-                if (isWhitesTurn) {
-                    score = -score;
-                }
+                if (isWhitesTurn) { score = -score; }
             } else {
+                // Non-terminal (incl. insufficient material):
                 score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1, 0);
                 if (score == EXIT_FLAG || abortRequested(deadline)) {
                     simulatorEngine.undoLastMove();
@@ -1347,7 +1333,6 @@ public class AI {
         return bestMove != -1 ? new MoveAndScore(bestMove, bestScore) : null;
     }
 
-
     /**
      * *
      * 5rkr/pp2Rp2/1b1p1Pb1/3P2Q1/2n3P1/2p5/P4P2/4R1K1 w - - 1 0
@@ -1358,7 +1343,6 @@ public class AI {
                              boolean isWhite, long deadline, int prevMove, int plyFromRoot,
                              int extStreak) {
         nodesVisited++;
-
         if (abortRequested(deadline)) return EXIT_FLAG;
 
         if (plyFromRoot >= maxDepth + ABS_PLY_LIMIT_MARGIN) {
@@ -1375,16 +1359,11 @@ public class AI {
             double m = CHECKMATE - plyFromRoot;
             return isWhite ? -m : +m; // side-to-move is losing here
         }
-        if (simulatorEngine.getGameState().isInStateDraw()) {
+        if (simulatorEngine.getGameState().isTerminal()) { // <-- terminal draw only
             return evaluateStaticPosition(simulatorEngine.getGameState(), isWhite, plyFromRoot);
         }
 
-        // STRICT DEPTH MANAGEMENT:
-        // Do NOT increase 'depth' at node entry. Child depth is non-increasing and
-        // at most MAX_CHECK_EXTENSIONS_IN_A_ROW extensions may keep it equal to the
-        // parent before we enforce a decrease.
         if (depth <= 0) {
-            // Quiescence returns white-oriented score; flip for black-to-move
             double eval = evaluateBoard(simulatorEngine, isWhite, deadline);
             if (eval == EXIT_FLAG) return EXIT_FLAG;
             if (!isWhite) eval = -eval;
@@ -2123,18 +2102,17 @@ public class AI {
 
     public double evaluateBoard(Engine simulatorEngine, boolean isWhitesTurn, long deadline) {
         if (simulatorEngine.getGameState().isInStateCheckMate()) {
-            // Side to move has no legal moves and is in check → losing for side to move
-            return -CHECKMATE; // alphaBeta handles mate distance; this path is rarely hit
+            return -CHECKMATE;
         }
 
-        if (simulatorEngine.getGameState().isInStateDraw()) {
+        // Treat both terminal draws and insufficient-material as draw for evaluation
+        if (simulatorEngine.getGameState().isDrawForUIOrEval()) {
             double scoreDiff = simulatorEngine.getGameState().getScore().getScoreDifference();
-            // stronger bias than ±0.01 to steer away from draws when ahead
             final double DRAW_BIAS = 0.20;
             if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
-                return DRAW - DRAW_BIAS; // discourage draws when ahead
+                return DRAW - DRAW_BIAS;
             } else if ((isWhitesTurn && scoreDiff < 0) || (!isWhitesTurn && scoreDiff > 0)) {
-                return DRAW + DRAW_BIAS; // prefer draws when behind
+                return DRAW + DRAW_BIAS;
             }
             return DRAW;
         }
@@ -2144,27 +2122,29 @@ public class AI {
 
         long boardStateHash = simulatorEngine.getBoardStateHash();
         CaptureTranspositionTableEntry entry = captureTranspositionTable.get(boardStateHash);
-
-        // Check if the entry exists and is relevant for the current search
         if (entry != null && entry.isWhite() == isWhitesTurn) {
             return entry.getScore();
         }
 
         double score = quiescenceSearch(simulatorEngine, isWhitesTurn, alpha, beta, deadline, 0);
-
-        // don't cache timeouts in the capture TT (qsearch TT)
         if (score != EXIT_FLAG) {
             captureTranspositionTable.put(boardStateHash, new CaptureTranspositionTableEntry(score, isWhitesTurn), 0);
         }
-
         return score;
     }
 
     private double quiescenceSearch(Engine simulatorEngine, boolean isWhitesTurn,
                                     double alpha, double beta, long deadline, int depth) {
-        // early stop
+        // Early stop
         if (abortRequested(deadline)) {
             return AI.EXIT_FLAG;
+        }
+
+        // *** REAL TRUTH: absolutely never expand terminal nodes. ***
+        // (Stalemate / 50-move / threefold are terminal for move-handling.
+        // Insufficient material is NOT terminal and will continue.)
+        if (simulatorEngine.getGameState().isTerminal()) {
+            return evaluateStaticPosition(simulatorEngine.getGameState(), isWhitesTurn, depth);
         }
 
         // If side to move is in check, search all legal evasions (not only captures)
@@ -2180,18 +2160,21 @@ public class AI {
             }
 
             // Simple delta/futility-like guard: if even a big swing cannot beat alpha, cut
-            final int BIG_DELTA = 1000; // ~queen
+            final int BIG_DELTA = 1000; // ~queen swing
             if (standPat + BIG_DELTA < alpha) {
                 return alpha;
             }
         }
 
         // Generate moves: evasions if in check, else captures/promotions
-        IntArrayList moves = inCheck ? simulatorEngine.getAllLegalMoves() : getPossibleCapturesOrPromotions(simulatorEngine);
+        IntArrayList moves = inCheck
+                ? simulatorEngine.getAllLegalMoves()
+                : getPossibleCapturesOrPromotions(simulatorEngine);
 
-        // Order them (captures first via MVV-LVA/promotion bonus, killers/history still help)
-        IntArrayList ordered = sortMovesByEfficiency(moves, 0, simulatorEngine.getBoardStateHash(), -1,
-                simulatorEngine);
+        // Order them (captures/promotions first etc.)
+        IntArrayList ordered = sortMovesByEfficiency(
+                moves, 0, simulatorEngine.getBoardStateHash(), -1, simulatorEngine
+        );
 
         for (int i = 0; i < ordered.size(); i++) {
             int m = ordered.getInt(i);
@@ -2199,17 +2182,28 @@ public class AI {
             boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
             boolean isQuiet = !isCapture && !isPromotion;
 
-            // --- SEE pruning: drop clearly losing captures or quiet moves (keeps promotions) ---
+            // --- SEE pruning: drop clearly losing captures or quiets (keeps promotions) ---
             if ((!inCheck && isCapture && !isPromotion) || isQuiet) {
                 int see = simulatorEngine.see(m);
                 if (see < 0) {
+                    // Guard: do not "probe" with a make/undo if node somehow became terminal.
+                    if (simulatorEngine.getGameState().isTerminal()) {
+                        continue;
+                    }
                     simulatorEngine.performMove(m);
                     boolean givesCheck = isSideInCheck(simulatorEngine, !isWhitesTurn);
                     simulatorEngine.undoLastMove();
                     if (!givesCheck) continue;
                 }
             }
+
+            // Guard again before actually making the move (paranoia; usually redundant)
+            if (simulatorEngine.getGameState().isTerminal()) {
+                return evaluateStaticPosition(simulatorEngine.getGameState(), isWhitesTurn, depth);
+            }
+
             simulatorEngine.performMove(m);
+
             // Propagate timeout BEFORE negation
             double child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
             simulatorEngine.undoLastMove();
@@ -2229,31 +2223,21 @@ public class AI {
     }
 
     private double evaluateStaticPosition(GameState gameState, boolean isWhitesTurn, int depthOrPly) {
-
         if (gameState.isInStateCheckMate()) {
             return -(CHECKMATE - depthOrPly);
         }
-        if (gameState.isInStateDraw()) {
-            if (log.isDebugEnabled()) {
-                log.debug("DRAW");
-            }
+        if (gameState.isDrawForUIOrEval()) { // <-- include insufficient material for eval/UI
+            if (log.isDebugEnabled()) log.debug("DRAW");
             double scoreDiff = gameState.getScore().getScoreDifference();
-            // stronger bias than ±0.01 to steer decisively
             final double DRAW_BIAS = 0.20;
             if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
-                return DRAW - DRAW_BIAS; // avoid draws when ahead
+                return DRAW - DRAW_BIAS;
             } else if ((isWhitesTurn && scoreDiff < 0) || (!isWhitesTurn && scoreDiff > 0)) {
-                return DRAW + DRAW_BIAS; // accept draws when behind
+                return DRAW + DRAW_BIAS;
             }
             return DRAW;
         }
         double scoreDifference = gameState.getScore().getScoreDifference();
-
-        if (log.isDebugEnabled()) {
-            log.debug("Evaluate static position score {}, {} ",
-                    isWhitesTurn ? scoreDifference : -scoreDifference,
-                    isWhitesTurn ? "WHITE" : "BLACK");
-        }
         return isWhitesTurn ? scoreDifference : -scoreDifference;
     }
 

@@ -97,7 +97,8 @@ public class Engine {
         synchronized (boardLock) {
             long boardHash = getBoardStateHash();
             if (legalMovesNeedUpdate || cachedLegalMovesHash != boardHash) {
-                if (gameState.isGameOver()) {
+                // Gate on terminality only (checkmate, stalemate, 50-move, threefold).
+                if (gameState.isTerminal()) {
                     IntArrayList empty = new IntArrayList(0);
                     cacheLegalMoves(boardHash, empty);
                     return empty;
@@ -109,36 +110,44 @@ public class Engine {
     }
 
     public void performMove(int move) {
-        long notifyHash = Long.MIN_VALUE;
-        boolean shouldNotify = false;
+        long notifyHash = Long.MIN_VALUE; // sentinel: only notify if we actually set it
 
         synchronized (boardLock) {
-            if (!gameState.isGameOver()) {
-                boolean isOpeningMove = false;
-                long boardStateHashBeforeMove = getBoardStateHash();
-
-                bitBoard.performMove(move);
-
-                long newHash = getBoardStateHash();
-                gameState.recordHash(newHash);
-
-                OpeningBook book = resolveOpeningBook();
-                if (book != null && book.containsMoveAndBoardStateHash(boardStateHashBeforeMove, move)) {
-                    isOpeningMove = true;
-                }
-
-                IntArrayList legalMoves = generateLegalMoves();
-                gameState.pushHalfmoveClock();
-                gameState.update(bitBoard, legalMoves, move, isOpeningMove);
-                gameState.getScore().applyMove(bitBoard, move, gameState.getState());
-                line.push(move);
-
-                notifyHash = newHash;
-                shouldNotify = true;
+            // Guard: never move from a terminal node
+            if (gameState.isTerminal()) {
+                throw new IllegalStateException("performMove called on terminal node");
             }
+
+            boolean isOpeningMove = false;
+            long boardStateHashBeforeMove = getBoardStateHash();
+
+            // 1) Apply on board
+            bitBoard.performMove(move);
+
+            // 2) Repetition/Zobrist bookkeeping
+            long newHash = getBoardStateHash();
+            gameState.recordHash(newHash);
+
+            // 3) Opening book hint
+            OpeningBook book = resolveOpeningBook();
+            if (book != null && book.containsMoveAndBoardStateHash(boardStateHashBeforeMove, move)) {
+                isOpeningMove = true;
+            }
+
+            // 4) Recompute legal moves & update state/score
+            IntArrayList legalMoves = generateLegalMoves();
+            gameState.pushHalfmoveClock();
+            gameState.update(bitBoard, legalMoves, move, isOpeningMove);
+            gameState.getScore().applyMove(bitBoard, move, gameState.getState());
+
+            // 5) Line/history
+            line.push(move);
+
+            // Defer notify until after releasing the lock
+            notifyHash = newHash;
         }
 
-        if (shouldNotify) {
+        if (notifyHash != Long.MIN_VALUE) {
             notifyPositionChanged(notifyHash);
         }
     }
@@ -150,23 +159,21 @@ public class Engine {
             this.bitBoard = FEN.translateFENtoBitBoard(fen);
             this.gameState = new GameState(bitBoard);
 
-            // Ensure the imported state reflects the parsed halfmove/fullmove counters and
-            // repetition baseline.  The constructor copies the counters from the bitboard, but
-            // we explicitly reset the historical bookkeeping so future updates start from this
-            // root position.
+            // Reset history to make this FEN the new root.
             gameState.setHalfmoveClock(bitBoard.getHalfmoveClock());
             gameState.setFullmoveNumber(bitBoard.getFullmoveNumber());
             gameState.getHashHistory().clear();
             gameState.getRepetition().clear();
             gameState.recordHash(getBoardStateHash());
 
-            // For terminal draw states (e.g., fifty-move rule) skip move generation entirely so
-            // callers observe an empty legal move list.
+            // If you auto-claim 50-move / threefold, these are terminal draws.
             if (gameState.isFiftyMoveRule() || gameState.isThreefoldRepetition()) {
                 cacheLegalMoves(getBoardStateHash(), new IntArrayList(0));
                 gameState.setState(GameStateEnum.DRAW);
+                // Still surface the UI/eval hint if material is insufficient.
                 gameState.setDrawByInsufficientMaterial(bitBoard.hasInsufficientMaterial());
             } else {
+                // Otherwise recompute normally; stalemate (terminal) or insufficient (non-terminal) will be detected here.
                 IntArrayList legalMoves = generateLegalMoves();
                 gameState.updateState(bitBoard, legalMoves, false);
             }
@@ -176,6 +183,7 @@ public class Engine {
 
         notifyPositionChanged(notifyHash);
     }
+
 
     public Engine createSimulation() {
         synchronized (boardLock) {
