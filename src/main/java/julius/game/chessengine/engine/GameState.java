@@ -23,6 +23,8 @@ public class GameState {
 
     private Score score;
 
+    private boolean drawByInsufficientMaterial;
+
     @Getter
     private int halfmoveClock = 0;          // resets on pawn move or capture
     @Getter
@@ -33,6 +35,7 @@ public class GameState {
         this.repetition = createRepetitionMap();
         state = GameStateEnum.PLAY;
         score = Score.initializeScore(bitBoard);
+        this.drawByInsufficientMaterial = bitBoard.hasInsufficientMaterial();
         this.halfmoveClock = bitBoard.getHalfmoveClock();
         this.fullmoveNumber = bitBoard.getFullmoveNumber();
         recordHash(bitBoard.getBoardStateHash());
@@ -45,6 +48,7 @@ public class GameState {
         this.halfmoveClock = other.halfmoveClock;
         this.fullmoveNumber = other.fullmoveNumber;
         this.lastZobrist = other.lastZobrist;
+        this.drawByInsufficientMaterial = other.drawByInsufficientMaterial;
         this.hashHistory.addAll(other.hashHistory);
         this.halfmoveStack.addAll(other.halfmoveStack);
         this.fullmoveStack.addAll(other.fullmoveStack);
@@ -76,6 +80,8 @@ public class GameState {
     }
 
     public void updateState(BitBoard bitBoard, IntArrayList legalMoves, boolean isOpeningMove) {
+        drawByInsufficientMaterial = bitBoard.hasInsufficientMaterial();
+
         if (whiteInCheck(bitBoard)) {
             state = GameStateEnum.WHITE_IN_CHECK;
             if (whiteLost(legalMoves)) {
@@ -86,7 +92,7 @@ public class GameState {
             if (blackLost(legalMoves)) {
                 state = GameStateEnum.WHITE_WON;
             }
-        } else if (isDraw(bitBoard, legalMoves)) {
+        } else if (isStalemate(bitBoard, legalMoves)) {
             state = GameStateEnum.DRAW;
         } else if (isFiftyMoveRule() || isThreefoldRepetition()) {
             state = GameStateEnum.DRAW;
@@ -107,7 +113,7 @@ public class GameState {
      */
 
     public boolean isGameOver() {
-        return isInStateCheckMate() || isInStateDraw();
+        return isInStateCheckMate() || state.equals(GameStateEnum.DRAW);
     }
 
     public boolean isInStateCheck() {
@@ -120,7 +126,7 @@ public class GameState {
     }
 
     public boolean isInStateDraw() {
-        return state.equals(GameStateEnum.DRAW);
+        return state.equals(GameStateEnum.DRAW) || drawByInsufficientMaterial;
     }
 
     private boolean whiteInCheck(BitBoard bitBoard) {
@@ -140,11 +146,10 @@ public class GameState {
     }
 
 
-    private boolean isDraw(BitBoard bitBoard, IntArrayList legalMoves) {
-        boolean insufficientMaterial = bitBoard.hasInsufficientMaterial();
+    private boolean isStalemate(BitBoard bitBoard, IntArrayList legalMoves) {
         boolean noLegalMoves = legalMoves.isEmpty();
         boolean inCheck = bitBoard.isInCheck(bitBoard.isWhitesTurn());
-        return (noLegalMoves && !inCheck) || insufficientMaterial;
+        return noLegalMoves && !inCheck;
     }
 
     /**
