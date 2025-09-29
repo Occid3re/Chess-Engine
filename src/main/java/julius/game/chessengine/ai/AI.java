@@ -1416,7 +1416,7 @@ public class AI {
         if (isWhite) {
             return maximizer(simulatorEngine, depth, alpha, beta, boardHash, alphaOriginal, betaOriginal, moves, deadline, prevMove, plyFromRoot, extStreak);
         } else {
-            return minimizer(simulatorEngine, depth, alpha, beta, boardHash, betaOriginal, moves, deadline, prevMove, plyFromRoot, extStreak);
+            return minimizer(simulatorEngine, depth, alpha, beta, boardHash, alphaOriginal, betaOriginal, moves, deadline, prevMove, plyFromRoot, extStreak);
         }
     }
 
@@ -1723,7 +1723,7 @@ public class AI {
 
 
     private double minimizer(Engine simulatorEngine, int depth, double alpha, double beta,
-                             long boardHash, double betaOriginal,
+                             long boardHash, double alphaOriginal, double betaOriginal,
                              IntArrayList moves, long deadline, int prevMove, int plyFromRoot,
                              int extStreak) {
 
@@ -1894,7 +1894,7 @@ public class AI {
 
         if (minEval >= betaOriginal && shouldUpdate) {
             transpositionTable.put(boardHash, new TranspositionTableEntry(minEval, depth, NodeType.LOWERBOUND, bestMoveAtThisNode), depth);
-        } else if (minEval <= alpha && shouldUpdate) {
+        } else if (minEval <= alphaOriginal && shouldUpdate) {
             transpositionTable.put(boardHash, new TranspositionTableEntry(minEval, depth, NodeType.UPPERBOUND, bestMoveAtThisNode), depth);
         } else if (shouldUpdate) {
             transpositionTable.put(boardHash, new TranspositionTableEntry(minEval, depth, NodeType.EXACT, bestMoveAtThisNode), depth);
