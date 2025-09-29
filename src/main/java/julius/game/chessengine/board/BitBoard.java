@@ -751,6 +751,13 @@ public class BitBoard {
     }
 
     private void initPieceBoardFromBitboards() {
+        rebuildPieceBoardFromBitboards();
+
+        whiteAttackDirty = true;
+        blackAttackDirty = true;
+    }
+
+    private void rebuildPieceBoardFromBitboards() {
         Arrays.fill(pieceBoard, null);
         setPieces(whitePawns, PieceType.PAWN);
         setPieces(blackPawns, PieceType.PAWN);
@@ -764,9 +771,120 @@ public class BitBoard {
         setPieces(blackQueens, PieceType.QUEEN);
         setPieces(whiteKing, PieceType.KING);
         setPieces(blackKing, PieceType.KING);
+    }
 
-        whiteAttackDirty = true;
-        blackAttackDirty = true;
+    private void ensurePieceBoardConsistency(String context) {
+        boolean mismatch = false;
+        StringBuilder details = log.isDebugEnabled() ? new StringBuilder(128) : null;
+
+        for (int index = 0; index < 64; index++) {
+            long mask = 1L << index;
+            PieceType actual = pieceBoard[index];
+            PieceType expected = null;
+            int carriers = 0;
+
+            if ((whitePawns & mask) != 0) {
+                carriers++;
+                expected = PieceType.PAWN;
+            }
+            if ((blackPawns & mask) != 0) {
+                carriers++;
+                expected = PieceType.PAWN;
+            }
+            if ((whiteKnights & mask) != 0) {
+                carriers++;
+                expected = PieceType.KNIGHT;
+            }
+            if ((blackKnights & mask) != 0) {
+                carriers++;
+                expected = PieceType.KNIGHT;
+            }
+            if ((whiteBishops & mask) != 0) {
+                carriers++;
+                expected = PieceType.BISHOP;
+            }
+            if ((blackBishops & mask) != 0) {
+                carriers++;
+                expected = PieceType.BISHOP;
+            }
+            if ((whiteRooks & mask) != 0) {
+                carriers++;
+                expected = PieceType.ROOK;
+            }
+            if ((blackRooks & mask) != 0) {
+                carriers++;
+                expected = PieceType.ROOK;
+            }
+            if ((whiteQueens & mask) != 0) {
+                carriers++;
+                expected = PieceType.QUEEN;
+            }
+            if ((blackQueens & mask) != 0) {
+                carriers++;
+                expected = PieceType.QUEEN;
+            }
+            if ((whiteKing & mask) != 0) {
+                carriers++;
+                expected = PieceType.KING;
+            }
+            if ((blackKing & mask) != 0) {
+                carriers++;
+                expected = PieceType.KING;
+            }
+
+            boolean occupancyFlag = (allPieces & mask) != 0L;
+
+            if (carriers == 0 && occupancyFlag) {
+                mismatch = true;
+                if (details != null) {
+                    details.append(formatSquare(index)).append("=stale-occupancy ");
+                }
+                continue;
+            }
+
+            if (carriers > 0 && !occupancyFlag) {
+                mismatch = true;
+                if (details != null) {
+                    details.append(formatSquare(index)).append("=missing-occupancy ");
+                }
+            }
+
+            if (carriers > 1) {
+                mismatch = true;
+                if (details != null) {
+                    details.append(formatSquare(index)).append("=multi").append(carriers).append(' ');
+                }
+                continue;
+            }
+
+            if (carriers == 0) {
+                if (actual != null) {
+                    mismatch = true;
+                    if (details != null) {
+                        details.append(formatSquare(index)).append("=expected-empty,found=").append(actual).append(' ');
+                    }
+                }
+                continue;
+            }
+
+            if (actual != expected) {
+                mismatch = true;
+                if (details != null) {
+                    details.append(formatSquare(index)).append("=expected=").append(expected)
+                            .append(",found=").append(actual).append(' ');
+                }
+            }
+        }
+
+        if (mismatch) {
+            if (log.isWarnEnabled()) {
+                log.warn("Detected piece array / bitboard desynchronization during {}; rebuilding from bitboards.", context);
+            }
+            if (details != null && details.length() > 0 && log.isDebugEnabled()) {
+                log.debug("pieceBoard discrepancies: {}", details);
+            }
+            rebuildPieceBoardFromBitboards();
+        }
     }
 
     /**
@@ -1229,6 +1347,8 @@ public class BitBoard {
 
     // New method (rename of existing generateAllPossibleMoves) that exposes pins:
     public MoveGenResult generateAllPossibleMovesWithPins(boolean whitesTurn) {
+        ensurePieceBoardConsistency("move-generation");
+
         IntArrayList moves = new IntArrayList(MAX_PSEUDO_LEGAL_MOVES);
 
         // NOTE: single computation here
@@ -1330,6 +1450,8 @@ public class BitBoard {
         whitePieces = whitePawns | whiteKnights | whiteBishops | whiteRooks | whiteQueens | whiteKing;
         blackPieces = blackPawns | blackKnights | blackBishops | blackRooks | blackQueens | blackKing;
         allPieces = whitePieces | blackPieces;
+
+        rebuildPieceBoardFromBitboards();
     }
 
     private void recomputeWhiteAttackMap() {
@@ -1936,6 +2058,8 @@ public class BitBoard {
 
     // Replace your current performMove with this version
     public void performMove(int move) {
+        ensurePieceBoardConsistency("perform-move");
+
         halfmoveHistory.push(halfmoveClock);
         fullmoveHistory.push(fullmoveNumber);
         doubleStepHistory.push(lastMoveDoubleStepPawnIndex);
@@ -2357,6 +2481,8 @@ public class BitBoard {
     }
 
     public void undoMove(int move) {
+        ensurePieceBoardConsistency("undo-move");
+
         int fromIndex = MoveHelper.deriveFromIndex(move);
         int toIndex = MoveHelper.deriveToIndex(move);
         int pieceTypeBits = MoveHelper.derivePieceTypeBits(move);
