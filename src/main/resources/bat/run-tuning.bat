@@ -17,7 +17,7 @@ if "%JARFILE%"=="" (
 )
 
 REM --- inputs ---
-set "SEED=src\main\resources\tuning\seed-tunings.yaml"
+set "SEED=src\main\resources\tuning\seed-population.yaml"
 set "MATCHES=%CD%\match-log.csv"
 if not exist "%SEED%" (
   echo [ERROR] Seed file not found: "%SEED%"
