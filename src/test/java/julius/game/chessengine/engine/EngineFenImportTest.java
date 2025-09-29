@@ -30,7 +30,12 @@ class EngineFenImportTest {
         assertFalse(gameState.isGameOver(), "Insufficient material should not stop move handling");
         assertEquals(GameStateEnum.PLAY, gameState.getState(), "Engine should remain in PLAY state");
         assertTrue(gameState.isDrawByInsufficientMaterial(), "Flag should mark draw for UI/evaluation");
-        assertTrue(gameState.isInStateDraw(), "Draw status should be visible to consumers");
+
+        // Use the UI/eval helper (includes insufficient material)
+        assertTrue(gameState.isDrawForUIOrEval(), "Draw should be visible to UI/eval");
+
+        // Terminal-only draw API must be false here
+        assertFalse(gameState.isInStateDraw(), "Non-terminal draws must not be treated as terminal");
 
         IntArrayList moves = engine.getAllLegalMoves();
         assertFalse(moves.isEmpty(), "Moves must still be generated under insufficient material");
@@ -43,4 +48,5 @@ class EngineFenImportTest {
         engine.undoLastMove();
         assertEquals(initialHistory, engine.getLine().size(), "undoLastMove must restore history");
     }
+
 }

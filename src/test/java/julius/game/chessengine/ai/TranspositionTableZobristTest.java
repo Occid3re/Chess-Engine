@@ -331,7 +331,17 @@ class TranspositionTableZobristTest {
                                 null,
                                 initialHash);
                         sequence.add(move);
+                        int before = lineSize(engine);
                         engine.performMove(move);
+                        int after  = lineSize(engine);
+
+                        int finalSequenceIndex = sequenceIndex;
+                        int finalDepth = depth;
+                        int finalPly = ply;
+                        assertEquals(before + 1, after,
+                                () -> "HISTORY UNDERFLOW SOURCE: performMove did not push for " + describeMove(move) +
+                                        " at depth " + finalDepth + " seq " + finalSequenceIndex + " ply " + finalPly +
+                                        " | FEN: " + fen);
                     }
 
                     String sequenceDescription = describeSequence(sequence);
@@ -740,7 +750,12 @@ class TranspositionTableZobristTest {
                 int choice = random.nextInt(moves.size());
                 int move = moves.getInt(choice);
                 movesMade.add(move);
+                int before = lineSize(engine);
                 engine.performMove(move);
+                int after  = lineSize(engine);
+                assertEquals(before + 1, after,
+                        () -> "performMove failed to push history for " + describeMove(move) +
+                                " in FEN: " + fen + " (before=" + before + ", after=" + after + ")");
             }
 
             for (int i = movesMade.size() - 1; i >= 0; i--) {
@@ -883,4 +898,24 @@ class TranspositionTableZobristTest {
             return "<reflection failed: " + ex.getMessage() + ">";
         }
     }
+
+    private static int lineSize(Engine e) {
+        try {
+            Field f = Engine.class.getDeclaredField("line");
+            f.setAccessible(true);
+            MoveStack s = (MoveStack) f.get(e);
+            return (s == null) ? -1 : s.size();
+        } catch (Exception ex) { return -1; }
+    }
+
+    private static String topOfLine(Engine e) {
+        try {
+            Field f = Engine.class.getDeclaredField("line");
+            f.setAccessible(true);
+            MoveStack s = (MoveStack) f.get(e);
+            if (s == null || s.isEmpty()) return "<empty>";
+            return TranspositionTableZobristTest.describeMove(s.peek()); // assuming MoveStack.peek()
+        } catch (Exception ex) { return "<unavailable>"; }
+    }
+
 }
