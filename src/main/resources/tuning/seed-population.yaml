@@ -88,3 +88,92 @@ population:
       piecesquare.earlyqueendevelopmentpenaltyperminor: -14.869948954091344
       piecesquare.notcastledrookmovepenalty: -7.632927292179623
       threat.hangingpawnpenalty: -11.609514901039722
+  -
+    name: a389a2d9-c3b2-4c21-9897-6d8b51a08774
+    evaluation:
+      modules:
+        materialmodule:
+          midgame: 1.3278208083336658
+          endgame: 1.1759278599744931
+        threatmodule:
+          midgame: 0.9649680356788558
+          endgame: 0.9849349881700269
+    numericParameters:
+      material.knightvalue: 314.12109980964533
+      threat.pawnthreatknightpenalty: -11.636881532686873
+      activity.endgamemobilityknight: 1.9228393894343092
+      activity.midgamecenterbishop: 2.2542427812388226
+      activity.endgamecenterqueen: 2.9640604938487116
+      pawnstructure.ownkingblockspassedpawnpenalty: -182.858223170821
+      kingsafety.attackweightknight: 10.491760629440936
+      pawnstructure.rookhalfopenfilebonus: 13.9684126350428
+      piecesquare.minundevelopedminorsforqueenpenalty: 1.7278335736618795
+      piecesquare.developmentphasethreshold: 57.05893037540023
+      piecesquare.startpositionpenalty: -34.77521110457121
+      activity.midgamemobilityrook: 2.0887816153883056
+      threat.hangingbishoppenalty: -18.818485376572312
+      kingsafety.halfopenfilepenalty: -15.010692664571998
+      activity.midgamemobilityknight: 2.328810803177331
+      kingsafety.attackweightrook: 14.31119369618012
+      activity.endgamecenterking: 2.431584210588993
+      activity.endgamemobilityqueen: 1.2071084949262252
+      piecesquare.blendscale: 266.52957019636125
+      activity.midgamemobilitybishop: 4.451252745054765
+      pawnstructure.blockedpawnpenalty: -9.611306312608141
+      activity.midgamemobilityqueen: 0.9680487472690049
+      material.pawnvalue: 136.73234869673786
+      kingsafety.openfilepenalty: -20.44122760766555
+      kingsafety.attackweightqueen: 14.166581496237345
+      pawnstructure.doubledpawnpenalty: -9.432699975938615
+      pawnstructure.passedpawnbonus: 67.48919702007792
+      pawnstructure.passedpawnfreepathbonusperrank: 10.00209764452498
+      material.bishoppairbonus: 34.24124184950004
+      activity.endgamemobilityrook: 2.5681396341637566
+      activity.midgamecenterknight: 3.2919177636868318
+      activity.midgamecenterrook: 1.8578383638081462
+      activity.midgamecenterqueen: 3.579817307388191
+      kingsafety.attackweightbishop: 14.282406724877674
+      material.bishopvalue: 277.6213662091555
+      piecesquare.queendevelopmentphasethreshold: 79.82356005284795
+      piecesquare.undevelopedminorpenalty: -23.09935117182809
+      threat.hangingknightpenalty: -30.092741838696668
+      kingsafety.backrankweaknessmidgamepenalty: -102.15666164359895
+      threat.pawnthreatrookpenalty: -9.79992553003154
+      pawnstructure.connectedpawnbonus: 7.851993698048618
+      kingsafety.attackweightpawn: 4.899932931539238
+      pawnstructure.centerpawnbonus: 13.005160482136294
+      threat.hangingrookpenalty: -48.78693576079839
+      activity.endgamecenterknight: 3.628225332698292
+      kingsafety.defenderbonus: 5.270743064604076
+      activity.midgamemobilityking: 0.0
+      pawnstructure.rookopenfilebonus: 23.70850203105218
+      threat.pawnthreatqueenpenalty: -28.539469791785855
+      threat.pawnthreatbishoppenalty: -7.960450814407325
+      activity.endgamemobilitybishop: 3.2231601116925375
+      piecesquare.castlingbonus: 14.88650816402077
+      material.queenvalue: 1326.391669532436
+      kingsafety.backrankweaknessendgamepenalty: -53.49896839354303
+      kingsafety.queenattackedpenalty: -65.266411505581
+      activity.endgamecenterrook: 2.9937737729175247
+      material.rookvalue: 573.9570094337469
+      kingsafety.missingpawnshieldpenalty: -18.313385700158822
+      activity.endgamecenterbishop: 2.8651392044725688
+      pawnstructure.backwardpawnpenalty: -10.678726948064703
+      threat.hangingqueenpenalty: -57.464699192720325
+      pawnstructure.isolatedpawnpenalty: -10.738410437738516
+      activity.midgamecenterking: 0.0
+      evaluation.blendscale: 209.75950775071638
+      pawnstructure.advancedpawnbonus: 8.55799233605732
+      pawnstructure.islandpenalty: -5.411659974423298
+      activity.endgamemobilityking: 2.0734247762819282
+      piecesquare.earlyqueendevelopmentpenaltyperminor: -14.291150881536083
+      piecesquare.notcastledrookmovepenalty: -8.813626575885406
+      threat.hangingpawnpenalty: -9.521403523486716
+      moveOrdering.killerMoveScore: 10000
+      moveOrdering.promotionBonus: 900
+      moveOrdering.killer0Bonus: 50
+      moveOrdering.killer1Bonus: 30
+      moveOrdering.counterMoveBonus: 400
+      moveOrdering.captureMvvMultiplier: 16
+      moveOrdering.captureSeeMultiplier: 32
+      moveOrdering.promotionSeeMultiplier: 16
