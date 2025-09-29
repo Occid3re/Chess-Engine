@@ -35,13 +35,18 @@ public class Engine {
     @Getter
     private MoveStack line = new MoveStack();
     private MoveStack redoLine = new MoveStack();
+
+    /**
+     * Note: Exposing BitBoard via getter allows reads but also enables callers to bypass the lock and mutate internals.
+     * If you keep this, document that external users must synchronize on boardLock before touching it.
+     */
     @Getter
     private BitBoard bitBoard = new BitBoard();
+
     @Getter
     private GameState gameState = new GameState(bitBoard);
 
-    private volatile LongConsumer onPositionChanged = _ -> {
-    };
+    private volatile LongConsumer onPositionChanged = _ -> {};
 
     public Engine() {
         startNewGame();
@@ -59,16 +64,24 @@ public class Engine {
             markLegalMovesStale();
 
             this.openingBook = other.openingBook;
+
+            // Intentionally DO NOT copy the onPositionChanged observer; clones are silent by default.
+            // Users can opt-in via setOnPositionChanged on the clone.
         }
     }
 
     public void setOnPositionChanged(LongConsumer cb) {
-        this.onPositionChanged = (cb != null ? cb : h -> {
-        });
+        this.onPositionChanged = (cb != null ? cb : h -> {});
     }
 
-    private void notifyPositionChanged() {
-        onPositionChanged.accept(getBoardStateHash());
+    /** Invoke observer outside of boardLock. */
+    private void notifyPositionChanged(long hash) {
+        LongConsumer cb = this.onPositionChanged; // read volatile once
+        try {
+            cb.accept(hash);
+        } catch (Throwable t) {
+            log.warn("onPositionChanged callback threw", t);
+        }
     }
 
     /**
@@ -96,28 +109,43 @@ public class Engine {
     }
 
     public void performMove(int move) {
+        long notifyHash = Long.MIN_VALUE;
+        boolean shouldNotify = false;
+
         synchronized (boardLock) {
-            boolean isOpeningMove = false;
             if (!gameState.isGameOver()) {
+                boolean isOpeningMove = false;
                 long boardStateHashBeforeMove = getBoardStateHash();
+
                 bitBoard.performMove(move);
+
                 long newHash = getBoardStateHash();
                 gameState.recordHash(newHash);
+
                 OpeningBook book = resolveOpeningBook();
                 if (book != null && book.containsMoveAndBoardStateHash(boardStateHashBeforeMove, move)) {
                     isOpeningMove = true;
                 }
+
                 IntArrayList legalMoves = generateLegalMoves();
                 gameState.pushHalfmoveClock();
                 gameState.update(bitBoard, legalMoves, move, isOpeningMove);
                 gameState.getScore().applyMove(bitBoard, move, gameState.getState());
                 line.push(move);
-                notifyPositionChanged();
+
+                notifyHash = newHash;
+                shouldNotify = true;
             }
+        }
+
+        if (shouldNotify) {
+            notifyPositionChanged(notifyHash);
         }
     }
 
     public void importBoardFromFen(String fen) {
+        long notifyHash;
+
         synchronized (boardLock) {
             this.bitBoard = FEN.translateFENtoBitBoard(fen);
             this.gameState = new GameState(bitBoard);
@@ -141,8 +169,11 @@ public class Engine {
                 IntArrayList legalMoves = generateLegalMoves();
                 gameState.updateState(bitBoard, legalMoves, false);
             }
-            notifyPositionChanged();
+
+            notifyHash = getBoardStateHash();
         }
+
+        notifyPositionChanged(notifyHash);
     }
 
     public Engine createSimulation() {
@@ -154,6 +185,8 @@ public class Engine {
 
     public void copyFrom(Engine other) {
         Objects.requireNonNull(other, "other engine");
+        long notifyHash;
+
         synchronized (boardLock) {
             synchronized (other.boardLock) {
                 this.bitBoard = new BitBoard(other.bitBoard);
@@ -164,10 +197,15 @@ public class Engine {
                 markLegalMovesStale();
                 this.openingBook = other.openingBook;
             }
+            notifyHash = getBoardStateHash();
         }
+
+        notifyPositionChanged(notifyHash);
     }
 
     public void startNewGame() {
+        long notifyHash;
+
         synchronized (boardLock) {
             bitBoard = new BitBoard();
             gameState = new GameState(bitBoard);
@@ -179,8 +217,10 @@ public class Engine {
                 this.openingBook = instance;
             }
             resetCachedLegalMoves();
-            notifyPositionChanged();
+            notifyHash = getBoardStateHash();
         }
+
+        notifyPositionChanged(notifyHash);
     }
 
     private OpeningBook resolveOpeningBook() {
@@ -253,7 +293,6 @@ public class Engine {
         }
     }
 
-
     private void markLegalMovesStale() {
         legalMovesNeedUpdate = true;
         cachedLegalMovesHash = Long.MIN_VALUE;
@@ -281,7 +320,6 @@ public class Engine {
         return a.size() == b.size()
                 && java.util.Arrays.equals(a.elements(), 0, a.size(), b.elements(), 0, b.size());
     }
-
 
     // Each of these methods would need to be implemented to handle the specific move generation for each piece type.
     public List<Move> getMovesFromIndex(int fromIndex) {
@@ -339,9 +377,10 @@ public class Engine {
                 log.warn("Move not legal!");
                 return gameState;
             }
-            performMove(move);
-            return gameState;
         }
+        // Perform the move outside of this synchronized block to reuse performMove's own locking & notification policy
+        performMove(getMove(fromIndex, toIndex, promotionPiece));
+        return gameState;
     }
 
     private int getMove(int fromIndex, int toIndex, int promotionPiece) {
@@ -355,7 +394,6 @@ public class Engine {
         }
         return -1;
     }
-
 
     public List<Position> getPossibleMovesForPosition(int fromIndex) {
         return getMovesFromIndex(fromIndex).stream()
@@ -383,7 +421,6 @@ public class Engine {
 
     // Engine.java
     public int doNullMoveForSearch() {
-        // Save current en-passant target (0 means none in your codebase)
         synchronized (boardLock) {
             int previousDoubleStep = bitBoard.getLastMoveDoubleStepPawnIndex();
 
@@ -419,6 +456,8 @@ public class Engine {
     }
 
     public void undoLastMove() {
+        long notifyHash;
+
         synchronized (boardLock) {
             if (line.isEmpty()) throw new IllegalStateException("undoLastMoveWasNotPossible, line is empty");
 
@@ -438,20 +477,25 @@ public class Engine {
 
             // 3) Bookkeeping
             redoLine.push(undoMove);
-            notifyPositionChanged();
+
+            notifyHash = getBoardStateHash();
         }
+
+        notifyPositionChanged(notifyHash);
     }
 
-
     public void redoMove() {
+        int moveToRedo;
+
         synchronized (boardLock) {
-            if (!redoLine.isEmpty()) {
-                performMove(redoLine.pop());
-                notifyPositionChanged();
-            } else {
+            if (redoLine.isEmpty()) {
                 throw new IllegalStateException("redoLastMoveWasNotPossible, redoLine is empty");
             }
+            moveToRedo = redoLine.pop();
         }
+
+        // Use performMove which handles locking and deferred notification.
+        performMove(moveToRedo);
     }
 
     public int getLastMove() {
@@ -498,7 +542,6 @@ public class Engine {
             return map;
         }
     }
-
 
     public boolean isEndgame() {
         synchronized (boardLock) {
