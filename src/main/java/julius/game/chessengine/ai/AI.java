@@ -303,22 +303,21 @@ public class AI {
     }
 
     private Heuristics.Snapshot captureHeuristicsSnapshot(int requiredDepth) {
-        while (true) {
-            long stamp = heuristicsLock.tryOptimisticRead();
-            if (stamp != 0L) {
-                Heuristics.Snapshot optimistic = globalHeuristics.snapshot(requiredDepth);
-                if (heuristicsLock.validate(stamp)) {
-                    heuristicsLockMetrics.recordOptimisticSnapshot();
-                    return optimistic;
-                }
+        long stamp = heuristicsLock.tryOptimisticRead();
+        if (stamp != 0L) {
+            Heuristics.Snapshot optimistic = globalHeuristics.snapshot(requiredDepth);
+            if (heuristicsLock.validate(stamp)) {
+                heuristicsLockMetrics.recordOptimisticSnapshot();
+                return optimistic;
             }
-            long readStamp = acquireReadLock();
-            try {
-                heuristicsLockMetrics.recordOptimisticFallback();
-                return globalHeuristics.snapshot(requiredDepth);
-            } finally {
-                releaseReadLock(readStamp);
-            }
+        }
+
+        long readStamp = acquireReadLock();
+        try {
+            heuristicsLockMetrics.recordOptimisticFallback();
+            return globalHeuristics.snapshot(requiredDepth);
+        } finally {
+            releaseReadLock(readStamp);
         }
     }
 
@@ -565,52 +564,64 @@ public class AI {
 
             MoveAndScore ms = null;
 
-            double alpha, beta;
             if (lastIterScore != null && currentDepth >= 3) {
                 double window = 50.0;
                 if (rng != null) window = Math.max(10.0, window + rng.nextDouble(-10.0, 10.0));
-                alpha = lastIterScore - window;
-                beta = lastIterScore + window;
+
+                double alpha = lastIterScore - window;
+                double beta  = lastIterScore + window;
 
                 int retries = 0;
+                boolean didFullWindow = false;
+
                 while (!shouldStopCalculating(task.getDeadline())) {
                     ms = searchRootMoves(simulatorEngine, task, currentDepth, alpha, beta, rng);
                     if (ms == null) break;
+
+                    // fail-low
                     if (ms.score <= alpha) {
+                        if (!didFullWindow && retries++ >= 3) {
+                            alpha = Double.NEGATIVE_INFINITY;
+                            beta  = Double.POSITIVE_INFINITY; // retry once with full window
+                            didFullWindow = true;
+                            continue;
+                        }
                         window *= 2.0;
                         alpha = ms.score - window;
-                        if (++retries > 3) {
-                            alpha = Double.NEGATIVE_INFINITY;
-                            beta = Double.POSITIVE_INFINITY;
-                        } else continue;
+                        continue;
                     }
+
+                    // fail-high
                     if (ms.score >= beta) {
+                        if (!didFullWindow && retries++ >= 3) {
+                            alpha = Double.NEGATIVE_INFINITY;
+                            beta  = Double.POSITIVE_INFINITY; // retry once with full window
+                            didFullWindow = true;
+                            continue;
+                        }
                         window *= 2.0;
                         beta = ms.score + window;
-                        if (++retries > 3) {
-                            alpha = Double.NEGATIVE_INFINITY;
-                            beta = Double.POSITIVE_INFINITY;
-                        } else continue;
+                        continue;
                     }
+
+                    // inside window => good; stop re-searching
                     break;
                 }
             }
 
             if (ms == null) {
-                ms = searchRootMoves(simulatorEngine, task, currentDepth, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, rng);
+                ms = searchRootMoves(simulatorEngine, task, currentDepth,
+                        Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, rng);
                 if (ms == null) {
-                    if (heuristics.hasUpdates()) {
-                        mergeThreadHeuristics(heuristics);
-                    }
+                    if (heuristics.hasUpdates()) mergeThreadHeuristics(heuristics);
                     break;
                 }
             }
 
             lastIterScore = ms.score;
             task.publishBest(ms, currentDepth, simulatorEngine);
-            if (heuristics.hasUpdates()) {
-                mergeThreadHeuristics(heuristics);
-            }
+
+            if (heuristics.hasUpdates()) mergeThreadHeuristics(heuristics);
             if (task.isStopRequested()) break;
         }
     }
