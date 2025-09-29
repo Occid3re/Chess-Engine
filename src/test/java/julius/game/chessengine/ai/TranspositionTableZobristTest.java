@@ -7,6 +7,7 @@ import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.helper.ZobristTable;
 import julius.game.chessengine.utils.Color;
+import julius.game.chessengine.utils.MoveStack;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.DisplayName;
@@ -333,8 +334,29 @@ class TranspositionTableZobristTest {
                         engine.performMove(move);
                     }
 
+                    String sequenceDescription = describeSequence(sequence);
                     for (int i = sequence.size() - 1; i >= 0; i--) {
-                        engine.undoLastMove();
+                        int expectedMove = sequence.get(i);
+                        int lastMove = engine.getLastMove();
+                        String undoContext = String.format("depth %d seq %d undoIndex %d", depth, sequenceIndex, i);
+                        if (lastMove == -1) {
+                            log.error("Undo stack empty before popping expected move {} ({}). Sequence: {}", expectedMove,
+                                    describeMove(expectedMove), sequenceDescription);
+                            logEngineMoveStacks(engine, undoContext + " pre-pop empty stack");
+                        } else if (lastMove != expectedMove) {
+                            log.warn("Undo stack top {} ({}) differs from expected move {} ({}) at {}. Sequence: {}", lastMove,
+                                    describeMove(lastMove), expectedMove, describeMove(expectedMove), undoContext,
+                                    sequenceDescription);
+                            logEngineMoveStacks(engine, undoContext + " pre-pop mismatch");
+                        }
+                        try {
+                            engine.undoLastMove();
+                        } catch (RuntimeException undoError) {
+                            log.error("Undo failed while processing {}. Last move before failure: {}. Sequence: {}", undoContext,
+                                    describeMaybeMove(lastMove), sequenceDescription, undoError);
+                            logEngineMoveStacks(engine, undoContext + " failure");
+                            throw undoError;
+                        }
                     }
 
                     assertStateRestored(fen, initialHash, initialPieceBoard, initialBitboards, engine, null, sequence);
@@ -646,6 +668,43 @@ class TranspositionTableZobristTest {
         boolean promo = MoveHelper.derivePromotionPieceTypeBits(move) != 0;
         return String.format("%s %s %s%s%s", color, mover, fromStr + toStr,
                 capture ? "x" : "", promo ? "=" + MoveHelper.intToPieceType(MoveHelper.derivePromotionPieceTypeBits(move)) : "");
+    }
+
+    private static String describeMaybeMove(int move) {
+        return move == -1 ? "<none>" : describeMove(move);
+    }
+
+    private static String describeSequence(List<Integer> moves) {
+        if (moves == null || moves.isEmpty()) {
+            return "<empty>";
+        }
+        return moves.stream()
+                .map(TranspositionTableZobristTest::describeMove)
+                .collect(Collectors.joining(", "));
+    }
+
+    private static void logEngineMoveStacks(Engine engine, String context) {
+        try {
+            Field lineField = Engine.class.getDeclaredField("line");
+            Field redoField = Engine.class.getDeclaredField("redoLine");
+            lineField.setAccessible(true);
+            redoField.setAccessible(true);
+            MoveStack lineStack = (MoveStack) lineField.get(engine);
+            MoveStack redoStack = (MoveStack) redoField.get(engine);
+            log.error("[{}] line stack size={} moves=[{}]", context, lineStack.size(), describeMoveStack(lineStack));
+            log.error("[{}] redo stack size={} moves=[{}]", context, redoStack.size(), describeMoveStack(redoStack));
+        } catch (ReflectiveOperationException reflectionError) {
+            log.error("Failed to log Engine move stacks for context {}", context, reflectionError);
+        }
+    }
+
+    private static String describeMoveStack(MoveStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return "<empty>";
+        }
+        return stack.stream()
+                .mapToObj(TranspositionTableZobristTest::describeMove)
+                .collect(Collectors.joining(", "));
     }
 
     private static void verifySingleMoveUndoRestoresState(Engine engine, String fen) {
