@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static julius.game.chessengine.board.MoveHelper.convertIndexToString;
 import static julius.game.chessengine.board.MoveHelper.createMoveInt;
@@ -27,6 +28,8 @@ import static julius.game.chessengine.helper.KnightHelper.knightMoveTable;
 public class BitBoard {
 
     private static final PieceType[] PROMOTION_PIECES = {PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT};
+
+    private static final AtomicLong CAPTURE_INCONSISTENCIES = new AtomicLong();
 
     BishopHelper bishopHelper = BishopHelper.getInstance();
     RookHelper rookHelper = RookHelper.getInstance();
@@ -171,11 +174,20 @@ public class BitBoard {
         }
     }
 
+    public static void resetCaptureInconsistencyCounter() {
+        CAPTURE_INCONSISTENCIES.set(0L);
+    }
+
+    public static long getCaptureInconsistencyCount() {
+        return CAPTURE_INCONSISTENCIES.get();
+    }
+
     private void logCaptureInconsistency(String context, PieceType moverType, int fromIndex, int targetIndex) {
         logCaptureInconsistency(context, moverType, fromIndex, targetIndex, null);
     }
 
     private void logCaptureInconsistency(String context, PieceType moverType, int fromIndex, int targetIndex, PieceType expectedCaptured) {
+        CAPTURE_INCONSISTENCIES.incrementAndGet();
         if (log.isErrorEnabled()) {
             log.error("{}", () -> buildCaptureInconsistencyReport(context, moverType, fromIndex, targetIndex, expectedCaptured));
         } else if (log.isWarnEnabled()) {
