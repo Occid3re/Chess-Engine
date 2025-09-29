@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
@@ -13,10 +14,13 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 
+import lombok.extern.log4j.Log4j2;
+
 /**
  * Runs a simple genetic algorithm on top of the chess engine by repeatedly letting configurations
  * play against each other and mutating the top performers into the next generation.
  */
+@Log4j2
 public final class GeneticOptimizer {
 
     private final MatchRunner matchRunner;
@@ -39,9 +43,24 @@ public final class GeneticOptimizer {
         }
 
         List<EngineTuning> population = new ArrayList<>(seedPopulation.population());
+        log.info("Starting genetic evolution with {} seed configurations (target population {}, generations {}, retain {}, mutation strength {}, matches per pair {}, match threads {}).",
+                seedPopulation.population().size(),
+                options.populationSize(),
+                options.generations(),
+                options.retainCount(),
+                String.format(Locale.ROOT, "%.3f", options.mutationStrength()),
+                options.matchesPerPair(),
+                options.matchParallelism());
+        if (log.isDebugEnabled()) {
+            log.debug("Initial population: {}", population.stream().map(EngineTuning::name).toList());
+        }
         while (population.size() < options.populationSize()) {
             EngineTuning parent = population.get(random.nextInt(population.size()));
             population.add(parent.mutate(random, options.mutationStrength()).rename(parent.name() + "_seed"));
+        }
+        if (log.isDebugEnabled()) {
+            log.debug("Expanded initial population to {} entries: {}", population.size(),
+                    population.stream().map(EngineTuning::name).toList());
         }
 
         List<MatchRunner.MatchResult> allMatches = new ArrayList<>();
@@ -52,6 +71,7 @@ public final class GeneticOptimizer {
 
         try {
             for (int generation = 0; generation < options.generations(); generation++) {
+                int generationIndex = generation + 1;
                 Map<EngineTuning, Double> scoreboard = new HashMap<>();
                 List<ScheduledMatch> scheduledMatches = new ArrayList<>();
 
@@ -66,7 +86,11 @@ public final class GeneticOptimizer {
                     }
                 }
 
+                log.info("Generation {}: scheduled {} matches for {} configurations", generationIndex,
+                        scheduledMatches.size(), population.size());
+
                 List<CompletedMatch> completedMatches = runScheduledMatches(scheduledMatches, matchOptions, executor);
+                log.info("Generation {}: completed {} matches", generationIndex, completedMatches.size());
 
                 for (CompletedMatch completed : completedMatches) {
                     allMatches.add(completed.result());
@@ -80,19 +104,60 @@ public final class GeneticOptimizer {
                         scoreboard.merge(a, result.whiteScore(), Double::sum);
                         scoreboard.merge(b, result.blackScore(), Double::sum);
                     }
+                    if (log.isDebugEnabled()) {
+                        log.debug("Generation {} match: {} vs {} => {}-{} ({}, {} plies)",
+                                generationIndex,
+                                result.whiteTuning().name(),
+                                result.blackTuning().name(),
+                                String.format(Locale.ROOT, "%.2f", result.whiteScore()),
+                                String.format(Locale.ROOT, "%.2f", result.blackScore()),
+                                result.finalState(),
+                                result.plies());
+                    }
                 }
 
-                population = scoreboard.entrySet().stream()
+                if (scoreboard.isEmpty()) {
+                    for (EngineTuning tuning : population) {
+                        scoreboard.putIfAbsent(tuning, 0.0);
+                    }
+                }
+
+                List<Map.Entry<EngineTuning, Double>> leaderboard = scoreboard.entrySet().stream()
                         .sorted(Map.Entry.<EngineTuning, Double>comparingByValue(Comparator.reverseOrder()))
+                        .toList();
+
+                if (log.isInfoEnabled()) {
+                    log.info("Generation {} leaderboard:", generationIndex);
+                    leaderboard.stream()
+                            .limit(Math.min(5, leaderboard.size()))
+                            .forEach(entry -> log.info("  {} -> {}", entry.getKey().name(),
+                                    String.format(Locale.ROOT, "%.2f", entry.getValue())));
+                }
+
+                List<EngineTuning> retained = leaderboard.stream()
                         .limit(Math.max(options.retainCount(), 2))
                         .map(Map.Entry::getKey)
                         .collect(ArrayList::new, ArrayList::add, ArrayList::addAll);
+
+                population = new ArrayList<>(retained);
+                int retainedCount = population.size();
 
                 while (population.size() < options.populationSize()) {
                     EngineTuning parent = population.get(random.nextInt(population.size()));
                     EngineTuning offspring = parent.mutate(random, options.mutationStrength())
                             .rename(parent.name() + "_g" + generation + "_mut");
                     population.add(offspring);
+                    if (log.isDebugEnabled()) {
+                        log.debug("Generation {}: created offspring {} from parent {}", generationIndex,
+                                offspring.name(), parent.name());
+                    }
+                }
+
+                log.info("Generation {}: retained {} configurations and produced {} offspring (population size {}).",
+                        generationIndex, retainedCount, population.size() - retainedCount, population.size());
+                if (log.isDebugEnabled()) {
+                    log.debug("Generation {} population: {}", generationIndex,
+                            population.stream().map(EngineTuning::name).toList());
                 }
             }
         } finally {

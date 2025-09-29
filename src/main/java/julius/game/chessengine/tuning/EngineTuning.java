@@ -17,6 +17,10 @@ import java.util.Random;
  */
 public final class EngineTuning {
 
+    static {
+        MoveOrderingParameters.defaults();
+    }
+
     private final String name;
     private final AiTuning ai;
     private final EvaluationTuning evaluation;

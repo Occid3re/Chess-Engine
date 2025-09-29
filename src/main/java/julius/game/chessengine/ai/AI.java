@@ -8,6 +8,7 @@ import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.tuning.AiTuning;
+import julius.game.chessengine.tuning.MoveOrderingParameters;
 import julius.game.chessengine.utils.Score;
 import lombok.Getter;
 import lombok.Setter;
@@ -130,6 +131,8 @@ public class AI {
      * structure between iterative-deepening iterations.
      */
     private final Heuristics globalHeuristics;
+
+    private final MoveOrderingParameters.Snapshot moveOrderingParameters;
 
     /**
      * Per-thread heuristic state used during move ordering. The tables are
@@ -269,6 +272,7 @@ public class AI {
 
         log.info("### SearchThreads = " + searchThreads + ", LazySmpThreads = " + lazySmpThreads);
 
+        this.moveOrderingParameters = MoveOrderingParameters.snapshot();
         this.globalHeuristics = new Heuristics(maxDepth);
         this.threadHeuristics = ThreadLocal.withInitial(() -> new Heuristics(maxDepth));
 
@@ -1985,10 +1989,13 @@ public class AI {
         final int CAT_TT = 7, CAT_PROMO = 6, CAT_CAP_GOOD = 5, CAT_CAP_EQUAL = 4,
                 CAT_KILLER0 = 3, CAT_KILLER1 = 2, CAT_QUIET = 1, CAT_CAP_BAD = 0;
 
-        // Lightweight bonuses (local so no class changes):
-        final int PROMOTION_ORDER_BONUS = 900;   // strong push for promotions
-        final int KILLER0_BONUS = 50;            // distinguish first vs second killer
-        final int KILLER1_BONUS = 30;
+        final int promotionBonus = moveOrderingParameters.promotionBonus();
+        final int killer0Bonus = moveOrderingParameters.killer0Bonus();
+        final int killer1Bonus = moveOrderingParameters.killer1Bonus();
+        final int killerMoveScore = moveOrderingParameters.killerMoveScore();
+        final int captureMvvMultiplier = moveOrderingParameters.captureMvvMultiplier();
+        final int captureSeeMultiplier = moveOrderingParameters.captureSeeMultiplier();
+        final int promotionSeeMultiplier = moveOrderingParameters.promotionSeeMultiplier();
 
         // Hash move (TT) handling — keep your "pin to front" approach
         TranspositionTableEntry ttEntry = transpositionTable.get(boardHash);
@@ -2002,7 +2009,7 @@ public class AI {
         final int prevFrom = (prevMove >= 0) ? (prevMove & 0x3F) : -1;
         final int prevTo = (prevMove >= 0) ? ((prevMove >>> 6) & 0x3F) : -1;
         final int cm = (prevFrom >= 0) ? counterMove[prevFrom][prevTo] : -1;
-        final int COUNTER_MOVE_BONUS = 400;
+        final int counterMoveBonus = moveOrderingParameters.counterMoveBonus();
 
         for (int i = 0; i < size; i++) {
             final int moveInt = moves.getInt(i);
@@ -2037,9 +2044,9 @@ public class AI {
                 int seeBonus = 0;
                 if (hasSee) {
                     int cappedSee = Math.max(-512, Math.min(512, seeValue));
-                    seeBonus = cappedSee * 16; // modest SEE influence within promotion bucket
+                    seeBonus = cappedSee * promotionSeeMultiplier;
                 }
-                score = base + PROMOTION_ORDER_BONUS + seeBonus;
+                score = base + promotionBonus + seeBonus;
             } else if (isCapture) {
                 // MVV-LVA for captures; classify as good/equal/bad without SEE
                 final int mvvLva = calculateMvvLvaScore(moveInt); // victim - attacker (can be negative)
@@ -2052,23 +2059,23 @@ public class AI {
                 }
                 // Scale captures so bigger victims / smaller attackers bubble up
                 int cappedSee = Math.max(-2048, Math.min(2048, seeValue));
-                score = (mvvLva * 16) + (cappedSee * 32);
+                score = (mvvLva * captureMvvMultiplier) + (cappedSee * captureSeeMultiplier);
                 if (score < 0) {
                     score = 0;
                 }
             } else if (moveInt == k0) {
                 category = CAT_KILLER0;
-                score = KILLER_MOVE_SCORE + KILLER0_BONUS;
+                score = killerMoveScore + killer0Bonus;
             } else if (moveInt == k1) {
                 category = CAT_KILLER1;
-                score = KILLER_MOVE_SCORE + KILLER1_BONUS;
+                score = killerMoveScore + killer1Bonus;
             } else {
                 // Quiet with history
                 final int from = moveInt & 0x3F;
                 final int to = (moveInt >>> 6) & 0x3F;
                 category = CAT_QUIET;
                 score = historyTable[from][to]; // butterfly history
-                if (moveInt == cm) score += COUNTER_MOVE_BONUS;
+                if (moveInt == cm) score += counterMoveBonus;
             }
 
             // Persist (kept for compatibility with your buffers)
