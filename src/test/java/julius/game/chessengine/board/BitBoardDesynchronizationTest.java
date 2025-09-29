@@ -1,13 +1,19 @@
 package julius.game.chessengine.board;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
+import julius.game.chessengine.ai.AI;
+import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.figures.PieceType;
+import julius.game.chessengine.tuning.AiTuning;
 import julius.game.chessengine.utils.Color;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 
 import static julius.game.chessengine.board.MoveHelper.*;
 import static org.junit.jupiter.api.Assertions.*;
@@ -15,6 +21,13 @@ import static org.junit.jupiter.api.Assertions.*;
 class BitBoardDesynchronizationTest {
 
     private static final long DFS_VISIT_LIMIT = 1_000_000L;
+    private static final int AUTOPLAY_EVENT_TARGET = 4;
+    private static final AiTuning CONCURRENT_TUNING = AiTuning.builder()
+            .searchThreads(4)
+            .lazySmpThreads(4)
+            .maxDepth(5)
+            .timeLimitMillis(30L)
+            .build();
 
     private record Scenario(String label, String fen, int depth) {
     }
@@ -63,6 +76,48 @@ class BitBoardDesynchronizationTest {
             String label = scenario.label();
             long seed = seedBase + i * 0x9E3779B97F4A7C15L;
             runRandomPlayout(board, 256, seed, label);
+        }
+    }
+
+    @Test
+    void autoPlayWithConcurrentAiMaintainsConsistency() throws InterruptedException {
+        for (Scenario scenario : SCENARIOS) {
+            String label = scenario.label();
+            InstrumentedEngine engine = new InstrumentedEngine(label + "[main]");
+            if (scenario.fen() != null) {
+                engine.importBoardFromFen(scenario.fen());
+            }
+
+            assertBoardConsistent(engine.getBitBoard(), label + " (before autoplay)");
+
+            // Skip autoplay for terminal positions where no legal moves exist.
+            if (engine.getAllLegalMoves().isEmpty()) {
+                continue;
+            }
+
+            AtomicInteger events = new AtomicInteger();
+            engine.setOnPositionChanged(hash -> {
+                int index = events.incrementAndGet();
+                assertBoardConsistent(engine.getBitBoard(), label + " autoplay event " + index);
+            });
+
+            AI ai = new AI(engine, CONCURRENT_TUNING);
+            ai.setSearchThreads(CONCURRENT_TUNING.searchThreads());
+            ai.setMaxDepth(CONCURRENT_TUNING.maxDepth());
+            ai.setTimeLimit(CONCURRENT_TUNING.timeLimitMillis());
+
+            try {
+                ai.startAutoPlay(true, true);
+                waitForCondition(() -> events.get() >= AUTOPLAY_EVENT_TARGET, 5_000L,
+                        label + " autoplay did not reach " + AUTOPLAY_EVENT_TARGET + " board updates");
+            } finally {
+                ai.stopCalculation();
+                ai.shutdown();
+                engine.setOnPositionChanged(h -> {
+                });
+            }
+
+            assertBoardConsistent(engine.getBitBoard(), label + " (after autoplay)");
         }
     }
 
@@ -197,6 +252,70 @@ class BitBoardDesynchronizationTest {
             case QUEEN -> color == Color.WHITE ? board.getWhiteQueens() : board.getBlackQueens();
             case KING -> color == Color.WHITE ? board.getWhiteKing() : board.getBlackKing();
         };
+    }
+
+    private static void waitForCondition(BooleanSupplier condition, long timeoutMillis, String failureMessage)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+        while (!condition.getAsBoolean()) {
+            if (System.nanoTime() > deadline) {
+                fail(failureMessage);
+            }
+            Thread.sleep(20L);
+        }
+    }
+
+    private static final class InstrumentedEngine extends Engine {
+        private final String label;
+        private final AtomicInteger simulationCounter = new AtomicInteger();
+
+        private InstrumentedEngine(String label) {
+            super();
+            this.label = label;
+            assertBoardConsistent(new BitBoard(getBitBoard()), label + " (init)");
+        }
+
+        private InstrumentedEngine(InstrumentedEngine source, String label) {
+            super(source);
+            this.label = label;
+            assertBoardConsistent(new BitBoard(getBitBoard()), label + " (clone)");
+        }
+
+        @Override
+        public Engine createSimulation() {
+            int id = simulationCounter.incrementAndGet();
+            return new InstrumentedEngine(this, label + "[sim-" + id + "]");
+        }
+
+        @Override
+        public void performMove(int move) {
+            super.performMove(move);
+            assertBoardConsistent(new BitBoard(getBitBoard()), label + " performMove " + describeMove(move));
+        }
+
+        @Override
+        public void undoLastMove() {
+            super.undoLastMove();
+            assertBoardConsistent(new BitBoard(getBitBoard()), label + " undoLastMove");
+        }
+
+        @Override
+        public void undoNullMoveForSearch(int previousDoubleStep) {
+            super.undoNullMoveForSearch(previousDoubleStep);
+            assertBoardConsistent(new BitBoard(getBitBoard()), label + " undoNullMove");
+        }
+
+        @Override
+        public void copyFrom(Engine other) {
+            super.copyFrom(other);
+            assertBoardConsistent(new BitBoard(getBitBoard()), label + " copyFrom");
+        }
+
+        @Override
+        public void importBoardFromFen(String fen) {
+            super.importBoardFromFen(fen);
+            assertBoardConsistent(new BitBoard(getBitBoard()), label + " importFEN");
+        }
     }
 
     private static String describeMove(int move) {
