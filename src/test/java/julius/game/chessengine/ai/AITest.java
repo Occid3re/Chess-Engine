@@ -134,7 +134,7 @@ class AITest {
         AI ai = new AI(engine, AiTuning.defaults());
 
         // 1. Checkmate recognition (black to move and checkmated)
-        String checkmateFen = "7k/5Q2/6K1/8/8/8/8/8 b - - 0 1";
+        String checkmateFen = "7k/7Q/6K1/8/8/8/8/8 b - - 0 1";
         engine.importBoardFromFen(checkmateFen);
         double mateScore = ai.evaluateBoard(engine, false, futureDeadline());
         log.info("Checkmate evaluation returned {}", mateScore);

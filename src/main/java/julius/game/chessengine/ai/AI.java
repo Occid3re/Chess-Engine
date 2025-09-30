@@ -201,13 +201,13 @@ public class AI {
     private record SearchJob(SearchTask task, boolean stop) {
 
         static SearchJob work(SearchTask task) {
-                return new SearchJob(task, false);
-            }
-
-            static SearchJob stopSignal() {
-                return new SearchJob(null, true);
-            }
+            return new SearchJob(task, false);
         }
+
+        static SearchJob stopSignal() {
+            return new SearchJob(null, true);
+        }
+    }
 
     private volatile boolean keepCalculating = true;
 
@@ -569,7 +569,7 @@ public class AI {
                 if (rng != null) window = Math.max(10.0, window + rng.nextDouble(-10.0, 10.0));
 
                 double alpha = lastIterScore - window;
-                double beta  = lastIterScore + window;
+                double beta = lastIterScore + window;
 
                 int retries = 0;
                 boolean didFullWindow = false;
@@ -582,7 +582,7 @@ public class AI {
                     if (ms.score <= alpha) {
                         if (!didFullWindow && retries++ >= 3) {
                             alpha = Double.NEGATIVE_INFINITY;
-                            beta  = Double.POSITIVE_INFINITY; // retry once with full window
+                            beta = Double.POSITIVE_INFINITY; // retry once with full window
                             didFullWindow = true;
                             continue;
                         }
@@ -595,7 +595,7 @@ public class AI {
                     if (ms.score >= beta) {
                         if (!didFullWindow && retries++ >= 3) {
                             alpha = Double.NEGATIVE_INFINITY;
-                            beta  = Double.POSITIVE_INFINITY; // retry once with full window
+                            beta = Double.POSITIVE_INFINITY; // retry once with full window
                             didFullWindow = true;
                             continue;
                         }
@@ -987,7 +987,13 @@ public class AI {
             previousBestMove = move;
             previousBestMoveHash = task.getBoardHash();
             searchResultReady = true;
-            fillCalculatedLine(simulatorEngine);
+
+            if (!simulatorEngine.getGameState().isTerminal()
+                    && !simulatorEngine.getGameState().isInStateCheckMate()) {
+                fillCalculatedLine(simulatorEngine);
+            } else {
+                this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
+            }
             return;
         }
 
@@ -1010,6 +1016,7 @@ public class AI {
     }
 
     private boolean isMoveStillLegal(Engine simulatorEngine, int move) {
+        if (simulatorEngine.getGameState().isTerminal()) return false;
         IntArrayList legalMoves = simulatorEngine.getAllLegalMoves();
         return MoveContainerUtils.contains(legalMoves, move);
     }
@@ -1108,8 +1115,13 @@ public class AI {
                     double currentAlpha = alphaRef.get();
                     double currentBeta = betaRef.get();
                     double pAlpha, pBeta;
-                    if (isWhitesTurn) { pAlpha = currentAlpha; pBeta = currentAlpha + 1; }
-                    else { pAlpha = currentBeta - 1; pBeta = currentBeta; }
+                    if (isWhitesTurn) {
+                        pAlpha = currentAlpha;
+                        pBeta = currentAlpha + 1;
+                    } else {
+                        pAlpha = currentBeta - 1;
+                        pBeta = currentBeta;
+                    }
 
                     double probe;
                     if (e.getGameState().isInStateCheckMate()) {
@@ -1133,8 +1145,11 @@ public class AI {
                                 double full = alphaBeta(e, depth - 1, aNow, bNow, !isWhitesTurn, deadline, moveInt, 1, 0);
                                 if (full != EXIT_FLAG) {
                                     finalScore = full;
-                                    if (isWhitesTurn) { if (full > aNow) alphaRef.set(full); }
-                                    else { if (full < bNow) betaRef.set(full); }
+                                    if (isWhitesTurn) {
+                                        if (full > aNow) alphaRef.set(full);
+                                    } else {
+                                        if (full < bNow) betaRef.set(full);
+                                    }
                                     Double curBest = bestScoreRef.get();
                                     if (isBetterScore(isWhitesTurn, full, curBest)) {
                                         bestScoreRef.set(full);
@@ -1196,87 +1211,109 @@ public class AI {
     }
 
 
-
     private boolean shouldStopCalculating(long deadline) {
         return abortRequested(deadline);
     }
 
     private void fillCalculatedLine(Engine simulation) {
+        // If the root is terminal, there is no PV to construct.
+        if (simulation.getGameState().isTerminal()
+                || simulation.getGameState().isInStateCheckMate()) {
+            this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
+            return;
+        }
+
         long rootHash = simulation.getBoardStateHash();
         List<MoveAndScore> pv = new ArrayList<>();
         Set<Long> seen = new HashSet<>();
         int movesPerformed = 0;
 
-        // Helper to check legality
         java.util.function.IntPredicate isLegalNow = (mv) -> {
+            // If terminal, no legal move exists, skip
+            if (simulation.getGameState().isTerminal()) return false;
             IntArrayList legal = simulation.getAllLegalMoves();
             return MoveContainerUtils.contains(legal, mv);
         };
 
-        // 1) Try to get a ROOT move (prefer EXACT, else accept LOWER/UPPER), else use currentBestMove, else first legal.
         TranspositionTableEntry rootEntry = transpositionTable.get(rootHash);
         int seedMove = -1;
-        Double seedScore = null; // nullable to indicate "unknown"
+        Double seedScore = null;
 
-        if (rootEntry != null && rootEntry.bestMove != -1 && MoveHelper.isWhitesMove(rootEntry.bestMove) == simulation.whitesTurn() && isLegalNow.test(rootEntry.bestMove)) {
-            // Prefer EXACT; otherwise still accept to seed PV so it's not empty
+        if (rootEntry != null
+                && rootEntry.bestMove != -1
+                && MoveHelper.isWhitesMove(rootEntry.bestMove) == simulation.whitesTurn()
+                && isLegalNow.test(rootEntry.bestMove)) {
             seedMove = rootEntry.bestMove;
             if (rootEntry.nodeType == NodeType.EXACT) {
                 seedScore = rootEntry.score;
             }
         }
 
-        if (seedMove == -1 && currentBestMove != -1 && MoveHelper.isWhitesMove(currentBestMove) == simulation.whitesTurn() && isLegalNow.test(currentBestMove)) {
+        if (seedMove == -1 && currentBestMove != -1
+                && MoveHelper.isWhitesMove(currentBestMove) == simulation.whitesTurn()
+                && isLegalNow.test(currentBestMove)) {
             seedMove = currentBestMove;
-            // score unknown; will remain null
         }
 
         if (seedMove == -1) {
-            // Fallback: first legal move, if any
-            IntArrayList legal = simulation.getAllLegalMoves();
-            if (!legal.isEmpty()) {
-                int mv = legal.getInt(0);
-                if (MoveHelper.isWhitesMove(mv) == simulation.whitesTurn()) {
-                    seedMove = mv;
+            // Fallback: first legal, if any (only when not terminal)
+            if (!simulation.getGameState().isTerminal()) {
+                IntArrayList legal = simulation.getAllLegalMoves();
+                if (!legal.isEmpty()) {
+                    int mv = legal.getInt(0);
+                    if (MoveHelper.isWhitesMove(mv) == simulation.whitesTurn()) {
+                        seedMove = mv;
+                    }
                 }
             }
         }
 
-        // If still nothing, no PV can be constructed
         if (seedMove == -1) {
             this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
-            if (log.isDebugEnabled()) log.debug("PV empty: no root move available/legal.");
             return;
         }
 
-        // Play the seed move
-        pv.add(new MoveAndScore(seedMove, seedScore != null ? seedScore : 0.0));
-        simulation.performMove(seedMove);
-        movesPerformed++;
+        // Before making any move, double-check we’re still non-terminal
+        if (simulation.getGameState().isTerminal()) {
+            this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
+            return;
+        }
+
+        try {
+            pv.add(new MoveAndScore(seedMove, seedScore != null ? seedScore : 0.0));
+            simulation.performMove(seedMove);
+            movesPerformed++;
+        } catch (IllegalStateException ise) {
+            // Defensive: if the engine still considers this node terminal, abort PV
+            this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
+            return;
+        }
+
         long curHash = simulation.getBoardStateHash();
 
-        // 2) Follow ONLY EXACT entries beyond root, with full validation
         while (true) {
             if (!seen.add(curHash)) break;
+            if (simulation.getGameState().isTerminal()) break;
 
             TranspositionTableEntry e = transpositionTable.get(curHash);
             if (e == null || e.bestMove == -1 || e.nodeType != NodeType.EXACT) break;
 
             int mv = e.bestMove;
-
-            // side-to-move must match and move must be legal now
             if (MoveHelper.isWhitesMove(mv) != simulation.whitesTurn()) break;
             if (!isLegalNow.test(mv)) break;
 
             pv.add(new MoveAndScore(mv, e.score));
-            simulation.performMove(mv);
-            movesPerformed++;
-            curHash = simulation.getBoardStateHash();
+            try {
+                simulation.performMove(mv);
+                movesPerformed++;
+                curHash = simulation.getBoardStateHash();
+            } catch (IllegalStateException ise) {
+                // Stop PV growth if engine signals terminal unexpectedly
+                break;
+            }
         }
 
-        // Undo simulation
         for (int i = 0; i < movesPerformed; i++) simulation.undoLastMove();
-
         this.calculatedLine = Collections.synchronizedList(pv);
     }
 
@@ -1300,7 +1337,9 @@ public class AI {
                 score = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
             } else if (simulatorEngine.getGameState().isTerminal()) { // <-- terminal only
                 score = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, depth);
-                if (isWhitesTurn) { score = -score; }
+                if (isWhitesTurn) {
+                    score = -score;
+                }
             } else {
                 // Non-terminal (incl. insufficient material):
                 score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1, 0);
@@ -2070,7 +2109,6 @@ public class AI {
         MoveContainerUtils.overwriteFromBuffer(moves, moveBuffer, size);
         return moves;
     }
-
 
 
     public double evaluateBoard(Engine simulatorEngine, boolean isWhitesTurn, long deadline) {
