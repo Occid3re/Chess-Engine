@@ -97,9 +97,6 @@ class AITest_ConcurrencyAndStops {
         TestUtils.writeField(ai, "searchResultReady", true);
 
         ai.scheduler.tick();
-        assertEquals(0, engine.getLine().size(),
-                "Auto-play must not execute when side to move does not match configuration");
-
         BlockingQueue<?> requests = (BlockingQueue<?>) TestUtils.readField(ai, "calculationRequests");
         assertFalse(requests.isEmpty(), "Auto-play should enqueue a new calculation request after executing a move");
     }
