@@ -5,7 +5,8 @@ import java.util.Objects;
 
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.figures.PieceType;
-import julius.game.chessengine.tuning.TunableParameter;
+import julius.game.chessengine.tuning.ParamId;
+import julius.game.chessengine.tuning.ParameterRegistry;
 /**
  * Tracks per-side material using incremental updates so the evaluation pipeline can
  * access midgame and endgame material totals without rescanning the board.
@@ -18,13 +19,6 @@ public final class MaterialModule implements EvaluationModule {
     public static final int DEFAULT_ROOK_VALUE = 500;
     public static final int DEFAULT_QUEEN_VALUE = 900;
     public static final int DEFAULT_BISHOP_PAIR_BONUS = 40;
-
-    private static final TunableParameter PAWN_VALUE = TunableParameter.of("material.pawnValue", DEFAULT_PAWN_VALUE);
-    private static final TunableParameter KNIGHT_VALUE = TunableParameter.of("material.knightValue", DEFAULT_KNIGHT_VALUE);
-    private static final TunableParameter BISHOP_VALUE = TunableParameter.of("material.bishopValue", DEFAULT_BISHOP_VALUE);
-    private static final TunableParameter ROOK_VALUE = TunableParameter.of("material.rookValue", DEFAULT_ROOK_VALUE);
-    private static final TunableParameter QUEEN_VALUE = TunableParameter.of("material.queenValue", DEFAULT_QUEEN_VALUE);
-    private static final TunableParameter BISHOP_PAIR_BONUS = TunableParameter.of("material.bishopPairBonus", DEFAULT_BISHOP_PAIR_BONUS);
 
     public interface PawnChangeListener {
         void onPawnAdded(boolean isWhite, int squareIndex);
@@ -71,27 +65,27 @@ public final class MaterialModule implements EvaluationModule {
     }
 
     public static int pawnValue() {
-        return PAWN_VALUE.getInt();
+        return ParameterRegistry.getInt(ParamId.MATERIAL_PAWN_VALUE);
     }
 
     public static int knightValue() {
-        return KNIGHT_VALUE.getInt();
+        return ParameterRegistry.getInt(ParamId.MATERIAL_KNIGHT_VALUE);
     }
 
     public static int bishopValue() {
-        return BISHOP_VALUE.getInt();
+        return ParameterRegistry.getInt(ParamId.MATERIAL_BISHOP_VALUE);
     }
 
     public static int rookValue() {
-        return ROOK_VALUE.getInt();
+        return ParameterRegistry.getInt(ParamId.MATERIAL_ROOK_VALUE);
     }
 
     public static int queenValue() {
-        return QUEEN_VALUE.getInt();
+        return ParameterRegistry.getInt(ParamId.MATERIAL_QUEEN_VALUE);
     }
 
     public static int bishopPairBonus() {
-        return BISHOP_PAIR_BONUS.getInt();
+        return ParameterRegistry.getInt(ParamId.MATERIAL_BISHOP_PAIR_BONUS);
     }
 
     @Override

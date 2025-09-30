@@ -5,6 +5,8 @@ import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.ImmutableBoardView;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.helper.PawnHelper;
+import julius.game.chessengine.tuning.ParamId;
+import julius.game.chessengine.tuning.ParameterRegistry;
 import julius.game.chessengine.tuning.TunableParameter;
 
 import java.util.Arrays;
@@ -539,6 +541,7 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
     }
 
     private static int calculateBackwardPawnPenalty(long pawns, long enemyPawns, long allPieces, boolean isWhite, int phase) {
+        int backwardPenalty = ParameterRegistry.getInt(ParamId.PAWN_STRUCTURE_BACKWARD_PAWN_PENALTY);
         int penalty = 0;
         long remaining = pawns;
         while (remaining != 0) {
@@ -548,7 +551,7 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
                 int forwardIndex = Long.numberOfTrailingZeros(forward);
                 long enemyAttack = PAWN_ATTACKS[isWhite ? WHITE : BLACK][forwardIndex] & enemyPawns;
                 if (enemyAttack != 0) {
-                    penalty += BACKWARD_PAWN_PENALTY.getInt();
+                    penalty += backwardPenalty;
                 }
             }
             remaining &= remaining - 1;

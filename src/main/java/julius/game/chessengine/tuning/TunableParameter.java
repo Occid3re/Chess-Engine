@@ -8,6 +8,7 @@ package julius.game.chessengine.tuning;
 public final class TunableParameter {
 
     private final String key;
+    private final ParamId id;
     private final int index;
     private final double defaultValue;
     private final Double minValue;
@@ -17,7 +18,13 @@ public final class TunableParameter {
         if (key == null || key.isBlank()) {
             throw new IllegalArgumentException("Parameter key must not be blank");
         }
-        this.key = NumericTuningParameters.normalizeKey(key);
+        String normalized = NumericTuningParameters.normalizeKey(key);
+        ParamId resolved = ParamId.forKey(normalized);
+        if (resolved == null) {
+            throw new IllegalArgumentException("Unknown parameter key: " + key);
+        }
+        this.key = normalized;
+        this.id = resolved;
         this.index = NumericTuningParameters.registerDefault(this.key, defaultValue);
         this.defaultValue = defaultValue;
         this.minValue = minValue;
@@ -36,7 +43,7 @@ public final class TunableParameter {
     }
 
     public double get() {
-        double value = NumericTuningParameters.resolve(index, defaultValue);
+        double value = ParameterRegistry.get(id);
         if (!Double.isFinite(value)) {
             value = defaultValue;
         }
@@ -63,5 +70,13 @@ public final class TunableParameter {
 
     public double defaultValue() {
         return defaultValue;
+    }
+
+    ParamId id() {
+        return id;
+    }
+
+    int index() {
+        return index;
     }
 }
