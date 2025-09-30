@@ -1,6 +1,8 @@
 package julius.game.chessengine.ai;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
+import julius.game.chessengine.board.Move;
+import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.tuning.AiTuning;
@@ -63,7 +65,11 @@ class AITest_PruningAndReductions {
             ai.evaluateBoard(simulation, true,
                     System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(2000));
 
-            log.info("Performed moves recorded: {}", simulation.performedMoves);
+            List<String> movesPerformed = simulation.performedMoves.stream()
+                    .map(julius.game.chessengine.board.Move::convertIntToMove)
+                    .map(Move::toString)
+                    .toList();
+            log.info("Performed moves recorded: {}", movesPerformed);
             assertEquals(0, simulation.losingCapturePerformed,
                     "Losing capture without giving check should be pruned");
         }
@@ -119,17 +125,25 @@ class AITest_PruningAndReductions {
         }
 
         void markLosingCapture(IntArrayList legal) {
+            int sideSign = whitesTurn() ? +1 : -1;
             for (int i = 0; i < legal.size(); i++) {
                 int move = legal.getInt(i);
-                if (julius.game.chessengine.board.MoveHelper.isCapture(move)) {
+                if (!MoveHelper.isCapture(move)) continue;
+
+                // Try it: does it give check? If yes, skip (we want the prune path).
+                performMove(move);
+                boolean givesCheck = getGameState().getState() ==
+                        (whitesTurn() ? GameStateEnum.WHITE_IN_CHECK : GameStateEnum.BLACK_IN_CHECK);
+                undoLastMove();
+
+                if (!givesCheck) {
                     losingCapture = move;
-                    break;
+                    return;
                 }
             }
-            if (losingCapture == -1) {
-                throw new IllegalStateException("No capture available to mark as losing");
-            }
+            throw new IllegalStateException("No non-checking capture available to mark as losing");
         }
+
 
         @Override
         public int see(int move) {
