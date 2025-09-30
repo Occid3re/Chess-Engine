@@ -43,7 +43,7 @@ java ^
   --generations 1 ^
   --population 8 ^
   --matches-per-pair 100 ^
-  --move-time 250 ^
+  --move-time 1000 ^
   --match-threads 16 ^
   --matches "%MATCHES%"
 
