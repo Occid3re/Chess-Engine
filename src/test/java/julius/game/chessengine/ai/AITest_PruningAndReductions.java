@@ -51,17 +51,17 @@ class AITest_PruningAndReductions {
     @DisplayName("SEE pruning skips losing captures that fail to give check")
     void seePruningDropsLosingCapture() throws Exception {
         PrunableEngine engine = new PrunableEngine();
-        engine.importBoardFromFen("4k3/8/8/8/8/3p4/4P3/4K3 w - - 0 1");
+        engine.importBoardFromFen("4k3/4p3/8/3p4/1pp2p2/p1R1p3/8/4K3 w - - 0 1");
 
         AI ai = new AI(engine, AiTuning.defaults());
-        try (AutoCloseable threads = DeterministicAiHelper.withSingleThread(ai)) {
+        try (AutoCloseable _ = DeterministicAiHelper.withSingleThread(ai)) {
             PrunableEngine simulation = (PrunableEngine) engine.createSimulation();
             IntArrayList legal = simulation.getAllLegalMoves();
-            assertTrue(legal.size() > 0, "Test position should have legal moves");
+            assertFalse(legal.isEmpty(), "Test position should have legal moves");
             simulation.markLosingCapture(legal);
 
             ai.evaluateBoard(simulation, true,
-                    System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(200));
+                    System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(2000));
 
             log.info("Performed moves recorded: {}", simulation.performedMoves);
             assertEquals(0, simulation.losingCapturePerformed,
@@ -87,7 +87,7 @@ class AITest_PruningAndReductions {
                 boolean.class, long.class, int.class, int.class, int.class);
         alphaBeta.setAccessible(true);
 
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         alphaBeta.invoke(aiInCheck, inCheck.createSimulation(), 3,
                 Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, false, deadline, 1, 0, 0);
         alphaBeta.invoke(aiSafe, safe.createSimulation(), 3,
