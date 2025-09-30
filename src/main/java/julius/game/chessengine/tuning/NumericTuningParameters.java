@@ -41,7 +41,17 @@ public final class NumericTuningParameters {
         DEFAULT_CACHE = Collections.unmodifiableMap(new LinkedHashMap<>(DEFAULTS));
         DEFAULT_VALUES = ensureCapacity(DEFAULT_VALUES, index + 1, UNSET);
         DEFAULT_VALUES[index] = defaultValue;
-        GLOBAL_OVERRIDE = GLOBAL_OVERRIDE.expandTo(index + 1);
+        GLOBAL_OVERRIDE = applyLateBoundOverride(GLOBAL_OVERRIDE.expandTo(index + 1), key, index);
+        OverrideValues threadOverrides = THREAD_OVERRIDES.get();
+        if (threadOverrides != null && threadOverrides != OverrideValues.EMPTY) {
+            OverrideValues expanded = threadOverrides.expandTo(index + 1);
+            OverrideValues updated = applyLateBoundOverride(expanded, key, index);
+            if (updated != expanded) {
+                THREAD_OVERRIDES.set(updated);
+            } else if (expanded != threadOverrides) {
+                THREAD_OVERRIDES.set(expanded);
+            }
+        }
         return index;
     }
 
@@ -225,6 +235,43 @@ public final class NumericTuningParameters {
             return null;
         }
         return extras.get(key);
+    }
+
+    private static OverrideValues applyLateBoundOverride(OverrideValues overrides, String key, int index) {
+        if (overrides == null || overrides == OverrideValues.EMPTY) {
+            return overrides;
+        }
+        Map<String, Double> extras = overrides.extras;
+        if (extras == null || extras.isEmpty()) {
+            return overrides;
+        }
+        Double pending = extras.get(key);
+        if (pending == null) {
+            return overrides;
+        }
+        int requiredLength = Math.max(DEFAULT_VALUES.length, index + 1);
+        double[] values = overrides.values;
+        double[] updatedValues;
+        if (values == null) {
+            updatedValues = new double[requiredLength];
+            Arrays.fill(updatedValues, UNSET);
+        } else if (values.length < requiredLength) {
+            updatedValues = Arrays.copyOf(values, requiredLength);
+            Arrays.fill(updatedValues, values.length, requiredLength, UNSET);
+        } else {
+            updatedValues = Arrays.copyOf(values, values.length);
+        }
+        updatedValues[index] = pending;
+        updatedValues = trimTrailingUnset(updatedValues);
+        Map<String, Double> remaining;
+        if (extras.size() == 1) {
+            remaining = Map.of();
+        } else {
+            Map<String, Double> copy = new LinkedHashMap<>(extras);
+            copy.remove(key);
+            remaining = Collections.unmodifiableMap(copy);
+        }
+        return new OverrideValues(updatedValues, remaining);
     }
 
     private static double[] ensureCapacity(double[] values, int size, double fillValue) {
