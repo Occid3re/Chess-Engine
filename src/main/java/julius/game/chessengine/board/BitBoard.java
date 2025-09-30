@@ -2571,22 +2571,6 @@ public class BitBoard {
         return false;
     }
 
-
-    public int getNonKingPieceCount() {
-        long nonKings = whitePawns | blackPawns
-                | whiteKnights | blackKnights
-                | whiteBishops | blackBishops
-                | whiteRooks | blackRooks
-                | whiteQueens | blackQueens;
-        return Long.bitCount(nonKings);
-    }
-
-
-    public boolean hasAnyPawns() {
-        return (whitePawns | blackPawns) != 0L;
-    }
-
-
     public int getPhase() {
         int phase = 0;
         phase += Long.bitCount(whiteQueens | blackQueens) * 4;
