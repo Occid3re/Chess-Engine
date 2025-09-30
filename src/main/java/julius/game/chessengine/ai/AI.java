@@ -380,17 +380,18 @@ public class AI {
     }
 
     private static int roundUpToPowerOfTwo(int value) {
-        if (value <= 1) {
-            return 1;
-        }
-        int highest = Integer.highestOneBit(value);
-        if (highest == value) {
-            return value;
-        }
-        if (highest > (1 << 30)) {
-            return 1 << 30;
-        }
-        return highest << 1;
+        // define behavior for non-positive
+        if (value <= 1) return 1;
+
+        // anything above 2^30 must saturate (since 2^31 doesn't fit in signed int)
+        if (value > (1 << 30)) return 1 << 30;
+
+        // exact power-of-two? return unchanged
+        int hib = Integer.highestOneBit(value);
+        if (hib == value) return value;
+
+        // next power-of-two (safe because value <= 2^30)
+        return hib << 1;
     }
 
     /**
