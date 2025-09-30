@@ -9,11 +9,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import testsupport.DeterministicAiHelper;
 import testsupport.TestLoggingExtension;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.SplittableRandom;
+import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 
