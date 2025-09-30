@@ -1425,8 +1425,17 @@ public class AI {
         BitBoard bitBoard = simulatorEngine.getBitBoard();
         boolean allowNullMove = useNullMovePruning
                 && !inCheck
-                && !simulatorEngine.isEndgame()
                 && prevMove != -1;
+
+        if (allowNullMove && simulatorEngine.isEndgame()) {
+            boolean hasPawns = bitBoard.hasAnyPawns();
+            int nonKingPieces = bitBoard.getNonKingPieceCount();
+            boolean cramped = mobility <= 6;
+
+            if (!hasPawns && nonKingPieces <= 2 && cramped) {
+                allowNullMove = false;
+            }
+        }
 
         if (allowNullMove) {
             double mateThreatScore = CHECKMATE - (plyFromRoot + 1);
