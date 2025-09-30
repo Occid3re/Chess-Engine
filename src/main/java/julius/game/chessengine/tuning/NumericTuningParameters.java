@@ -15,12 +15,16 @@ public final class NumericTuningParameters {
     private static final Map<String, Double> DEFAULTS = new LinkedHashMap<>();
     private static final ThreadLocal<Map<String, Double>> THREAD_PARAMETERS = new ThreadLocal<>();
     private static volatile Map<String, Double> GLOBAL_PARAMETERS = Map.of();
+    private static volatile Map<String, Double> DEFAULT_CACHE = Map.of();
 
     private NumericTuningParameters() {
     }
 
     static synchronized void registerDefault(String key, double defaultValue) {
-        DEFAULTS.putIfAbsent(key, defaultValue);
+        if (!DEFAULTS.containsKey(key)) {
+            DEFAULTS.put(key, defaultValue);
+            DEFAULT_CACHE = Collections.unmodifiableMap(new LinkedHashMap<>(DEFAULTS));
+        }
     }
 
     static double resolve(String key, double defaultValue) {
@@ -37,15 +41,12 @@ public final class NumericTuningParameters {
         if (global != null) {
             return global;
         }
-        synchronized (DEFAULTS) {
-            return DEFAULTS.getOrDefault(normalized, defaultValue);
-        }
+        Double fallback = DEFAULT_CACHE.get(normalized);
+        return fallback != null ? fallback : defaultValue;
     }
 
     static Map<String, Double> defaults() {
-        synchronized (DEFAULTS) {
-            return Collections.unmodifiableMap(new LinkedHashMap<>(DEFAULTS));
-        }
+        return DEFAULT_CACHE;
     }
 
     public static AutoCloseable use(Map<String, Double> parameters) {
@@ -83,10 +84,30 @@ public final class NumericTuningParameters {
         if (key == null) {
             throw new IllegalArgumentException("Key must not be null");
         }
-        String normalized = key.trim().toLowerCase(Locale.ROOT);
-        if (normalized.isEmpty()) {
+        int length = key.length();
+        int start = 0;
+        int end = length;
+        while (start < length && Character.isWhitespace(key.charAt(start))) {
+            start++;
+        }
+        while (end > start && Character.isWhitespace(key.charAt(end - 1))) {
+            end--;
+        }
+        if (start == end) {
             throw new IllegalArgumentException("Key must not be blank");
         }
-        return normalized;
+        boolean needsLowerCase = false;
+        for (int i = start; i < end; i++) {
+            char c = key.charAt(i);
+            if (Character.toLowerCase(c) != c) {
+                needsLowerCase = true;
+                break;
+            }
+        }
+        if (start == 0 && end == length && !needsLowerCase) {
+            return key;
+        }
+        String trimmed = (start == 0 && end == length) ? key : key.substring(start, end);
+        return needsLowerCase ? trimmed.toLowerCase(Locale.ROOT) : trimmed;
     }
 }
