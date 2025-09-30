@@ -6,7 +6,7 @@ import julius.game.chessengine.board.ImmutableBoardView;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.helper.BishopHelper;
 import julius.game.chessengine.helper.RookHelper;
-import julius.game.chessengine.tuning.TunableParameter;
+import julius.game.chessengine.tuning.Tuning;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -41,20 +41,6 @@ public final class KingSafetyModule implements EvaluationModule {
     private static final int DEFAULT_BACKRANK_WEAKNESS_MIDGAME_PENALTY = -100;
     private static final int DEFAULT_BACKRANK_WEAKNESS_ENDGAME_PENALTY = -50;
 
-    private static final TunableParameter MISSING_PAWN_SHIELD_PENALTY = TunableParameter.of("kingSafety.missingPawnShieldPenalty", DEFAULT_MISSING_PAWN_SHIELD_PENALTY);
-    private static final TunableParameter HALF_OPEN_FILE_PENALTY = TunableParameter.of("kingSafety.halfOpenFilePenalty", DEFAULT_HALF_OPEN_FILE_PENALTY);
-    private static final TunableParameter OPEN_FILE_PENALTY = TunableParameter.of("kingSafety.openFilePenalty", DEFAULT_OPEN_FILE_PENALTY);
-    private static final TunableParameter DEFENDER_BONUS = TunableParameter.of("kingSafety.defenderBonus", DEFAULT_DEFENDER_BONUS);
-    private static final TunableParameter QUEEN_ATTACKED_PENALTY = TunableParameter.of("kingSafety.queenAttackedPenalty", DEFAULT_QUEEN_ATTACKED_PENALTY);
-    private static final TunableParameter BACKRANK_WEAKNESS_MIDGAME_PENALTY = TunableParameter.of("kingSafety.backrankWeaknessMidgamePenalty", DEFAULT_BACKRANK_WEAKNESS_MIDGAME_PENALTY);
-    private static final TunableParameter BACKRANK_WEAKNESS_ENDGAME_PENALTY = TunableParameter.of("kingSafety.backrankWeaknessEndgamePenalty", DEFAULT_BACKRANK_WEAKNESS_ENDGAME_PENALTY);
-
-    private static final TunableParameter PAWN_ATTACK_WEIGHT = TunableParameter.of("kingSafety.attackWeightPawn", 5);
-    private static final TunableParameter KNIGHT_ATTACK_WEIGHT = TunableParameter.of("kingSafety.attackWeightKnight", 10);
-    private static final TunableParameter BISHOP_ATTACK_WEIGHT = TunableParameter.of("kingSafety.attackWeightBishop", 10);
-    private static final TunableParameter ROOK_ATTACK_WEIGHT = TunableParameter.of("kingSafety.attackWeightRook", 15);
-    private static final TunableParameter QUEEN_ATTACK_WEIGHT = TunableParameter.of("kingSafety.attackWeightQueen", 20);
-
     private static final long NOT_A_FILE = ~FileMasks[0];
     private static final long NOT_H_FILE = ~FileMasks[7];
 
@@ -78,18 +64,18 @@ public final class KingSafetyModule implements EvaluationModule {
     private int endgameScoreCache;
 
     public KingSafetyModule() {
-        this.missingPawnShieldPenalty = MISSING_PAWN_SHIELD_PENALTY.getInt();
-        this.halfOpenFilePenalty = HALF_OPEN_FILE_PENALTY.getInt();
-        this.openFilePenalty = OPEN_FILE_PENALTY.getInt();
-        this.defenderBonus = DEFENDER_BONUS.getInt();
-        this.queenAttackedPenalty = QUEEN_ATTACKED_PENALTY.getInt();
-        this.backrankWeaknessMidgamePenalty = BACKRANK_WEAKNESS_MIDGAME_PENALTY.getInt();
-        this.backrankWeaknessEndgamePenalty = BACKRANK_WEAKNESS_ENDGAME_PENALTY.getInt();
-        attackWeights[PAWN] = PAWN_ATTACK_WEIGHT.getInt();
-        attackWeights[KNIGHT] = KNIGHT_ATTACK_WEIGHT.getInt();
-        attackWeights[BISHOP] = BISHOP_ATTACK_WEIGHT.getInt();
-        attackWeights[ROOK] = ROOK_ATTACK_WEIGHT.getInt();
-        attackWeights[QUEEN] = QUEEN_ATTACK_WEIGHT.getInt();
+        this.missingPawnShieldPenalty = Tuning.missingPawnShieldPenalty();
+        this.halfOpenFilePenalty = Tuning.halfOpenFilePenalty();
+        this.openFilePenalty = Tuning.openFilePenalty();
+        this.defenderBonus = Tuning.defenderBonus();
+        this.queenAttackedPenalty = Tuning.queenAttackedPenalty();
+        this.backrankWeaknessMidgamePenalty = Tuning.backrankWeaknessMidgamePenalty();
+        this.backrankWeaknessEndgamePenalty = Tuning.backrankWeaknessEndgamePenalty();
+        attackWeights[PAWN] = Tuning.kingSafetyPawnAttackWeight();
+        attackWeights[KNIGHT] = Tuning.kingSafetyKnightAttackWeight();
+        attackWeights[BISHOP] = Tuning.kingSafetyBishopAttackWeight();
+        attackWeights[ROOK] = Tuning.kingSafetyRookAttackWeight();
+        attackWeights[QUEEN] = Tuning.kingSafetyQueenAttackWeight();
     }
 
     @Override

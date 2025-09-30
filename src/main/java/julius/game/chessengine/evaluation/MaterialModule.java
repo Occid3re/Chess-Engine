@@ -5,8 +5,7 @@ import java.util.Objects;
 
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.figures.PieceType;
-import julius.game.chessengine.tuning.ParamId;
-import julius.game.chessengine.tuning.ParameterRegistry;
+import julius.game.chessengine.tuning.Tuning;
 /**
  * Tracks per-side material using incremental updates so the evaluation pipeline can
  * access midgame and endgame material totals without rescanning the board.
@@ -65,27 +64,27 @@ public final class MaterialModule implements EvaluationModule {
     }
 
     public static int pawnValue() {
-        return ParameterRegistry.getInt(ParamId.MATERIAL_PAWN_VALUE);
+        return Tuning.pawnValue();
     }
 
     public static int knightValue() {
-        return ParameterRegistry.getInt(ParamId.MATERIAL_KNIGHT_VALUE);
+        return Tuning.knightValue();
     }
 
     public static int bishopValue() {
-        return ParameterRegistry.getInt(ParamId.MATERIAL_BISHOP_VALUE);
+        return Tuning.bishopValue();
     }
 
     public static int rookValue() {
-        return ParameterRegistry.getInt(ParamId.MATERIAL_ROOK_VALUE);
+        return Tuning.rookValue();
     }
 
     public static int queenValue() {
-        return ParameterRegistry.getInt(ParamId.MATERIAL_QUEEN_VALUE);
+        return Tuning.queenValue();
     }
 
     public static int bishopPairBonus() {
-        return ParameterRegistry.getInt(ParamId.MATERIAL_BISHOP_PAIR_BONUS);
+        return Tuning.bishopPairBonus();
     }
 
     @Override

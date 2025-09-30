@@ -6,7 +6,7 @@ import java.util.Objects;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.ImmutableBoardView;
 import julius.game.chessengine.figures.PieceType;
-import julius.game.chessengine.tuning.TunableParameter;
+import julius.game.chessengine.tuning.Tuning;
 
 import static julius.game.chessengine.helper.BishopHelper.BISHOP_ENDGAME_POSITIONAL_VALUES;
 import static julius.game.chessengine.helper.BishopHelper.BISHOP_MIDGAME_POSITIONAL_VALUES;
@@ -52,16 +52,6 @@ public final class PieceSquareModule implements EvaluationModule {
     private static final int DEFAULT_BLEND_SCALE = 256;
     private static final int DEFAULT_CASTLING_BONUS = 20;
     private static final int DEFAULT_NOT_CASTLED_AND_ROOK_MOVE_PENALTY = -10;
-
-    private static final TunableParameter DEVELOPMENT_PHASE_THRESHOLD = TunableParameter.of("pieceSquare.developmentPhaseThreshold", DEFAULT_DEVELOPMENT_PHASE_THRESHOLD, 0, 256);
-    private static final TunableParameter QUEEN_DEVELOPMENT_PHASE_THRESHOLD = TunableParameter.of("pieceSquare.queenDevelopmentPhaseThreshold", DEFAULT_QUEEN_DEVELOPMENT_PHASE_THRESHOLD, 0, 256);
-    private static final TunableParameter UNDEVELOPED_MINOR_PENALTY = TunableParameter.of("pieceSquare.undevelopedMinorPenalty", DEFAULT_UNDEVELOPED_MINOR_PENALTY);
-    private static final TunableParameter EARLY_QUEEN_DEVELOPMENT_PENALTY_PER_MINOR = TunableParameter.of("pieceSquare.earlyQueenDevelopmentPenaltyPerMinor", DEFAULT_EARLY_QUEEN_DEVELOPMENT_PENALTY_PER_MINOR);
-    private static final TunableParameter MIN_UNDEVELOPED_MINORS_FOR_QUEEN_PENALTY = TunableParameter.of("pieceSquare.minUndevelopedMinorsForQueenPenalty", DEFAULT_MIN_UNDEVELOPED_MINORS_FOR_QUEEN_PENALTY, 0, 8);
-    private static final TunableParameter START_POSITION_PENALTY = TunableParameter.of("pieceSquare.startPositionPenalty", DEFAULT_START_POSITION_PENALTY);
-    private static final TunableParameter BLEND_SCALE = TunableParameter.of("pieceSquare.blendScale", DEFAULT_BLEND_SCALE, 1, 1024);
-    private static final TunableParameter CASTLING_BONUS = TunableParameter.of("pieceSquare.castlingBonus", DEFAULT_CASTLING_BONUS);
-    private static final TunableParameter NOT_CASTLED_AND_ROOK_MOVE_PENALTY = TunableParameter.of("pieceSquare.notCastledRookMovePenalty", DEFAULT_NOT_CASTLED_AND_ROOK_MOVE_PENALTY);
 
     private static final long NOT_A_FILE = ~FileMasks[0];
     private static final long NOT_H_FILE = ~FileMasks[7];
@@ -157,28 +147,28 @@ public final class PieceSquareModule implements EvaluationModule {
     private boolean castlingDirty = true;
 
     public PieceSquareModule() {
-        this.developmentPhaseThreshold = DEVELOPMENT_PHASE_THRESHOLD.getInt();
-        this.queenDevelopmentPhaseThreshold = QUEEN_DEVELOPMENT_PHASE_THRESHOLD.getInt();
-        this.undevelopedMinorPenalty = UNDEVELOPED_MINOR_PENALTY.getInt();
-        this.earlyQueenDevelopmentPenaltyPerMinor = EARLY_QUEEN_DEVELOPMENT_PENALTY_PER_MINOR.getInt();
-        this.minUndevelopedMinorsForQueenPenalty = MIN_UNDEVELOPED_MINORS_FOR_QUEEN_PENALTY.getInt();
-        this.startPositionPenalty = START_POSITION_PENALTY.getInt();
-        this.blendScale = BLEND_SCALE.getInt();
-        this.castlingBonus = CASTLING_BONUS.getInt();
-        this.notCastledRookMovePenalty = NOT_CASTLED_AND_ROOK_MOVE_PENALTY.getInt();
+        this.developmentPhaseThreshold = Tuning.developmentPhaseThreshold();
+        this.queenDevelopmentPhaseThreshold = Tuning.queenDevelopmentPhaseThreshold();
+        this.undevelopedMinorPenalty = Tuning.undevelopedMinorPenalty();
+        this.earlyQueenDevelopmentPenaltyPerMinor = Tuning.earlyQueenDevelopmentPenaltyPerMinor();
+        this.minUndevelopedMinorsForQueenPenalty = Tuning.minUndevelopedMinorsForQueenPenalty();
+        this.startPositionPenalty = Tuning.startPositionPenalty();
+        this.blendScale = Tuning.pieceSquareBlendScale();
+        this.castlingBonus = Tuning.castlingBonus();
+        this.notCastledRookMovePenalty = Tuning.notCastledRookMovePenalty();
         Arrays.fill(occupantColor, -1);
     }
 
     public static int castlingBonus() {
-        return CASTLING_BONUS.getInt();
+        return Tuning.castlingBonus();
     }
 
     public static int notCastledRookMovePenalty() {
-        return NOT_CASTLED_AND_ROOK_MOVE_PENALTY.getInt();
+        return Tuning.notCastledRookMovePenalty();
     }
 
     public static int blendScale() {
-        return BLEND_SCALE.getInt();
+        return Tuning.pieceSquareBlendScale();
     }
 
     @Override
