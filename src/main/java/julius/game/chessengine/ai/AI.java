@@ -192,6 +192,9 @@ public class AI {
 
     private ScheduledExecutorService scheduler;
 
+    private volatile boolean autoPlayWhite;
+    private volatile boolean autoPlayBlack;
+
     private final BlockingQueue<CalculationRequest> calculationRequests = new LinkedBlockingQueue<>();
     private final BlockingQueue<SearchJob> searchJobs = new LinkedBlockingQueue<>();
 
@@ -814,10 +817,17 @@ public class AI {
         previousBestMove = -1;
         previousBestMoveHash = -1;
         searchResultReady = false;
+        setAutoPlaySides(false, false);
     }
 
 
+    protected void setAutoPlaySides(boolean aiIsWhite, boolean aiIsBlack) {
+        this.autoPlayWhite = aiIsWhite;
+        this.autoPlayBlack = aiIsBlack;
+    }
+
     public void startAutoPlay(boolean aiIsWhite, boolean aiIsBlack) {
+        setAutoPlaySides(aiIsWhite, aiIsBlack);
         if (scheduler != null && !scheduler.isShutdown()) {
             scheduler.shutdownNow(); // Ensure previous scheduler is stopped
         }
@@ -831,7 +841,9 @@ public class AI {
                 scheduler.shutdown();
                 return;
             }
-            if ((aiIsWhite && mainEngine.whitesTurn()) || (aiIsBlack && !mainEngine.whitesTurn())) {
+            boolean whitesTurn = mainEngine.whitesTurn();
+            boolean shouldMove = (autoPlayWhite && whitesTurn) || (autoPlayBlack && !whitesTurn);
+            if (shouldMove) {
                 if (searchResultReady && currentBestMove != -1 &&
                         bestMoveForHash == mainEngine.getBoardStateHash()) {
                     performMove();
@@ -875,7 +887,18 @@ public class AI {
             return;
         }
 
-        if (MoveHelper.isWhitesMove(currentBestMove) != mainEngine.whitesTurn()) {
+        boolean moveIsWhite = MoveHelper.isWhitesMove(currentBestMove);
+        if ((moveIsWhite && !autoPlayWhite) || (!moveIsWhite && !autoPlayBlack)) {
+            log.info("Best move {} disabled by auto-play configuration", Move.convertIntToMove(currentBestMove));
+            currentBestMove = -1;
+            bestMoveForHash = -1;
+            previousBestMove = -1;
+            previousBestMoveHash = -1;
+            searchResultReady = false;
+            return;
+        }
+
+        if (moveIsWhite != mainEngine.whitesTurn()) {
             log.info("Best move {} not for side to move", Move.convertIntToMove(currentBestMove));
             currentBestMove = -1;                           // (optional) also drop here
             bestMoveForHash = -1;

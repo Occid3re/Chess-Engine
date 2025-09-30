@@ -113,6 +113,7 @@ class AITest_ConcurrencyAndStops {
 
         @Override
         public void startAutoPlay(boolean aiIsWhite, boolean aiIsBlack) {
+            setAutoPlaySides(aiIsWhite, aiIsBlack);
             try {
                 TestUtils.writeField(this, "scheduler", scheduler);
                 Method start = AI.class.getDeclaredMethod("startCalculationThread");
