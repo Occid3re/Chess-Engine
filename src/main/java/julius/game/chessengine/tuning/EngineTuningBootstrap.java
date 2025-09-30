@@ -104,7 +104,7 @@ public final class EngineTuningBootstrap {
                     loaded.sourceDescription());
             return;
         }
-        EngineTuning tuning = loaded.population().population().getFirst();
+        EngineTuning tuning = loaded.primary();
         NumericTuningParameters.setGlobal(tuning.numericParameters());
         Score.setGlobalFactory(Score.forEvaluationWeights(tuning.evaluationWeights()));
         log.info("Applied engine tuning \"{}\" from {} ({} configurations available).",
@@ -115,10 +115,12 @@ public final class EngineTuningBootstrap {
 
     static final class LoadedTuning {
         private final EngineTuningSet population;
+        private final EngineTuning primary;
         private final String sourceDescription;
 
         LoadedTuning(EngineTuningSet population, String sourceDescription) {
             this.population = population != null ? population : EngineTuningSet.empty();
+            this.primary = this.population.primary();
             this.sourceDescription = sourceDescription != null ? sourceDescription : "";
         }
 
@@ -126,8 +128,13 @@ public final class EngineTuningBootstrap {
             return population;
         }
 
+        EngineTuning primary() {
+            return primary;
+        }
+
         String sourceDescription() {
             return sourceDescription;
         }
     }
 }
+

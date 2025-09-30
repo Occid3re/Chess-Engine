@@ -25,12 +25,14 @@ public final class EngineTuning {
     private final AiTuning ai;
     private final EvaluationTuning evaluation;
     private final Map<String, Double> numericParameters;
+    private final EvaluationWeights evaluationWeights;
 
     private EngineTuning(Builder builder) {
         this.name = builder.name;
         this.ai = builder.ai;
         this.evaluation = builder.evaluation;
         this.numericParameters = builder.numericParameters;
+        this.evaluationWeights = builder.evaluation.weights();
     }
 
     public static Builder builder() {
@@ -58,7 +60,7 @@ public final class EngineTuning {
     }
 
     public EvaluationWeights evaluationWeights() {
-        return evaluation.toWeights();
+        return evaluationWeights;
     }
 
     public EngineTuning mutate(Random random, double strength) {
@@ -154,3 +156,4 @@ public final class EngineTuning {
         }
     }
 }
+

@@ -828,6 +828,7 @@ public class AI {
 
         startCalculationThread();
         scheduler.scheduleAtFixedRate(() -> {
+            log.debug("state: {}, keepCalculating: {}", mainEngine.getGameState().getState(), keepCalculating);
             if (mainEngine.getGameState().isGameOver() || !keepCalculating) {
                 stopCalculation();
                 scheduler.shutdown();
@@ -867,6 +868,7 @@ public class AI {
 
         long now = mainEngine.getBoardStateHash();
         if (now != bestMoveForHash) {
+            log.info("Stale best move for hash {}, current {}", bestMoveForHash, now);
             currentBestMove = -1;                           // <-- stop re-trying the stale move
             bestMoveForHash = -1;
             previousBestMove = -1;
@@ -877,6 +879,7 @@ public class AI {
         }
 
         if (MoveHelper.isWhitesMove(currentBestMove) != mainEngine.whitesTurn()) {
+            log.info("Best move {} not for side to move", Move.convertIntToMove(currentBestMove));
             currentBestMove = -1;                           // (optional) also drop here
             bestMoveForHash = -1;
             previousBestMove = -1;
@@ -924,9 +927,13 @@ public class AI {
 
 
     private void performCalculation() {
+        log.debug(" --- TranspositionTable[{}/{}] --- ", transpositionTable.size(), transpositionTableCapacity);
+
         try {
             Engine simulatorEngine = mainEngine.createSimulation();
             long boardStateHash = simulatorEngine.getBoardStateHash();
+            log.debug("boardStateBeforeCalculation {}, currentBoardState {}", beforeCalculationBoardState, currentBoardState);
+
             boolean isWhite = simulatorEngine.whitesTurn();
             long deadline = System.nanoTime() + timeLimit * 1_000_000;
             beforeCalculationBoardState = boardStateHash;
@@ -1049,14 +1056,6 @@ public class AI {
         return t != null && t.isStopRequested();
     }
 
-    /**
-     * Parallel root search with work-splitting (YBWC-style) and PVS.
-     * - First move is searched in the caller thread with full window.
-     * - Remaining moves are searched as tasks with a narrow probe, then full if needed.
-     * - TT-aware skipping: if a child TT entry at depth-1 makes the outcome obvious relative
-     *   to current (alpha,beta), we skip or directly use it to update best/alpha/beta.
-     * - Thread-safe shared alpha/beta and best are updated atomically (locks kept tiny).
-     */
     private MoveAndScore getBestMoveParallel(Engine simulatorEngine,
                                              SearchTask task,
                                              int depth,
@@ -1069,27 +1068,27 @@ public class AI {
         }
 
         final boolean isWhitesTurn = task.isWhiteToMove();
-
         IntArrayList legal = simulatorEngine.getAllLegalMoves();
-        IntArrayList orderedMoves = sortMovesByEfficiency(
-                legal, depth, simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
+        IntArrayList orderedMoves = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
         if (orderedMoves.isEmpty()) return null;
         maybeRotateRootMoves(orderedMoves, rng);
 
-        // --- Search the first move in this thread (full window) ---
         int firstMove = orderedMoves.getInt(0);
+        int bestMove;
+        double bestScore;
+
         if (abortRequested(deadline)) return null;
 
         simulatorEngine.performMove(firstMove);
         double firstScore;
         if (simulatorEngine.getGameState().isInStateCheckMate()) {
             firstScore = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
-        } else if (simulatorEngine.getGameState().isTerminal()) { // stalemate/50/3fold only
+        } else if (simulatorEngine.getGameState().isTerminal()) { // <-- terminal only (stalemate/50/3fold)
             firstScore = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, depth);
             if (isWhitesTurn) firstScore = -firstScore;
         } else {
-            firstScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta,
-                    !isWhitesTurn, deadline, firstMove, 1, 0);
+            // Non-terminal (incl. insufficient material): keep searching
+            firstScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, firstMove, 1, 0);
             if (firstScore == EXIT_FLAG || abortRequested(deadline)) {
                 simulatorEngine.undoLastMove();
                 return null;
@@ -1097,14 +1096,13 @@ public class AI {
         }
         simulatorEngine.undoLastMove();
 
-        int bestMove = firstMove;
-        double bestScore = firstScore;
+        bestMove = firstMove;
+        bestScore = firstScore;
 
         if (isWhitesTurn) alpha = Math.max(alpha, firstScore);
         else beta = Math.min(beta, firstScore);
         if (alpha >= beta) return new MoveAndScore(bestMove, bestScore);
 
-        // --- Fan out the rest with a bounded number of workers ---
         final int fanout = Math.min(ROOT_PARALLEL_LIMIT, orderedMoves.size() - 1);
         if (fanout <= 0) return new MoveAndScore(bestMove, bestScore);
 
@@ -1112,119 +1110,82 @@ public class AI {
         final List<Future<MoveAndScore>> futures = new ArrayList<>(fanout);
 
         final AtomicReference<Double> alphaRef = new AtomicReference<>(alpha);
-        final AtomicReference<Double> betaRef  = new AtomicReference<>(beta);
-        final AtomicReference<Double> bestScoreRef = new AtomicReference<>(bestScore);
+        final AtomicReference<Double> betaRef = new AtomicReference<>(beta);
         final java.util.concurrent.atomic.AtomicInteger bestMoveRef = new java.util.concurrent.atomic.AtomicInteger(bestMove);
+        final AtomicReference<Double> bestScoreRef = new AtomicReference<>(bestScore);
         final AtomicBoolean stopRef = new AtomicBoolean(false);
-
-        // Short critical section only for full-window re-search to avoid too many fullers at once.
-        final java.util.concurrent.locks.ReentrantLock fullSearchLock = new java.util.concurrent.locks.ReentrantLock();
+        final java.util.concurrent.locks.ReentrantLock fullResLock = new java.util.concurrent.locks.ReentrantLock();
 
         for (int i = 1; i <= fanout; i++) {
             final int moveInt = orderedMoves.getInt(i);
             futures.add(ecs.submit(() -> {
                 if (stopRef.get() || abortRequested(deadline)) return null;
-
                 Heuristics helperHeuristics = prepareHelperHeuristics(task, depth);
-                // ensure definite assignment for Java's flow analysis
-                double localScore = 0.0;
-
                 try {
                     Engine e = simulatorEngine.createSimulation();
                     e.performMove(moveInt);
 
-                    if (e.getGameState().isInStateCheckMate()) {
-                        localScore = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
-                    } else if (e.getGameState().isTerminal()) {
-                        localScore = evaluateStaticPosition(e.getGameState(), !isWhitesTurn, depth);
-                        if (isWhitesTurn) localScore = -localScore;
+                    double currentAlpha = alphaRef.get();
+                    double currentBeta = betaRef.get();
+                    double pAlpha, pBeta;
+                    if (isWhitesTurn) {
+                        pAlpha = currentAlpha;
+                        pBeta = currentAlpha + 1;
                     } else {
-                        // --- TT-aware reuse/skip at child (depth-1) ---
-                        boolean usedTT = false;
-                        int childDepth = depth - 1;
-                        long childHash = e.getBoardStateHash();
-                        TranspositionTableEntry ce = transpositionTable.get(childHash);
-                        if (ce != null && ce.depth >= childDepth) {
-                            NodeType nt = ce.nodeType;
-                            double aNow = alphaRef.get();
-                            double bNow = betaRef.get();
-
-                            if (nt == NodeType.EXACT) {
-                                // If exact and clearly outside current window for root, we may use it directly.
-                                if ((isWhitesTurn && ce.score <= aNow) || (!isWhitesTurn && ce.score >= bNow)) {
-                                    localScore = ce.score;
-                                    usedTT = true;
-                                }
-                            } else if (nt == NodeType.UPPERBOUND) {
-                                if (isWhitesTurn && ce.score <= aNow) {
-                                    localScore = ce.score;
-                                    usedTT = true; // cannot beat alpha
-                                }
-                            } else if (nt == NodeType.LOWERBOUND) {
-                                if (!isWhitesTurn && ce.score >= bNow) {
-                                    localScore = ce.score;
-                                    usedTT = true; // cannot improve beta for minimizing perspective at root
-                                }
-                            }
-                        }
-
-                        if (!usedTT) {
-                            // Root PVS narrow probe
-                            double aNow = alphaRef.get();
-                            double bNow = betaRef.get();
-
-                            double probeAlpha = isWhitesTurn ? Math.max(aNow, bestScoreRef.get()) : aNow;
-                            double probeBeta  = isWhitesTurn ? probeAlpha + 1 : Math.min(bNow, bestScoreRef.get()) - 1;
-
-                            double probe = alphaBeta(e, childDepth, probeAlpha, probeBeta,
-                                    !isWhitesTurn, deadline, moveInt, 1, 0);
-                            if (probe == EXIT_FLAG || abortRequested(deadline)) return null;
-
-                            boolean needFull = isWhitesTurn ? (probe > probeAlpha) : (probe < probeBeta);
-                            if (needFull) {
-                                // Controlled full-window re-search under short lock
-                                fullSearchLock.lock();
-                                try {
-                                    aNow = alphaRef.get();
-                                    bNow = betaRef.get();
-                                    localScore = alphaBeta(e, childDepth, aNow, bNow,
-                                            !isWhitesTurn, deadline, moveInt, 1, 0);
-                                } finally {
-                                    fullSearchLock.unlock();
-                                }
-                                if (localScore == EXIT_FLAG) return null;
-                            } else {
-                                localScore = probe;
-                            }
-                        }
+                        pAlpha = currentBeta - 1;
+                        pBeta = currentBeta;
                     }
 
-                    // Update best/alpha/beta if improved
-                    while (true) {
+                    double probe;
+                    if (e.getGameState().isInStateCheckMate()) {
+                        probe = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
+                    } else if (e.getGameState().isTerminal()) { // <-- terminal only
+                        probe = evaluateStaticPosition(e.getGameState(), !isWhitesTurn, depth);
+                        if (isWhitesTurn) probe = -probe;
+                    } else {
+                        probe = alphaBeta(e, depth - 1, pAlpha, pBeta, !isWhitesTurn, deadline, moveInt, 1, 0);
+                        if (probe == EXIT_FLAG || abortRequested(deadline)) return null;
+                    }
+
+                    boolean needsFull = isWhitesTurn ? (probe > alphaRef.get()) : (probe < betaRef.get());
+                    double finalScore = probe;
+
+                    if (needsFull && !stopRef.get()) {
+                        fullResLock.lock();
+                        try {
+                            if (!stopRef.get() && !abortRequested(deadline)) {
+                                double aNow = alphaRef.get(), bNow = betaRef.get();
+                                double full = alphaBeta(e, depth - 1, aNow, bNow, !isWhitesTurn, deadline, moveInt, 1, 0);
+                                if (full != EXIT_FLAG) {
+                                    finalScore = full;
+                                    if (isWhitesTurn) {
+                                        if (full > aNow) alphaRef.set(full);
+                                    } else {
+                                        if (full < bNow) betaRef.set(full);
+                                    }
+                                    Double curBest = bestScoreRef.get();
+                                    if (isBetterScore(isWhitesTurn, full, curBest)) {
+                                        bestScoreRef.set(full);
+                                        bestMoveRef.set(moveInt);
+                                    }
+                                    if (alphaRef.get() >= betaRef.get()) stopRef.set(true);
+                                }
+                            }
+                        } finally {
+                            fullResLock.unlock();
+                        }
+                    } else {
                         Double curBest = bestScoreRef.get();
-                        if (!isBetterScore(isWhitesTurn, localScore, curBest)) break;
-
-                        if (bestScoreRef.compareAndSet(curBest, localScore)) {
+                        if (isBetterScore(isWhitesTurn, finalScore, curBest)) {
+                            bestScoreRef.set(finalScore);
                             bestMoveRef.set(moveInt);
-
-                            // tighten window
-                            double aNow = alphaRef.get();
-                            double bNow = betaRef.get();
-                            if (isWhitesTurn) {
-                                if (localScore > aNow) alphaRef.compareAndSet(aNow, localScore);
-                            } else {
-                                if (localScore < bNow) betaRef.compareAndSet(bNow, localScore);
-                            }
-                            break;
+                            if (isWhitesTurn && finalScore > alphaRef.get()) alphaRef.set(finalScore);
+                            if (!isWhitesTurn && finalScore < betaRef.get()) betaRef.set(finalScore);
+                            if (alphaRef.get() >= betaRef.get()) stopRef.set(true);
                         }
                     }
 
-                    // Early stop if window collapsed
-                    if (alphaRef.get() >= betaRef.get()) {
-                        stopRef.set(true);
-                    }
-                    return new MoveAndScore(moveInt, localScore);
-
+                    return new MoveAndScore(moveInt, finalScore);
                 } finally {
                     if (helperHeuristics.hasUpdates()) mergeThreadHeuristics(helperHeuristics);
                     else helperHeuristics.resetUpdates();
@@ -1241,9 +1202,8 @@ public class AI {
                 MoveAndScore res = f.get();
                 if (res == null) continue;
 
-                // snapshot shared state
                 alpha = alphaRef.get();
-                beta  = betaRef.get();
+                beta = betaRef.get();
                 bestMove = bestMoveRef.get();
                 bestScore = bestScoreRef.get();
 
@@ -1255,16 +1215,13 @@ public class AI {
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
         } catch (Exception ex) {
-            log.warn("Parallel root error", ex);
+            log.warn("Parallel root YBWC error", ex);
         } finally {
-            for (Future<MoveAndScore> f : futures) {
-                if (!f.isDone()) f.cancel(true);
-            }
+            for (Future<MoveAndScore> f : futures) if (!f.isDone()) f.cancel(true);
         }
 
         return bestMove != -1 ? new MoveAndScore(bestMove, bestScore) : null;
     }
-
 
 
     private boolean shouldStopCalculating(long deadline) {
@@ -1373,123 +1330,47 @@ public class AI {
         this.calculatedLine = Collections.synchronizedList(pv);
     }
 
-    /**
-     * Single-threaded root search (used when searchThreads <= 1).
-     * - Root-level PVS: first move full-window, rest narrow (alpha, alpha+1) then full if needed.
-     * - TT-aware skipping: if a child TT entry at depth-1 already proves it cannot improve alpha
-     *   (for the side to move at root), we skip searching that move this pass.
-     * - Uses your move ordering (TT hash move is already hoisted).
-     */
-    private MoveAndScore getBestMove(Engine simulatorEngine,
-                                     boolean isWhitesTurn,
-                                     int depth,
-                                     long deadline,
-                                     double alpha,
-                                     double beta,
-                                     SplittableRandom rng) {
+
+    private MoveAndScore getBestMove(Engine simulatorEngine, boolean isWhitesTurn, int depth, long deadline,
+                                     double alpha, double beta, SplittableRandom rng) {
         int bestMove = -1;
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
 
-        IntArrayList ordered = sortMovesByEfficiency(
-                simulatorEngine.getAllLegalMoves(), depth,
+        IntArrayList sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth,
                 simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
-        maybeRotateRootMoves(ordered, rng);
+        maybeRotateRootMoves(sortedMoves, rng);
 
-        for (int idx = 0; idx < ordered.size(); idx++) {
+        for (int idx = 0; idx < sortedMoves.size(); idx++) {
+            int moveInt = sortedMoves.getInt(idx);
             if (abortRequested(deadline)) break;
 
-            int moveInt = ordered.getInt(idx);
-
-            // --- Child TT probe for reuse/skip between aspiration retries ---
-            // If a TT entry already proves this move cannot help (upper bound <= alpha for max,
-            // lower bound >= beta for min), skip or accept immediately when safe.
-            double childTTScore = Double.NaN;
-            byte childTTType = 0;
-            int childDepth = depth - 1;
-            boolean canUseChildTT = false;
-
-            // Make move (but we can also peek TT after making to get child hash)
             simulatorEngine.performMove(moveInt);
-
-            if (!simulatorEngine.getGameState().isInStateCheckMate()
-                    && !simulatorEngine.getGameState().isTerminal()) {
-                long childHash = simulatorEngine.getBoardStateHash();
-                TranspositionTableEntry ce = transpositionTable.get(childHash);
-                if (ce != null && ce.depth >= childDepth) {
-                    childTTScore = ce.score;
-                    childTTType  = (byte) ce.nodeType.ordinal(); // EXACT=2, LOWER=0, UPPER=1 (based on your enum order)
-                    canUseChildTT = true;
-                }
-            }
-
             double score;
             if (simulatorEngine.getGameState().isInStateCheckMate()) {
                 score = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
-            } else if (simulatorEngine.getGameState().isTerminal()) { // stalemate/50/3fold only
+            } else if (simulatorEngine.getGameState().isTerminal()) { // <-- terminal only
                 score = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, depth);
-                if (isWhitesTurn) score = -score;
-            } else {
-                boolean skip = false;
-                if (canUseChildTT) {
-                    // NodeType order in your code is: LOWERBOUND, UPPERBOUND, EXACT
-                    // We guard against relying on ordinal, but it’s already available above.
-                    NodeType nt = NodeType.values()[childTTType];
-                    if (isWhitesTurn) {
-                        if (nt == NodeType.UPPERBOUND && childTTScore <= alpha) {
-                            skip = true; // cannot beat alpha
-                        }
-                    } else {
-                        if (nt == NodeType.LOWERBOUND && childTTScore >= beta) {
-                            skip = true; // cannot beat beta for minimizing perspective (root)
-                        }
-                    }
-                    if (nt == NodeType.EXACT) {
-                        // Exact child score is often good enough to skip a full re-search
-                        // at root when it clearly won't change the decision.
-                        if (isWhitesTurn && childTTScore <= alpha) skip = true;
-                        if (!isWhitesTurn && childTTScore >= beta)  skip = true;
-                    }
+                if (isWhitesTurn) {
+                    score = -score;
                 }
-
-                if (skip) {
-                    score = childTTScore;
-                } else {
-                    // Root PVS:
-                    if (idx == 0 || alpha == Double.NEGATIVE_INFINITY || beta == Double.POSITIVE_INFINITY) {
-                        // First move or no PVS window possible -> full window
-                        score = alphaBeta(simulatorEngine, childDepth, alpha, beta,
-                                !isWhitesTurn, deadline, moveInt, 1, 0);
-                    } else {
-                        // Narrow (null-window) probe
-                        double probeAlpha = isWhitesTurn ? Math.max(alpha, bestScore) : alpha;
-                        double probeBeta  = isWhitesTurn ? probeAlpha + 1 : Math.min(beta, bestScore) - 1;
-                        score = alphaBeta(simulatorEngine, childDepth, probeAlpha, probeBeta,
-                                !isWhitesTurn, deadline, moveInt, 1, 0);
-
-                        // If probe indicates improvement, re-search full window
-                        boolean needFull = (score != EXIT_FLAG) &&
-                                (isWhitesTurn ? score > probeAlpha : score < probeBeta);
-                        if (needFull && !abortRequested(deadline)) {
-                            score = alphaBeta(simulatorEngine, childDepth, alpha, beta,
-                                    !isWhitesTurn, deadline, moveInt, 1, 0);
-                        }
-                    }
+            } else {
+                // Non-terminal (incl. insufficient material):
+                score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1, 0);
+                if (score == EXIT_FLAG || abortRequested(deadline)) {
+                    simulatorEngine.undoLastMove();
+                    break;
                 }
             }
-
             simulatorEngine.undoLastMove();
-            if (score == EXIT_FLAG) break;
 
             if (isBetterScore(isWhitesTurn, score, bestScore)) {
                 bestScore = score;
                 bestMove = moveInt;
             }
-            // Update window (fail-hard)
             if (isWhitesTurn) alpha = Math.max(alpha, score);
             else beta = Math.min(beta, score);
             if (alpha >= beta) break;
         }
-
         return bestMove != -1 ? new MoveAndScore(bestMove, bestScore) : null;
     }
 
@@ -1916,6 +1797,8 @@ public class AI {
                              long boardHash, double alphaOriginal, double betaOriginal,
                              IntArrayList moves, long deadline, int prevMove, int plyFromRoot,
                              int extStreak) {
+
+        long start = log.isDebugEnabled() ? System.nanoTime() : 0L;
         double minEval = Double.POSITIVE_INFINITY;
         int bestMoveAtThisNode = -1;
 
@@ -2053,6 +1936,12 @@ public class AI {
                         }
                     }
                 }
+            }
+
+            if (log.isDebugEnabled()) {
+                long endTime = System.nanoTime();
+                log.debug("DEPTH: {} --- {}", depth, Move.convertIntToMove(move));
+                log.debug("<-- [-] Time taken for minimizer: {} ms", (endTime - start) / 1e6);
             }
 
             simulatorEngine.undoLastMove();
@@ -2370,6 +2259,7 @@ public class AI {
             return -(CHECKMATE - depthOrPly);
         }
         if (gameState.isDrawForUIOrEval()) { // <-- include insufficient material for eval/UI
+            if (log.isDebugEnabled()) log.debug("DRAW");
             double scoreDiff = gameState.getScore().getScoreDifference();
             final double DRAW_BIAS = 0.20;
             if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
