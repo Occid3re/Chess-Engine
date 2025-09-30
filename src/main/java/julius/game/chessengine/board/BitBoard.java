@@ -1230,20 +1230,24 @@ public class BitBoard {
     // New method (rename of existing generateAllPossibleMoves) that exposes pins:
     public MoveGenResult generateAllPossibleMovesWithPins(boolean whitesTurn) {
         IntArrayList moves = new IntArrayList(MAX_PSEUDO_LEGAL_MOVES);
-
-        // NOTE: single computation here
-        PinState pinState = computePinState(whitesTurn);
-
-        generatePawnMoves(whitesTurn, moves, pinState);
-        generateKnightMoves(whitesTurn, moves, pinState);
-        generateBishopMoves(whitesTurn, moves, pinState);
-        generateRookMoves(whitesTurn, moves, pinState);
-        generateQueenMoves(whitesTurn, moves, pinState);
-        generateKingMoves(whitesTurn, moves, pinState);
-
+        PinState pinState = generateAllPossibleMovesInto(whitesTurn, moves);
         return new MoveGenResult(moves, pinState);
     }
 
+    public PinState generateAllPossibleMovesInto(boolean whitesTurn, IntArrayList targetMoves) {
+        targetMoves.clear();
+        PinState pinState = computePinState(whitesTurn);
+        final int castlingState = packCastlingState();
+
+        generatePawnMoves(whitesTurn, targetMoves, pinState, castlingState);
+        generateKnightMoves(whitesTurn, targetMoves, pinState, castlingState);
+        generateBishopMoves(whitesTurn, targetMoves, pinState, castlingState);
+        generateRookMoves(whitesTurn, targetMoves, pinState, castlingState);
+        generateQueenMoves(whitesTurn, targetMoves, pinState, castlingState);
+        generateKingMoves(whitesTurn, targetMoves, pinState, castlingState);
+
+        return pinState;
+    }
 
     public IntArrayList generateAllPossibleMoves(boolean whitesTurn) {
         return generateAllPossibleMovesWithPins(whitesTurn).moves;
@@ -1342,12 +1346,12 @@ public class BitBoard {
         blackAttackDirty = false;
     }
 
-    private void generatePawnMoves(boolean whitesTurn, IntArrayList moves, PinState pinState) {
+    private void generatePawnMoves(boolean whitesTurn, IntArrayList moves, PinState pinState, int castlingState) {
         final long pawns = whitesTurn ? whitePawns : blackPawns;
         final long opponentPieces = whitesTurn ? blackPieces : whitePieces;
         final long emptySquares = ~allPieces;
         final long promotionRank = whitesTurn ? RankMasks[7] : RankMasks[0];
-        final int cs = packCastlingState(); // cache once
+        final int cs = castlingState; // reuse precomputed castling state
 
         // ------------------ Single Pushes ------------------
         long singlePushes = whitesTurn ? (pawns << 8) & emptySquares
@@ -1528,11 +1532,11 @@ public class BitBoard {
     }
 
 
-    private void generateKnightMoves(boolean whitesTurn, IntArrayList moves, PinState pinState) {
+    private void generateKnightMoves(boolean whitesTurn, IntArrayList moves, PinState pinState, int castlingState) {
         long knights = whitesTurn ? whiteKnights : blackKnights;
         final long opponentPieces = whitesTurn ? blackPieces : whitePieces;
         final long ownPieces = whitesTurn ? whitePieces : blackPieces;
-        final int cs = packCastlingState(); // cache once
+        final int cs = castlingState; // reuse precomputed castling state
 
         while (knights != 0) {
             int from = Long.numberOfTrailingZeros(knights);
@@ -1564,11 +1568,11 @@ public class BitBoard {
         }
     }
 
-    private void generateBishopMoves(boolean isWhite, IntArrayList moves, PinState pinState) {
+    private void generateBishopMoves(boolean isWhite, IntArrayList moves, PinState pinState, int castlingState) {
         long bishops = isWhite ? whiteBishops : blackBishops;
         final long ownPieces = isWhite ? whitePieces : blackPieces;
         final long oppPieces = isWhite ? blackPieces : whitePieces;
-        final int cs = packCastlingState(); // cache once
+        final int cs = castlingState; // reuse precomputed castling state
 
         while (bishops != 0) {
             int from = Long.numberOfTrailingZeros(bishops);
@@ -1605,11 +1609,11 @@ public class BitBoard {
         }
     }
 
-    private void generateRookMoves(boolean whitesTurn, IntArrayList moves, PinState pinState) {
+    private void generateRookMoves(boolean whitesTurn, IntArrayList moves, PinState pinState, int castlingState) {
         long rooks = whitesTurn ? whiteRooks : blackRooks;
         final long ownPieces = whitesTurn ? whitePieces : blackPieces;
         final long oppPieces = whitesTurn ? blackPieces : whitePieces;
-        final int cs = packCastlingState(); // cache once
+        final int cs = castlingState; // reuse precomputed castling state
 
         while (rooks != 0) {
             int from = Long.numberOfTrailingZeros(rooks);
@@ -1648,11 +1652,11 @@ public class BitBoard {
         }
     }
 
-    private void generateQueenMoves(boolean whitesTurn, IntArrayList moves, PinState pinState) {
+    private void generateQueenMoves(boolean whitesTurn, IntArrayList moves, PinState pinState, int castlingState) {
         long queens = whitesTurn ? whiteQueens : blackQueens;
         final long ownPieces = whitesTurn ? whitePieces : blackPieces;
         final long oppPieces = whitesTurn ? blackPieces : whitePieces;
-        final int cs = packCastlingState(); // cache once
+        final int cs = castlingState; // reuse precomputed castling state
 
         while (queens != 0) {
             int from = Long.numberOfTrailingZeros(queens);
@@ -1691,7 +1695,7 @@ public class BitBoard {
         }
     }
 
-    private void generateKingMoves(boolean whitesTurn, IntArrayList moves, PinState pinState) {
+    private void generateKingMoves(boolean whitesTurn, IntArrayList moves, PinState pinState, int castlingState) {
         long kingBitboard = whitesTurn ? whiteKing : blackKing;
         if (kingBitboard == 0L) return;
 
@@ -1702,7 +1706,7 @@ public class BitBoard {
         final long oppPieces = whitesTurn ? blackPieces : whitePieces;
         final long legal = kingAttacks & ~ownPieces;
         final long captureMask = kingAttacks & oppPieces;
-        final int cs = packCastlingState(); // cache once
+        final int cs = castlingState; // reuse precomputed castling state
 
         long possible = legal;
         while (possible != 0) {

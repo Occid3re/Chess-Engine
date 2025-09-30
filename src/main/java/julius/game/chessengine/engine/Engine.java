@@ -32,6 +32,9 @@ public class Engine {
     private int[] cachedLegalMoves = new int[0];
     private int cachedLegalMoveCount = 0;
 
+    private static final int MOVE_BUFFER_CAPACITY = 256;
+    private final IntArrayList pseudoMoveBuffer = new IntArrayList(MOVE_BUFFER_CAPACITY);
+
     @Getter
     private MoveStack line = new MoveStack();
     private MoveStack redoLine = new MoveStack();
@@ -247,9 +250,9 @@ public class Engine {
             final long boardStateHash = getBoardStateHash();
 
             // Get pseudo moves + the already-computed PinState in one shot
-            BitBoard.MoveGenResult gen = bitBoard.generateAllPossibleMovesWithPins(bitBoard.whitesTurn);
-            IntArrayList pseudoMoves = gen.moves();
-            BitBoard.PinState pinState = gen.pinState();
+            IntArrayList pseudoMoves = pseudoMoveBuffer;
+            pseudoMoves.clear();
+            BitBoard.PinState pinState = bitBoard.generateAllPossibleMovesInto(bitBoard.whitesTurn, pseudoMoves);
 
             // NEW: detect check once
             boolean inCheck = bitBoard.isInCheck(bitBoard.whitesTurn);
@@ -296,7 +299,6 @@ public class Engine {
                     );
                 }
             }
-            legalMoves.trim();
             cacheLegalMoves(boardStateHash, legalMoves);
             return legalMoves;
         }
@@ -558,3 +560,4 @@ public class Engine {
         }
     }
 }
+
