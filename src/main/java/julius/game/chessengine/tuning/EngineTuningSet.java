@@ -27,7 +27,12 @@ public final class EngineTuningSet {
         return population;
     }
 
+    public EngineTuning primary() {
+        return population.isEmpty() ? null : population.get(0);
+    }
+
     public boolean isEmpty() {
         return population.isEmpty();
     }
 }
+

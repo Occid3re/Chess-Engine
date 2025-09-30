@@ -18,9 +18,11 @@ import java.util.stream.Collectors;
 public final class EvaluationTuning {
 
     private final Map<String, ModuleConfig> modules;
+    private final EvaluationWeights weights;
 
     private EvaluationTuning(Map<String, ModuleConfig> modules) {
         this.modules = modules;
+        this.weights = buildWeights(modules);
     }
 
     public static EvaluationTuning identity() {
@@ -49,15 +51,11 @@ public final class EvaluationTuning {
     }
 
     public EvaluationWeights toWeights() {
-        if (modules.isEmpty()) {
-            return EvaluationWeights.identity();
-        }
-        Map<String, EvaluationWeights.ModuleWeight> weights = modules.entrySet().stream()
-                .collect(Collectors.toMap(
-                        Map.Entry::getKey,
-                        entry -> new EvaluationWeights.ModuleWeight(entry.getValue().midgame(), entry.getValue().endgame())
-                ));
-        return EvaluationWeights.of(weights);
+        return weights;
+    }
+
+    public EvaluationWeights weights() {
+        return weights;
     }
 
     public EvaluationTuning mutate(Random random, double strength) {
@@ -72,6 +70,18 @@ public final class EvaluationTuning {
             mutated.put(name, new ModuleConfig(mid, end));
         });
         return EvaluationTuning.of(mutated);
+    }
+
+    private static EvaluationWeights buildWeights(Map<String, ModuleConfig> modules) {
+        if (modules == null || modules.isEmpty()) {
+            return EvaluationWeights.identity();
+        }
+        Map<String, EvaluationWeights.ModuleWeight> mapped = modules.entrySet().stream()
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        entry -> new EvaluationWeights.ModuleWeight(entry.getValue().midgame(), entry.getValue().endgame())
+                ));
+        return EvaluationWeights.of(mapped);
     }
 
     private static double mutateWeight(double value, Random random, double strength) {
@@ -128,3 +138,4 @@ public final class EvaluationTuning {
         }
     }
 }
+
