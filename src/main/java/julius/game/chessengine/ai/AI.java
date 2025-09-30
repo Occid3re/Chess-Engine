@@ -457,7 +457,7 @@ public class AI {
         keepCalculating = true;
 
         if (calculationCoordinator != null && calculationCoordinator.isAlive()) {
-            enqueueCalculationRequest();
+            enqueueCalculationRequestIfNeeded();
             return;
         }
 
@@ -477,6 +477,16 @@ public class AI {
             calculationThreads[i] = worker;
         }
 
+        enqueueCalculationRequestIfNeeded();
+    }
+
+    private void enqueueCalculationRequestIfNeeded() {
+        if (searchResultReady && currentBestMove != -1) {
+            long currentHash = mainEngine.getBoardStateHash();
+            if (bestMoveForHash == currentHash) {
+                return;
+            }
+        }
         enqueueCalculationRequest();
     }
 
