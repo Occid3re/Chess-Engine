@@ -209,10 +209,12 @@ public class AI {
         }
     }
 
+    private static final long UNINITIALIZED_BOARD_STATE = Long.MIN_VALUE;
+
     private volatile boolean keepCalculating = true;
 
-    private volatile long currentBoardState = -1;
-    private volatile long beforeCalculationBoardState = -2;
+    private volatile long currentBoardState = UNINITIALIZED_BOARD_STATE;
+    private volatile long beforeCalculationBoardState = UNINITIALIZED_BOARD_STATE;
 
     private volatile int currentBestMove = -1;
     private volatile int previousBestMove = -1;
@@ -755,8 +757,8 @@ public class AI {
         previousBestMove = -1;
         previousBestMoveHash = -1;
         searchResultReady = false;
-        currentBoardState = -1;
-        beforeCalculationBoardState = -2;
+        currentBoardState = UNINITIALIZED_BOARD_STATE;
+        beforeCalculationBoardState = UNINITIALIZED_BOARD_STATE;
         calculatedLine = Collections.synchronizedList(new ArrayList<>());
         mainEngine.startNewGame();
         clearHistoryTable();
@@ -2283,7 +2285,9 @@ public class AI {
      * required cross-thread visibility.</p>
      */
     private boolean positionChanged() {
-        return currentBoardState != beforeCalculationBoardState;
+        return currentBoardState != UNINITIALIZED_BOARD_STATE
+                && beforeCalculationBoardState != UNINITIALIZED_BOARD_STATE
+                && currentBoardState != beforeCalculationBoardState;
     }
 
     /**
