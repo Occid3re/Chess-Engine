@@ -54,6 +54,10 @@ class AITest_MateThreatDiagnostics {
                 new Object[]{
                         "rn2kb1r/pp2pppp/5q2/1p6/2b3Q1/4B2P/PP3PP1/RN2K1NR b KQkq - 1 12",
                         List.of("Nc6", "e6")
+                },
+                new Object[]{
+                        "r1bqk2r/ppp2ppp/2n1p3/3pP3/3P4/2bB1N2/P1P2PPP/R1BQ1RK1 w kq - 0 9",
+                        List.of("Rb1")
                 }
         );
     }
