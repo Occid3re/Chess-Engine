@@ -1439,7 +1439,9 @@ public class AI {
 
         if (allowNullMove) {
             double mateThreatScore = CHECKMATE - (plyFromRoot + 1);
-            if ((isWhite && beta >= mateThreatScore) || (!isWhite && alpha <= -mateThreatScore)) {
+            boolean betaSignalsMateThreat = isWhite && Double.isFinite(beta) && beta >= mateThreatScore;
+            boolean alphaSignalsMateThreat = !isWhite && Double.isFinite(alpha) && alpha <= -mateThreatScore;
+            if (betaSignalsMateThreat || alphaSignalsMateThreat) {
                 allowNullMove = false;
             }
         }
