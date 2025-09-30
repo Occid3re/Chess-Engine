@@ -1423,19 +1423,16 @@ public class AI {
         IntArrayList moves = simulatorEngine.getAllLegalMoves();
         int mobility = moves.size();
         BitBoard bitBoard = simulatorEngine.getBitBoard();
+        final int NULL_MOVE_SENTINEL = -1;
+        boolean previousMoveWasNull = prevMove == NULL_MOVE_SENTINEL;
+        if (previousMoveWasNull && plyFromRoot == 0) {
+            // There was no real move before the root call, so treat it as eligible for a null move.
+            previousMoveWasNull = false;
+        }
         boolean allowNullMove = useNullMovePruning
                 && !inCheck
-                && prevMove != -1;
-
-        if (allowNullMove && simulatorEngine.isEndgame()) {
-            boolean hasPawns = bitBoard.hasAnyPawns();
-            int nonKingPieces = bitBoard.getNonKingPieceCount();
-            boolean cramped = mobility <= 6;
-
-            if (!hasPawns && nonKingPieces <= 2 && cramped) {
-                allowNullMove = false;
-            }
-        }
+                && !simulatorEngine.isEndgame()
+                && !previousMoveWasNull;
 
         if (allowNullMove) {
             double mateThreatScore = CHECKMATE - (plyFromRoot + 1);
