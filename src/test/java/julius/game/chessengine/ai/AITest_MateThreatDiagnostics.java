@@ -52,8 +52,8 @@ class AITest_MateThreatDiagnostics {
                         List.of("f4")
                 },
                 new Object[]{
-                        "rnb1k2r/2bp3p/3qpp1n/P5p1/Q1P3P1/PN6/4BPNP/R4RK1 w - - 1 24",
-                        List.of("f4")
+                        "rn2kb1r/pp2pppp/5q2/1p6/2b3Q1/4B2P/PP3PP1/RN2K1NR b KQkq - 1 12",
+                        List.of("Nc6", "e6")
                 }
         );
     }
