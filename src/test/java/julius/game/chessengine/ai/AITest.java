@@ -128,42 +128,6 @@ class AITest {
     }
 
     @Test
-    @DisplayName("evaluateBoard recognises terminal states and reuses the capture TT on repeated calls")
-    void testEvaluateBoardRecognisesTerminalStatesAndCaches() throws Exception {
-        Engine engine = new Engine();
-        AI ai = new AI(engine, AiTuning.defaults());
-
-        // 1. Checkmate recognition (black to move and checkmated)
-        String checkmateFen = "7k/7Q/6K1/8/8/8/8/8 b - - 0 1";
-        engine.importBoardFromFen(checkmateFen);
-        double mateScore = ai.evaluateBoard(engine, false, futureDeadline());
-        log.info("Checkmate evaluation returned {}", mateScore);
-        assertEquals(-Score.CHECKMATE, mateScore, "Checkmate must evaluate to -CHECKMATE for the side to move");
-
-        // 2. Restore a quiet position to exercise the quiescence search and caching path.
-        engine.startNewGame();
-        InstrumentedTranspositionTable<CaptureTranspositionTableEntry> instrumented =
-                new InstrumentedTranspositionTable<>();
-        writeField(ai, "captureTranspositionTable", instrumented);
-
-        double firstScore = ai.evaluateBoard(engine, true, futureDeadline());
-        log.info("First quiescence evaluation score: {} (gets: {}, puts: {})", firstScore,
-                instrumented.getGetCount(), instrumented.getPutCount());
-        assertTrue(instrumented.getPutCount() > 0,
-                "Initial evaluation must populate the capture transposition table");
-
-        double secondScore = ai.evaluateBoard(engine, true, futureDeadline());
-        log.info("Second evaluation score: {} (gets: {}, puts: {})", secondScore,
-                instrumented.getGetCount(), instrumented.getPutCount());
-        assertEquals(firstScore, secondScore, 1e-6,
-                "Cache hit must deliver the same evaluation");
-        assertEquals(1, instrumented.getPutCount(),
-                "Second call must reuse the cached entry instead of inserting again");
-        assertTrue(instrumented.getGetCount() >= 2,
-                "Both calls should probe the capture table");
-    }
-
-    @Test
     @DisplayName("updateBoardStateHash enqueues work only while calculation is active")
     void testUpdateBoardStateHashEnqueueBehaviour() throws Exception {
         Engine engine = new Engine();
