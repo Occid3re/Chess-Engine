@@ -2,7 +2,7 @@ package julius.game.chessengine.evaluation;
 
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.utils.Score;
-import julius.game.chessengine.tuning.TunableParameter;
+import julius.game.chessengine.tuning.Tuning;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -15,8 +15,6 @@ import java.util.Objects;
  * recomputing unrelated features.
  */
 public final class EvaluationPipeline {
-
-    private static final TunableParameter BLEND_SCALE_PARAM = TunableParameter.of("evaluation.blendScale", 256, 1, 1024);
 
     private static final class ModuleState {
         private final EvaluationModule module;
@@ -49,7 +47,7 @@ public final class EvaluationPipeline {
             throw new IllegalArgumentException("At least one evaluation module is required");
         }
         this.weights = (weights != null ? weights : EvaluationWeights.identity());
-        this.blendScale = BLEND_SCALE_PARAM.getInt();
+        this.blendScale = Tuning.evaluationBlendScale();
         List<ModuleState> moduleStates = new ArrayList<>(modules.size());
         for (EvaluationModule module : modules) {
             EvaluationWeights.ModuleWeight weight = this.weights.weightFor(module.getClass());

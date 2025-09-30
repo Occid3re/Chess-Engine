@@ -5,9 +5,7 @@ import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.ImmutableBoardView;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.helper.PawnHelper;
-import julius.game.chessengine.tuning.ParamId;
-import julius.game.chessengine.tuning.ParameterRegistry;
-import julius.game.chessengine.tuning.TunableParameter;
+import julius.game.chessengine.tuning.Tuning;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -39,20 +37,6 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
     public static final int DEFAULT_PASSED_PAWN_FREE_PATH_BONUS_PER_RANK = 12;
     public static final int DEFAULT_ROOK_HALF_OPEN_FILE_BONUS = 15;
     public static final int DEFAULT_ROOK_OPEN_FILE_BONUS = 25;
-
-    private static final TunableParameter CENTER_PAWN_BONUS = TunableParameter.of("pawnStructure.centerPawnBonus", DEFAULT_CENTER_PAWN_BONUS);
-    private static final TunableParameter PASSED_PAWN_BONUS = TunableParameter.of("pawnStructure.passedPawnBonus", DEFAULT_PASSED_PAWN_BONUS);
-    private static final TunableParameter CONNECTED_PAWN_BONUS = TunableParameter.of("pawnStructure.connectedPawnBonus", DEFAULT_CONNECTED_PAWN_BONUS);
-    private static final TunableParameter PAWN_ISLAND_PENALTY = TunableParameter.of("pawnStructure.islandPenalty", DEFAULT_PAWN_ISLAND_PENALTY);
-    private static final TunableParameter DOUBLED_PAWN_PENALTY = TunableParameter.of("pawnStructure.doubledPawnPenalty", DEFAULT_DOUBLED_PAWN_PENALTY);
-    private static final TunableParameter ISOLATED_PAWN_PENALTY = TunableParameter.of("pawnStructure.isolatedPawnPenalty", DEFAULT_ISOLATED_PAWN_PENALTY);
-    private static final TunableParameter ADVANCED_PAWN_BONUS = TunableParameter.of("pawnStructure.advancedPawnBonus", DEFAULT_ADVANCED_PAWN_BONUS);
-    private static final TunableParameter BLOCKED_PAWN_PENALTY = TunableParameter.of("pawnStructure.blockedPawnPenalty", DEFAULT_BLOCKED_PAWN_PENALTY);
-    private static final TunableParameter BACKWARD_PAWN_PENALTY = TunableParameter.of("pawnStructure.backwardPawnPenalty", DEFAULT_BACKWARD_PAWN_PENALTY);
-    private static final TunableParameter OWN_KING_BLOCKS_PASSED_PAWN_PENALTY = TunableParameter.of("pawnStructure.ownKingBlocksPassedPawnPenalty", DEFAULT_OWN_KING_BLOCKS_PASSED_PAWN_PENALTY);
-    private static final TunableParameter PASSED_PAWN_FREE_PATH_BONUS_PER_RANK = TunableParameter.of("pawnStructure.passedPawnFreePathBonusPerRank", DEFAULT_PASSED_PAWN_FREE_PATH_BONUS_PER_RANK);
-    private static final TunableParameter ROOK_HALF_OPEN_FILE_BONUS = TunableParameter.of("pawnStructure.rookHalfOpenFileBonus", DEFAULT_ROOK_HALF_OPEN_FILE_BONUS);
-    private static final TunableParameter ROOK_OPEN_FILE_BONUS = TunableParameter.of("pawnStructure.rookOpenFileBonus", DEFAULT_ROOK_OPEN_FILE_BONUS);
 
     private static final int WHITE = 0;
     private static final int BLACK = 1;
@@ -104,55 +88,55 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
     }
 
     public static int centerPawnBonus() {
-        return CENTER_PAWN_BONUS.getInt();
+        return Tuning.centerPawnBonus();
     }
 
     public static int passedPawnBonus() {
-        return PASSED_PAWN_BONUS.getInt();
+        return Tuning.passedPawnBonus();
     }
 
     public static int connectedPawnBonus() {
-        return CONNECTED_PAWN_BONUS.getInt();
+        return Tuning.connectedPawnBonus();
     }
 
     public static int pawnIslandPenalty() {
-        return PAWN_ISLAND_PENALTY.getInt();
+        return Tuning.pawnIslandPenalty();
     }
 
     public static int doubledPawnPenalty() {
-        return DOUBLED_PAWN_PENALTY.getInt();
+        return Tuning.doubledPawnPenalty();
     }
 
     public static int isolatedPawnPenalty() {
-        return ISOLATED_PAWN_PENALTY.getInt();
+        return Tuning.isolatedPawnPenalty();
     }
 
     public static int advancedPawnBonus() {
-        return ADVANCED_PAWN_BONUS.getInt();
+        return Tuning.advancedPawnBonus();
     }
 
     public static int blockedPawnPenalty() {
-        return BLOCKED_PAWN_PENALTY.getInt();
+        return Tuning.blockedPawnPenalty();
     }
 
     public static int backwardPawnPenalty() {
-        return BACKWARD_PAWN_PENALTY.getInt();
+        return Tuning.backwardPawnPenalty();
     }
 
     public static int ownKingBlocksPassedPawnPenalty() {
-        return OWN_KING_BLOCKS_PASSED_PAWN_PENALTY.getInt();
+        return Tuning.ownKingBlocksPassedPawnPenalty();
     }
 
     public static int passedPawnFreePathBonusPerRank() {
-        return PASSED_PAWN_FREE_PATH_BONUS_PER_RANK.getInt();
+        return Tuning.passedPawnFreePathBonusPerRank();
     }
 
     public static int rookHalfOpenFileBonus() {
-        return ROOK_HALF_OPEN_FILE_BONUS.getInt();
+        return Tuning.rookHalfOpenFileBonus();
     }
 
     public static int rookOpenFileBonus() {
-        return ROOK_OPEN_FILE_BONUS.getInt();
+        return Tuning.rookOpenFileBonus();
     }
 
     @Override
@@ -242,11 +226,11 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
                 calculateBlockedPawnPenalty(blackPawns, allPieces, false, 256));
 
         PhaseScore whiteBackward = PhaseScore.of(
-                calculateBackwardPawnPenalty(whitePawns, blackPawns, allPieces, true, 0),
-                calculateBackwardPawnPenalty(whitePawns, blackPawns, allPieces, true, 256));
+                calculateBackwardPawnPenalty(whitePawns, blackPawns, allPieces, true, 0, backwardPawnPenalty),
+                calculateBackwardPawnPenalty(whitePawns, blackPawns, allPieces, true, 256, backwardPawnPenalty));
         PhaseScore blackBackward = PhaseScore.of(
-                calculateBackwardPawnPenalty(blackPawns, whitePawns, allPieces, false, 0),
-                calculateBackwardPawnPenalty(blackPawns, whitePawns, allPieces, false, 256));
+                calculateBackwardPawnPenalty(blackPawns, whitePawns, allPieces, false, 0, backwardPawnPenalty),
+                calculateBackwardPawnPenalty(blackPawns, whitePawns, allPieces, false, 256, backwardPawnPenalty));
 
         PhaseScore[] whiteComponents = new PhaseScore[]{
                 whiteCenter,
@@ -540,8 +524,8 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         return scaleByPhase(penalty, phase);
     }
 
-    private static int calculateBackwardPawnPenalty(long pawns, long enemyPawns, long allPieces, boolean isWhite, int phase) {
-        int backwardPenalty = ParameterRegistry.getInt(ParamId.PAWN_STRUCTURE_BACKWARD_PAWN_PENALTY);
+    private static int calculateBackwardPawnPenalty(long pawns, long enemyPawns, long allPieces, boolean isWhite, int phase,
+            int backwardPenalty) {
         int penalty = 0;
         long remaining = pawns;
         while (remaining != 0) {

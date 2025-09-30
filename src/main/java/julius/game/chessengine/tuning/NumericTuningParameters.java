@@ -84,6 +84,7 @@ public final class NumericTuningParameters {
         GLOBAL_PARAMETERS = normalized;
         ParameterSnapshot snapshot = ParameterSnapshot.apply(DEFAULT_SNAPSHOT, normalized);
         ParameterRegistry.setGlobalSnapshot(snapshot);
+        Tuning.refresh();
     }
 
     public static void hotReload(Map<String, Double> parameters) {

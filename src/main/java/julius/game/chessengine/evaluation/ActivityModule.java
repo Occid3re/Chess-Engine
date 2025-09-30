@@ -7,7 +7,7 @@ import julius.game.chessengine.helper.BishopHelper;
 import julius.game.chessengine.helper.KingHelper;
 import julius.game.chessengine.helper.KnightHelper;
 import julius.game.chessengine.helper.RookHelper;
-import julius.game.chessengine.tuning.TunableParameter;
+import julius.game.chessengine.tuning.Tuning;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -28,30 +28,6 @@ public final class ActivityModule implements EvaluationModule {
     private static final int ROOK = MoveHelper.pieceTypeToInt(PieceType.ROOK);
     private static final int QUEEN = MoveHelper.pieceTypeToInt(PieceType.QUEEN);
     private static final int KING = MoveHelper.pieceTypeToInt(PieceType.KING);
-
-    private static final TunableParameter MIDGAME_KNIGHT_MOBILITY = TunableParameter.of("activity.midgameMobilityKnight", 2);
-    private static final TunableParameter MIDGAME_BISHOP_MOBILITY = TunableParameter.of("activity.midgameMobilityBishop", 4);
-    private static final TunableParameter MIDGAME_ROOK_MOBILITY = TunableParameter.of("activity.midgameMobilityRook", 2);
-    private static final TunableParameter MIDGAME_QUEEN_MOBILITY = TunableParameter.of("activity.midgameMobilityQueen", 1);
-    private static final TunableParameter MIDGAME_KING_MOBILITY = TunableParameter.of("activity.midgameMobilityKing", 0);
-
-    private static final TunableParameter ENDGAME_KNIGHT_MOBILITY = TunableParameter.of("activity.endgameMobilityKnight", 2);
-    private static final TunableParameter ENDGAME_BISHOP_MOBILITY = TunableParameter.of("activity.endgameMobilityBishop", 4);
-    private static final TunableParameter ENDGAME_ROOK_MOBILITY = TunableParameter.of("activity.endgameMobilityRook", 2);
-    private static final TunableParameter ENDGAME_QUEEN_MOBILITY = TunableParameter.of("activity.endgameMobilityQueen", 1);
-    private static final TunableParameter ENDGAME_KING_MOBILITY = TunableParameter.of("activity.endgameMobilityKing", 2);
-
-    private static final TunableParameter MIDGAME_KNIGHT_CENTER = TunableParameter.of("activity.midgameCenterKnight", 3);
-    private static final TunableParameter MIDGAME_BISHOP_CENTER = TunableParameter.of("activity.midgameCenterBishop", 3);
-    private static final TunableParameter MIDGAME_ROOK_CENTER = TunableParameter.of("activity.midgameCenterRook", 3);
-    private static final TunableParameter MIDGAME_QUEEN_CENTER = TunableParameter.of("activity.midgameCenterQueen", 3);
-    private static final TunableParameter MIDGAME_KING_CENTER = TunableParameter.of("activity.midgameCenterKing", 0);
-
-    private static final TunableParameter ENDGAME_KNIGHT_CENTER = TunableParameter.of("activity.endgameCenterKnight", 3);
-    private static final TunableParameter ENDGAME_BISHOP_CENTER = TunableParameter.of("activity.endgameCenterBishop", 3);
-    private static final TunableParameter ENDGAME_ROOK_CENTER = TunableParameter.of("activity.endgameCenterRook", 3);
-    private static final TunableParameter ENDGAME_QUEEN_CENTER = TunableParameter.of("activity.endgameCenterQueen", 3);
-    private static final TunableParameter ENDGAME_KING_CENTER = TunableParameter.of("activity.endgameCenterKing", 2);
 
     private static final long CENTRAL_SQUARES;
 
@@ -132,29 +108,29 @@ public final class ActivityModule implements EvaluationModule {
         for (int i = 0; i < activities.length; i++) {
             activities[i] = new PieceActivity();
         }
-        midgameMobilityWeights[KNIGHT] = MIDGAME_KNIGHT_MOBILITY.getInt();
-        midgameMobilityWeights[BISHOP] = MIDGAME_BISHOP_MOBILITY.getInt();
-        midgameMobilityWeights[ROOK] = MIDGAME_ROOK_MOBILITY.getInt();
-        midgameMobilityWeights[QUEEN] = MIDGAME_QUEEN_MOBILITY.getInt();
-        midgameMobilityWeights[KING] = MIDGAME_KING_MOBILITY.getInt();
+        midgameMobilityWeights[KNIGHT] = Tuning.activityMidgameKnightMobility();
+        midgameMobilityWeights[BISHOP] = Tuning.activityMidgameBishopMobility();
+        midgameMobilityWeights[ROOK] = Tuning.activityMidgameRookMobility();
+        midgameMobilityWeights[QUEEN] = Tuning.activityMidgameQueenMobility();
+        midgameMobilityWeights[KING] = Tuning.activityMidgameKingMobility();
 
-        endgameMobilityWeights[KNIGHT] = ENDGAME_KNIGHT_MOBILITY.getInt();
-        endgameMobilityWeights[BISHOP] = ENDGAME_BISHOP_MOBILITY.getInt();
-        endgameMobilityWeights[ROOK] = ENDGAME_ROOK_MOBILITY.getInt();
-        endgameMobilityWeights[QUEEN] = ENDGAME_QUEEN_MOBILITY.getInt();
-        endgameMobilityWeights[KING] = ENDGAME_KING_MOBILITY.getInt();
+        endgameMobilityWeights[KNIGHT] = Tuning.activityEndgameKnightMobility();
+        endgameMobilityWeights[BISHOP] = Tuning.activityEndgameBishopMobility();
+        endgameMobilityWeights[ROOK] = Tuning.activityEndgameRookMobility();
+        endgameMobilityWeights[QUEEN] = Tuning.activityEndgameQueenMobility();
+        endgameMobilityWeights[KING] = Tuning.activityEndgameKingMobility();
 
-        midgameCenterWeights[KNIGHT] = MIDGAME_KNIGHT_CENTER.getInt();
-        midgameCenterWeights[BISHOP] = MIDGAME_BISHOP_CENTER.getInt();
-        midgameCenterWeights[ROOK] = MIDGAME_ROOK_CENTER.getInt();
-        midgameCenterWeights[QUEEN] = MIDGAME_QUEEN_CENTER.getInt();
-        midgameCenterWeights[KING] = MIDGAME_KING_CENTER.getInt();
+        midgameCenterWeights[KNIGHT] = Tuning.activityMidgameKnightCenter();
+        midgameCenterWeights[BISHOP] = Tuning.activityMidgameBishopCenter();
+        midgameCenterWeights[ROOK] = Tuning.activityMidgameRookCenter();
+        midgameCenterWeights[QUEEN] = Tuning.activityMidgameQueenCenter();
+        midgameCenterWeights[KING] = Tuning.activityMidgameKingCenter();
 
-        endgameCenterWeights[KNIGHT] = ENDGAME_KNIGHT_CENTER.getInt();
-        endgameCenterWeights[BISHOP] = ENDGAME_BISHOP_CENTER.getInt();
-        endgameCenterWeights[ROOK] = ENDGAME_ROOK_CENTER.getInt();
-        endgameCenterWeights[QUEEN] = ENDGAME_QUEEN_CENTER.getInt();
-        endgameCenterWeights[KING] = ENDGAME_KING_CENTER.getInt();
+        endgameCenterWeights[KNIGHT] = Tuning.activityEndgameKnightCenter();
+        endgameCenterWeights[BISHOP] = Tuning.activityEndgameBishopCenter();
+        endgameCenterWeights[ROOK] = Tuning.activityEndgameRookCenter();
+        endgameCenterWeights[QUEEN] = Tuning.activityEndgameQueenCenter();
+        endgameCenterWeights[KING] = Tuning.activityEndgameKingCenter();
     }
 
     @Override

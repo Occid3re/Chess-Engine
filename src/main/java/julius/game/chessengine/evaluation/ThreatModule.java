@@ -3,7 +3,7 @@ package julius.game.chessengine.evaluation;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.ImmutableBoardView;
 import julius.game.chessengine.figures.PieceType;
-import julius.game.chessengine.tuning.TunableParameter;
+import julius.game.chessengine.tuning.Tuning;
 
 import java.util.Objects;
 
@@ -26,31 +26,20 @@ public final class ThreatModule implements EvaluationModule {
     private static final int QUEEN = MoveHelper.pieceTypeToInt(PieceType.QUEEN);
     private static final int KING = MoveHelper.pieceTypeToInt(PieceType.KING);
 
-    private static final TunableParameter HANGING_PAWN_PENALTY = TunableParameter.of("threat.hangingPawnPenalty", -12);
-    private static final TunableParameter HANGING_KNIGHT_PENALTY = TunableParameter.of("threat.hangingKnightPenalty", -30);
-    private static final TunableParameter HANGING_BISHOP_PENALTY = TunableParameter.of("threat.hangingBishopPenalty", -30);
-    private static final TunableParameter HANGING_ROOK_PENALTY = TunableParameter.of("threat.hangingRookPenalty", -45);
-    private static final TunableParameter HANGING_QUEEN_PENALTY = TunableParameter.of("threat.hangingQueenPenalty", -70);
-
-    private static final TunableParameter PAWN_THREAT_KNIGHT_PENALTY = TunableParameter.of("threat.pawnThreatKnightPenalty", -10);
-    private static final TunableParameter PAWN_THREAT_BISHOP_PENALTY = TunableParameter.of("threat.pawnThreatBishopPenalty", -10);
-    private static final TunableParameter PAWN_THREAT_ROOK_PENALTY = TunableParameter.of("threat.pawnThreatRookPenalty", -18);
-    private static final TunableParameter PAWN_THREAT_QUEEN_PENALTY = TunableParameter.of("threat.pawnThreatQueenPenalty", -25);
-
     private final int[] hangingPenalties = new int[7];
     private final int[] pawnThreatPenalties = new int[7];
 
     public ThreatModule() {
-        hangingPenalties[PAWN] = HANGING_PAWN_PENALTY.getInt();
-        hangingPenalties[KNIGHT] = HANGING_KNIGHT_PENALTY.getInt();
-        hangingPenalties[BISHOP] = HANGING_BISHOP_PENALTY.getInt();
-        hangingPenalties[ROOK] = HANGING_ROOK_PENALTY.getInt();
-        hangingPenalties[QUEEN] = HANGING_QUEEN_PENALTY.getInt();
+        hangingPenalties[PAWN] = Tuning.hangingPawnPenalty();
+        hangingPenalties[KNIGHT] = Tuning.hangingKnightPenalty();
+        hangingPenalties[BISHOP] = Tuning.hangingBishopPenalty();
+        hangingPenalties[ROOK] = Tuning.hangingRookPenalty();
+        hangingPenalties[QUEEN] = Tuning.hangingQueenPenalty();
 
-        pawnThreatPenalties[KNIGHT] = PAWN_THREAT_KNIGHT_PENALTY.getInt();
-        pawnThreatPenalties[BISHOP] = PAWN_THREAT_BISHOP_PENALTY.getInt();
-        pawnThreatPenalties[ROOK] = PAWN_THREAT_ROOK_PENALTY.getInt();
-        pawnThreatPenalties[QUEEN] = PAWN_THREAT_QUEEN_PENALTY.getInt();
+        pawnThreatPenalties[KNIGHT] = Tuning.pawnThreatKnightPenalty();
+        pawnThreatPenalties[BISHOP] = Tuning.pawnThreatBishopPenalty();
+        pawnThreatPenalties[ROOK] = Tuning.pawnThreatRookPenalty();
+        pawnThreatPenalties[QUEEN] = Tuning.pawnThreatQueenPenalty();
     }
 
     private int midgameScoreCache;
