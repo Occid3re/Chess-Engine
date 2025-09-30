@@ -11,6 +11,7 @@ public final class TunableParameter {
     private final double defaultValue;
     private final Double minValue;
     private final Double maxValue;
+    private final int id;
 
     private TunableParameter(String key, double defaultValue, Double minValue, Double maxValue) {
         if (key == null || key.isBlank()) {
@@ -20,7 +21,7 @@ public final class TunableParameter {
         this.defaultValue = defaultValue;
         this.minValue = minValue;
         this.maxValue = maxValue;
-        NumericTuningParameters.registerDefault(this.key, defaultValue);
+        this.id = NumericTuningParameters.registerDefault(this.key, defaultValue);
     }
 
     public static TunableParameter of(String key, double defaultValue) {
@@ -35,7 +36,7 @@ public final class TunableParameter {
     }
 
     public double get() {
-        double value = NumericTuningParameters.resolve(key, defaultValue);
+        double value = NumericTuningParameters.resolve(id, defaultValue);
         if (!Double.isFinite(value)) {
             value = defaultValue;
         }
