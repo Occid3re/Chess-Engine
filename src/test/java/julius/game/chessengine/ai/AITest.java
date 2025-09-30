@@ -1,9 +1,8 @@
 package julius.game.chessengine.ai;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
-import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.board.Move;
-import julius.game.chessengine.ai.NodeType;
+import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.tuning.AiTuning;
 import julius.game.chessengine.utils.MoveStack;
 import julius.game.chessengine.utils.Score;
@@ -11,17 +10,25 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import testsupport.TestLoggingExtension;
 
-import java.lang.reflect.Field;
+import julius.game.chessengine.ai.NodeType;
+
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static testsupport.TestUtils.extractTableSize;
+import static testsupport.TestUtils.putDummyEntry;
+import static testsupport.TestUtils.readField;
+import static testsupport.TestUtils.readKillersLength;
+import static testsupport.TestUtils.writeField;
 
 @DisplayName("Comprehensive AI behavioural tests with verbose diagnostics")
+@ExtendWith(TestLoggingExtension.class)
 class AITest {
 
     private static final Logger log = LogManager.getLogger(AITest.class);
@@ -216,60 +223,6 @@ class AITest {
         log.info("Hash snapshot -> initial: {}, post-move: {}, after reset: {}", initialHash, mutatedHash, hashAfterReset);
         assertEquals(initialHash, hashAfterReset,
                 "Engine must restart to the initial position when reset is invoked");
-    }
-
-    // ---------------------------------------------------------------------
-    // Helper utilities with verbose logging
-    // ---------------------------------------------------------------------
-
-    private static long futureDeadline() {
-        return System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-    }
-
-    private static Object readField(Object target, String fieldName) throws Exception {
-        Field field = resolveField(target.getClass(), fieldName);
-        field.setAccessible(true);
-        return field.get(target);
-    }
-
-    private static void writeField(Object target, String fieldName, Object value) throws Exception {
-        Field field = resolveField(target.getClass(), fieldName);
-        field.setAccessible(true);
-        field.set(target, value);
-        log.debug("Field {} on {} updated to {}", fieldName, target.getClass().getSimpleName(), value);
-    }
-
-    private static Field resolveField(Class<?> type, String name) throws NoSuchFieldException {
-        Class<?> current = type;
-        while (current != null) {
-            try {
-                return current.getDeclaredField(name);
-            } catch (NoSuchFieldException ignored) {
-                current = current.getSuperclass();
-            }
-        }
-        throw new NoSuchFieldException(name);
-    }
-
-    private static int readKillersLength(Object heuristics) throws Exception {
-        Field killersField = heuristics.getClass().getDeclaredField("killers");
-        killersField.setAccessible(true);
-        int[][] killers = (int[][]) killersField.get(heuristics);
-        return killers.length;
-    }
-
-    @SuppressWarnings("unchecked")
-    private static void putDummyEntry(AI ai, String field, long key, Object value) throws Exception {
-        Object table = readField(ai, field);
-        assertNotNull(table, field + " should not be null");
-        Method put = table.getClass().getMethod("put", long.class, Object.class, int.class);
-        put.invoke(table, key, value, 1);
-    }
-
-    private static int extractTableSize(AI ai, String field) throws Exception {
-        Object table = readField(ai, field);
-        Method size = table.getClass().getMethod("size");
-        return (int) size.invoke(table);
     }
 
     private static int computeExpectedCapacity(int hashSizeMb, boolean mainTable)
