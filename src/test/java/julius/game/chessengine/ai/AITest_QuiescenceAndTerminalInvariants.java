@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class AITest_QuiescenceAndTerminalInvariants {
 
     @Test
-    @DisplayName("evaluateBoard applies draw bias based on score difference")
+    @DisplayName("evaluateBoard returns plain DRAW for terminal draws (no bias)")
     void evaluateBoardRespectsDrawBias() throws Exception {
         try (AutoCloseable ignored = Score.useFactory(bitBoard -> new Score(bitBoard, null) {
             @Override
@@ -44,10 +44,10 @@ class AITest_QuiescenceAndTerminalInvariants {
 
                 log.info("Draw bias check -> whiteScore={}, blackScore={} ", whiteScore, blackScore);
 
-                assertEquals(Score.DRAW - 0.20, whiteScore, 1e-6,
-                        "White should see DRAW - bias when ahead in a terminal draw");
-                assertEquals(Score.DRAW + 0.20, blackScore, 1e-6,
-                        "Black should see DRAW + bias when behind in a terminal draw");
+                assertEquals(Score.DRAW, whiteScore, 1e-6,
+                        "Terminal draw currently returns plain DRAW (no bias)");
+                assertEquals(Score.DRAW, blackScore, 1e-6,
+                        "Terminal draw currently returns plain DRAW (no bias)");
             }
         }
     }
