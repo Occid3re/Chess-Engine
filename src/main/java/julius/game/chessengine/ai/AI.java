@@ -575,7 +575,7 @@ public class AI {
             boolean firstAtDepth = task.beginIteration(currentDepth);
             prepareIterationState(task, heuristics, currentDepth, firstAtDepth);
 
-            MoveAndScore ms = null;
+            RootSearchResult result = null;
 
             if (lastIterScore != null && currentDepth >= 3) {
                 double window = 50.0;
@@ -588,11 +588,14 @@ public class AI {
                 boolean didFullWindow = false;
 
                 while (!shouldStopCalculating(task.getDeadline())) {
-                    ms = searchRootMoves(simulatorEngine, task, currentDepth, alpha, beta, rng);
-                    if (ms == null) break;
+                    result = searchRootMoves(simulatorEngine, task, currentDepth, alpha, beta, rng);
+                    if (!result.hasCandidate()) break;
+
+                    MoveAndScore candidate = result.bestMove();
+                    if (!result.isCompleted()) break;
 
                     // fail-low
-                    if (ms.score <= alpha) {
+                    if (candidate.score <= alpha) {
                         if (!didFullWindow && retries++ >= 3) {
                             alpha = Double.NEGATIVE_INFINITY;
                             beta = Double.POSITIVE_INFINITY; // retry once with full window
@@ -600,12 +603,12 @@ public class AI {
                             continue;
                         }
                         window *= 2.0;
-                        alpha = ms.score - window;
+                        alpha = candidate.score - window;
                         continue;
                     }
 
                     // fail-high
-                    if (ms.score >= beta) {
+                    if (candidate.score >= beta) {
                         if (!didFullWindow && retries++ >= 3) {
                             alpha = Double.NEGATIVE_INFINITY;
                             beta = Double.POSITIVE_INFINITY; // retry once with full window
@@ -613,7 +616,7 @@ public class AI {
                             continue;
                         }
                         window *= 2.0;
-                        beta = ms.score + window;
+                        beta = candidate.score + window;
                         continue;
                     }
 
@@ -622,17 +625,32 @@ public class AI {
                 }
             }
 
-            if (ms == null) {
-                ms = searchRootMoves(simulatorEngine, task, currentDepth,
+            if (result == null || !result.hasCandidate()) {
+                result = searchRootMoves(simulatorEngine, task, currentDepth,
                         Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, rng);
-                if (ms == null) {
-                    if (heuristics.hasUpdates()) mergeThreadHeuristics(heuristics);
-                    break;
-                }
             }
 
-            lastIterScore = ms.score;
-            task.publishBest(ms, currentDepth, simulatorEngine);
+            if (!result.hasCandidate()) {
+                if (heuristics.hasUpdates()) mergeThreadHeuristics(heuristics);
+                if (!result.isCompleted() && currentDepth == 1) {
+                    // Depth-1 special-case still requires a candidate; none here.
+                }
+                break;
+            }
+
+            MoveAndScore sealed = result.bestMove();
+
+            if (!result.isCompleted()) {
+                if (currentDepth == 1) {
+                    lastIterScore = sealed.score;
+                    task.publishBest(sealed, currentDepth, simulatorEngine);
+                }
+                if (heuristics.hasUpdates()) mergeThreadHeuristics(heuristics);
+                break;
+            }
+
+            lastIterScore = sealed.score;
+            task.publishBest(sealed, currentDepth, simulatorEngine);
 
             if (heuristics.hasUpdates()) mergeThreadHeuristics(heuristics);
             if (task.isStopRequested()) break;
@@ -686,7 +704,7 @@ public class AI {
         return heuristics;
     }
 
-    protected MoveAndScore searchRootMoves(Engine sim, SearchTask task, int depth, double alpha, double beta, SplittableRandom rng) {
+    protected RootSearchResult searchRootMoves(Engine sim, SearchTask task, int depth, double alpha, double beta, SplittableRandom rng) {
         if (searchThreads > 1) {
             return getBestMoveParallel(sim, task, depth, task.getDeadline(), alpha, beta, rng);
         }
@@ -1056,13 +1074,13 @@ public class AI {
         return t != null && t.isStopRequested();
     }
 
-    private MoveAndScore getBestMoveParallel(Engine simulatorEngine,
-                                             SearchTask task,
-                                             int depth,
-                                             long deadline,
-                                             double alpha,
-                                             double beta,
-                                             SplittableRandom rng) {
+    private RootSearchResult getBestMoveParallel(Engine simulatorEngine,
+                                                 SearchTask task,
+                                                 int depth,
+                                                 long deadline,
+                                                 double alpha,
+                                                 double beta,
+                                                 SplittableRandom rng) {
         if (searchPool == null || abortRequested(deadline)) {
             return getBestMove(simulatorEngine, task.isWhiteToMove(), depth, deadline, alpha, beta, rng);
         }
@@ -1070,14 +1088,18 @@ public class AI {
         final boolean isWhitesTurn = task.isWhiteToMove();
         IntArrayList legal = simulatorEngine.getAllLegalMoves();
         IntArrayList orderedMoves = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
-        if (orderedMoves.isEmpty()) return null;
+        if (orderedMoves.isEmpty()) return RootSearchResult.completed(null);
         maybeRotateRootMoves(orderedMoves, rng);
 
         int firstMove = orderedMoves.getInt(0);
         int bestMove;
         double bestScore;
 
-        if (abortRequested(deadline)) return null;
+        boolean aborted = false;
+
+        if (abortRequested(deadline)) {
+            return RootSearchResult.aborted(null);
+        }
 
         simulatorEngine.performMove(firstMove);
         double firstScore;
@@ -1091,7 +1113,7 @@ public class AI {
             firstScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, firstMove, 1, 0);
             if (firstScore == EXIT_FLAG || abortRequested(deadline)) {
                 simulatorEngine.undoLastMove();
-                return null;
+                return RootSearchResult.aborted(null);
             }
         }
         simulatorEngine.undoLastMove();
@@ -1101,10 +1123,16 @@ public class AI {
 
         if (isWhitesTurn) alpha = Math.max(alpha, firstScore);
         else beta = Math.min(beta, firstScore);
-        if (alpha >= beta) return new MoveAndScore(bestMove, bestScore);
+        if (alpha >= beta) {
+            MoveAndScore candidate = createCandidate(bestMove, bestScore);
+            return RootSearchResult.completed(candidate);
+        }
 
         final int fanout = Math.min(ROOT_PARALLEL_LIMIT, orderedMoves.size() - 1);
-        if (fanout <= 0) return new MoveAndScore(bestMove, bestScore);
+        if (fanout <= 0) {
+            MoveAndScore candidate = createCandidate(bestMove, bestScore);
+            return RootSearchResult.completed(candidate);
+        }
 
         final CompletionService<MoveAndScore> ecs = new ExecutorCompletionService<>(searchPool);
         final List<Future<MoveAndScore>> futures = new ArrayList<>(fanout);
@@ -1196,7 +1224,11 @@ public class AI {
         int completed = 0;
         try {
             while (completed < fanout) {
-                if (stopRef.get() || abortRequested(deadline)) break;
+                if (stopRef.get()) break;
+                if (abortRequested(deadline)) {
+                    aborted = true;
+                    break;
+                }
                 Future<MoveAndScore> f = ecs.take();
                 completed++;
                 MoveAndScore res = f.get();
@@ -1214,13 +1246,18 @@ public class AI {
             }
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
+            aborted = true;
         } catch (Exception ex) {
             log.warn("Parallel root YBWC error", ex);
         } finally {
             for (Future<MoveAndScore> f : futures) if (!f.isDone()) f.cancel(true);
         }
 
-        return bestMove != -1 ? new MoveAndScore(bestMove, bestScore) : null;
+        MoveAndScore candidate = bestMove != -1 ? createCandidate(bestMove, bestScore) : null;
+        if (abortRequested(deadline)) {
+            aborted = true;
+        }
+        return aborted ? RootSearchResult.aborted(candidate) : RootSearchResult.completed(candidate);
     }
 
 
@@ -1331,10 +1368,12 @@ public class AI {
     }
 
 
-    private MoveAndScore getBestMove(Engine simulatorEngine, boolean isWhitesTurn, int depth, long deadline,
-                                     double alpha, double beta, SplittableRandom rng) {
+    private RootSearchResult getBestMove(Engine simulatorEngine, boolean isWhitesTurn, int depth, long deadline,
+                                         double alpha, double beta, SplittableRandom rng) {
         int bestMove = -1;
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
+
+        boolean aborted = false;
 
         IntArrayList sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth,
                 simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
@@ -1342,7 +1381,10 @@ public class AI {
 
         for (int idx = 0; idx < sortedMoves.size(); idx++) {
             int moveInt = sortedMoves.getInt(idx);
-            if (abortRequested(deadline)) break;
+            if (abortRequested(deadline)) {
+                aborted = true;
+                break;
+            }
 
             simulatorEngine.performMove(moveInt);
             double score;
@@ -1358,6 +1400,7 @@ public class AI {
                 score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1, 0);
                 if (score == EXIT_FLAG || abortRequested(deadline)) {
                     simulatorEngine.undoLastMove();
+                    aborted = true;
                     break;
                 }
             }
@@ -1371,7 +1414,14 @@ public class AI {
             else beta = Math.min(beta, score);
             if (alpha >= beta) break;
         }
-        return bestMove != -1 ? new MoveAndScore(bestMove, bestScore) : null;
+        MoveAndScore candidate = bestMove != -1 ? createCandidate(bestMove, bestScore) : null;
+        return aborted ? RootSearchResult.aborted(candidate) : RootSearchResult.completed(candidate);
+    }
+
+    private MoveAndScore createCandidate(int move, double score) {
+        if (move == -1) return null;
+        if (!Double.isFinite(score)) return null;
+        return new MoveAndScore(move, score);
     }
 
     /**

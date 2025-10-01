@@ -183,8 +183,8 @@ class AITest_MateThreatDiagnostics {
         }
 
         @Override
-        protected MoveAndScore searchRootMoves(Engine simulatorEngine, SearchTask task, int depth,
-                                               double alpha, double beta, SplittableRandom rng) {
+        protected RootSearchResult searchRootMoves(Engine simulatorEngine, SearchTask task, int depth,
+                                                   double alpha, double beta, SplittableRandom rng) {
             DepthTrace trace = beginDepthTrace(task, depth, alpha, beta);
 
             long deadline = task.getDeadline();
@@ -200,15 +200,17 @@ class AITest_MateThreatDiagnostics {
                 if (ordered.isEmpty()) {
                     trace.addNote("No legal moves available at the root");
                     trace.finish(alpha, beta, null);
-                    return null;
+                    return RootSearchResult.completed(null);
                 }
 
                 double bestScore = isWhite ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
                 int bestMove = -1;
+                boolean aborted = false;
 
                 for (int index = 0; index < ordered.size(); index++) {
                     if (abortRequested(deadline)) {
                         trace.addNote("Abort requested before analysing move index " + index);
+                        aborted = true;
                         break;
                     }
 
@@ -233,6 +235,7 @@ class AITest_MateThreatDiagnostics {
 
                     if (evaluation.exitEarly) {
                         trace.addNote("Search aborted while analysing move " + formatMove(moveInt));
+                        aborted = true;
                         break;
                     }
 
@@ -257,7 +260,7 @@ class AITest_MateThreatDiagnostics {
 
                 MoveAndScore result = bestMove != -1 ? new MoveAndScore(bestMove, bestScore) : null;
                 trace.finish(alpha, beta, result);
-                return result;
+                return aborted ? RootSearchResult.aborted(result) : RootSearchResult.completed(result);
             } catch (IllegalAccessException | InvocationTargetException e) {
                 throw new IllegalStateException("Failed to capture diagnostic data", e);
             }

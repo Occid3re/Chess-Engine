@@ -64,7 +64,7 @@ class AITest_IterativeDeepeningAndWindows {
         }
 
         @Override
-        protected MoveAndScore searchRootMoves(Engine sim, SearchTask task, int depth, double alpha, double beta, SplittableRandom rng) {
+        protected RootSearchResult searchRootMoves(Engine sim, SearchTask task, int depth, double alpha, double beta, SplittableRandom rng) {
             WindowInvocation invocation = new WindowInvocation(depth, alpha, beta);
             invocationsByDepth.computeIfAbsent(depth, d -> new ArrayList<>()).add(invocation);
             log.info("Depth {} invocation -> alpha={}, beta={}", depth, alpha, beta);
@@ -76,7 +76,7 @@ class AITest_IterativeDeepeningAndWindows {
             if (depth >= 3 && invocation.isAspirationWindow() && aspirationFailures < 4) {
                 aspirationFailures++;
                 // Return a score below alpha to simulate fail-low and trigger another iteration.
-                return new MoveAndScore(0, alpha - 25.0);
+                return RootSearchResult.completed(new MoveAndScore(0, alpha - 25.0));
             }
 
             double score;
@@ -85,7 +85,7 @@ class AITest_IterativeDeepeningAndWindows {
             } else {
                 score = Math.min(beta - 1.0, alpha + 1.0);
             }
-            return new MoveAndScore(0, score);
+            return RootSearchResult.completed(new MoveAndScore(0, score));
         }
 
         private record WindowInvocation(int depth, double alpha, double beta) {
