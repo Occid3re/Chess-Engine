@@ -8,6 +8,7 @@ import julius.game.chessengine.tuning.EngineTuningBootstrap;
 import julius.game.chessengine.tuning.EngineTuningLoader;
 import julius.game.chessengine.tuning.EngineTuningSet;
 import julius.game.chessengine.tuning.Tuning;
+import julius.game.chessengine.utils.Score;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestReporter;
@@ -27,6 +28,8 @@ class EvaluationModuleTuningAlignmentTest {
 
     private static final Path SEED_TUNING = Path.of("src", "main", "resources", "tuning", "seed-tunings.yaml");
     private static final String TEST_FEN = "r3k2r/pppb1ppp/2n1bn2/2Pp4/3P4/2N1PN2/PPPB1PPP/R3K2R w KQkq d6 7 12";
+    private static final String BLACK_IN_CHECK_FEN = "4k3/8/8/8/8/8/4R3/4K3 b - - 0 1";
+    private static final String WHITE_IN_CHECK_FEN = "4k3/4r3/8/8/8/8/8/4K3 w - - 0 1";
 
     @Test
     void seedTuningParametersAlignWithYaml(TestReporter reporter) throws IOException {
@@ -104,22 +107,7 @@ class EvaluationModuleTuningAlignmentTest {
 
         EngineTuningBootstrap.reloadDefaults();
 
-        MaterialModule material = new MaterialModule();
-        PawnStructureModule pawnStructure = new PawnStructureModule();
-        material.setPawnChangeListener(pawnStructure);
-        PieceSquareModule pieceSquare = new PieceSquareModule();
-        ActivityModule activity = new ActivityModule();
-        KingSafetyModule kingSafety = new KingSafetyModule();
-        ThreatModule threat = new ThreatModule();
-
-        List<EvaluationModule> modules = List.of(
-                material,
-                pawnStructure,
-                pieceSquare,
-                activity,
-                kingSafety,
-                threat
-        );
+        List<EvaluationModule> modules = createModules();
 
         EvaluationWeights weights = baseline.evaluationWeights();
         EvaluationPipeline pipeline = new EvaluationPipeline(modules, weights);
@@ -162,6 +150,131 @@ class EvaluationModuleTuningAlignmentTest {
         reporter.publishEntry("blend-details",
                 "phase=" + phase + " blendScale=" + blendScale +
                         " expected=" + expectedBlended);
+    }
+
+    @Test
+    void evaluationPipelineAppliesCheckAdjustment(TestReporter reporter) throws IOException {
+        EngineTuningSet set = EngineTuningLoader.load(SEED_TUNING);
+        EngineTuning baseline = set.primary();
+        Assertions.assertThat(baseline).isNotNull();
+
+        EngineTuningBootstrap.reloadDefaults();
+
+        WeightedResult blackPlay = evaluatePosition(baseline, BLACK_IN_CHECK_FEN,
+                GameStateEnum.PLAY, reporter, "black-check-play");
+        WeightedResult blackCheck = evaluatePosition(baseline, BLACK_IN_CHECK_FEN,
+                GameStateEnum.BLACK_IN_CHECK, reporter, "black-check-adjusted");
+
+        assertAggregationMatchesModuleTotals(blackPlay, 0);
+        assertAggregationMatchesModuleTotals(blackCheck, Score.CHECK);
+
+        Assertions.assertThat(blackCheck.weightedMidgame())
+                .isCloseTo(blackPlay.weightedMidgame(), Assertions.offset(1e-6));
+        Assertions.assertThat(blackCheck.weightedEndgame())
+                .isCloseTo(blackPlay.weightedEndgame(), Assertions.offset(1e-6));
+
+        Assertions.assertThat(blackCheck.midgame() - blackPlay.midgame())
+                .isEqualTo(expectedRoundedDifference(blackPlay.weightedMidgame(), Score.CHECK));
+        Assertions.assertThat(blackCheck.endgame() - blackPlay.endgame())
+                .isEqualTo(expectedRoundedDifference(blackPlay.weightedEndgame(), Score.CHECK));
+
+        WeightedResult whitePlay = evaluatePosition(baseline, WHITE_IN_CHECK_FEN,
+                GameStateEnum.PLAY, reporter, "white-check-play");
+        WeightedResult whiteCheck = evaluatePosition(baseline, WHITE_IN_CHECK_FEN,
+                GameStateEnum.WHITE_IN_CHECK, reporter, "white-check-adjusted");
+
+        assertAggregationMatchesModuleTotals(whitePlay, 0);
+        assertAggregationMatchesModuleTotals(whiteCheck, -Score.CHECK);
+
+        Assertions.assertThat(whiteCheck.weightedMidgame())
+                .isCloseTo(whitePlay.weightedMidgame(), Assertions.offset(1e-6));
+        Assertions.assertThat(whiteCheck.weightedEndgame())
+                .isCloseTo(whitePlay.weightedEndgame(), Assertions.offset(1e-6));
+
+        Assertions.assertThat(whiteCheck.midgame() - whitePlay.midgame())
+                .isEqualTo(expectedRoundedDifference(whitePlay.weightedMidgame(), -Score.CHECK));
+        Assertions.assertThat(whiteCheck.endgame() - whitePlay.endgame())
+                .isEqualTo(expectedRoundedDifference(whitePlay.weightedEndgame(), -Score.CHECK));
+    }
+
+    private void assertAggregationMatchesModuleTotals(WeightedResult result, int checkAdjustment) {
+        int expectedMid = (int) Math.round(result.weightedMidgame() + checkAdjustment);
+        int expectedEnd = (int) Math.round(result.weightedEndgame() + checkAdjustment);
+        Assertions.assertThat(result.midgame()).isEqualTo(expectedMid);
+        Assertions.assertThat(result.endgame()).isEqualTo(expectedEnd);
+
+        long numerator = (long) expectedMid * (result.blendScale() - result.phase())
+                + (long) expectedEnd * result.phase();
+        int expectedBlended = (int) (numerator / result.blendScale());
+        Assertions.assertThat(result.blended()).isEqualTo(expectedBlended);
+    }
+
+    private static int expectedRoundedDifference(double base, int adjustment) {
+        int without = (int) Math.round(base);
+        int with = (int) Math.round(base + adjustment);
+        return with - without;
+    }
+
+    private WeightedResult evaluatePosition(EngineTuning baseline, String fen,
+                                            GameStateEnum gameState,
+                                            TestReporter reporter,
+                                            String label) throws IOException {
+        BitBoard board = FEN.translateFENtoBitBoard(fen);
+        EvaluationContext context = EvaluationContext.from(board, gameState);
+        List<EvaluationModule> modules = createModules();
+
+        EvaluationWeights weights = baseline.evaluationWeights();
+        EvaluationPipeline pipeline = new EvaluationPipeline(modules, weights);
+        pipeline.initialize(context);
+
+        int midgame = pipeline.getMidgameScore();
+        int endgame = pipeline.getEndgameScore();
+        int blended = pipeline.getBlendedScore();
+
+        double weightedMid = 0.0;
+        double weightedEnd = 0.0;
+        for (EvaluationModule module : modules) {
+            EvaluationWeights.ModuleWeight weight = weights.weightFor(module.getClass());
+            int rawMid = module.getMidgameScore();
+            int rawEnd = module.getEndgameScore();
+            weightedMid += rawMid * weight.midgame();
+            weightedEnd += rawEnd * weight.endgame();
+            reporter.publishEntry(label + "-module",
+                    module.getClass().getSimpleName() + " rawMid=" + rawMid
+                            + " rawEnd=" + rawEnd + " weightMid=" + weight.midgame()
+                            + " weightEnd=" + weight.endgame());
+        }
+
+        reporter.publishEntry(label + "-totals",
+                "midgame=" + midgame + " endgame=" + endgame + " blended=" + blended
+                        + " weightedMid=" + weightedMid + " weightedEnd=" + weightedEnd);
+
+        int blendScale = baseline.numericParameters().get("evaluation.blendscale").intValue();
+        return new WeightedResult(weightedMid, weightedEnd, midgame, endgame, blended,
+                context.getPhase(), blendScale);
+    }
+
+    private List<EvaluationModule> createModules() {
+        MaterialModule material = new MaterialModule();
+        PawnStructureModule pawnStructure = new PawnStructureModule();
+        material.setPawnChangeListener(pawnStructure);
+        return List.of(
+                material,
+                pawnStructure,
+                new PieceSquareModule(),
+                new ActivityModule(),
+                new KingSafetyModule(),
+                new ThreatModule()
+        );
+    }
+
+    private record WeightedResult(double weightedMidgame,
+                                  double weightedEndgame,
+                                  int midgame,
+                                  int endgame,
+                                  int blended,
+                                  int phase,
+                                  int blendScale) {
     }
 
     private Map<String, PhaseWeight> readModuleWeights() throws IOException {
