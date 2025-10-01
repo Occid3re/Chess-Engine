@@ -1,0 +1,5 @@
+[Event "Test"]
+[Site "Local"]
+[Result "*"]
+
+1. e4 e5 2. Nf3 d6 3. d4 Nd7 4. Nc3 Ngf6 5. Bc4 Be7 *
