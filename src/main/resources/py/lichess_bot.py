@@ -616,27 +616,60 @@ def play_game(client: berserk.Client,
     abort_requested = False
 
     abort_timer = None
+    abort_reason = None  # "initial" when awaiting first move, "reply" awaiting opponent reply
     abort_lock = threading.Lock()
+    abort_start_time = game_start_time
 
     def _cancel_abort_timer():
-        nonlocal abort_timer
+        nonlocal abort_timer, abort_reason
         if abort_timer is not None:
             abort_timer.cancel()
             abort_timer = None
+            abort_reason = None
+
+    def _schedule_abort_timer(reason: str):
+        nonlocal abort_timer, abort_reason, abort_start_time
+        _cancel_abort_timer()
+        abort_reason = reason
+        abort_start_time = time.time()
+        abort_timer = threading.Timer(ABORT_NO_MOVE_AFTER, _abort_inactive_game)
+        abort_timer.daemon = True
+        abort_timer.start()
 
     def _abort_inactive_game():
-        nonlocal abort_requested, abort_timer
+        nonlocal abort_requested, abort_timer, abort_reason
         with abort_lock:
-            if abort_requested or current_move_count > 0:
+            if abort_requested:
                 abort_timer = None
+                abort_reason = None
                 return
+
+            wait_desc = None
+            if abort_reason == "initial":
+                if current_move_count > 0:
+                    abort_timer = None
+                    abort_reason = None
+                    return
+                wait_desc = "for the first move"
+            elif abort_reason == "reply":
+                if current_move_count > 1:
+                    abort_timer = None
+                    abort_reason = None
+                    return
+                wait_desc = "for the opponent's first reply"
+            else:
+                abort_timer = None
+                abort_reason = None
+                return
+
             abort_requested = True
-        elapsed = time.time() - game_start_time
+
+        elapsed = time.time() - abort_start_time
         try:
             client.bots.abort_game(game_id)
             print(
                 f"[info] Aborted inactive game {game_id} after waiting "
-                f"{int(elapsed)}s for the first move"
+                f"{int(elapsed)}s {wait_desc}"
             )
         except (berserk.exceptions.ResponseError, berserk.exceptions.ApiError) as e:
             print(f"[warn] Failed to abort inactive game {game_id}: {e}")
@@ -644,11 +677,10 @@ def play_game(client: berserk.Client,
             print(f"[warn] Unexpected error aborting game {game_id}: {e}")
         finally:
             abort_timer = None
+            abort_reason = None
 
     if ABORT_NO_MOVE_AFTER > 0:
-        abort_timer = threading.Timer(ABORT_NO_MOVE_AFTER, _abort_inactive_game)
-        abort_timer.daemon = True
-        abort_timer.start()
+        _schedule_abort_timer("initial")
 
     try:
         for event in stream:
@@ -671,7 +703,11 @@ def play_game(client: berserk.Client,
                     for mv in moves.split():
                         board.push_uci(mv)
                 current_move_count = len(moves.split()) if moves else 0
-                if current_move_count > 0:
+                if current_move_count == 0:
+                    pass
+                elif current_move_count == 1 and my_color_is_white and abort_reason == "reply":
+                    pass
+                else:
                     _cancel_abort_timer()
 
                 if is_my_turn(board, my_color_is_white) and not board.is_game_over():
@@ -682,7 +718,9 @@ def play_game(client: berserk.Client,
                         move_sent = safe_make_move(client, game_id, result.move.uci())
                         if not move_sent:
                             print("[warn] Move send failed, retrying once")
-                            safe_make_move(client, game_id, result.move.uci())
+                            move_sent = safe_make_move(client, game_id, result.move.uci())
+                        if move_sent and my_color_is_white and current_move_count == 0 and ABORT_NO_MOVE_AFTER > 0:
+                            _schedule_abort_timer("reply")
                     except (asyncio.TimeoutError,
                             chess.engine.EngineError,
                             chess.engine.EngineTerminatedError) as e:
@@ -698,7 +736,9 @@ def play_game(client: berserk.Client,
                             move_sent = safe_make_move(client, game_id, fallback.uci())
                             if not move_sent:
                                 print("[warn] Fallback move send failed, retrying once")
-                                safe_make_move(client, game_id, fallback.uci())
+                                move_sent = safe_make_move(client, game_id, fallback.uci())
+                            if move_sent and my_color_is_white and current_move_count == 0 and ABORT_NO_MOVE_AFTER > 0:
+                                _schedule_abort_timer("reply")
 
             elif t == "gameState":
                 state = event
@@ -708,7 +748,11 @@ def play_game(client: berserk.Client,
                     for mv in moves.split():
                         board.push_uci(mv)
                 current_move_count = len(moves.split()) if moves else 0
-                if current_move_count > 0:
+                if current_move_count == 0:
+                    pass
+                elif current_move_count == 1 and my_color_is_white and abort_reason == "reply":
+                    pass
+                else:
                     _cancel_abort_timer()
 
                 if board.is_game_over() or my_color_is_white is None:
