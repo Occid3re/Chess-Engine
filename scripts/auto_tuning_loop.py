@@ -1,21 +1,47 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Automated tuning loop for Chess-Engine BestMoveSearchTest (improved).
+Automated tuning loop for Chess-Engine BestMoveSearchTest (advanced).
 
-Key features:
-- Robust project-root detection (finds nearest pom.xml) + --project-root override.
-- Atomic writes + timestamped backups for seed-tunings.yaml and a "best" checkpoint file.
-- Temperature-controlled spectral search with configurable schedule and RNG seed.
-- Clear acceptance rule: (successes ↑, failures ↓, errors ↓, duration ↓).
+Highlights
+----------
+- Project-root autodetect (or --project-root override).
+- Atomic writes, timestamped backups, and "best" checkpoint file.
+- Temperature-controlled spectral search + simulated annealing to escape plateaus.
+- Mutate *subset* of parameters per iteration (less thrashing), soft clamping.
+- Reheating after repeated non-improvements.
+- Robust Maven execution:
+    * Pass-through extra args (no PowerShell quoting pain).
+    * Explicit surefire:test goal.
+    * Aggregates Surefire/Failsafe XML across *all* modules recursively.
+    * Dumps stdout/stderr to logs/ on failure.
+- Clear acceptance priority (successes ↑, failures ↓, errors ↓, duration ↓).
 - JSONL logging per iteration; optional Git commit on improvement.
-- Full CLI to tweak tests, Maven, schedule, and limits without editing the file.
+
+Typical usage (PowerShell)
+--------------------------
+python .\scripts\auto_tuning_loop.py `
+  --project-root C:\Development\Chess-Engine `
+  --mvn .\mvnw.cmd `
+  --test julius.game.chessengine.ai.BestMoveSearchTest `
+  --java-release 25 `
+  --preview `
+  --accept-worse `
+  --accept-temp 0.08 `
+  --mut-frac 0.30 `
+  --noimp-reheat 12 `
+  --reheat-factor 1.7 `
+  --extra-maven-args -q
+
+If the test lives in a submodule:
+  --extra-maven-args -pl :engine -am
 """
 
 from __future__ import annotations
 
 import argparse
 import dataclasses
+import glob
 import hashlib
 import json
 import math
@@ -28,9 +54,10 @@ import sys
 import tempfile
 import textwrap
 import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 # ----------------------------
 # Patterns
@@ -92,27 +119,22 @@ class TestResult:
         )
 
     def score_tuple(self) -> Tuple[int, int, int, float]:
-        # For comparison: higher is better for successes; lower is better for failures, errors, duration
+        # higher is better for successes; lower better for failures/errors/duration
         return (self.successes, -self.failures, -self.errors, -self.duration_s)
-
 
 # ----------------------------
 # Utilities
 # ----------------------------
 
 def find_project_root(start: Path) -> Path:
-    """
-    Find the nearest ancestor directory containing a pom.xml.
-    """
+    """Find the nearest ancestor directory containing a pom.xml."""
     cur = start.resolve()
     if cur.is_file():
         cur = cur.parent
     for path in [cur, *cur.parents]:
         if (path / "pom.xml").exists():
             return path
-    # Fallback: given start directory if no pom.xml found
     return start
-
 
 def atomic_write(path: Path, content: str) -> None:
     tmp_fd, tmp_path = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
@@ -127,10 +149,8 @@ def atomic_write(path: Path, content: str) -> None:
         except Exception:
             pass
 
-
 def timestamp() -> str:
     return time.strftime("%Y%m%d-%H%M%S", time.localtime())
-
 
 # ----------------------------
 # Optimizer
@@ -143,6 +163,8 @@ class SeedTuningOptimizer:
         self.tuning_path = tuning_path
         if not tuning_path.exists():
             raise FileNotFoundError(f"Cannot find tuning file at {tuning_path}")
+        # track initial magnitudes for soft clamping
+        self._initial_magnitudes: Dict[str, float] = {}
 
     def backup(self, suffix: str) -> Path:
         dst = self.tuning_path.with_suffix(self.tuning_path.suffix + f".{suffix}.{timestamp()}.bak")
@@ -167,12 +189,10 @@ class SeedTuningOptimizer:
                 continue
 
             # Detect end of block: a non-empty line whose indent is <= base indent
-            # (allows blank lines and comments within the block)
             indent_len = len(line) - len(line.lstrip())
             if stripped and base_indent_len is not None and indent_len <= base_indent_len:
                 break
 
-            # Parse numeric lines inside the block (ignore comments or non-matching)
             match = NUMERIC_VALUE_PATTERN.match(stripped)
             if match:
                 key = match.group("key")
@@ -198,6 +218,12 @@ class SeedTuningOptimizer:
         atomic_write(dst, "\n".join(lines))
         return dst
 
+    @staticmethod
+    def _phase_from_name(name: str) -> float:
+        digest = hashlib.sha256(name.encode("utf-8")).digest()
+        integer = int.from_bytes(digest[:8], byteorder="big", signed=False)
+        return (integer % 1000) / 1000.0 * 2.0 * math.pi
+
     def perturb(
             self,
             lines: List[str],
@@ -208,32 +234,62 @@ class SeedTuningOptimizer:
             temp_min: float,
             temp_decay: float,
             spectral_base: float,
+            mut_frac: float = 0.33,
+            clamp_mult: float = 5.0,
     ) -> List[str]:
         """
-        Return a new list of lines with adjusted numeric parameter values.
+        Adjust a random subset of numeric parameters.
+        - mut_frac: fraction of keys to mutate each iteration (0..1)
+        - clamp_mult: soft clamp around initial |value| to avoid runaway
         """
         updated_lines = list(lines)
 
-        # Temperature schedule
+        # Temperature schedule with decay
         temperature = max(temp_min, temp_start * math.exp(-iteration / max(1e-9, temp_decay)))
         # Slight iteration-dependent spectral drift
         spectral_frequency = spectral_base + 0.07 * math.sin(iteration * 0.173)
 
-        for param in parameters.values():
+        keys = list(parameters.keys())
+        if not keys:
+            return updated_lines
+
+        # choose subset to mutate
+        k = max(1, int(round(len(keys) * max(0.0, min(1.0, mut_frac)))))
+        mutate_keys = set(rng.sample(keys, k))
+
+        for name, param in parameters.items():
             value = param.numeric_value
+
+            # remember initial magnitudes for clamping
+            if name not in self._initial_magnitudes:
+                self._initial_magnitudes[name] = max(abs(value), 1.0)
+            init_mag = self._initial_magnitudes[name]
+
+            if name not in mutate_keys:
+                # leave untouched (preserves param formatting)
+                updated_lines[param.line_index] = f"{param.indent}{param.name}: {param.raw_value}"
+                continue
+
             magnitude = max(abs(value), 1.0)
-            phase = self._phase_from_name(param.name)
+            phase = self._phase_from_name(name)
 
             spectral_component = math.sin(iteration * spectral_frequency + phase)
-            carrier_component = math.cos(iteration * 0.37 - phase / 2.0)
+            carrier_component  = math.cos(iteration * 0.37 - phase / 2.0)
             gaussian_component = rng.gauss(0.0, 0.5)
 
-            # Gentle logistic scaling that avoids exploding for large magnitudes
             logistic_gain = 1.0 / (1.0 + math.exp(-value / (50.0 + magnitude)))
             blend = 0.6 * spectral_component + 0.3 * carrier_component + 0.1 * gaussian_component
             delta = temperature * logistic_gain * blend
 
             candidate = value + delta * magnitude
+
+            # soft clamp: keep within ±(clamp_mult * initial magnitude)
+            lo = -clamp_mult * init_mag
+            hi =  clamp_mult * init_mag
+            if candidate < lo:
+                candidate = lo + 0.1 * (rng.random())
+            elif candidate > hi:
+                candidate = hi - 0.1 * (rng.random())
 
             if param.is_float:
                 formatted = f"{candidate:.{param.decimals}f}"
@@ -244,18 +300,9 @@ class SeedTuningOptimizer:
 
         return updated_lines
 
-    @staticmethod
-    def _phase_from_name(name: str) -> float:
-        digest = hashlib.sha256(name.encode("utf-8")).digest()
-        integer = int.from_bytes(digest[:8], byteorder="big", signed=False)
-        return (integer % 1000) / 1000.0 * 2.0 * math.pi
-
-
 # ----------------------------
 # Maven test runner
 # ----------------------------
-import glob
-import xml.etree.ElementTree as ET
 
 def _aggregate_test_totals_from_reports(project_root: Path) -> Tuple[int, int, int, int]:
     """
@@ -283,74 +330,28 @@ def _aggregate_test_totals_from_reports(project_root: Path) -> Tuple[int, int, i
         )
 
     total = failures = errors = skipped = 0
+
+    def add_suite(suite):
+        nonlocal total, failures, errors, skipped
+        t  = int(suite.attrib.get("tests", 0))
+        fz = int(suite.attrib.get("failures", 0))
+        er = int(suite.attrib.get("errors", 0))
+        # some schemas use "ignored" instead of "skipped"
+        sk = int(suite.attrib.get("skipped", suite.attrib.get("ignored", 0)) or 0)
+        total += t; failures += fz; errors += er; skipped += sk
+
     for f in files:
         try:
             tree = ET.parse(f)
             root = tree.getroot()
-            # Typical surefire/failsafe schema: <testsuite tests="" failures="" errors="" skipped="">
-            def add_suite(suite):
-                nonlocal total, failures, errors, skipped
-                t = int(suite.attrib.get("tests", 0))
-                fz = int(suite.attrib.get("failures", 0))
-                er = int(suite.attrib.get("errors", 0))
-                sk = int(suite.attrib.get("skipped", suite.attrib.get("ignored", 0)) or 0)
-                total += t; failures += fz; errors += er; skipped += sk
-
             if root.tag == "testsuite":
                 add_suite(root)
             else:
                 for suite in root.findall(".//testsuite"):
                     add_suite(suite)
         except Exception:
-            # Ignore partial/malformed files; keep aggregating
             continue
 
-    return total, failures, errors, skipped
-
-def _parse_surefire_summary_from_xml(project_root: Path) -> Tuple[int, int, int, int]:
-    """
-    Fallback: scan target/surefire-reports/TEST-*.xml and sum attributes.
-    Returns (total, failures, errors, skipped).
-    Raises RuntimeError if no XML reports are found.
-    """
-    reports_dir = project_root / "target" / "surefire-reports"
-    pattern = str(reports_dir / "TEST-*.xml")
-    files = glob.glob(pattern)
-    if not files:
-        raise RuntimeError(f"No Surefire XML reports found under {reports_dir}")
-
-    total = failures = errors = skipped = 0
-    for f in files:
-        try:
-            tree = ET.parse(f)
-            root = tree.getroot()
-            # Surefire uses <testsuite tests=".." failures=".." errors=".." skipped="..">
-            if root.tag == "testsuite":
-                t = int(root.attrib.get("tests", 0))
-                fz = int(root.attrib.get("failures", 0))
-                er = int(root.attrib.get("errors", 0))
-                sk = int(root.attrib.get("skipped", 0) or 0)
-                total += t
-                failures += fz
-                errors += er
-                skipped += sk
-            else:
-                # Some formats wrap suites in <testsuites>
-                for suite in root.findall(".//testsuite"):
-                    t = int(suite.attrib.get("tests", 0))
-                    fz = int(suite.attrib.get("failures", 0))
-                    er = int(suite.attrib.get("errors", 0))
-                    sk = int(suite.attrib.get("skipped", 0) or 0)
-                    total += t
-                    failures += fz
-                    errors += er
-                    skipped += sk
-        except Exception as ex:
-            # Ignore malformed files; continue aggregating
-            continue
-
-    if total == 0 and not files:
-        raise RuntimeError(f"Found XML reports but could not parse totals under {reports_dir}")
     return total, failures, errors, skipped
 
 
@@ -373,18 +374,14 @@ def run_best_move_tests(
     arg_line = "--enable-preview" if use_preview else ""
     base_cmd = [
         mvn_bin,
-        # Enforce compiler/preview for JDK 25
         f"-Djava.version={java_release}",
         f"-Dmaven.compiler.source={java_release}",
         f"-Dmaven.compiler.target={java_release}",
         f"-Dmaven.compiler.enablePreview={'true' if use_preview else 'false'}",
-        # Surefire picks up argLine for forked JVM
-        f"-DargLine={arg_line}",
-        # Ensure tests aren’t skipped and summary prints
+        f"-DargLine={arg_line}",          # picked up by surefire forked JVM
         "-DskipTests=false",
         "-Dsurefire.printSummary=true",
         f"-Dtest={test_name}",
-        # Call the plugin goal explicitly (more reliable than bare "test" phase)
         "surefire:test",
         *extra_maven_args,
     ]
@@ -403,18 +400,18 @@ def run_best_move_tests(
     stdout = proc.stdout or ""
     stderr = proc.stderr or ""
 
-    # 1) Try console summary
+    # Prefer console summary when present
     matches = TEST_SUMMARY_PATTERN.findall(stdout) or TEST_SUMMARY_PATTERN.findall(stderr)
     if matches:
         total, failures, errors, skipped = map(int, matches[-1])
         return TestResult(total, failures, errors, skipped, stdout, stderr, dt)
 
-    # 2) Aggregate XMLs across all modules (Surefire/Failsafe)
+    # Aggregate XMLs across modules (Surefire/Failsafe)
     try:
         total, failures, errors, skipped = _aggregate_test_totals_from_reports(project_root)
         return TestResult(total, failures, errors, skipped, stdout, stderr, dt)
     except Exception as ex:
-        # 3) Dump outputs for diagnostics
+        # Dump outputs for diagnostics
         logs_dir = project_root / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
         out_path = logs_dir / f"maven_stdout_{timestamp()}.log"
@@ -431,7 +428,31 @@ def run_best_move_tests(
             f"Full outputs dumped to:\n  {out_path}\n  {err_path}"
         )
 
+# ----------------------------
+# Scoring and acceptance
+# ----------------------------
 
+def score_tuple(res: TestResult) -> Tuple[int, int, int, float]:
+    return (res.successes, -res.failures, -res.errors, -res.duration_s)
+
+def tuple_better(a: Tuple[int, int, int, float], b: Tuple[int, int, int, float]) -> bool:
+    return a > b  # lexicographic
+
+def scalar_score(res: TestResult) -> float:
+    # Smooth scalar for annealing decision
+    return (res.successes * 1.0) - (res.failures * 0.6) - (res.errors * 1.5) - (0.02 * res.duration_s)
+
+def accept_candidate(best: TestResult, cand: TestResult, temp: float, allow_worse: bool, rng: random.Random) -> bool:
+    bt = score_tuple(best)
+    ct = score_tuple(cand)
+    if tuple_better(ct, bt):
+        return True
+    if not allow_worse:
+        return False
+    # Simulated annealing: accept occasionally when worse
+    db = scalar_score(cand) - scalar_score(best)  # negative if worse
+    prob = math.exp(db / max(1e-9, temp))
+    return rng.random() < prob
 
 # ----------------------------
 # Logging
@@ -443,9 +464,8 @@ def log_jsonl(path: Path, record: dict) -> None:
     with path.open("a", encoding="utf-8") as f:
         f.write(line + "\n")
 
-
 # ----------------------------
-# Main loop
+# Main
 # ----------------------------
 
 def main() -> None:
@@ -462,95 +482,42 @@ def main() -> None:
         default=None,
         help="Project root containing pom.xml. If omitted, auto-detected from tuning path upward.",
     )
-    parser.add_argument(
-        "--mvn",
-        type=str,
-        default="mvn",
-        help="Maven executable (default: mvn)",
-    )
-    parser.add_argument(
-        "--test",
-        type=str,
-        default="BestMoveSearchTest",
-        help="JUnit test class or pattern to run (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--java-release",
-        type=int,
-        default=25,
-        help="Java release for source/target (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--preview",
-        action="store_true",
-        default=True,
-        help="Enable Java --enable-preview (default: True)",
-    )
-    parser.add_argument(
-        "--no-preview",
-        dest="preview",
-        action="store_false",
-        help="Disable Java preview features.",
-    )
+    parser.add_argument("--mvn", type=str, default="mvn", help="Maven executable (default: mvn)")
+    parser.add_argument("--test", type=str, default="BestMoveSearchTest", help="JUnit test class/pattern (default: %(default)s)")
+    parser.add_argument("--java-release", type=int, default=25, help="Java release for source/target (default: %(default)s)")
+    parser.add_argument("--preview", action="store_true", default=True, help="Enable Java --enable-preview (default: True)")
+    parser.add_argument("--no-preview", dest="preview", action="store_false", help="Disable Java preview features.")
     parser.add_argument(
         "--extra-maven-args",
         nargs=argparse.REMAINDER,
         default=[],
         help="Extra args passed directly to Maven (everything after this flag).",
     )
-    parser.add_argument(
-        "--max-iters",
-        type=int,
-        default=0,
-        help="Stop after N iterations (0 = infinite until Ctrl+C).",
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=None,
-        help="RNG seed (default: time-based).",
-    )
-    parser.add_argument(
-        "--temp-start",
-        type=float,
-        default=0.35,
-        help="Initial temperature (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--temp-min",
-        type=float,
-        default=0.05,
-        help="Minimum temperature (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--temp-decay",
-        type=float,
-        default=12.0,
-        help="e-folding decay constant for temperature (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--spectral-base",
-        type=float,
-        default=0.61,
-        help="Base spectral frequency for exploration (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--log-jsonl",
-        type=Path,
-        default=Path("logs/auto_tuning_log.jsonl"),
-        help="Path to JSONL log file (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--git-commit",
-        action="store_true",
-        help="If set, commit improved tunings via git with a message per improvement.",
-    )
+
+    parser.add_argument("--max-iters", type=int, default=0, help="Stop after N iterations (0 = infinite until Ctrl+C).")
+    parser.add_argument("--seed", type=int, default=None, help="RNG seed (default: time-based).")
+
+    # Temperature / exploration knobs
+    parser.add_argument("--temp-start", type=float, default=0.35, help="Initial temperature (default: %(default)s)")
+    parser.add_argument("--temp-min",   type=float, default=0.05, help="Minimum temperature (default: %(default)s)")
+    parser.add_argument("--temp-decay", type=float, default=12.0, help="e-folding decay constant (default: %(default)s)")
+    parser.add_argument("--spectral-base", type=float, default=0.61, help="Base spectral frequency (default: %(default)s)")
+
+    # Advanced search controls
+    parser.add_argument("--accept-worse", action="store_true", help="Enable simulated annealing (accept worse occasionally).")
+    parser.add_argument("--accept-temp",  type=float, default=0.08, help="Annealing temperature (default: %(default)s).")
+    parser.add_argument("--mut-frac",     type=float, default=0.33, help="Fraction of parameters to mutate each iter (default: %(default)s).")
+    parser.add_argument("--noimp-reheat", type=int,   default=10,   help="Reheat after N no-improvement iterations (default: %(default)s).")
+    parser.add_argument("--reheat-factor",type=float, default=1.7,  help="Temp multiplier when reheating (default: %(default)s).")
+
+    parser.add_argument("--log-jsonl", type=Path, default=Path("logs/auto_tuning_log.jsonl"), help="Path to JSONL log file.")
+    parser.add_argument("--git-commit", action="store_true", help="Commit improved tunings via git per improvement.")
 
     args = parser.parse_args()
 
-    tuning_path: Path = args.tuning_path
+    tuning_path: Path  = args.tuning_path
     project_root: Path = args.project_root or find_project_root(tuning_path.parent)
-    mvn_bin: str = args.mvn
+    mvn_bin: str       = args.mvn
     extra_args: List[str] = args.extra_maven_args
 
     print(f"Project root: {project_root}")
@@ -586,6 +553,9 @@ def main() -> None:
     print(f"Best checkpoint saved to: {best_checkpoint}")
 
     iteration = 0
+    no_improve = 0
+    temp_boost = 1.0
+
     try:
         while True:
             iteration += 1
@@ -597,15 +567,21 @@ def main() -> None:
 
             # Reload in case of external edits
             current_lines, current_parameters = optimizer.load()
+
+            # Effective temperature (with reheating)
+            eff_temp_start = args.temp_start * temp_boost
+
             candidate_lines = optimizer.perturb(
                 current_lines,
                 current_parameters,
                 iteration,
                 rng,
-                temp_start=args.temp_start,
+                temp_start=eff_temp_start,
                 temp_min=args.temp_min,
                 temp_decay=args.temp_decay,
                 spectral_base=args.spectral_base,
+                mut_frac=args.mut_frac,
+                clamp_mult=5.0,
             )
             optimizer.write(candidate_lines)
 
@@ -621,58 +597,75 @@ def main() -> None:
             except Exception as exc:  # revert on any failure
                 print(f"Test execution failed: {exc}. Reverting changes.")
                 optimizer.write(best_content)
-                # Log failure
                 log_jsonl(
                     args.log_jsonl,
-                    {
-                        "ts": timestamp(),
-                        "iter": iteration,
-                        "event": "test_execution_failed",
-                        "error": str(exc),
-                    },
+                    {"ts": timestamp(), "iter": iteration, "event": "test_execution_failed", "error": str(exc)},
                 )
                 continue
 
             print("Candidate  :", candidate_result.summary())
 
-            improved = candidate_result.score_tuple() > best_result.score_tuple()
+            # Decide to keep (improvement or annealed acceptance)
+            keep = accept_candidate(
+                best=best_result,
+                cand=candidate_result,
+                temp=args.accept_temp,
+                allow_worse=args.accept_worse,
+                rng=rng,
+            )
 
-            # Log iteration outcome
+            if keep:
+                kept_because = (
+                    "improvement"
+                    if tuple_better(score_tuple(candidate_result), score_tuple(best_result))
+                    else "annealed-accept"
+                )
+                print(
+                    "Improvement detected. Keeping new tuning parameters."
+                    if kept_because == "improvement"
+                    else "Accepted worse candidate via annealing. Keeping new tuning parameters."
+                )
+                best_content = list(candidate_lines)
+                best_result = candidate_result
+                best_checkpoint = optimizer.checkpoint_best(best_content)
+                print(f"Updated best checkpoint: {best_checkpoint}")
+                no_improve = 0
+
+                if args.git_commit:
+                    try:
+                        msg = (
+                            f"Auto-tune: {best_result.successes} ok, "
+                            f"{best_result.failures} fail, {best_result.errors} err "
+                            f"({args.test}, iter {iteration}, {kept_because})"
+                        )
+                        subprocess.run(["git", "add", str(tuning_path)], cwd=str(project_root), check=False)
+                        subprocess.run(["git", "commit", "-m", msg], cwd=str(project_root), check=False)
+                    except Exception as git_exc:
+                        print(f"(Non-fatal) Git commit failed: {git_exc}")
+
+            else:
+                print("No improvement. Reverting to previous best parameters.")
+                optimizer.write(best_content)
+                no_improve += 1
+                if args.noimp_reheat and (no_improve % args.noimp_reheat == 0):
+                    temp_boost *= args.reheat_factor
+                    print(f"(Plateau) Reheating: temp_start ×= {args.reheat_factor:.2f} -> {args.temp_start * temp_boost:.4f}")
+
+            # Log iteration
             log_jsonl(
                 args.log_jsonl,
                 {
                     "ts": timestamp(),
                     "iter": iteration,
                     "seed": args.seed,
-                    "temperature": max(args.temp_min, args.temp_start * math.exp(-iteration / max(1e-9, args.temp_decay))),
+                    "temp_start_effective": eff_temp_start,
+                    "mut_frac": args.mut_frac,
                     "candidate": dataclasses.asdict(candidate_result),
                     "best": dataclasses.asdict(best_result),
-                    "improved": improved,
+                    "accepted": keep,
+                    "no_improve": no_improve,
                 },
             )
-
-            if improved:
-                print("Improvement detected. Keeping new tuning parameters.")
-                best_content = list(candidate_lines)
-                best_result = candidate_result
-                best_checkpoint = optimizer.checkpoint_best(best_content)
-                print(f"Updated best checkpoint: {best_checkpoint}")
-
-                if args.git_commit:
-                    try:
-                        # Create a descriptive commit
-                        msg = (
-                            f"Auto-tuning improvement: {best_result.successes} successes, "
-                            f"{best_result.failures} failures, {best_result.errors} errors "
-                            f"({args.test}, iter {iteration})"
-                        )
-                        subprocess.run(["git", "add", str(tuning_path)], cwd=str(project_root), check=False)
-                        subprocess.run(["git", "commit", "-m", msg], cwd=str(project_root), check=False)
-                    except Exception as git_exc:
-                        print(f"(Non-fatal) Git commit failed: {git_exc}")
-            else:
-                print("No improvement. Reverting to previous best parameters.")
-                optimizer.write(best_content)
 
     except KeyboardInterrupt:
         print("\nStopping optimization loop by user request.")
@@ -682,10 +675,9 @@ def main() -> None:
         print("Final best :", best_result.summary())
         print("Done.")
 
-
 if __name__ == "__main__":
     try:
         main()
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         print(f"Fatal error: {err}", file=sys.stderr)
         sys.exit(1)
