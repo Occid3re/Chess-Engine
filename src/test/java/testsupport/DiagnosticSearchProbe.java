@@ -36,16 +36,23 @@ import java.util.stream.Collectors;
  */
 public final class DiagnosticSearchProbe extends AI {
 
+    private static final double MATE_SCORE_THRESHOLD = Score.CHECKMATE - 1000;
+
     private final Method sortMovesMethod;
     private final Method maybeRotateRootMovesMethod;
     private final Method abortRequestedMethod;
     private final Method alphaBetaMethod;
     private final Method evaluateStaticPositionMethod;
     private final Method isBetterScoreMethod;
+    private final Method taskDeadlineAccessor;
+    private final Method taskIsWhiteAccessor;
+    private final java.lang.reflect.Constructor<MoveAndScore> moveAndScoreConstructor;
     private final Field nodesVisitedField;
     private final Field nullMoveCountField;
     private final Field transpositionTableField;
     private final Field calculatedLineField;
+    private final Field moveField;
+    private final Field scoreField;
     private final Map<Integer, AtomicInteger> depthAttemptCounter = new ConcurrentHashMap<>();
     private final List<DepthTrace> depthTraces = Collections.synchronizedList(new ArrayList<>());
 
@@ -85,6 +92,21 @@ public final class DiagnosticSearchProbe extends AI {
 
             calculatedLineField = AI.class.getDeclaredField("calculatedLine");
             calculatedLineField.setAccessible(true);
+
+            taskDeadlineAccessor = SearchTask.class.getDeclaredMethod("getDeadline");
+            taskDeadlineAccessor.setAccessible(true);
+
+            taskIsWhiteAccessor = SearchTask.class.getDeclaredMethod("isWhiteToMove");
+            taskIsWhiteAccessor.setAccessible(true);
+
+            moveAndScoreConstructor = MoveAndScore.class.getDeclaredConstructor(int.class, double.class);
+            moveAndScoreConstructor.setAccessible(true);
+
+            moveField = MoveAndScore.class.getDeclaredField("move");
+            moveField.setAccessible(true);
+
+            scoreField = MoveAndScore.class.getDeclaredField("score");
+            scoreField.setAccessible(true);
         } catch (NoSuchMethodException | NoSuchFieldException e) {
             throw new IllegalStateException("Unable to bootstrap DiagnosticSearchProbe instrumentation", e);
         }
@@ -117,8 +139,8 @@ public final class DiagnosticSearchProbe extends AI {
                                            double alpha, double beta, SplittableRandom rng) {
         DepthTrace trace = beginDepthTrace(task, depth, alpha, beta);
 
-        long deadline = task.getDeadline();
-        boolean isWhite = task.isWhiteToMove();
+        long deadline = taskDeadline(task);
+        boolean isWhite = taskIsWhiteToMove(task);
 
         try {
             IntArrayList legal = simulatorEngine.getAllLegalMoves();
@@ -167,7 +189,7 @@ public final class DiagnosticSearchProbe extends AI {
 
                 if (evaluation.hasScore() && (boolean) isBetterScoreMethod.invoke(this, isWhite, evaluation.score, bestScore)) {
                     bestScore = evaluation.score;
-                    best = new MoveAndScore(moveInt, evaluation.score);
+                    best = constructMoveAndScore(moveInt, evaluation.score);
                 }
 
                 if (evaluation.hasScore()) {
@@ -195,9 +217,25 @@ public final class DiagnosticSearchProbe extends AI {
         int attempt = depthAttemptCounter
                 .computeIfAbsent(depth, d -> new AtomicInteger())
                 .incrementAndGet();
-        DepthTrace trace = new DepthTrace(depth, attempt, task.isWhiteToMove(), alpha, beta);
+        DepthTrace trace = new DepthTrace(depth, attempt, taskIsWhiteToMove(task), alpha, beta);
         depthTraces.add(trace);
         return trace;
+    }
+
+    private long taskDeadline(SearchTask task) {
+        try {
+            return (long) taskDeadlineAccessor.invoke(task);
+        } catch (IllegalAccessException | InvocationTargetException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private boolean taskIsWhiteToMove(SearchTask task) {
+        try {
+            return (boolean) taskIsWhiteAccessor.invoke(task);
+        } catch (IllegalAccessException | InvocationTargetException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private boolean abortRequested(long deadline) {
@@ -320,8 +358,8 @@ public final class DiagnosticSearchProbe extends AI {
         if (result == null) {
             sb.append("<no move found>");
         } else {
-            sb.append(formatMove(result.move)).append(" (score=")
-                    .append(String.format(Locale.ROOT, "%.2f", result.score)).append(')');
+            sb.append(formatMove(moveValue(result))).append(" (score=")
+                    .append(String.format(Locale.ROOT, "%.2f", scoreValue(result))).append(')');
         }
         sb.append(System.lineSeparator());
 
@@ -331,7 +369,7 @@ public final class DiagnosticSearchProbe extends AI {
             sb.append("<empty>");
         } else {
             String pvString = pv.stream()
-                    .map(ms -> formatMove(ms.move))
+                    .map(ms -> formatMove(moveValue(ms)))
                     .collect(Collectors.joining(" → "));
             sb.append(pvString);
         }
@@ -488,8 +526,8 @@ public final class DiagnosticSearchProbe extends AI {
             }
 
             sb.append("   result → best=")
-                    .append(finalBest != null ? formatMove(finalBest.move) + String.format(Locale.ROOT,
-                            " (%.2f)", finalBest.score) : "<none>")
+                    .append(finalBest != null ? formatMove(moveValue(finalBest)) + String.format(Locale.ROOT,
+                            " (%.2f)", scoreValue(finalBest)) : "<none>")
                     .append(", α=").append(String.format(Locale.ROOT, "%.2f", finalAlpha))
                     .append(", β=").append(String.format(Locale.ROOT, "%.2f", finalBeta));
             if (betaCutoff) {
@@ -498,11 +536,11 @@ public final class DiagnosticSearchProbe extends AI {
             return sb.toString();
         }
 
-        int depth() {
+        public int depth() {
             return depth;
         }
 
-        int attempt() {
+        public int attempt() {
             return attempt;
         }
     }
@@ -555,13 +593,37 @@ public final class DiagnosticSearchProbe extends AI {
         }
 
         private String formatScore(double score) {
-            if (score >= Score.CHECKMATE_THRESHOLD) {
+            if (score >= MATE_SCORE_THRESHOLD) {
                 return String.format(Locale.ROOT, "mate %+d", (int) (Score.CHECKMATE - score));
             }
-            if (score <= -Score.CHECKMATE_THRESHOLD) {
+            if (score <= -MATE_SCORE_THRESHOLD) {
                 return String.format(Locale.ROOT, "mate -%d", (int) (Score.CHECKMATE + score));
             }
             return String.format(Locale.ROOT, "%+.2f", score);
+        }
+    }
+
+    private MoveAndScore constructMoveAndScore(int moveInt, double score) {
+        try {
+            return moveAndScoreConstructor.newInstance(moveInt, score);
+        } catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private int moveValue(MoveAndScore moveAndScore) {
+        try {
+            return moveField.getInt(moveAndScore);
+        } catch (IllegalAccessException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private double scoreValue(MoveAndScore moveAndScore) {
+        try {
+            return scoreField.getDouble(moveAndScore);
+        } catch (IllegalAccessException e) {
+            throw new IllegalStateException(e);
         }
     }
 }
