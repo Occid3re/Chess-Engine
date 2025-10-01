@@ -89,6 +89,9 @@ NUMERIC_VALUE_PATTERN = re.compile(
     r"(?P<key>[A-Za-z0-9_.]+):\s*(?P<value>-?\d+(?:\.\d+)?)\s*$"
 )
 
+BMSTAT_PATTERN = re.compile(r"\[BMSTAT\]\s*(\{.*\})")
+BMSUM_PATTERN  = re.compile(r"\[BMSUM\]\s*(\{.*\})")
+
 # ----------------------------
 # Data classes
 # ----------------------------
@@ -124,21 +127,48 @@ class TestResult:
     stdout: str
     stderr: str
     duration_s: float
+    metrics: Dict[str, float] = dataclasses.field(default_factory=dict)
+    decision_stats: List[Dict] = dataclasses.field(default_factory=list)
 
     @property
     def successes(self) -> int:
         return self.total - self.failures - self.errors
 
     def summary(self) -> str:
-        return (
+        base = (
             f"Tests run: {self.total}, successes: {self.successes}, "
             f"failures: {self.failures}, errors: {self.errors}, skipped: {self.skipped}, "
             f"duration: {self.duration_s:.2f}s"
         )
+        extras: List[str] = []
+        avg_cp_loss = self.metrics.get("avgCpLoss") if self.metrics else None
+        if avg_cp_loss is not None:
+            extras.append(f"avgCpLoss: {avg_cp_loss:.2f} cp")
+        top1_rate = self.metrics.get("top1Rate") if self.metrics else None
+        if top1_rate is not None:
+            extras.append(f"top1Rate: {top1_rate * 100:.1f}%")
+        avg_nodes = self.metrics.get("avgNodes") if self.metrics else None
+        if avg_nodes is not None:
+            extras.append(f"avgNodes: {avg_nodes:.0f}")
+        avg_duration = self.metrics.get("avgDurationMs") if self.metrics else None
+        if avg_duration is not None:
+            extras.append(f"avgDuration: {avg_duration:.1f} ms")
+        if extras:
+            base += " | " + ", ".join(extras)
+        return base
 
-    def score_tuple(self) -> Tuple[int, int, int, float]:
-        # higher is better for successes; lower better for failures/errors/duration
-        return (self.successes, -self.failures, -self.errors, -self.duration_s)
+    def score_tuple(self) -> Tuple[float, float, float, float, float, float]:
+        # higher is better for successes/top1Rate; lower better for failures/errors/cpLoss/duration
+        top1_rate = float(self.metrics.get("top1Rate", 0.0) or 0.0)
+        avg_cp_loss = float(self.metrics.get("avgCpLoss", 0.0) or 0.0)
+        return (
+            float(self.successes),
+            float(-self.failures),
+            float(-self.errors),
+            top1_rate,
+            -avg_cp_loss,
+            -self.duration_s,
+        )
 
 # ----------------------------
 # Utilities
@@ -288,6 +318,21 @@ class SeedTuningOptimizer:
         text = self.tuning_path.read_text(encoding="utf-8")
         lines = text.splitlines()
 
+        numeric_parameters = self._extract_numeric_parameters(lines)
+        evaluation_parameters = self._extract_evaluation_parameters(lines)
+
+        combined: Dict[str, NumericParameter] = {}
+        combined.update(evaluation_parameters)
+        combined.update(numeric_parameters)
+
+        if not combined:
+            raise ValueError(
+                "No tunable parameters found in seed-tunings.yaml (expected evaluation.modules.* or numericParameters entries)."
+            )
+
+        return lines, combined
+
+    def _extract_numeric_parameters(self, lines: List[str]) -> Dict[str, NumericParameter]:
         numeric_parameters: Dict[str, NumericParameter] = {}
         in_numeric_block = False
         base_indent_len: Optional[int] = None
@@ -316,10 +361,66 @@ class SeedTuningOptimizer:
                     raw_value=value,
                 )
 
-        if not numeric_parameters:
-            raise ValueError("No numeric parameters found under 'numericParameters:' in seed-tunings.yaml")
+        return numeric_parameters
 
-        return lines, numeric_parameters
+    def _extract_evaluation_parameters(self, lines: List[str]) -> Dict[str, NumericParameter]:
+        evaluation_parameters: Dict[str, NumericParameter] = {}
+        in_evaluation = False
+        evaluation_indent: Optional[int] = None
+        in_modules = False
+        modules_indent: Optional[int] = None
+        current_module: Optional[str] = None
+        module_indent: Optional[int] = None
+
+        for idx, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped:
+                continue
+
+            indent_len = len(line) - len(line.lstrip())
+
+            if not in_evaluation:
+                if stripped.startswith("evaluation:"):
+                    in_evaluation = True
+                    evaluation_indent = indent_len
+                continue
+
+            if evaluation_indent is not None and indent_len <= evaluation_indent:
+                in_evaluation = False
+                in_modules = False
+                current_module = None
+                continue
+
+            if not in_modules:
+                if stripped.startswith("modules:"):
+                    in_modules = True
+                    modules_indent = indent_len
+                continue
+
+            if modules_indent is not None and indent_len <= modules_indent:
+                in_modules = False
+                current_module = None
+                continue
+
+            if stripped.endswith(":") and ":" not in stripped[:-1]:
+                current_module = stripped[:-1].strip()
+                module_indent = indent_len
+                continue
+
+            if current_module and module_indent is not None and indent_len > module_indent:
+                match = NUMERIC_VALUE_PATTERN.match(stripped)
+                if match:
+                    key = match.group("key")
+                    value = match.group("value")
+                    full_key = f"evaluation.modules.{current_module}.{key}"
+                    evaluation_parameters[full_key] = NumericParameter(
+                        name=full_key,
+                        line_index=idx,
+                        indent=line[: len(line) - len(line.lstrip())],
+                        raw_value=value,
+                    )
+
+        return evaluation_parameters
 
     def write(self, lines: List[str]) -> None:
         content = "\n".join(lines)
@@ -446,6 +547,29 @@ def _aggregate_test_totals_from_reports(project_root: Path) -> Tuple[int, int, i
     return total, failures, errors, skipped
 
 
+def _parse_best_move_metrics(stdout: str, stderr: str) -> Tuple[List[Dict], Dict]:
+    records: List[Dict] = []
+    summary: Dict = {}
+    for stream in (stdout, stderr):
+        if not stream:
+            continue
+        for line in stream.splitlines():
+            stat_match = BMSTAT_PATTERN.search(line)
+            if stat_match:
+                try:
+                    records.append(json.loads(stat_match.group(1)))
+                except json.JSONDecodeError:
+                    pass
+            sum_match = BMSUM_PATTERN.search(line)
+            if sum_match:
+                try:
+                    summary = json.loads(sum_match.group(1))
+                except json.JSONDecodeError:
+                    pass
+    summary = {k: v for k, v in summary.items() if v is not None}
+    return records, summary
+
+
 def _compose_argline(
         use_preview: bool,
         jvm_gc: str,
@@ -518,15 +642,36 @@ def run_best_move_tests(
 
     stdout = proc.stdout or ""
     stderr = proc.stderr or ""
+    decision_stats, summary_metrics = _parse_best_move_metrics(stdout, stderr)
 
     matches = TEST_SUMMARY_PATTERN.findall(stdout) or TEST_SUMMARY_PATTERN.findall(stderr)
     if matches:
         total, failures, errors, skipped = map(int, matches[-1])
-        return TestResult(total, failures, errors, skipped, stdout, stderr, dt)
+        return TestResult(
+            total,
+            failures,
+            errors,
+            skipped,
+            stdout,
+            stderr,
+            dt,
+            metrics=summary_metrics,
+            decision_stats=decision_stats,
+        )
 
     try:
         total, failures, errors, skipped = _aggregate_test_totals_from_reports(project_root)
-        return TestResult(total, failures, errors, skipped, stdout, stderr, dt)
+        return TestResult(
+            total,
+            failures,
+            errors,
+            skipped,
+            stdout,
+            stderr,
+            dt,
+            metrics=summary_metrics,
+            decision_stats=decision_stats,
+        )
     except Exception as ex:
         logs_dir = project_root / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
@@ -548,14 +693,26 @@ def run_best_move_tests(
 # Scoring and acceptance
 # ----------------------------
 
-def score_tuple(res: TestResult) -> Tuple[int, int, int, float]:
-    return (res.successes, -res.failures, -res.errors, -res.duration_s)
+def score_tuple(res: TestResult) -> Tuple[float, float, float, float, float, float]:
+    return res.score_tuple()
 
-def tuple_better(a: Tuple[int, int, int, float], b: Tuple[int, int, int, float]) -> bool:
+def tuple_better(
+        a: Tuple[float, float, float, float, float, float],
+        b: Tuple[float, float, float, float, float, float],
+) -> bool:
     return a > b
 
 def scalar_score(res: TestResult) -> float:
-    return (res.successes * 1.0) - (res.failures * 0.6) - (res.errors * 1.5) - (0.02 * res.duration_s)
+    avg_cp_loss = float(res.metrics.get("avgCpLoss", 0.0) or 0.0)
+    top1_rate = float(res.metrics.get("top1Rate", 0.0) or 0.0)
+    return (
+        (res.successes * 1.0)
+        - (res.failures * 0.6)
+        - (res.errors * 1.5)
+        - (0.02 * res.duration_s)
+        - (0.005 * avg_cp_loss)
+        + (0.5 * top1_rate)
+    )
 
 def accept_candidate(best: TestResult, cand: TestResult, temp: float, allow_worse: bool, rng: random.Random) -> bool:
     bt = score_tuple(best)
