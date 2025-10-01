@@ -27,8 +27,8 @@ public class ScoreEvaluationTest {
 
     @Test
     void boxedInKingTriggersBackrankPenalty() {
-        BitBoard boxed = FEN.translateFENtoBitBoard("6k1/5ppp/8/8/8/8/8/6K1 w - - 0 1");
-        BitBoard defended = FEN.translateFENtoBitBoard("6k1/4qppp/8/8/8/8/8/6K1 w - - 0 1");
+        BitBoard boxed = FEN.translateFENtoBitBoard("4k3/3p1p2/8/8/8/8/4Q3/6K1 w - - 0 1");
+        BitBoard defended = FEN.translateFENtoBitBoard("4k3/3prp2/8/8/8/8/4Q3/6K1 w - - 0 1");
 
         KingSafetyView boxedView = kingSafetyView(boxed);
         KingSafetyView defendedView = kingSafetyView(defended);
@@ -37,6 +37,8 @@ public class ScoreEvaluationTest {
         int defendedScore = defendedView.blackKing().blend(defended.getPhase());
 
         assertTrue(boxedScore < defendedScore);
+        assertTrue(boxedView.blackBackrankWeakness().blend(boxed.getPhase())
+                < defendedView.blackBackrankWeakness().blend(defended.getPhase()));
     }
 
     @Test
