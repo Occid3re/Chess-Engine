@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Automated tuning loop for Chess-Engine BestMoveSearchTest (advanced).
+Automated tuning loop for Chess-Engine BestMoveSearchTest (advanced, JVM-adaptive).
 
 Highlights
 ----------
@@ -18,6 +18,17 @@ Highlights
 - Clear acceptance priority (successes ↑, failures ↓, errors ↓, duration ↓).
 - JSONL logging per iteration; optional Git commit on improvement.
 
+JVM & Engine parity with lichess_bot
+------------------------------------
+- Auto CPU plan -> searchThreads, lazySmpThreads, rootParallelLimit.
+- ZGC by default (override via --jvm-gc).
+- -XX:ActiveProcessorCount (planned CPUs), -XX:ConcGCThreads, -XX:CICompilerCount.
+- -Xms/-Xmx auto (based on RAM & TT size) or explicit via flags.
+- Pass engine system props into the test JVM:
+    -Dchessengine.searchThreads, -Dchessengine.lazySmpThreads,
+    -Dchessengine.rootParallelLimit, -Dchessengine.tt.mb, -Dchessengine.tuning.file, etc.
+- All of the above are placed into Surefire's forked JVM via -DargLine="...".
+
 Typical usage (PowerShell)
 --------------------------
 python .\scripts\auto_tuning_loop.py `
@@ -31,6 +42,13 @@ python .\scripts\auto_tuning_loop.py `
   --mut-frac 0.30 `
   --noimp-reheat 12 `
   --reheat-factor 1.7 `
+  --jvm-gc zgc `
+  --tt-mb 1024 `
+  --engine-threads auto `
+  --lazy-threads auto `
+  --root-par-limit auto `
+  --xms auto `
+  --xmx auto `
   --extra-maven-args -q
 
 If the test lives in a submodule:
@@ -153,6 +171,102 @@ def timestamp() -> str:
     return time.strftime("%Y%m%d-%H%M%S", time.localtime())
 
 # ----------------------------
+# CPU/RAM planning (parity with lichess_bot philosophy)
+# ----------------------------
+
+def _detect_cpus() -> Tuple[int, int]:
+    logical = os.cpu_count() or 2
+    physical = None
+    try:
+        import psutil  # optional
+        physical = psutil.cpu_count(logical=False) or None
+    except Exception:
+        pass
+    if physical is None:
+        physical = max(1, logical // 2)
+    return logical, physical
+
+def _total_memory_bytes() -> Optional[int]:
+    try:
+        import psutil
+        return int(psutil.virtual_memory().total)
+    except Exception:
+        # Windows fallback via environ (not reliable), else None
+        return None
+
+def _auto_thread_plan(max_concurrent_games: int = 1) -> Dict[str, int]:
+    logical, physical = _detect_cpus()
+    reserve = 2 + max(0, max_concurrent_games - 1)
+    target_total = max(1, min(physical, (logical - reserve)))
+    search_threads = min(3, max(1, target_total // 4))
+    lazy_threads = max(1, target_total - search_threads)
+    root_par_limit = max(24, min(96, search_threads * 12))
+    return {
+        "logical": logical,
+        "physical": physical,
+        "search": search_threads,
+        "lazy": lazy_threads,
+        "root_limit": root_par_limit,
+        "planned_total": max(1, search_threads + lazy_threads),
+    }
+
+def _gc_flag(gc: str) -> str:
+    g = (gc or "").lower()
+    if g == "zgc":
+        return "-XX:+UseZGC"
+    if g == "shenandoah":
+        return "-XX:+UseShenandoahGC"
+    if g == "g1":
+        return "-XX:+UseG1GC"
+    # allow custom flag pass-through
+    return gc
+
+def _derive_jvm_flags(
+        jvm_gc: str,
+        xms: str,
+        xmx: str,
+        apc: int,
+        conc_gc_threads: Optional[int],
+        ci_compiler_count: Optional[int],
+        soft_max: Optional[str] = None,
+) -> List[str]:
+    flags = [
+        _gc_flag(jvm_gc),
+        f"-Xms{xms}",
+        f"-Xmx{xmx}",
+        "-XX:+AlwaysPreTouch",
+        "-XX:FlightRecorderOptions=stackdepth=256",
+        f"-XX:ActiveProcessorCount={apc}",
+    ]
+    if conc_gc_threads is not None:
+        flags.append(f"-XX:ConcGCThreads={conc_gc_threads}")
+    if ci_compiler_count is not None:
+        flags.append(f"-XX:CICompilerCount={ci_compiler_count}")
+    if soft_max:
+        flags.append(f"-XX:SoftMaxHeapSize={soft_max}")
+    # pleasant ZGC tuning
+    if jvm_gc.lower() == "zgc":
+        flags.append("-XX:ZUncommitDelay=60")
+    return flags
+
+def _auto_heap(tt_mb: int) -> Tuple[str, str, Optional[str]]:
+    """
+    Simple heuristic:
+      - base = max(2048MB, 3 * TT)
+      - cap at 75% of RAM if psutil available
+    """
+    base_mb = max(2048, 3 * max(1, tt_mb))
+    ram = _total_memory_bytes()
+    soft = None
+    if ram:
+        ram_mb = ram // (1024 * 1024)
+        hard_cap = max(1024, int(ram_mb * 0.75))
+        base_mb = min(base_mb, hard_cap)
+        # optional soft cap to let ZGC uncommit under memory pressure
+        soft = f"{max(1024, int(ram_mb * 0.5))}m"
+    return f"{base_mb}m", f"{base_mb}m", soft
+
+# ----------------------------
 # Optimizer
 # ----------------------------
 
@@ -163,7 +277,6 @@ class SeedTuningOptimizer:
         self.tuning_path = tuning_path
         if not tuning_path.exists():
             raise FileNotFoundError(f"Cannot find tuning file at {tuning_path}")
-        # track initial magnitudes for soft clamping
         self._initial_magnitudes: Dict[str, float] = {}
 
     def backup(self, suffix: str) -> Path:
@@ -188,7 +301,6 @@ class SeedTuningOptimizer:
                     base_indent_len = len(line) - len(line.lstrip())
                 continue
 
-            # Detect end of block: a non-empty line whose indent is <= base indent
             indent_len = len(line) - len(line.lstrip())
             if stripped and base_indent_len is not None and indent_len <= base_indent_len:
                 break
@@ -237,36 +349,27 @@ class SeedTuningOptimizer:
             mut_frac: float = 0.33,
             clamp_mult: float = 5.0,
     ) -> List[str]:
-        """
-        Adjust a random subset of numeric parameters.
-        - mut_frac: fraction of keys to mutate each iteration (0..1)
-        - clamp_mult: soft clamp around initial |value| to avoid runaway
-        """
+        """Adjust a random subset of numeric parameters."""
         updated_lines = list(lines)
 
-        # Temperature schedule with decay
         temperature = max(temp_min, temp_start * math.exp(-iteration / max(1e-9, temp_decay)))
-        # Slight iteration-dependent spectral drift
         spectral_frequency = spectral_base + 0.07 * math.sin(iteration * 0.173)
 
         keys = list(parameters.keys())
         if not keys:
             return updated_lines
 
-        # choose subset to mutate
         k = max(1, int(round(len(keys) * max(0.0, min(1.0, mut_frac)))))
         mutate_keys = set(rng.sample(keys, k))
 
         for name, param in parameters.items():
             value = param.numeric_value
 
-            # remember initial magnitudes for clamping
             if name not in self._initial_magnitudes:
                 self._initial_magnitudes[name] = max(abs(value), 1.0)
             init_mag = self._initial_magnitudes[name]
 
             if name not in mutate_keys:
-                # leave untouched (preserves param formatting)
                 updated_lines[param.line_index] = f"{param.indent}{param.name}: {param.raw_value}"
                 continue
 
@@ -283,7 +386,6 @@ class SeedTuningOptimizer:
 
             candidate = value + delta * magnitude
 
-            # soft clamp: keep within ±(clamp_mult * initial magnitude)
             lo = -clamp_mult * init_mag
             hi =  clamp_mult * init_mag
             if candidate < lo:
@@ -301,20 +403,10 @@ class SeedTuningOptimizer:
         return updated_lines
 
 # ----------------------------
-# Maven test runner
+# Maven test runner (with JVM/system props parity)
 # ----------------------------
 
 def _aggregate_test_totals_from_reports(project_root: Path) -> Tuple[int, int, int, int]:
-    """
-    Recursively scan *all modules* for Surefire/Failsafe XML reports and aggregate totals.
-
-    Looks for:
-      **/target/surefire-reports/TEST-*.xml
-      **/target/failsafe-reports/TEST-*.xml
-
-    Returns (total, failures, errors, skipped).
-    Raises RuntimeError if no report files are found anywhere.
-    """
     patterns = [
         str(project_root / "**" / "target" / "surefire-reports" / "TEST-*.xml"),
         str(project_root / "**" / "target" / "failsafe-reports" / "TEST-*.xml"),
@@ -336,7 +428,6 @@ def _aggregate_test_totals_from_reports(project_root: Path) -> Tuple[int, int, i
         t  = int(suite.attrib.get("tests", 0))
         fz = int(suite.attrib.get("failures", 0))
         er = int(suite.attrib.get("errors", 0))
-        # some schemas use "ignored" instead of "skipped"
         sk = int(suite.attrib.get("skipped", suite.attrib.get("ignored", 0)) or 0)
         total += t; failures += fz; errors += er; skipped += sk
 
@@ -355,6 +446,26 @@ def _aggregate_test_totals_from_reports(project_root: Path) -> Tuple[int, int, i
     return total, failures, errors, skipped
 
 
+def _compose_argline(
+        use_preview: bool,
+        jvm_gc: str,
+        xms: str,
+        xmx: str,
+        apc: int,
+        conc_gc_threads: Optional[int],
+        ci_compiler_count: Optional[int],
+        soft_max: Optional[str],
+        engine_sysprops: Dict[str, str],
+) -> str:
+    parts: List[str] = []
+    if use_preview:
+        parts.append("--enable-preview")
+    parts.extend(_derive_jvm_flags(jvm_gc, xms, xmx, apc, conc_gc_threads, ci_compiler_count, soft_max))
+    for k, v in engine_sysprops.items():
+        parts.append(f"-D{k}={v}")
+    return " ".join(parts)
+
+
 def run_best_move_tests(
         project_root: Path,
         mvn_bin: str,
@@ -362,23 +473,31 @@ def run_best_move_tests(
         java_release: int,
         use_preview: bool,
         extra_maven_args: List[str],
+        # JVM & engine parity inputs:
+        jvm_gc: str,
+        xms: str,
+        xmx: str,
+        apc: int,
+        conc_gc_threads: Optional[int],
+        ci_compiler_count: Optional[int],
+        soft_max: Optional[str],
+        engine_sysprops: Dict[str, str],
 ) -> TestResult:
     """
     Execute Maven tests and parse results.
-    Strategy:
-      1) Run the Surefire goal explicitly (module-aware via extra args like -pl/-am).
-      2) Parse console summary if present.
-      3) Otherwise aggregate all module XML reports (Surefire/Failsafe).
-      4) If still nothing, dump stdout/stderr to logs/ and raise.
+      - Puts JVM flags + engine system properties into Surefire's fork via -DargLine="...".
     """
-    arg_line = "--enable-preview" if use_preview else ""
+    arg_line_str = _compose_argline(
+        use_preview, jvm_gc, xms, xmx, apc, conc_gc_threads, ci_compiler_count, soft_max, engine_sysprops
+    )
+
     base_cmd = [
         mvn_bin,
         f"-Djava.version={java_release}",
         f"-Dmaven.compiler.source={java_release}",
         f"-Dmaven.compiler.target={java_release}",
         f"-Dmaven.compiler.enablePreview={'true' if use_preview else 'false'}",
-        f"-DargLine={arg_line}",          # picked up by surefire forked JVM
+        f"-DargLine={arg_line_str}",
         "-DskipTests=false",
         "-Dsurefire.printSummary=true",
         f"-Dtest={test_name}",
@@ -400,18 +519,15 @@ def run_best_move_tests(
     stdout = proc.stdout or ""
     stderr = proc.stderr or ""
 
-    # Prefer console summary when present
     matches = TEST_SUMMARY_PATTERN.findall(stdout) or TEST_SUMMARY_PATTERN.findall(stderr)
     if matches:
         total, failures, errors, skipped = map(int, matches[-1])
         return TestResult(total, failures, errors, skipped, stdout, stderr, dt)
 
-    # Aggregate XMLs across modules (Surefire/Failsafe)
     try:
         total, failures, errors, skipped = _aggregate_test_totals_from_reports(project_root)
         return TestResult(total, failures, errors, skipped, stdout, stderr, dt)
     except Exception as ex:
-        # Dump outputs for diagnostics
         logs_dir = project_root / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
         out_path = logs_dir / f"maven_stdout_{timestamp()}.log"
@@ -436,10 +552,9 @@ def score_tuple(res: TestResult) -> Tuple[int, int, int, float]:
     return (res.successes, -res.failures, -res.errors, -res.duration_s)
 
 def tuple_better(a: Tuple[int, int, int, float], b: Tuple[int, int, int, float]) -> bool:
-    return a > b  # lexicographic
+    return a > b
 
 def scalar_score(res: TestResult) -> float:
-    # Smooth scalar for annealing decision
     return (res.successes * 1.0) - (res.failures * 0.6) - (res.errors * 1.5) - (0.02 * res.duration_s)
 
 def accept_candidate(best: TestResult, cand: TestResult, temp: float, allow_worse: bool, rng: random.Random) -> bool:
@@ -449,7 +564,6 @@ def accept_candidate(best: TestResult, cand: TestResult, temp: float, allow_wors
         return True
     if not allow_worse:
         return False
-    # Simulated annealing: accept occasionally when worse
     db = scalar_score(cand) - scalar_score(best)  # negative if worse
     prob = math.exp(db / max(1e-9, temp))
     return rng.random() < prob
@@ -470,48 +584,56 @@ def log_jsonl(path: Path, record: dict) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Automated tuning loop for BestMoveSearchTest.")
-    parser.add_argument(
-        "--tuning-path",
-        type=Path,
-        default=Path("src/main/resources/tuning/seed-tunings.yaml"),
-        help="Path to the YAML file with numericParameters (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--project-root",
-        type=Path,
-        default=None,
-        help="Project root containing pom.xml. If omitted, auto-detected from tuning path upward.",
-    )
-    parser.add_argument("--mvn", type=str, default="mvn", help="Maven executable (default: mvn)")
-    parser.add_argument("--test", type=str, default="BestMoveSearchTest", help="JUnit test class/pattern (default: %(default)s)")
-    parser.add_argument("--java-release", type=int, default=25, help="Java release for source/target (default: %(default)s)")
-    parser.add_argument("--preview", action="store_true", default=True, help="Enable Java --enable-preview (default: True)")
-    parser.add_argument("--no-preview", dest="preview", action="store_false", help="Disable Java preview features.")
-    parser.add_argument(
-        "--extra-maven-args",
-        nargs=argparse.REMAINDER,
-        default=[],
-        help="Extra args passed directly to Maven (everything after this flag).",
-    )
+    parser.add_argument("--tuning-path", type=Path, default=Path("src/main/resources/tuning/seed-tunings.yaml"))
+    parser.add_argument("--project-root", type=Path, default=None)
+    parser.add_argument("--mvn", type=str, default="mvn")
+    parser.add_argument("--test", type=str, default="BestMoveSearchTest")
+    parser.add_argument("--java-release", type=int, default=25)
+    parser.add_argument("--preview", action="store_true", default=True)
+    parser.add_argument("--no-preview", dest="preview", action="store_false")
+    parser.add_argument("--extra-maven-args", nargs=argparse.REMAINDER, default=[])
 
-    parser.add_argument("--max-iters", type=int, default=0, help="Stop after N iterations (0 = infinite until Ctrl+C).")
-    parser.add_argument("--seed", type=int, default=None, help="RNG seed (default: time-based).")
+    parser.add_argument("--max-iters", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=None)
 
-    # Temperature / exploration knobs
-    parser.add_argument("--temp-start", type=float, default=0.35, help="Initial temperature (default: %(default)s)")
-    parser.add_argument("--temp-min",   type=float, default=0.05, help="Minimum temperature (default: %(default)s)")
-    parser.add_argument("--temp-decay", type=float, default=12.0, help="e-folding decay constant (default: %(default)s)")
-    parser.add_argument("--spectral-base", type=float, default=0.61, help="Base spectral frequency (default: %(default)s)")
+    # Exploration knobs
+    parser.add_argument("--temp-start", type=float, default=0.35)
+    parser.add_argument("--temp-min",   type=float, default=0.05)
+    parser.add_argument("--temp-decay", type=float, default=12.0)
+    parser.add_argument("--spectral-base", type=float, default=0.61)
 
-    # Advanced search controls
-    parser.add_argument("--accept-worse", action="store_true", help="Enable simulated annealing (accept worse occasionally).")
-    parser.add_argument("--accept-temp",  type=float, default=0.08, help="Annealing temperature (default: %(default)s).")
-    parser.add_argument("--mut-frac",     type=float, default=0.33, help="Fraction of parameters to mutate each iter (default: %(default)s).")
-    parser.add_argument("--noimp-reheat", type=int,   default=10,   help="Reheat after N no-improvement iterations (default: %(default)s).")
-    parser.add_argument("--reheat-factor",type=float, default=1.7,  help="Temp multiplier when reheating (default: %(default)s).")
+    parser.add_argument("--accept-worse", action="store_true")
+    parser.add_argument("--accept-temp",  type=float, default=0.08)
+    parser.add_argument("--mut-frac",     type=float, default=0.33)
+    parser.add_argument("--noimp-reheat", type=int,   default=10)
+    parser.add_argument("--reheat-factor",type=float, default=1.7)
 
-    parser.add_argument("--log-jsonl", type=Path, default=Path("logs/auto_tuning_log.jsonl"), help="Path to JSONL log file.")
-    parser.add_argument("--git-commit", action="store_true", help="Commit improved tunings via git per improvement.")
+    parser.add_argument("--log-jsonl", type=Path, default=Path("logs/auto_tuning_log.jsonl"))
+    parser.add_argument("--git-commit", action="store_true")
+
+    # -------- JVM & Engine parity options (mirroring lichess_bot) --------
+    parser.add_argument("--jvm-gc", type=str, default=os.environ.get("JAVA_GC", "zgc"),
+                        help='GC: zgc|shenandoah|g1 or a custom JVM flag.')
+    parser.add_argument("--xms", type=str, default=os.environ.get("JAVA_XMS", "auto"),
+                        help='Heap Xms (e.g., 6g, 4096m) or "auto".')
+    parser.add_argument("--xmx", type=str, default=os.environ.get("JAVA_XMX", "auto"),
+                        help='Heap Xmx (e.g., 6g, 4096m) or "auto".')
+    parser.add_argument("--apc", type=str, default="auto",
+                        help='ActiveProcessorCount value or "auto".')
+    parser.add_argument("--concgc", type=str, default="auto",
+                        help='ConcGCThreads value or "auto".')
+    parser.add_argument("--cicomp", type=str, default="auto",
+                        help='CICompilerCount value or "auto".')
+
+    parser.add_argument("--tt-mb", type=int, default=int(os.environ.get("CHESSENGINE_TT_MB", "1024")))
+    parser.add_argument("--engine-threads", type=str, default=os.environ.get("CHESSENGINE_THREADS", "auto"))
+    parser.add_argument("--lazy-threads", type=str, default=os.environ.get("CHESSENGINE_LAZY_THREADS", "auto"))
+    parser.add_argument("--root-par-limit", type=str, default=os.environ.get("CHESSENGINE_ROOT_PAR_LIMIT", "auto"))
+    parser.add_argument("--tuning-file", type=str, default=os.environ.get("CHESSENGINE_TUNING_FILE", ""),
+                        help="Optional absolute path to tuning file passed as -Dchessengine.tuning.file.")
+
+    # A hint for planning: how many games concurrently during tests (kept 1)
+    parser.add_argument("--plan-concurrent", type=int, default=1)
 
     args = parser.parse_args()
 
@@ -531,12 +653,64 @@ def main() -> None:
     rng.seed(args.seed)
     print(f"RNG seed    : {args.seed}")
 
-    # Initial backup & load
+    # ---------- Plan parallelism (parity with lichess_bot)
+    plan = _auto_thread_plan(max_concurrent_games=max(1, args.plan_concurrent))
+    def _resolve_int(opt: str, auto_val: int) -> int:
+        return auto_val if str(opt).strip().lower() == "auto" else int(opt)
+
+    search_threads = _resolve_int(args.engine_threads, plan["search"]) if str(args.engine_threads).isdigit() or args.engine_threads == "auto" else int(args.engine_threads)
+    lazy_threads   = _resolve_int(args.lazy_threads,   plan["lazy"])   if str(args.lazy_threads).isdigit()   or args.lazy_threads   == "auto" else int(args.lazy_threads)
+    root_limit     = _resolve_int(args.root_par_limit, plan["root_limit"]) if str(args.root_par_limit).isdigit() or args.root_par_limit == "auto" else int(args.root_par_limit)
+
+    planned_total  = max(1, search_threads + lazy_threads)
+    apc_val        = _resolve_int(args.apc, plan["planned_total"]) if args.apc == "auto" else int(args.apc)
+
+    # GC helpers (keep conservative; scale modestly)
+    logical, physical = _detect_cpus()
+    conc_gc_threads = None if args.concgc == "auto" else int(args.concgc)
+    ci_comp_count   = None if args.cicomp == "auto" else int(args.cicomp)
+    if args.concgc == "auto":
+        conc_gc_threads = max(1, min(4, apc_val // 2))
+    if args.cicomp == "auto":
+        ci_comp_count = max(1, min(8, apc_val))
+
+    # Heap sizing
+    if args.xms.lower() == "auto" or args.xmx.lower() == "auto":
+        xms_auto, xmx_auto, soft_max = _auto_heap(args.tt_mb)
+        xms = xms_auto if args.xms.lower() == "auto" else args.xms
+        xmx = xmx_auto if args.xmx.lower() == "auto" else args.xmx
+    else:
+        xms = args.xms
+        xmx = args.xmx
+        soft_max = None
+
+    print(
+        f"[plan] CPUs(logical/physical)={logical}/{physical} | "
+        f"search={search_threads} lazy={lazy_threads} rootParallelLimit={root_limit} | "
+        f"APC={apc_val} ConcGCThreads={conc_gc_threads} CICompilerCount={ci_comp_count} | "
+        f"Xms={xms} Xmx={xmx} GC={args.jvm_gc}"
+    )
+
+    # Engine system properties (mirroring the bot defaults)
+    engine_sysprops = {
+        "chessengine.searchThreads": str(search_threads),
+        "chessengine.lazySmpThreads": str(lazy_threads),
+        "chessengine.rootParallelLimit": str(root_limit),
+        "chessengine.tt.mb": str(args.tt_mb),
+        "logging.level.root": "INFO",
+        # Keep UCI verbosity modest in tests
+        "chessengine.uci.info.minIntervalMs": "200",
+        "chessengine.uci.info.maxPvLen": "10",
+    }
+    if args.tuning_file:
+        engine_sysprops["chessengine.tuning.file"] = args.tuning_file
+
+    # ---------- Initial backup & load
     optimizer.backup("initial")
     best_lines, _ = optimizer.load()
     best_content = list(best_lines)
 
-    # Baseline
+    # ---------- Baseline
     print("\nRunning initial test suite…")
     baseline_result = run_best_move_tests(
         project_root=project_root,
@@ -545,6 +719,14 @@ def main() -> None:
         java_release=args.java_release,
         use_preview=args.preview,
         extra_maven_args=extra_args,
+        jvm_gc=args.jvm_gc,
+        xms=xms,
+        xmx=xmx,
+        apc=apc_val,
+        conc_gc_threads=conc_gc_threads,
+        ci_compiler_count=ci_comp_count,
+        soft_max=soft_max,
+        engine_sysprops=engine_sysprops,
     )
     print("Baseline   :", baseline_result.summary())
 
@@ -565,10 +747,7 @@ def main() -> None:
 
             print(f"\n=== Iteration {iteration} ===")
 
-            # Reload in case of external edits
             current_lines, current_parameters = optimizer.load()
-
-            # Effective temperature (with reheating)
             eff_temp_start = args.temp_start * temp_boost
 
             candidate_lines = optimizer.perturb(
@@ -593,8 +772,16 @@ def main() -> None:
                     java_release=args.java_release,
                     use_preview=args.preview,
                     extra_maven_args=extra_args,
+                    jvm_gc=args.jvm_gc,
+                    xms=xms,
+                    xmx=xmx,
+                    apc=apc_val,
+                    conc_gc_threads=conc_gc_threads,
+                    ci_compiler_count=ci_comp_count,
+                    soft_max=soft_max,
+                    engine_sysprops=engine_sysprops,
                 )
-            except Exception as exc:  # revert on any failure
+            except Exception as exc:
                 print(f"Test execution failed: {exc}. Reverting changes.")
                 optimizer.write(best_content)
                 log_jsonl(
@@ -605,7 +792,6 @@ def main() -> None:
 
             print("Candidate  :", candidate_result.summary())
 
-            # Decide to keep (improvement or annealed acceptance)
             keep = accept_candidate(
                 best=best_result,
                 cand=candidate_result,
@@ -615,16 +801,10 @@ def main() -> None:
             )
 
             if keep:
-                kept_because = (
-                    "improvement"
-                    if tuple_better(score_tuple(candidate_result), score_tuple(best_result))
-                    else "annealed-accept"
-                )
-                print(
-                    "Improvement detected. Keeping new tuning parameters."
-                    if kept_because == "improvement"
-                    else "Accepted worse candidate via annealing. Keeping new tuning parameters."
-                )
+                improved = tuple_better(score_tuple(candidate_result), score_tuple(best_result))
+                print("Improvement detected. Keeping new tuning parameters."
+                      if improved else
+                      "Accepted worse candidate via annealing. Keeping new tuning parameters.")
                 best_content = list(candidate_lines)
                 best_result = candidate_result
                 best_checkpoint = optimizer.checkpoint_best(best_content)
@@ -636,22 +816,21 @@ def main() -> None:
                         msg = (
                             f"Auto-tune: {best_result.successes} ok, "
                             f"{best_result.failures} fail, {best_result.errors} err "
-                            f"({args.test}, iter {iteration}, {kept_because})"
+                            f"({args.test}, iter {iteration}, {'improvement' if improved else 'annealed'})"
                         )
                         subprocess.run(["git", "add", str(tuning_path)], cwd=str(project_root), check=False)
                         subprocess.run(["git", "commit", "-m", msg], cwd=str(project_root), check=False)
                     except Exception as git_exc:
                         print(f"(Non-fatal) Git commit failed: {git_exc}")
-
             else:
                 print("No improvement. Reverting to previous best parameters.")
                 optimizer.write(best_content)
                 no_improve += 1
                 if args.noimp_reheat and (no_improve % args.noimp_reheat == 0):
                     temp_boost *= args.reheat_factor
-                    print(f"(Plateau) Reheating: temp_start ×= {args.reheat_factor:.2f} -> {args.temp_start * temp_boost:.4f}")
+                    print(f"(Plateau) Reheating: temp_start ×= {args.reheat_factor:.2f} "
+                          f"-> {args.temp_start * temp_boost:.4f}")
 
-            # Log iteration
             log_jsonl(
                 args.log_jsonl,
                 {
@@ -670,7 +849,6 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\nStopping optimization loop by user request.")
     finally:
-        # Ensure we end with the best content in place
         optimizer.write(best_content)
         print("Final best :", best_result.summary())
         print("Done.")
