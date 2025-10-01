@@ -617,6 +617,7 @@ def play_game(client: berserk.Client,
 
     abort_timer = None
     abort_reason = None  # "initial" when awaiting first move, "reply" awaiting opponent reply
+    abort_timer_generation = 0
     abort_lock = threading.Lock()
     abort_start_time = game_start_time
 
@@ -628,30 +629,39 @@ def play_game(client: berserk.Client,
             abort_reason = None
 
     def _schedule_abort_timer(reason: str):
-        nonlocal abort_timer, abort_reason, abort_start_time
+        nonlocal abort_timer, abort_reason, abort_start_time, abort_timer_generation
+        abort_timer_generation += 1
+        generation = abort_timer_generation
         _cancel_abort_timer()
         abort_reason = reason
         abort_start_time = time.time()
-        abort_timer = threading.Timer(ABORT_NO_MOVE_AFTER, _abort_inactive_game)
+        abort_timer = threading.Timer(
+            ABORT_NO_MOVE_AFTER,
+            _abort_inactive_game,
+            args=(generation, reason),
+        )
         abort_timer.daemon = True
         abort_timer.start()
 
-    def _abort_inactive_game():
-        nonlocal abort_requested, abort_timer, abort_reason
+    def _abort_inactive_game(generation: int, timer_reason: str):
+        nonlocal abort_requested, abort_timer, abort_reason, abort_timer_generation
         with abort_lock:
+            if generation != abort_timer_generation or abort_reason != timer_reason:
+                return
+
             if abort_requested:
                 abort_timer = None
                 abort_reason = None
                 return
 
             wait_desc = None
-            if abort_reason == "initial":
+            if timer_reason == "initial":
                 if current_move_count > 0:
                     abort_timer = None
                     abort_reason = None
                     return
                 wait_desc = "for the first move"
-            elif abort_reason == "reply":
+            elif timer_reason == "reply":
                 if current_move_count > 1:
                     abort_timer = None
                     abort_reason = None
