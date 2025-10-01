@@ -101,6 +101,7 @@ class NumericParameter:
     name: str
     line_index: int
     indent: str
+    yaml_key: str
     raw_value: str
 
     @property
@@ -358,6 +359,7 @@ class SeedTuningOptimizer:
                     name=key,
                     line_index=idx,
                     indent=line[: len(line) - len(line.lstrip())],
+                    yaml_key=key,
                     raw_value=value,
                 )
 
@@ -417,6 +419,7 @@ class SeedTuningOptimizer:
                         name=full_key,
                         line_index=idx,
                         indent=line[: len(line) - len(line.lstrip())],
+                        yaml_key=key,
                         raw_value=value,
                     )
 
@@ -471,7 +474,7 @@ class SeedTuningOptimizer:
             init_mag = self._initial_magnitudes[name]
 
             if name not in mutate_keys:
-                updated_lines[param.line_index] = f"{param.indent}{param.name}: {param.raw_value}"
+                updated_lines[param.line_index] = f"{param.indent}{param.yaml_key}: {param.raw_value}"
                 continue
 
             magnitude = max(abs(value), 1.0)
@@ -499,7 +502,8 @@ class SeedTuningOptimizer:
             else:
                 formatted = str(int(round(candidate)))
 
-            updated_lines[param.line_index] = f"{param.indent}{param.name}: {formatted}"
+            updated_lines[param.line_index] = f"{param.indent}{param.yaml_key}: {formatted}"
+            param.raw_value = formatted
 
         return updated_lines
 
