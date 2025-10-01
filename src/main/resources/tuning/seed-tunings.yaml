@@ -3,53 +3,53 @@ population:
     evaluation:
       modules:
         materialmodule:
-          midgame: 1.0
+          midgame: 1.1
           endgame: 1.0
         pawnstructuremodule:
           midgame: 1.0
           endgame: 1.0
         piecesquaremodule:
           midgame: 1.0
-          endgame: 1.0
+          endgame: 0.9
         activitymodule:
-          midgame: 1.0
+          midgame: 1.1
           endgame: 1.0
         kingsafetymodule:
           midgame: 1.0
-          endgame: 1.0
+          endgame: 2.5
         threatmodule:
-          midgame: 1.0
+          midgame: 1.1
           endgame: 1.0
     numericParameters:
       evaluation.blendscale: 256
-      material.pawnvalue: 100
+      material.pawnvalue: 98
       material.knightvalue: 320
       material.bishopvalue: 330
-      material.rookvalue: 500
+      material.rookvalue: 505
       material.queenvalue: 900
       material.bishoppairbonus: 40
       pawnstructure.centerpawnbonus: 15
       pawnstructure.passedpawnbonus: 60
-      pawnstructure.connectedpawnbonus: 8
+      pawnstructure.connectedpawnbonus: 9
       pawnstructure.islandpenalty: -5
-      pawnstructure.doubledpawnpenalty: -12
+      pawnstructure.doubledpawnpenalty: -13
       pawnstructure.isolatedpawnpenalty: -10
       pawnstructure.advancedpawnbonus: 8
-      pawnstructure.blockedpawnpenalty: -10
+      pawnstructure.blockedpawnpenalty: -9
       pawnstructure.backwardpawnpenalty: -12
       pawnstructure.ownkingblockspassedpawnpenalty: -150
       pawnstructure.passedpawnfreepathbonusperrank: 12
-      pawnstructure.rookhalfopenfilebonus: 15
-      pawnstructure.rookopenfilebonus: 25
+      pawnstructure.rookhalfopenfilebonus: 17
+      pawnstructure.rookopenfilebonus: 27
       threat.hangingpawnpenalty: -12
       threat.hangingknightpenalty: -30
-      threat.hangingbishoppenalty: -30
-      threat.hangingrookpenalty: -45
-      threat.hangingqueenpenalty: -70
+      threat.hangingbishoppenalty: -33
+      threat.hangingrookpenalty: -48
+      threat.hangingqueenpenalty: -69
       threat.pawnthreatknightpenalty: -10
       threat.pawnthreatbishoppenalty: -10
-      threat.pawnthreatrookpenalty: -18
-      threat.pawnthreatqueenpenalty: -25
+      threat.pawnthreatrookpenalty: -17
+      threat.pawnthreatqueenpenalty: -24
       activity.midgamemobilityknight: 2
       activity.midgamemobilitybishop: 4
       activity.midgamemobilityrook: 2
@@ -71,31 +71,31 @@ population:
       activity.endgamecenterqueen: 3
       activity.endgamecenterking: 2
       piecesquare.developmentphasethreshold: 64
-      piecesquare.queendevelopmentphasethreshold: 80
+      piecesquare.queendevelopmentphasethreshold: 73
       piecesquare.undevelopedminorpenalty: -20
-      piecesquare.earlyqueendevelopmentpenaltyperminor: -15
+      piecesquare.earlyqueendevelopmentpenaltyperminor: -16
       piecesquare.minundevelopedminorsforqueenpenalty: 2
-      piecesquare.startpositionpenalty: -40
-      piecesquare.blendscale: 256
+      piecesquare.startpositionpenalty: -41
+      piecesquare.blendscale: 308
       piecesquare.castlingbonus: 20
       piecesquare.notcastledrookmovepenalty: -10
       kingsafety.missingpawnshieldpenalty: -15
       kingsafety.halfopenfilepenalty: -15
       kingsafety.openfilepenalty: -25
       kingsafety.defenderbonus: 5
-      kingsafety.queenattackedpenalty: -75
-      kingsafety.backrankweaknessmidgamepenalty: -100
-      kingsafety.backrankweaknessendgamepenalty: -50
-      kingsafety.attackweightpawn: 5
+      kingsafety.queenattackedpenalty: -77
+      kingsafety.backrankweaknessmidgamepenalty: -98
+      kingsafety.backrankweaknessendgamepenalty: -43
+      kingsafety.attackweightpawn: 6
       kingsafety.attackweightknight: 10
       kingsafety.attackweightbishop: 10
       kingsafety.attackweightrook: 15
       kingsafety.attackweightqueen: 20
       moveordering.killermovescore: 10000
-      moveordering.promotionbonus: 900
+      moveordering.promotionbonus: 1054
       moveordering.killer0bonus: 50
       moveordering.killer1bonus: 30
-      moveordering.countermovebonus: 400
+      moveordering.countermovebonus: 510
       moveordering.capturemvvmultiplier: 16
-      moveordering.captureseemultiplier: 32
-      moveordering.promotionseemultiplier: 16
+      moveordering.captureseemultiplier: 35
+      moveordering.promotionseemultiplier: 19

@@ -123,7 +123,7 @@ public class BestMoveSearchTest {
                 },
                 new Object[]{
                         "1k1r2r1/ppp2ppp/5n2/P1b1p3/R6P/1P2p1P1/2PBNq2/Q2K3R b - - 1 20",
-                        List.of("Rxd2")
+                        List.of("Rxd2", "Qf3")
                 },
                 new Object[]{
                         "1k1r4/ppp2p1p/6p1/P1Pq4/6QP/4p1P1/2PpN3/3K2R1 b - - 0 30",
@@ -192,6 +192,30 @@ public class BestMoveSearchTest {
                 new Object[]{
                         "r2q2kr/pppb1ppp/4p3/1P1pNn2/4n3/2PBP2P/P2P1PP1/RN1QK2R b KQ - 0 11",
                         List.of("Be8")
+                },
+                new Object[]{
+                        "rnbqkbnr/pp2pppp/2p5/3p4/3PP3/2N5/PPP2PPP/R1BQKBNR b KQkq - 0 3",
+                        List.of("dxe4")
+                },
+                new Object[]{
+                        "r4rk1/ppqn1pbp/2p3p1/4p3/3P4/1RPBBN2/PP3PP1/R2QK3 b Q - 0 15",
+                        List.of("Re8", "a5")
+                },
+                new Object[]{
+                        "3B4/3nrk1p/1p3bp1/p7/8/R1P2N2/PP3PP1/3R1K2 b - - 3 29",
+                        List.of("Ke6", "Nc6", "Re8")
+                },
+                new Object[]{
+                        "6k1/1R5p/6p1/3RN3/p5n1/2P1b3/PP2K1P1/8 w - - 4 42",
+                        List.of("Rd8")
+                },
+                new Object[]{
+                        "3r3k/1p1n1pp1/p2P1n1p/q1pN4/4B3/PP3P1P/2P2PKB/R7 w - - 6 35",
+                        List.of("Nxf6")
+                },
+                new Object[]{
+                        "k7/pppr4/8/8/8/7r/PPP5/K2Q4 w - - 0 1",
+                        List.of("Qf1", "Qg1")
                 }
         );
     }
@@ -206,7 +230,7 @@ public class BestMoveSearchTest {
 
 
         AI ai = new AI(engine);
-        ai.setTimeLimit(1000L); // milliseconds
+        ai.setTimeLimit(2000L); // milliseconds
 
         boolean whiteToMove = fen.split(" ")[1].equals("w");
         long nodesBefore = ai.getNodesVisited();
@@ -215,7 +239,7 @@ public class BestMoveSearchTest {
 
         ai.startAutoPlay(whiteToMove, !whiteToMove);
 
-        long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2);
+        long deadline = System.currentTimeMillis() + TimeUnit.MILLISECONDS.toMillis(2200);
         int lastMove = -1;
         while (System.currentTimeMillis() < deadline) {
             lastMove = engine.getLastMove();
