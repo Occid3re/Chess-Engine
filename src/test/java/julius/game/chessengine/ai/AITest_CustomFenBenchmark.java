@@ -31,13 +31,19 @@ class AITest_CustomFenBenchmark {
                 Arguments.of(
                         "Classical opening baseline",
                         "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-                        4
+                        11
                 ),
                 Arguments.of(
                         "Tactical middlegame pressure",
                         "r2q1rk1/pp2bppp/2n1pn2/3p4/3P4/2NBPN2/PPQ2PPP/R3K2R w KQ - 0 1",
+                        7
+                ),
+                Arguments.of(
+                        "Tactical middlegame pressure",
+                        "rnb1k2r/2bp3p/3qpp1n/P5p1/Q1P3P1/PN6/4BPNP/R4RK1 w - - 1 24",
                         5
                 )
+
         );
     }
 
@@ -58,7 +64,7 @@ class AITest_CustomFenBenchmark {
                 .lazySmpThreads(1)
                 .hashSizeMb(64)
                 .maxDepth(depth)
-                .timeLimitMillis(2500)
+                .timeLimitMillis(25000)
                 .nullMovePruning(true)
                 .build();
 
@@ -67,7 +73,7 @@ class AITest_CustomFenBenchmark {
         try (AutoCloseable ignore = DeterministicAiHelper.withSingleThread(ai)) {
             System.out.printf(Locale.ROOT, "Running benchmark: %s%n", description);
             long start = System.nanoTime();
-            MoveAndScore result = ai.searchBestMoveBlocking(2500);
+            MoveAndScore result = ai.searchBestMoveBlocking(25000);
             Duration wallClock = Duration.ofNanos(System.nanoTime() - start);
 
             assertNotNull(result, "Search should produce a best move");

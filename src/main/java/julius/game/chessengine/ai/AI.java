@@ -9,6 +9,7 @@ import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.tuning.AiTuning;
 import julius.game.chessengine.tuning.MoveOrderingParameters;
+import julius.game.chessengine.tuning.Tuning;
 import julius.game.chessengine.utils.Score;
 import lombok.Getter;
 import lombok.Setter;
@@ -2192,7 +2193,7 @@ public class AI {
             }
 
             // Simple delta/futility-like guard: if even a big swing cannot beat alpha, cut
-            final int BIG_DELTA = 1000; // ~queen swing
+            final double BIG_DELTA = Tuning.queenValue() / 100.0; // ~queen swing in pawns
             if (standPat + BIG_DELTA < alpha) {
                 return alpha;
             }
