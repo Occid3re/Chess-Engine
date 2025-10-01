@@ -212,12 +212,14 @@ public final class KingSafetyModule implements EvaluationModule {
         int from = MoveHelper.deriveFromIndex(move);
         int to = MoveHelper.deriveToIndex(move);
         long moveMask = (1L << from) | (1L << to);
-        if ((moveMask & (state.kingZone | state.shieldMask | state.fileMask)) != 0) {
+        if ((moveMask & (state.kingZone | state.shieldMask | state.fileMask | state.backrankFileMask)) != 0) {
             return true;
         }
         int movedPiece = MoveHelper.derivePieceTypeBits(move);
         if (movedPiece == PAWN) {
-            if (((1L << from) & state.fileMask) != 0 || ((1L << to) & state.fileMask) != 0) {
+            long fromMask = 1L << from;
+            long toMask = 1L << to;
+            if (((fromMask | toMask) & (state.fileMask | state.backrankFileMask)) != 0) {
                 return true;
             }
         }
@@ -227,7 +229,7 @@ public final class KingSafetyModule implements EvaluationModule {
             if (MoveHelper.isEnPassantMove(move)) {
                 captureMask = side == WHITE ? (1L << (to - 8)) : (1L << (to + 8));
             }
-            if ((captureMask & (state.shieldMask | state.fileMask)) != 0) {
+            if ((captureMask & (state.shieldMask | state.fileMask | state.backrankFileMask)) != 0) {
                 return true;
             }
         }
@@ -249,6 +251,12 @@ public final class KingSafetyModule implements EvaluationModule {
         if (state.backrankMask != 0 && ((prevFriendlyAttacks ^ currFriendlyAttacks) & state.backrankMask) != 0) {
             return true;
         }
+        if (state.backrankMask != 0) {
+            boolean moveByEnemy = MoveHelper.isWhitesMove(move) != (side == WHITE);
+            if (moveByEnemy && (movedPiece == ROOK || movedPiece == QUEEN)) {
+                return true;
+            }
+        }
         return false;
     }
 
@@ -265,9 +273,11 @@ public final class KingSafetyModule implements EvaluationModule {
         state.shieldMask = computeShieldMask(kingBits, isWhite);
         state.fileMask = FileMasks[kingSquare & 7];
         state.backrankMask = 0L;
+        state.backrankFileMask = 0L;
         int rank = kingSquare / 8;
         if ((isWhite && rank == 0) || (!isWhite && rank == 7)) {
             state.backrankMask = computeBackrankMask(kingSquare);
+            state.backrankFileMask = computeBackrankFileMask(kingSquare);
         }
 
         long friendlyPawns = isWhite ? board.getWhitePawns() : board.getBlackPawns();
@@ -302,7 +312,7 @@ public final class KingSafetyModule implements EvaluationModule {
         int shieldPenalty = state.missingShield * missingPawnShieldPenalty;
         int attackPenalty = -state.totalAttackWeight;
         int defenderBonus = state.defenderCount * this.defenderBonus;
-        computeBackrankWeaknessPenalty(state, board, isWhite);
+        computeBackrankWeaknessPenalty(state, board, isWhite, enemyAttacks, allPieces);
         int baseMidgame = shieldPenalty + state.filePenalty + attackPenalty + defenderBonus;
         state.midgameKingSafety = baseMidgame + state.backrankWeaknessMidgame;
         state.endgameKingSafety = baseMidgame / 2 + state.backrankWeaknessEndgame;
@@ -323,7 +333,8 @@ public final class KingSafetyModule implements EvaluationModule {
         state.endgameQueenPenalty = queenEnd;
     }
 
-    private void computeBackrankWeaknessPenalty(SideState state, ImmutableBoardView board, boolean isWhite) {
+    private void computeBackrankWeaknessPenalty(SideState state, ImmutableBoardView board, boolean isWhite,
+                                                long enemyAttacks, long occupancy) {
         state.backrankWeaknessMidgame = 0;
         state.backrankWeaknessEndgame = 0;
         if (state.kingSquare < 0) {
@@ -336,13 +347,30 @@ public final class KingSafetyModule implements EvaluationModule {
 
         long kingMask = 1L << state.kingSquare;
         long escapeSquares = computeEscapeSquares(kingMask, isWhite);
-        long occupiedEscape = escapeSquares & board.getAllPieces();
-        if ((escapeSquares & ~occupiedEscape) != 0) {
+        long emptyEscape = escapeSquares & ~occupancy;
+        long safeEscape = emptyEscape & ~enemyAttacks;
+        if (safeEscape != 0) {
             return;
         }
 
         long backrankMask = state.backrankMask;
         if (backrankMask == 0L) {
+            return;
+        }
+
+        long enemySliders = isWhite
+                ? (board.getBlackRooks() | board.getBlackQueens())
+                : (board.getWhiteRooks() | board.getWhiteQueens());
+        if (enemySliders == 0L) {
+            return;
+        }
+
+        long relevantFiles = state.backrankFileMask;
+        if (relevantFiles == 0L) {
+            return;
+        }
+
+        if (!hasEnemySliderPressure(enemySliders, backrankMask, relevantFiles, occupancy)) {
             return;
         }
 
@@ -353,6 +381,34 @@ public final class KingSafetyModule implements EvaluationModule {
 
         state.backrankWeaknessMidgame = backrankWeaknessMidgamePenalty;
         state.backrankWeaknessEndgame = backrankWeaknessEndgamePenalty;
+    }
+
+    private boolean hasEnemySliderPressure(long sliders, long backrankMask, long relevantFiles, long occupancy) {
+        long remaining = sliders;
+        while (remaining != 0) {
+            long slider = remaining & -remaining;
+            remaining ^= slider;
+            int index = Long.numberOfTrailingZeros(slider);
+            long mask = ROOK_HELPER.rookMasks[index];
+            long occMask = occupancy & mask;
+            long attacks = ROOK_HELPER.calculateMovesUsingRookMagic(index, occMask);
+            if ((attacks & backrankMask) != 0) {
+                return true;
+            }
+            long destinations = attacks & ~occupancy & relevantFiles;
+            while (destinations != 0) {
+                long destination = destinations & -destinations;
+                destinations ^= destination;
+                int destIndex = Long.numberOfTrailingZeros(destination);
+                long destMask = ROOK_HELPER.rookMasks[destIndex];
+                long destOccupancy = (occupancy ^ slider) | destination;
+                long destAttacks = ROOK_HELPER.calculateMovesUsingRookMagic(destIndex, destOccupancy & destMask);
+                if ((destAttacks & backrankMask) != 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static long computeEscapeSquares(long kingMask, boolean isWhite) {
@@ -385,6 +441,18 @@ public final class KingSafetyModule implements EvaluationModule {
         }
         if (file < 7) {
             mask |= 1L << (kingSquare + 1);
+        }
+        return mask;
+    }
+
+    private static long computeBackrankFileMask(int kingSquare) {
+        int file = kingSquare & 7;
+        long mask = FileMasks[file];
+        if (file > 0) {
+            mask |= FileMasks[file - 1];
+        }
+        if (file < 7) {
+            mask |= FileMasks[file + 1];
         }
         return mask;
     }
@@ -569,7 +637,9 @@ public final class KingSafetyModule implements EvaluationModule {
                 PhaseScore.of(sideStates[WHITE].midgameKingSafety, sideStates[WHITE].endgameKingSafety),
                 PhaseScore.of(sideStates[BLACK].midgameKingSafety, sideStates[BLACK].endgameKingSafety),
                 PhaseScore.of(sideStates[WHITE].midgameQueenPenalty, sideStates[WHITE].endgameQueenPenalty),
-                PhaseScore.of(sideStates[BLACK].midgameQueenPenalty, sideStates[BLACK].endgameQueenPenalty)
+                PhaseScore.of(sideStates[BLACK].midgameQueenPenalty, sideStates[BLACK].endgameQueenPenalty),
+                PhaseScore.of(sideStates[WHITE].backrankWeaknessMidgame, sideStates[WHITE].backrankWeaknessEndgame),
+                PhaseScore.of(sideStates[BLACK].backrankWeaknessMidgame, sideStates[BLACK].backrankWeaknessEndgame)
         );
     }
 
@@ -582,18 +652,23 @@ public final class KingSafetyModule implements EvaluationModule {
         private final PhaseScore blackKing;
         private final PhaseScore whiteQueen;
         private final PhaseScore blackQueen;
+        private final PhaseScore whiteBackrankWeakness;
+        private final PhaseScore blackBackrankWeakness;
 
         private KingSafetyView(PhaseScore whiteKing, PhaseScore blackKing,
-                               PhaseScore whiteQueen, PhaseScore blackQueen) {
+                               PhaseScore whiteQueen, PhaseScore blackQueen,
+                               PhaseScore whiteBackrankWeakness, PhaseScore blackBackrankWeakness) {
             this.whiteKing = whiteKing;
             this.blackKing = blackKing;
             this.whiteQueen = whiteQueen;
             this.blackQueen = blackQueen;
+            this.whiteBackrankWeakness = whiteBackrankWeakness;
+            this.blackBackrankWeakness = blackBackrankWeakness;
         }
 
         public static KingSafetyView empty() {
             PhaseScore zero = PhaseScore.of(0, 0);
-            return new KingSafetyView(zero, zero, zero, zero);
+            return new KingSafetyView(zero, zero, zero, zero, zero, zero);
         }
 
         public PhaseScore whiteKing() {
@@ -610,6 +685,14 @@ public final class KingSafetyModule implements EvaluationModule {
 
         public PhaseScore blackQueen() {
             return blackQueen;
+        }
+
+        public PhaseScore whiteBackrankWeakness() {
+            return whiteBackrankWeakness;
+        }
+
+        public PhaseScore blackBackrankWeakness() {
+            return blackBackrankWeakness;
         }
 
         public int whiteMidgameTotal() {
@@ -640,6 +723,14 @@ public final class KingSafetyModule implements EvaluationModule {
 
         public static PhaseScore of(int midgame, int endgame) {
             return new PhaseScore(midgame, endgame);
+        }
+
+        public int midgame() {
+            return midgame;
+        }
+
+        public int endgame() {
+            return endgame;
         }
 
         public int blend(int phase) {
@@ -678,6 +769,7 @@ public final class KingSafetyModule implements EvaluationModule {
         private int backrankWeaknessEndgame;
         private final int[] zoneAttackWeights = new int[64];
         private long backrankMask;
+        private long backrankFileMask;
 
         private void reset() {
             kingSquare = -1;
@@ -695,6 +787,7 @@ public final class KingSafetyModule implements EvaluationModule {
             backrankWeaknessMidgame = 0;
             backrankWeaknessEndgame = 0;
             backrankMask = 0L;
+            backrankFileMask = 0L;
             Arrays.fill(zoneAttackWeights, 0);
         }
     }
