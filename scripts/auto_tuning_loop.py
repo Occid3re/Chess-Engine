@@ -288,6 +288,73 @@ class SeedTuningOptimizer:
         text = self.tuning_path.read_text(encoding="utf-8")
         lines = text.splitlines()
 
+        evaluation_parameters: Dict[str, NumericParameter] = {}
+        in_evaluation = False
+        evaluation_indent: Optional[int] = None
+        modules_indent: Optional[int] = None
+        current_module: Optional[str] = None
+        current_module_indent: Optional[int] = None
+
+        for idx, line in enumerate(lines):
+            stripped = line.strip()
+            indent = len(line) - len(line.lstrip())
+
+            if not in_evaluation and stripped.startswith("evaluation:"):
+                in_evaluation = True
+                evaluation_indent = indent
+                modules_indent = None
+                current_module = None
+                current_module_indent = None
+                continue
+
+            if in_evaluation:
+                if not stripped:
+                    continue
+                if evaluation_indent is not None and indent <= evaluation_indent:
+                    in_evaluation = False
+                    modules_indent = None
+                    current_module = None
+                    current_module_indent = None
+                    # fall through to allow other parsers to consume this line
+                else:
+                    if modules_indent is None:
+                        if stripped.startswith("modules:"):
+                            modules_indent = indent
+                        # Skip any other keys nested directly under evaluation
+                        continue
+
+                    if indent <= (modules_indent or 0):
+                        modules_indent = None
+                        current_module = None
+                        current_module_indent = None
+                        continue
+
+                    if stripped.endswith(":") and ":" not in stripped[:-1]:
+                        current_module = stripped[:-1]
+                        current_module_indent = indent
+                        continue
+
+                    if current_module is None or current_module_indent is None:
+                        continue
+
+                    if indent <= current_module_indent:
+                        current_module = None
+                        current_module_indent = None
+                        continue
+
+                    match = NUMERIC_VALUE_PATTERN.match(stripped)
+                    if match and current_module:
+                        phase = match.group("key")
+                        value = match.group("value")
+                        dict_key = f"evaluation.modules.{current_module}.{phase}"
+                        evaluation_parameters[dict_key] = NumericParameter(
+                            name=phase,
+                            line_index=idx,
+                            indent=line[: len(line) - len(line.lstrip())],
+                            raw_value=value,
+                        )
+                    continue
+
         numeric_parameters: Dict[str, NumericParameter] = {}
         in_numeric_block = False
         base_indent_len: Optional[int] = None
@@ -316,10 +383,16 @@ class SeedTuningOptimizer:
                     raw_value=value,
                 )
 
-        if not numeric_parameters:
-            raise ValueError("No numeric parameters found under 'numericParameters:' in seed-tunings.yaml")
+        all_parameters: Dict[str, NumericParameter] = {}
+        all_parameters.update(evaluation_parameters)
+        all_parameters.update(numeric_parameters)
 
-        return lines, numeric_parameters
+        if not all_parameters:
+            raise ValueError(
+                "No tunable parameters found under 'evaluation.modules' or 'numericParameters' in seed-tunings.yaml"
+            )
+
+        return lines, all_parameters
 
     def write(self, lines: List[str]) -> None:
         content = "\n".join(lines)
@@ -388,6 +461,9 @@ class SeedTuningOptimizer:
 
             lo = -clamp_mult * init_mag
             hi =  clamp_mult * init_mag
+            if name.startswith("evaluation.modules."):
+                lo = 0.0
+                hi = clamp_mult * init_mag
             if candidate < lo:
                 candidate = lo + 0.1 * (rng.random())
             elif candidate > hi:
