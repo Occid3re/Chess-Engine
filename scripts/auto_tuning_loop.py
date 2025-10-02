@@ -53,6 +53,8 @@ python .\scripts\auto_tuning_loop.py `
 
 If the test lives in a submodule:
   --extra-maven-args -pl :engine -am
+
+python .\scripts\auto_tuning_loop.py --project-root C:\Development\Chess-Engine --mvn .\mvnw.cmd --test julius.game.chessengine.ai.BestMoveSearchTest --java-release 25 --preview --accept-worse --accept-temp 0.08 --mut-frac 0.30 --noimp-reheat 12 --reheat-factor 1.7 --jvm-gc zgc --tt-mb 1024 --engine-threads auto --lazy-threads auto --root-par-limit auto --xms auto --xmx auto --plan-concurrent 1 --extra-maven-args -q
 """
 
 from __future__ import annotations
