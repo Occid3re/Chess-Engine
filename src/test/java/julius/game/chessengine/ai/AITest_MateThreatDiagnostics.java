@@ -20,13 +20,21 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.SplittableRandom;
+import java.util.concurrent.CompletionService;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -74,9 +82,14 @@ class AITest_MateThreatDiagnostics {
         Engine engine = new Engine();
         engine.importBoardFromFen(fen);
 
+        int searchThreads = configuredThreadCount("mateThreat.searchThreads",
+                configuredThreadCount("chessengine.searchThreads", 1));
+        int lazySmpThreads = configuredThreadCount("mateThreat.lazySmpThreads",
+                configuredThreadCount("chessengine.lazySmpThreads", 1));
+
         AiTuning tuning = AiTuning.builder()
-                .searchThreads(1)
-                .lazySmpThreads(1)
+                .searchThreads(searchThreads)
+                .lazySmpThreads(lazySmpThreads)
                 .hashSizeMb(64)
                 .maxDepth(14)
                 .timeLimitMillis(1000)
@@ -99,6 +112,10 @@ class AITest_MateThreatDiagnostics {
         System.out.println(report);
     }
 
+    private static int configuredThreadCount(String property, int defaultValue) {
+        return Math.max(1, Integer.getInteger(property, defaultValue));
+    }
+
     /**
      * AI subclass that mirrors {@link AI#searchRootMoves} but captures rich diagnostics
      * about the root move ordering and alpha-beta behaviour. The heavy lifting happens
@@ -112,6 +129,14 @@ class AITest_MateThreatDiagnostics {
         private final Method alphaBetaMethod;
         private final Method evaluateStaticPositionMethod;
         private final Method isBetterScoreMethod;
+        private final Method prepareHelperHeuristicsMethod;
+        private final Method mergeThreadHeuristicsMethod;
+        private final Method createCandidateMethod;
+        private final Class<?> heuristicsClass;
+        private final Method heuristicsHasUpdatesMethod;
+        private final Method heuristicsResetUpdatesMethod;
+        private final Field searchPoolField;
+        private final int rootParallelLimit;
         private final Field nodesVisitedField;
         private final Field nullMoveCountField;
         private final Field transpositionTableField;
@@ -155,7 +180,32 @@ class AITest_MateThreatDiagnostics {
 
                 calculatedLineField = AI.class.getDeclaredField("calculatedLine");
                 calculatedLineField.setAccessible(true);
-            } catch (NoSuchMethodException | NoSuchFieldException e) {
+
+                prepareHelperHeuristicsMethod = AI.class.getDeclaredMethod("prepareHelperHeuristics",
+                        SearchTask.class, int.class);
+                prepareHelperHeuristicsMethod.setAccessible(true);
+
+                heuristicsClass = prepareHelperHeuristicsMethod.getReturnType();
+
+                mergeThreadHeuristicsMethod = AI.class.getDeclaredMethod("mergeThreadHeuristics", heuristicsClass);
+                mergeThreadHeuristicsMethod.setAccessible(true);
+
+                heuristicsHasUpdatesMethod = heuristicsClass.getDeclaredMethod("hasUpdates");
+                heuristicsHasUpdatesMethod.setAccessible(true);
+
+                heuristicsResetUpdatesMethod = heuristicsClass.getDeclaredMethod("resetUpdates");
+                heuristicsResetUpdatesMethod.setAccessible(true);
+
+                createCandidateMethod = AI.class.getDeclaredMethod("createCandidate", int.class, double.class);
+                createCandidateMethod.setAccessible(true);
+
+                searchPoolField = AI.class.getDeclaredField("searchPool");
+                searchPoolField.setAccessible(true);
+
+                Field rootParallelLimitField = AI.class.getDeclaredField("ROOT_PARALLEL_LIMIT");
+                rootParallelLimitField.setAccessible(true);
+                rootParallelLimit = rootParallelLimitField.getInt(null);
+            } catch (NoSuchMethodException | NoSuchFieldException | IllegalAccessException e) {
                 throw new IllegalStateException("Unable to bootstrap DiagnosticAI instrumentation", e);
             }
         }
@@ -186,7 +236,15 @@ class AITest_MateThreatDiagnostics {
         protected RootSearchResult searchRootMoves(Engine simulatorEngine, SearchTask task, int depth,
                                                    double alpha, double beta, SplittableRandom rng) {
             DepthTrace trace = beginDepthTrace(task, depth, alpha, beta);
+            if (getSearchThreads() > 1) {
+                return searchRootMovesParallel(simulatorEngine, task, depth, alpha, beta, rng, trace);
+            }
+            return searchRootMovesSequential(simulatorEngine, task, depth, alpha, beta, rng, trace);
+        }
 
+        private RootSearchResult searchRootMovesSequential(Engine simulatorEngine, SearchTask task, int depth,
+                                                          double alpha, double beta, SplittableRandom rng,
+                                                          DepthTrace trace) {
             long deadline = task.getDeadline();
             boolean isWhite = task.isWhiteToMove();
 
@@ -230,15 +288,6 @@ class AITest_MateThreatDiagnostics {
                     long nanosAfter = System.nanoTime();
                     long nodesAfter = nodesVisited();
 
-                    trace.record(moveInt, index, evaluation, nodesAfter - nodesBefore,
-                            nanosAfter - nanosBefore, alphaBefore, betaBefore, alpha, beta);
-
-                    if (evaluation.exitEarly) {
-                        trace.addNote("Search aborted while analysing move " + formatMove(moveInt));
-                        aborted = true;
-                        break;
-                    }
-
                     if (evaluation.hasScore() && isBetterScore(isWhite, evaluation.score, bestScore)) {
                         bestScore = evaluation.score;
                         bestMove = moveInt;
@@ -250,6 +299,23 @@ class AITest_MateThreatDiagnostics {
                         } else {
                             beta = Math.min(beta, evaluation.score);
                         }
+                    }
+
+                    double alphaAfterLoop = alpha;
+                    double betaAfterLoop = beta;
+
+                    String threadName = Thread.currentThread().getName();
+                    trace.record(moveInt, index, evaluation, Math.max(0, nodesAfter - nodesBefore),
+                            Math.max(0, nanosAfter - nanosBefore), alphaBefore, betaBefore, alphaAfterLoop,
+                            betaAfterLoop, threadName, evaluation.reason);
+                    trace.recordThreadStages(moveInt, List.of(new ThreadStage(threadName, evaluation.reason,
+                            Math.max(0, nodesAfter - nodesBefore), Math.max(0, nanosAfter - nanosBefore),
+                            evaluation.score, alphaBefore, betaBefore, alphaAfterLoop, betaAfterLoop)));
+
+                    if (evaluation.exitEarly) {
+                        trace.addNote("Search aborted while analysing move " + formatMove(moveInt));
+                        aborted = true;
+                        break;
                     }
 
                     if (alpha >= beta) {
@@ -266,10 +332,421 @@ class AITest_MateThreatDiagnostics {
             }
         }
 
+        private RootSearchResult searchRootMovesParallel(Engine simulatorEngine, SearchTask task, int depth,
+                                                         double alpha, double beta, SplittableRandom rng,
+                                                         DepthTrace trace) {
+            ExecutorService pool = searchPool();
+            if (pool == null) {
+                trace.addNote("Parallel search requested but no executor is available; using sequential fallback");
+                return searchRootMovesSequential(simulatorEngine, task, depth, alpha, beta, rng, trace);
+            }
+
+            long deadline = task.getDeadline();
+            boolean isWhite = task.isWhiteToMove();
+
+            try {
+                IntArrayList legal = simulatorEngine.getAllLegalMoves();
+                IntArrayList ordered = (IntArrayList) sortMovesMethod.invoke(this, legal, depth,
+                        simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
+
+                maybeRotateRootMovesMethod.invoke(this, ordered, rng);
+
+                if (ordered.isEmpty()) {
+                    trace.addNote("No legal moves available at the root");
+                    trace.finish(alpha, beta, null);
+                    return RootSearchResult.completed(null);
+                }
+
+                if (abortRequested(deadline)) {
+                    trace.addNote("Abort requested before launching parallel workers");
+                    trace.finish(alpha, beta, null);
+                    return RootSearchResult.aborted(null);
+                }
+
+                int firstMove = ordered.getInt(0);
+                long nodesBefore = nodesVisited();
+                long nanosBefore = System.nanoTime();
+                double alphaBefore = alpha;
+                double betaBefore = beta;
+
+                simulatorEngine.performMove(firstMove);
+                EvaluationResult firstEvaluation = evaluateAfterRootMove(simulatorEngine, depth, alpha, beta,
+                        isWhite, deadline, firstMove);
+                simulatorEngine.undoLastMove();
+
+                long nanosAfter = System.nanoTime();
+                long nodesAfter = nodesVisited();
+
+                if (firstEvaluation.hasScore()) {
+                    if (isWhite) {
+                        alpha = Math.max(alpha, firstEvaluation.score);
+                    } else {
+                        beta = Math.min(beta, firstEvaluation.score);
+                    }
+                }
+
+                double alphaAfterFirst = alpha;
+                double betaAfterFirst = beta;
+
+                String mainThread = Thread.currentThread().getName();
+                trace.record(firstMove, 0, firstEvaluation, Math.max(0, nodesAfter - nodesBefore),
+                        Math.max(0, nanosAfter - nanosBefore), alphaBefore, betaBefore, alphaAfterFirst,
+                        betaAfterFirst, mainThread, firstEvaluation.reason);
+                trace.recordThreadStages(firstMove, List.of(new ThreadStage(mainThread, firstEvaluation.reason,
+                        Math.max(0, nodesAfter - nodesBefore), Math.max(0, nanosAfter - nanosBefore),
+                        firstEvaluation.score, alphaBefore, betaBefore, alphaAfterFirst, betaAfterFirst)));
+
+                if (firstEvaluation.exitEarly) {
+                    trace.addNote("Search aborted while analysing move " + formatMove(firstMove));
+                    trace.finish(alpha, beta, null);
+                    return RootSearchResult.aborted(null);
+                }
+
+                double bestScore = firstEvaluation.hasScore()
+                        ? firstEvaluation.score
+                        : (isWhite ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY);
+                int bestMove = firstEvaluation.hasScore() ? firstMove : -1;
+
+                if (alpha >= beta) {
+                    MoveAndScore candidate = bestMove != -1 ? new MoveAndScore(bestMove, bestScore) : null;
+                    trace.markCutoff(firstMove, alpha, beta);
+                    trace.finish(alpha, beta, candidate);
+                    return RootSearchResult.completed(candidate);
+                }
+
+                int fanout = Math.min(rootParallelLimit, ordered.size() - 1);
+                if (fanout <= 0) {
+                    MoveAndScore candidate = bestMove != -1 ? new MoveAndScore(bestMove, bestScore) : null;
+                    trace.finish(alpha, beta, candidate);
+                    return RootSearchResult.completed(candidate);
+                }
+
+                CompletionService<WorkerResult> completionService = new ExecutorCompletionService<>(pool);
+                List<Future<WorkerResult>> futures = new ArrayList<>(fanout);
+
+                AtomicReference<Double> alphaRef = new AtomicReference<>(alpha);
+                AtomicReference<Double> betaRef = new AtomicReference<>(beta);
+                java.util.concurrent.atomic.AtomicInteger bestMoveRef = new java.util.concurrent.atomic.AtomicInteger(bestMove);
+                AtomicReference<Double> bestScoreRef = new AtomicReference<>(bestScore);
+                AtomicBoolean stopRef = new AtomicBoolean(false);
+                ReentrantLock fullResLock = new ReentrantLock();
+
+                for (int i = 1; i <= fanout; i++) {
+                    final int moveInt = ordered.getInt(i);
+                    final int order = i;
+                    futures.add(completionService.submit(() -> {
+                        try {
+                            return evaluateParallelMove(simulatorEngine, task, depth, deadline, isWhite,
+                                    alphaRef, betaRef, bestMoveRef, bestScoreRef, stopRef, fullResLock,
+                                    moveInt, order);
+                        } catch (Exception ex) {
+                            return WorkerResult.aborted(moveInt, order, List.of(
+                                    new ThreadStage(Thread.currentThread().getName(), "error", 0L, 0L,
+                                            null, Double.NaN, Double.NaN, Double.NaN, Double.NaN)));
+                        }
+                    }));
+                }
+
+                boolean aborted = false;
+                int completed = 0;
+
+                try {
+                    while (completed < fanout) {
+                        if (stopRef.get()) {
+                            break;
+                        }
+                        if (abortRequested(deadline)) {
+                            aborted = true;
+                            break;
+                        }
+                        Future<WorkerResult> future = completionService.take();
+                        completed++;
+                        WorkerResult worker = future.get();
+                        if (worker == null) {
+                            continue;
+                        }
+
+                        trace.recordThreadStages(worker.moveInt, worker.stages);
+
+                        double alphaBeforeMove = Double.isNaN(worker.alphaBefore) ? alphaRef.get() : worker.alphaBefore;
+                        double betaBeforeMove = Double.isNaN(worker.betaBefore) ? betaRef.get() : worker.betaBefore;
+                        double alphaAfterMove = Double.isNaN(worker.alphaAfter) ? alphaRef.get() : worker.alphaAfter;
+                        double betaAfterMove = Double.isNaN(worker.betaAfter) ? betaRef.get() : worker.betaAfter;
+
+                        String workerThread = worker.stages.isEmpty()
+                                ? Thread.currentThread().getName()
+                                : worker.stages.get(worker.stages.size() - 1).threadName;
+
+                        trace.record(worker.moveInt, worker.order, worker.evaluation, worker.nodesSpent,
+                                worker.nanosSpent, alphaBeforeMove, betaBeforeMove, alphaAfterMove, betaAfterMove,
+                                workerThread, worker.evaluation.reason);
+
+                        if (worker.evaluation.exitEarly) {
+                            trace.addNote("Worker aborted while analysing move " + formatMove(worker.moveInt));
+                        }
+
+                        if (alphaRef.get() >= betaRef.get()) {
+                            stopRef.set(true);
+                            break;
+                        }
+                    }
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    aborted = true;
+                } catch (Exception ex) {
+                    trace.addNote("Parallel worker failure: " + ex.getMessage());
+                } finally {
+                    for (Future<WorkerResult> future : futures) {
+                        if (!future.isDone()) {
+                            future.cancel(true);
+                        }
+                    }
+                }
+
+                double finalAlpha = alphaRef.get();
+                double finalBeta = betaRef.get();
+                bestMove = bestMoveRef.get();
+                bestScore = bestScoreRef.get();
+                MoveAndScore candidate = bestMove != -1 ? createCandidate(bestMove, bestScore) : null;
+                trace.finish(finalAlpha, finalBeta, candidate);
+
+                if (abortRequested(deadline)) {
+                    aborted = true;
+                }
+
+                return aborted ? RootSearchResult.aborted(candidate) : RootSearchResult.completed(candidate);
+            } catch (IllegalAccessException | InvocationTargetException e) {
+                throw new IllegalStateException("Failed to capture diagnostic data", e);
+            }
+        }
+
+        private WorkerResult evaluateParallelMove(Engine simulatorEngine, SearchTask task, int depth, long deadline,
+                                                  boolean isWhite, AtomicReference<Double> alphaRef,
+                                                  AtomicReference<Double> betaRef,
+                                                  java.util.concurrent.atomic.AtomicInteger bestMoveRef,
+                                                  AtomicReference<Double> bestScoreRef, AtomicBoolean stopRef,
+                                                  ReentrantLock fullResLock, int moveInt, int order)
+                throws InvocationTargetException, IllegalAccessException {
+            Engine workerEngine = simulatorEngine.createSimulation();
+            Object heuristics = prepareHelperHeuristics(task, depth);
+            List<ThreadStage> stages = new ArrayList<>();
+            long workerStart = System.nanoTime();
+            long nodesStart = nodesVisited();
+            String threadName = Thread.currentThread().getName();
+
+            try {
+                if (stopRef.get() || abortRequested(deadline)) {
+                    return WorkerResult.aborted(moveInt, order, stages);
+                }
+
+                workerEngine.performMove(moveInt);
+
+                double currentAlpha = alphaRef.get();
+                double currentBeta = betaRef.get();
+                double stageAlphaBefore;
+                double stageBetaBefore;
+                long stageNodes = 0L;
+                long stageNanos = 0L;
+                double probeScore;
+                EvaluationResult evaluation;
+
+                if (workerEngine.getGameState().isInStateCheckMate()) {
+                    probeScore = isWhite ? (Score.CHECKMATE - 1) : -(Score.CHECKMATE - 1);
+                    evaluation = EvaluationResult.mate(probeScore);
+                    stageAlphaBefore = currentAlpha;
+                    stageBetaBefore = currentBeta;
+                } else if (workerEngine.getGameState().isTerminal()) {
+                    double eval = (double) evaluateStaticPositionMethod.invoke(this, workerEngine.getGameState(),
+                            !isWhite, depth);
+                    if (isWhite) {
+                        eval = -eval;
+                    }
+                    probeScore = eval;
+                    evaluation = EvaluationResult.terminal(probeScore);
+                    stageAlphaBefore = currentAlpha;
+                    stageBetaBefore = currentBeta;
+                } else {
+                    double pAlpha = isWhite ? currentAlpha : currentBeta - 1;
+                    double pBeta = isWhite ? currentAlpha + 1 : currentBeta;
+                    stageAlphaBefore = pAlpha;
+                    stageBetaBefore = pBeta;
+
+                    long probeNodesStart = nodesVisited();
+                    long probeStart = System.nanoTime();
+                    double probe = (double) alphaBetaMethod.invoke(this, workerEngine, depth - 1, pAlpha, pBeta,
+                            !isWhite, deadline, moveInt, 1, 0);
+                    long probeNanos = System.nanoTime() - probeStart;
+                    long probeNodes = nodesVisited() - probeNodesStart;
+                    stageNodes = Math.max(0L, probeNodes);
+                    stageNanos = Math.max(0L, probeNanos);
+
+                    if (probe == EXIT_FLAG || abortRequested(deadline)) {
+                        stages.add(new ThreadStage(threadName, "probe", stageNodes, stageNanos, null,
+                                stageAlphaBefore, stageBetaBefore, stageAlphaBefore, stageBetaBefore));
+                        return WorkerResult.aborted(moveInt, order, stages);
+                    }
+
+                    probeScore = probe;
+                    evaluation = EvaluationResult.search(probeScore);
+                }
+
+                boolean needsFull = isWhite ? (probeScore > alphaRef.get()) : (probeScore < betaRef.get());
+                double finalScore = probeScore;
+                double alphaAfter = alphaRef.get();
+                double betaAfter = betaRef.get();
+
+                if (needsFull && !stopRef.get()) {
+                    fullResLock.lock();
+                    try {
+                        if (!stopRef.get() && !abortRequested(deadline)) {
+                            double aNow = alphaRef.get();
+                            double bNow = betaRef.get();
+                            long fullNodesStart = nodesVisited();
+                            long fullStart = System.nanoTime();
+                            double full = (double) alphaBetaMethod.invoke(this, workerEngine, depth - 1, aNow, bNow,
+                                    !isWhite, deadline, moveInt, 1, 0);
+                            long fullNanos = System.nanoTime() - fullStart;
+                            long fullNodes = nodesVisited() - fullNodesStart;
+                            long safeFullNodes = Math.max(0L, fullNodes);
+                            long safeFullNanos = Math.max(0L, fullNanos);
+
+                            stages.add(new ThreadStage(threadName, evaluation.reason, stageNodes, stageNanos,
+                                    evaluation.score, stageAlphaBefore, stageBetaBefore,
+                                    stageAlphaBefore, stageBetaBefore));
+
+                            if (full == EXIT_FLAG || abortRequested(deadline)) {
+                                stages.add(new ThreadStage(threadName, "full", safeFullNodes, safeFullNanos, null,
+                                        aNow, bNow, aNow, bNow));
+                                return WorkerResult.aborted(moveInt, order, stages);
+                            }
+
+                            finalScore = full;
+                            if (isWhite) {
+                                if (full > aNow) {
+                                    alphaRef.set(full);
+                                }
+                            } else {
+                                if (full < bNow) {
+                                    betaRef.set(full);
+                                }
+                            }
+
+                            Double curBest = bestScoreRef.get();
+                            if (isBetterScore(isWhite, full, curBest)) {
+                                bestScoreRef.set(full);
+                                bestMoveRef.set(moveInt);
+                            }
+
+                            if (alphaRef.get() >= betaRef.get()) {
+                                stopRef.set(true);
+                            }
+
+                            alphaAfter = alphaRef.get();
+                            betaAfter = betaRef.get();
+
+                            stages.add(new ThreadStage(threadName, "full", safeFullNodes, safeFullNanos, finalScore,
+                                    aNow, bNow, alphaAfter, betaAfter));
+                        } else {
+                            stages.add(new ThreadStage(threadName, evaluation.reason, stageNodes, stageNanos,
+                                    evaluation.score, stageAlphaBefore, stageBetaBefore,
+                                    stageAlphaBefore, stageBetaBefore));
+                            return WorkerResult.aborted(moveInt, order, stages);
+                        }
+                    } finally {
+                        fullResLock.unlock();
+                    }
+                } else {
+                    Double curBest = bestScoreRef.get();
+                    if (isBetterScore(isWhite, finalScore, curBest)) {
+                        bestScoreRef.set(finalScore);
+                        bestMoveRef.set(moveInt);
+                        if (isWhite && finalScore > alphaRef.get()) {
+                            alphaRef.set(finalScore);
+                        }
+                        if (!isWhite && finalScore < betaRef.get()) {
+                            betaRef.set(finalScore);
+                        }
+                        if (alphaRef.get() >= betaRef.get()) {
+                            stopRef.set(true);
+                        }
+                    }
+
+                    alphaAfter = alphaRef.get();
+                    betaAfter = betaRef.get();
+
+                    stages.add(new ThreadStage(threadName, evaluation.reason, stageNodes, stageNanos, finalScore,
+                            stageAlphaBefore, stageBetaBefore, alphaAfter, betaAfter));
+                }
+
+                long nodesSpent = Math.max(0L, nodesVisited() - nodesStart);
+                long nanosSpent = Math.max(0L, System.nanoTime() - workerStart);
+                MoveAndScore moveAndScore = createCandidate(moveInt, finalScore);
+                boolean usedFullWindow = stages.stream().anyMatch(stage -> "full".equals(stage.phase));
+                EvaluationResult finalEvaluation = usedFullWindow ? EvaluationResult.search(finalScore) : evaluation;
+
+                return new WorkerResult(moveInt, order, finalEvaluation, moveAndScore, nodesSpent, nanosSpent,
+                        stageAlphaBefore, stageBetaBefore, alphaAfter, betaAfter, stages, false);
+            } finally {
+                if (heuristicsHaveUpdates(heuristics)) {
+                    mergeThreadHeuristics(heuristics);
+                } else {
+                    heuristicsResetUpdates(heuristics);
+                }
+            }
+        }
+
         private boolean isBetterScore(boolean isWhite, double score, double bestScore) {
             try {
                 return (boolean) isBetterScoreMethod.invoke(this, isWhite, score, bestScore);
             } catch (IllegalAccessException | InvocationTargetException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+
+        private Object prepareHelperHeuristics(SearchTask task, int depth) {
+            try {
+                return prepareHelperHeuristicsMethod.invoke(this, task, depth);
+            } catch (IllegalAccessException | InvocationTargetException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+
+        private void mergeThreadHeuristics(Object heuristics) {
+            try {
+                mergeThreadHeuristicsMethod.invoke(this, heuristics);
+            } catch (IllegalAccessException | InvocationTargetException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+
+        private boolean heuristicsHaveUpdates(Object heuristics) {
+            try {
+                return (boolean) heuristicsHasUpdatesMethod.invoke(heuristics);
+            } catch (IllegalAccessException | InvocationTargetException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+
+        private void heuristicsResetUpdates(Object heuristics) {
+            try {
+                heuristicsResetUpdatesMethod.invoke(heuristics);
+            } catch (IllegalAccessException | InvocationTargetException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+
+        private MoveAndScore createCandidate(int move, double score) {
+            try {
+                return (MoveAndScore) createCandidateMethod.invoke(this, move, score);
+            } catch (IllegalAccessException | InvocationTargetException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+
+        private ExecutorService searchPool() {
+            try {
+                return (ExecutorService) searchPoolField.get(this);
+            } catch (IllegalAccessException e) {
                 throw new IllegalStateException(e);
             }
         }
@@ -354,6 +831,10 @@ class AITest_MateThreatDiagnostics {
                         .append(String.format(Locale.ROOT, "%.2f", result.score)).append(')');
             }
             sb.append(System.lineSeparator());
+
+            sb.append("Thread config: searchThreads=").append(getSearchThreads())
+                    .append(", lazySmpThreads=").append(getLazySmpThreads())
+                    .append(System.lineSeparator());
 
             sb.append("Principal variation: ");
             List<MoveAndScore> pv = principalVariation();
@@ -476,6 +957,68 @@ class AITest_MateThreatDiagnostics {
             }
         }
 
+        private static final class ThreadStage {
+            final String threadName;
+            final String phase;
+            final long nodesSpent;
+            final long nanosSpent;
+            final Double score;
+            final double alphaBefore;
+            final double betaBefore;
+            final double alphaAfter;
+            final double betaAfter;
+
+            ThreadStage(String threadName, String phase, long nodesSpent, long nanosSpent, Double score,
+                        double alphaBefore, double betaBefore, double alphaAfter, double betaAfter) {
+                this.threadName = threadName;
+                this.phase = phase;
+                this.nodesSpent = nodesSpent;
+                this.nanosSpent = nanosSpent;
+                this.score = score;
+                this.alphaBefore = alphaBefore;
+                this.betaBefore = betaBefore;
+                this.alphaAfter = alphaAfter;
+                this.betaAfter = betaAfter;
+            }
+        }
+
+        private static final class WorkerResult {
+            final int moveInt;
+            final int order;
+            final EvaluationResult evaluation;
+            final MoveAndScore moveAndScore;
+            final long nodesSpent;
+            final long nanosSpent;
+            final double alphaBefore;
+            final double betaBefore;
+            final double alphaAfter;
+            final double betaAfter;
+            final List<ThreadStage> stages;
+            final boolean aborted;
+
+            WorkerResult(int moveInt, int order, EvaluationResult evaluation, MoveAndScore moveAndScore,
+                         long nodesSpent, long nanosSpent, double alphaBefore, double betaBefore,
+                         double alphaAfter, double betaAfter, List<ThreadStage> stages, boolean aborted) {
+                this.moveInt = moveInt;
+                this.order = order;
+                this.evaluation = evaluation;
+                this.moveAndScore = moveAndScore;
+                this.nodesSpent = nodesSpent;
+                this.nanosSpent = nanosSpent;
+                this.alphaBefore = alphaBefore;
+                this.betaBefore = betaBefore;
+                this.alphaAfter = alphaAfter;
+                this.betaAfter = betaAfter;
+                this.stages = stages;
+                this.aborted = aborted;
+            }
+
+            static WorkerResult aborted(int moveInt, int order, List<ThreadStage> stages) {
+                return new WorkerResult(moveInt, order, EvaluationResult.exit(), null, 0L, 0L,
+                        Double.NaN, Double.NaN, Double.NaN, Double.NaN, stages, true);
+            }
+        }
+
         private final class DepthTrace {
             private final int depth;
             private final int attempt;
@@ -484,6 +1027,7 @@ class AITest_MateThreatDiagnostics {
             private final double initialBeta;
             private final long startedAt = System.nanoTime();
             private final List<RootMoveTrace> moves = new ArrayList<>();
+            private final List<ThreadEvent> threadEvents = new ArrayList<>();
             private final List<String> notes = new ArrayList<>();
             private boolean betaCutoff;
             private int cutoffMove = -1;
@@ -500,13 +1044,25 @@ class AITest_MateThreatDiagnostics {
             }
 
             void record(int moveInt, int order, EvaluationResult evaluation, long nodesSpent, long nanosSpent,
-                        double alphaBefore, double betaBefore, double alphaAfterLoop, double betaAfterLoop) {
+                        double alphaBefore, double betaBefore, double alphaAfterLoop, double betaAfterLoop,
+                        String threadName, String phase) {
                 moves.add(new RootMoveTrace(moveInt, order, evaluation, nodesSpent, nanosSpent,
-                        alphaBefore, betaBefore, alphaAfterLoop, betaAfterLoop));
+                        alphaBefore, betaBefore, alphaAfterLoop, betaAfterLoop, threadName, phase));
             }
 
             void addNote(String note) {
                 notes.add(note);
+            }
+
+            void recordThreadStages(int moveInt, List<ThreadStage> stages) {
+                if (stages == null || stages.isEmpty()) {
+                    return;
+                }
+                for (ThreadStage stage : stages) {
+                    threadEvents.add(new ThreadEvent(stage.threadName, moveInt, stage.phase,
+                            stage.nodesSpent, stage.nanosSpent, stage.score,
+                            stage.alphaBefore, stage.betaBefore, stage.alphaAfter, stage.betaAfter));
+                }
             }
 
             void markCutoff(int moveInt, double alpha, double beta) {
@@ -569,6 +1125,36 @@ class AITest_MateThreatDiagnostics {
                         sb.append("  Note: ").append(note).append(System.lineSeparator());
                     }
                 }
+
+                if (!threadEvents.isEmpty()) {
+                    sb.append("  Thread activity:").append(System.lineSeparator());
+                    Map<String, List<ThreadEvent>> byThread = threadEvents.stream()
+                            .collect(Collectors.groupingBy(
+                                    event -> event.threadName == null || event.threadName.isBlank()
+                                            ? "<unnamed>"
+                                            : event.threadName,
+                                    LinkedHashMap::new,
+                                    Collectors.toList()));
+
+                    for (Map.Entry<String, List<ThreadEvent>> entry : byThread.entrySet()) {
+                        long totalNodes = entry.getValue().stream().mapToLong(ThreadEvent::nodesSpent).sum();
+                        long totalMicros = entry.getValue().stream().mapToLong(event -> event.nanosSpent / 1_000).sum();
+                        sb.append(String.format(Locale.ROOT, "    [%s] nodes=%d time=%dµs",
+                                entry.getKey(), totalNodes, totalMicros)).append(System.lineSeparator());
+                        for (ThreadEvent event : entry.getValue()) {
+                            sb.append(String.format(Locale.ROOT,
+                                            "      %-12s %-10s | nodes=%-6d time=%4dµs | window [%.2f, %.2f] → [%.2f, %.2f]",
+                                            formatMove(event.moveInt), event.phase,
+                                            event.nodesSpent, event.nanosSpent / 1_000,
+                                            event.alphaBefore, event.betaBefore,
+                                            event.alphaAfter, event.betaAfter));
+                            if (event.score != null) {
+                                sb.append(String.format(Locale.ROOT, " | score=%.2f", event.score));
+                            }
+                            sb.append(System.lineSeparator());
+                        }
+                    }
+                }
                 return sb.toString().stripTrailing();
             }
         }
@@ -583,9 +1169,12 @@ class AITest_MateThreatDiagnostics {
             private final double betaBefore;
             private final double alphaAfter;
             private final double betaAfter;
+            private final String threadName;
+            private final String phase;
 
             RootMoveTrace(int moveInt, int order, EvaluationResult evaluation, long nodesSpent, long nanosSpent,
-                          double alphaBefore, double betaBefore, double alphaAfter, double betaAfter) {
+                          double alphaBefore, double betaBefore, double alphaAfter, double betaAfter,
+                          String threadName, String phase) {
                 this.moveInt = moveInt;
                 this.order = order;
                 this.evaluation = evaluation;
@@ -595,6 +1184,8 @@ class AITest_MateThreatDiagnostics {
                 this.betaBefore = betaBefore;
                 this.alphaAfter = alphaAfter;
                 this.betaAfter = betaAfter;
+                this.threadName = threadName;
+                this.phase = phase;
             }
 
             int order() {
@@ -608,11 +1199,16 @@ class AITest_MateThreatDiagnostics {
                 boolean isCritical = criticalMoves.contains(normalizedSan)
                         || criticalMoves.contains(normalizeMoveLabel(coord));
 
+                String workerLabel = (threadName == null || threadName.isBlank()) ? "<main>" : threadName;
+                String phaseLabel = (phase == null || phase.isBlank()) ? "final" : phase;
+
                 StringBuilder sb = new StringBuilder();
                 sb.append(String.format(Locale.ROOT,
-                        "#%02d %-12s | nodes=%-6d time=%4dµs | window [%.2f, %.2f] → [%.2f, %.2f]",
-                        order + 1, coord + (isCritical ? " *" : ""), nodesSpent,
-                        nanosSpent / 1_000, alphaBefore, betaBefore, alphaAfter, betaAfter));
+                        "#%02d %-12s | worker=%-18s | nodes=%-6d time=%4dµs | window [%.2f, %.2f] → [%.2f, %.2f]",
+                        order + 1, coord + (isCritical ? " *" : ""),
+                        workerLabel + "/" + phaseLabel,
+                        nodesSpent, nanosSpent / 1_000,
+                        alphaBefore, betaBefore, alphaAfter, betaAfter));
                 sb.append(" | result=");
 
                 if (evaluation.exitEarly) {
@@ -625,6 +1221,41 @@ class AITest_MateThreatDiagnostics {
 
                 sb.append(" (via ").append(evaluation.reason).append(')');
                 return sb.toString();
+            }
+        }
+
+        private final class ThreadEvent {
+            private final String threadName;
+            private final int moveInt;
+            private final String phase;
+            private final long nodesSpent;
+            private final long nanosSpent;
+            private final Double score;
+            private final double alphaBefore;
+            private final double betaBefore;
+            private final double alphaAfter;
+            private final double betaAfter;
+
+            ThreadEvent(String threadName, int moveInt, String phase, long nodesSpent, long nanosSpent,
+                        Double score, double alphaBefore, double betaBefore, double alphaAfter, double betaAfter) {
+                this.threadName = threadName;
+                this.moveInt = moveInt;
+                this.phase = phase;
+                this.nodesSpent = nodesSpent;
+                this.nanosSpent = nanosSpent;
+                this.score = score;
+                this.alphaBefore = alphaBefore;
+                this.betaBefore = betaBefore;
+                this.alphaAfter = alphaAfter;
+                this.betaAfter = betaAfter;
+            }
+
+            long nodesSpent() {
+                return nodesSpent;
+            }
+
+            long nanosSpent() {
+                return nanosSpent;
             }
         }
     }
