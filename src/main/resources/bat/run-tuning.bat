@@ -41,10 +41,10 @@ java ^
   org.springframework.boot.loader.launch.PropertiesLauncher ^
   --seed "%SEED%" ^
   --generations 1 ^
-  --population 8 ^
-  --matches-per-pair 100 ^
-  --move-time 1000 ^
-  --match-threads 16 ^
+  --population 16 ^
+  --matches-per-pair 2 ^
+  --move-time 2000 ^
+  --match-threads 20 ^
   --matches "%MATCHES%"
 
 set "ERR=%ERRORLEVEL%"
