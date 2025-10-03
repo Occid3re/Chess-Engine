@@ -153,13 +153,23 @@ public class RookHelper {
             0, 0, 5, 5, 5, 5, 0, 0  // R8
     };
 
+    public final int[] rookShifts = new int[64];   // = 64 - rookBits[sq]
+
     public RookHelper() {
         loadMagicNumbers();
-        for (int square = 0; square < 64; square++) {
-            rookMasks[square] = generateOccupancyMask(square);
-            rookBits[square] = Long.bitCount(rookMasks[square]);
-            rookAttacks[square] = buildAttackTableForSquare(square, rookMagics[square], rookMasks[square]);
+        for (int sq = 0; sq < 64; sq++) {
+            rookMasks[sq]  = generateOccupancyMask(sq);
+            rookBits[sq]   = Long.bitCount(rookMasks[sq]);
+            rookShifts[sq] = 64 - rookBits[sq];                 // <-- add
+            rookAttacks[sq]= buildAttackTableForSquare(sq, rookMagics[sq], rookMasks[sq]);
         }
+    }
+
+    public final long calculateMovesUsingRookMagic(int square, long occupancy) {
+        // self-mask to be safe/call-site-agnostic; HotSpot keeps this cheap
+        long occMasked = occupancy & rookMasks[square];
+        int idx = (int)((occMasked * rookMagics[square]) >>> rookShifts[square]);
+        return rookAttacks[square][idx];
     }
 
     public static RookHelper getInstance() {
@@ -369,11 +379,6 @@ public class RookHelper {
         } catch (IOException e) {
             log.error("Error writing magic numbers to file", e);
         }
-    }
-
-    public long calculateMovesUsingRookMagic(int square, long occupancy) {
-        int index = this.transform(occupancy, this.rookMagics[square], this.rookMasks[square]);
-        return this.rookAttacks[square][index];
     }
 
     // ----------------------- Perfect magic machinery -----------------------

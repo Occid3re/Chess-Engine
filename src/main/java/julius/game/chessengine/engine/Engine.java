@@ -12,7 +12,6 @@ import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.function.LongConsumer;
-import java.util.stream.Collectors;
 
 import static julius.game.chessengine.board.MoveHelper.convertIndexToString;
 
@@ -70,15 +69,15 @@ public class Engine {
             this.openingBook = other.openingBook;
 
             // Intentionally DO NOT copy the onPositionChanged observer; clones are silent by default.
-            // Users can opt-in via setOnPositionChanged on the clone.
+            // Users can opt in via setOnPositionChanged on the clone.
         }
     }
 
     public void setOnPositionChanged(LongConsumer cb) {
-        this.onPositionChanged = (cb != null ? cb : h -> {});
+        this.onPositionChanged = (cb != null ? cb : _ -> {});
     }
 
-    /** Invoke observer outside of boardLock. */
+    /** Invoke observer outside boardLock. */
     private void notifyPositionChanged(long hash) {
         LongConsumer cb = this.onPositionChanged; // read volatile once
         try {
@@ -114,12 +113,16 @@ public class Engine {
     }
 
     public void performMove(int move) {
-        long notifyHash = Long.MIN_VALUE; // sentinel: only notify if we actually set it
+        long notifyHash; // sentinel: only notify if we actually set it
 
         synchronized (boardLock) {
             // Guard: never move from a terminal node
             if (gameState.isTerminal()) {
                 throw new IllegalStateException("performMove called on terminal node");
+            }
+
+            if (!redoLine.isEmpty()) {
+                redoLine.clear();
             }
 
             boolean isOpeningMove = false;
@@ -218,7 +221,6 @@ public class Engine {
 
     public void startNewGame() {
         long notifyHash;
-
         synchronized (boardLock) {
             bitBoard = new BitBoard();
             gameState = new GameState(bitBoard);
@@ -226,13 +228,15 @@ public class Engine {
             line = new MoveStack();
             redoLine = new MoveStack();
             OpeningBook instance = OpeningBook.getInstance();
-            if (instance != null) {
-                this.openingBook = instance;
-            }
+            if (instance != null) openingBook = instance;
             resetCachedLegalMoves();
+
+            gameState.getHashHistory().clear();
+            gameState.getRepetition().clear();
+            gameState.recordHash(getBoardStateHash());
+
             notifyHash = getBoardStateHash();
         }
-
         notifyPositionChanged(notifyHash);
     }
 
@@ -362,23 +366,9 @@ public class Engine {
                 && java.util.Arrays.equals(a.elements(), 0, a.size(), b.elements(), 0, b.size());
     }
 
-    // Each of these methods would need to be implemented to handle the specific move generation for each piece type.
-    public List<Move> getMovesFromIndex(int fromIndex) {
-        IntArrayList legalMoves = getAllLegalMoves();
-        List<Move> movesFromIndex = new ArrayList<>();
-        for (int i = 0; i < legalMoves.size(); i++) {
-            int m = legalMoves.getInt(i);
-            int from = MoveHelper.deriveFromIndex(m); // Extract the first 6 bits
-            if (from == fromIndex) {
-                movesFromIndex.add(Move.convertIntToMove(m));
-            }
-        }
-        return movesFromIndex;
-    }
-
     public void moveRandomFigure(boolean isWhite) {
         IntArrayList moves = getAllLegalMoves();
-        if (moves.size() == 0) {
+        if (moves.isEmpty()) {
             throw new RuntimeException("No moves possible for " + (isWhite ? "White" : "Black"));
         }
         Random rand = new Random();
@@ -386,16 +376,12 @@ public class Engine {
         performMove(randomMove);
     }
 
-    public GameState moveFigure(int fromIndex, int toIndex, int promotionPiece) {
-        return moveFigure(bitBoard, fromIndex, toIndex, promotionPiece);
-    }
-
     // always queen
     public void moveFigure(int fromIndex, int toIndex) {
         moveFigure(bitBoard, fromIndex, toIndex, 5);
     }
 
-    public GameState moveFigure(BitBoard bitBoard, int fromIndex, int toIndex, int promotionPiece) {
+    public void moveFigure(BitBoard bitBoard, int fromIndex, int toIndex, int promotionPiece) {
         synchronized (boardLock) {
             // Determine the piece type and color from the bitboard based on the 'from' position
             PieceType pieceType = bitBoard.getPieceTypeAtIndex(fromIndex);
@@ -416,12 +402,11 @@ public class Engine {
 
             if (move == -1) {
                 log.warn("Move not legal!");
-                return gameState;
+                return;
             }
         }
         // Perform the move outside of this synchronized block to reuse performMove's own locking & notification policy
         performMove(getMove(fromIndex, toIndex, promotionPiece));
-        return gameState;
     }
 
     private int getMove(int fromIndex, int toIndex, int promotionPiece) {
@@ -434,12 +419,6 @@ public class Engine {
             if (promo == 0 || promo == promotionPiece) return m; // exact or non-promo
         }
         return -1;
-    }
-
-    public List<Position> getPossibleMovesForPosition(int fromIndex) {
-        return getMovesFromIndex(fromIndex).stream()
-                .map(Move::getTo)
-                .collect(Collectors.toList());
     }
 
     public long getBoardStateHash() {
