@@ -129,14 +129,22 @@ public class BishopHelper {
     private final boolean[] squareMagicFound = new boolean[64];
 
     private static BishopHelper instance = null;
+    public final int[] bishopShifts = new int[64];
 
-    private BishopHelper() {
+    public BishopHelper() {
         loadMagicNumbers();
-        for (int square = 0; square < 64; square++) {
-            bishopMasks[square] = generateOccupancyMask(square);
-            bishopBits[square] = Long.bitCount(bishopMasks[square]);
-            bishopAttacks[square] = buildAttackTableForSquare(square, bishopMagics[square], bishopMasks[square]);
+        for (int sq = 0; sq < 64; sq++) {
+            bishopMasks[sq]  = generateOccupancyMask(sq);
+            bishopBits[sq]   = Long.bitCount(bishopMasks[sq]);
+            bishopShifts[sq] = 64 - bishopBits[sq];             // <-- add
+            bishopAttacks[sq]= buildAttackTableForSquare(sq, bishopMagics[sq], bishopMasks[sq]);
         }
+    }
+
+    public final long calculateMovesUsingBishopMagic(int square, long occupancy) {
+        long occMasked = occupancy & bishopMasks[square];
+        int idx = (int)((occMasked * bishopMagics[square]) >>> bishopShifts[square]);
+        return bishopAttacks[square][idx];
     }
 
     public static BishopHelper getInstance() {
@@ -267,11 +275,6 @@ public class BishopHelper {
     public void loadMagicNumbers() {
         System.arraycopy(PRECOMPUTED_BISHOP_MAGICS, 0, bishopMagics, 0, bishopMagics.length);
         Arrays.fill(squareMagicFound, true);
-    }
-
-    public long calculateMovesUsingBishopMagic(int square, long occupancy) {
-        int index = this.transform(occupancy, this.bishopMagics[square], this.bishopMasks[square]);
-        return this.bishopAttacks[square][index];
     }
 
     // ----------------------- INTERNALS -----------------------

@@ -642,7 +642,6 @@ public class AI {
 
             if (!result.isCompleted()) {
                 if (currentDepth == 1) {
-                    lastIterScore = sealed.score;
                     task.publishBest(sealed, currentDepth, simulatorEngine);
                 }
                 if (heuristics.hasUpdates()) mergeThreadHeuristics(heuristics);
