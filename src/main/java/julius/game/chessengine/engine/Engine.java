@@ -256,7 +256,10 @@ public class Engine {
             BitBoard.PinState pinState = bitBoard.generateAllPossibleMovesInto(bitBoard.whitesTurn, pseudoMoves);
 
             // NEW: detect check once
-            boolean inCheck = bitBoard.isInCheck(bitBoard.whitesTurn);
+            BitBoard.CheckInfo checkInfo = bitBoard.analyzeCheck(bitBoard.whitesTurn, pinState);
+            boolean inCheck = checkInfo.inCheck();
+            boolean doubleCheck = checkInfo.doubleCheck();
+            long responseMask = checkInfo.responseMask();
 
             int[] pseudoElements = pseudoMoves.elements();
             final int pseudoCount = pseudoMoves.size();
@@ -283,7 +286,21 @@ public class Engine {
                     continue;
                 }
 
-                // If in check, fall back to the full legality test
+                int pieceBits = MoveHelper.derivePieceTypeBits(move);
+                boolean isKingMove = (pieceBits == 6);
+                boolean isEnPassant = MoveHelper.isEnPassantMove(move);
+
+                if (doubleCheck && !isKingMove) {
+                    continue;
+                }
+
+                if (!isKingMove && !isEnPassant) {
+                    long toMask = 1L << MoveHelper.deriveToIndex(move);
+                    if ((toMask & responseMask) == 0L) {
+                        continue;
+                    }
+                }
+
                 if (bitBoard.isMoveLegalFast(move, pinState)) {
                     pseudoElements[writeIdx++] = move;
                 }

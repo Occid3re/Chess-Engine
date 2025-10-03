@@ -80,6 +80,13 @@ public class BitBoard {
         }
     }
 
+    public record CheckInfo(long checkerMask, boolean doubleCheck, long responseMask) {
+
+        public boolean inCheck() {
+            return checkerMask != 0L;
+        }
+    }
+
     private record PinRayInfo(long rayMask, int pinnerSquare) {
     }
 
@@ -612,6 +619,106 @@ public class BitBoard {
         }
 
         return new PinState(whiteSide, kingSquare, diagonalPinned, straightPinned);
+    }
+
+    public CheckInfo analyzeCheck(boolean whiteSide, PinState pins) {
+        int kingSquare;
+        if (pins != null && pins.whiteSide() == whiteSide) {
+            kingSquare = pins.kingSquare();
+        } else {
+            kingSquare = findKingIndex(whiteSide);
+        }
+
+        long occ = allPieces;
+        long enemyPawns = whiteSide ? blackPawns : whitePawns;
+        long enemyKnights = whiteSide ? blackKnights : whiteKnights;
+        long enemyBishops = whiteSide ? blackBishops : whiteBishops;
+        long enemyRooks = whiteSide ? blackRooks : whiteRooks;
+        long enemyQueens = whiteSide ? blackQueens : whiteQueens;
+        long enemyKing = whiteSide ? blackKing : whiteKing;
+
+        long checkerMask = 0L;
+        long responseCandidate = 0L;
+        boolean firstCheckerRecorded = false;
+        boolean doubleCheck = false;
+
+        long pawnCheckers = pawnAttackersToSquare(kingSquare, !whiteSide, whitePawns, blackPawns) & enemyPawns;
+        while (pawnCheckers != 0) {
+            long checker = pawnCheckers & -pawnCheckers;
+            pawnCheckers &= pawnCheckers - 1;
+            checkerMask |= checker;
+            if (!firstCheckerRecorded) {
+                firstCheckerRecorded = true;
+                responseCandidate = checker;
+            } else {
+                doubleCheck = true;
+            }
+        }
+
+        long knightCheckers = KnightHelper.knightMoveTable[kingSquare] & enemyKnights;
+        while (knightCheckers != 0) {
+            long checker = knightCheckers & -knightCheckers;
+            knightCheckers &= knightCheckers - 1;
+            checkerMask |= checker;
+            if (!firstCheckerRecorded) {
+                firstCheckerRecorded = true;
+                responseCandidate = checker;
+            } else {
+                doubleCheck = true;
+            }
+        }
+
+        long kingCheckers = KING_ATTACKS[kingSquare] & enemyKing;
+        while (kingCheckers != 0) {
+            long checker = kingCheckers & -kingCheckers;
+            kingCheckers &= kingCheckers - 1;
+            checkerMask |= checker;
+            if (!firstCheckerRecorded) {
+                firstCheckerRecorded = true;
+                responseCandidate = checker;
+            } else {
+                doubleCheck = true;
+            }
+        }
+
+        long bishopSliders = enemyBishops | enemyQueens;
+        long bishopRays = bishopAttacksFromWithOcc(kingSquare, occ) & bishopSliders;
+        long tmpBishops = bishopRays;
+        while (tmpBishops != 0) {
+            long checker = tmpBishops & -tmpBishops;
+            tmpBishops &= tmpBishops - 1;
+            checkerMask |= checker;
+            int checkerSq = Long.numberOfTrailingZeros(checker);
+            long blockMask = BitboardHelper.lineBetweenIndices(kingSquare, checkerSq) | checker;
+            if (!firstCheckerRecorded) {
+                firstCheckerRecorded = true;
+                responseCandidate = blockMask;
+            } else {
+                doubleCheck = true;
+            }
+        }
+
+        long rookSliders = enemyRooks | enemyQueens;
+        long rookRays = rookAttacksFromWithOcc(kingSquare, occ) & rookSliders;
+        // Avoid double-counting queens already registered on diagonal rays.
+        rookRays &= ~bishopRays;
+        long tmpRooks = rookRays;
+        while (tmpRooks != 0) {
+            long checker = tmpRooks & -tmpRooks;
+            tmpRooks &= tmpRooks - 1;
+            checkerMask |= checker;
+            int checkerSq = Long.numberOfTrailingZeros(checker);
+            long blockMask = BitboardHelper.lineBetweenIndices(kingSquare, checkerSq) | checker;
+            if (!firstCheckerRecorded) {
+                firstCheckerRecorded = true;
+                responseCandidate = blockMask;
+            } else {
+                doubleCheck = true;
+            }
+        }
+
+        long responseMask = (!doubleCheck && firstCheckerRecorded) ? responseCandidate : 0L;
+        return new CheckInfo(checkerMask, doubleCheck, responseMask);
     }
 
     private boolean isMoveAllowedByPin(PinState pinState, int from, int to) {
