@@ -255,8 +255,11 @@ public class Engine {
             pseudoMoves.clear();
             BitBoard.PinState pinState = bitBoard.generateAllPossibleMovesInto(bitBoard.whitesTurn, pseudoMoves);
 
-            // NEW: detect check once
-            boolean inCheck = bitBoard.isInCheck(bitBoard.whitesTurn);
+            BitBoard.CheckInfo checkInfo = bitBoard.analyzeCheck(bitBoard.whitesTurn, pinState);
+            boolean inCheck = checkInfo.inCheck();
+            boolean doubleCheck = checkInfo.doubleCheck();
+            long responseMask = checkInfo.responseMask();
+            long checkingPieces = checkInfo.checkingPieces();
 
             int[] pseudoElements = pseudoMoves.elements();
             final int pseudoCount = pseudoMoves.size();
@@ -268,22 +271,33 @@ public class Engine {
             for (int i = 0; i < pseudoCount; i++) {
                 int move = pseudoElements[i];
 
-                // Fast path when NOT in check:
-                // - pins already enforced during generation
-                // - king steps were prefiltered in generateKingMoves (see §2)
-                // So only EP needs a special legality test.
+                boolean isEnPassant = MoveHelper.isEnPassantMove(move);
+                int pieceBits = MoveHelper.derivePieceTypeBits(move);
+
                 if (!inCheck) {
-                    if (MoveHelper.isEnPassantMove(move)) {
-                        if (bitBoard.isMoveLegalFast(move, pinState)) {
-                            pseudoElements[writeIdx++] = move;
-                        }
-                    } else {
+                    if (!isEnPassant || bitBoard.isMoveLegalFast(move, pinState)) {
                         pseudoElements[writeIdx++] = move;
                     }
                     continue;
                 }
 
-                // If in check, fall back to the full legality test
+                if (pieceBits != 6) {
+                    if (doubleCheck) {
+                        continue;
+                    }
+                    int to = MoveHelper.deriveToIndex(move);
+                    long toMask = 1L << to;
+                    boolean allowed = (responseMask & toMask) != 0L;
+                    if (!allowed && isEnPassant) {
+                        int captureSquare = MoveHelper.isWhitesMove(move) ? to - 8 : to + 8;
+                        long captureMask = 1L << captureSquare;
+                        allowed = (checkingPieces & captureMask) != 0L;
+                    }
+                    if (!allowed) {
+                        continue;
+                    }
+                }
+
                 if (bitBoard.isMoveLegalFast(move, pinState)) {
                     pseudoElements[writeIdx++] = move;
                 }

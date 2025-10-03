@@ -80,6 +80,13 @@ public class BitBoard {
         }
     }
 
+    public record CheckInfo(long checkingPieces, boolean doubleCheck, long responseMask) {
+
+        public boolean inCheck() {
+            return checkingPieces != 0L;
+        }
+    }
+
     private record PinRayInfo(long rayMask, int pinnerSquare) {
     }
 
@@ -2272,6 +2279,51 @@ public class BitBoard {
     public boolean isInCheck(boolean white) {
         int kingIndex = findKingIndex(white);
         return isSquareUnderAttack(kingIndex, white);
+    }
+
+    public CheckInfo analyzeCheck(boolean whiteSide, PinState pins) {
+        int kingSquare;
+        if (pins != null && pins.whiteSide() == whiteSide) {
+            kingSquare = pins.kingSquare();
+        } else {
+            kingSquare = findKingIndex(whiteSide);
+        }
+
+        long occ = allPieces;
+        long enemyKnights = whiteSide ? blackKnights : whiteKnights;
+        long enemyBishops = whiteSide ? blackBishops : whiteBishops;
+        long enemyRooks = whiteSide ? blackRooks : whiteRooks;
+        long enemyQueens = whiteSide ? blackQueens : whiteQueens;
+        long enemyKing = whiteSide ? blackKing : whiteKing;
+
+        long pawnCheckers = pawnAttackersToSquare(kingSquare, !whiteSide, whitePawns, blackPawns);
+        long knightCheckers = knightMoveTable[kingSquare] & enemyKnights;
+        long bishopAttacks = bishopAttacksFromWithOcc(kingSquare, occ);
+        long rookAttacks = rookAttacksFromWithOcc(kingSquare, occ);
+        long diagonalCheckers = bishopAttacks & (enemyBishops | enemyQueens);
+        long straightCheckers = rookAttacks & (enemyRooks | enemyQueens);
+        long kingCheckers = KING_ATTACKS[kingSquare] & enemyKing;
+
+        long checkingPieces = pawnCheckers | knightCheckers | diagonalCheckers | straightCheckers | kingCheckers;
+        if (checkingPieces == 0L) {
+            return new CheckInfo(0L, false, 0L);
+        }
+
+        long sliderCheckers = diagonalCheckers | straightCheckers;
+        boolean doubleCheck = (checkingPieces & (checkingPieces - 1)) != 0;
+        long responseMask = 0L;
+
+        if (!doubleCheck) {
+            if (sliderCheckers != 0L) {
+                int checkerSquare = Long.numberOfTrailingZeros(sliderCheckers);
+                long between = BitboardHelper.lineBetweenIndices(kingSquare, checkerSquare);
+                responseMask = between | (1L << checkerSquare);
+            } else {
+                responseMask = checkingPieces;
+            }
+        }
+
+        return new CheckInfo(checkingPieces, doubleCheck, responseMask);
     }
 
 
