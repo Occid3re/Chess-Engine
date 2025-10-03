@@ -310,9 +310,14 @@ public class Engine {
     }
 
     private void cacheLegalMoves(long boardHash, IntArrayList legalMoves) {
+        int size = legalMoves.size();
+        if (cachedLegalMoves.length < size) {
+            cachedLegalMoves = new int[size];
+        }
+        legalMoves.getElements(0, cachedLegalMoves, 0, size);
+
         this.cachedLegalMovesHash = boardHash;
-        this.cachedLegalMoveCount = legalMoves.size();
-        this.cachedLegalMoves = legalMoves.toIntArray();
+        this.cachedLegalMoveCount = size;
         this.legalMovesNeedUpdate = false;
     }
 
@@ -321,7 +326,6 @@ public class Engine {
     }
 
     private void resetCachedLegalMoves() {
-        cachedLegalMoves = new int[0];
         cachedLegalMoveCount = 0;
         cachedLegalMovesHash = Long.MIN_VALUE;
         legalMovesNeedUpdate = true;
