@@ -568,9 +568,12 @@ public class AI {
     private void iterativeDeepening(SearchTask task, Engine simulatorEngine, SplittableRandom rng) {
         Double lastIterScore = null;
         Heuristics heuristics = threadHeuristics.get();
+        boolean timingEnabled = log.isDebugEnabled();
 
         for (int currentDepth = 1; currentDepth <= maxDepth; currentDepth++) {
             if (shouldStopCalculating(task.getDeadline())) break;
+
+            long iterationStart = timingEnabled ? System.nanoTime() : 0L;
 
             boolean firstAtDepth = task.beginIteration(currentDepth);
             prepareIterationState(task, heuristics, currentDepth, firstAtDepth);
@@ -635,6 +638,7 @@ public class AI {
                 if (!result.isCompleted() && currentDepth == 1) {
                     // Depth-1 special-case still requires a candidate; none here.
                 }
+                if (timingEnabled) logIterationTiming(currentDepth, iterationStart, result);
                 break;
             }
 
@@ -646,6 +650,7 @@ public class AI {
                     task.publishBest(sealed, currentDepth, simulatorEngine);
                 }
                 if (heuristics.hasUpdates()) mergeThreadHeuristics(heuristics);
+                if (timingEnabled) logIterationTiming(currentDepth, iterationStart, result);
                 break;
             }
 
@@ -653,7 +658,11 @@ public class AI {
             task.publishBest(sealed, currentDepth, simulatorEngine);
 
             if (heuristics.hasUpdates()) mergeThreadHeuristics(heuristics);
-            if (task.isStopRequested()) break;
+            if (task.isStopRequested()) {
+                if (timingEnabled) logIterationTiming(currentDepth, iterationStart, result);
+                break;
+            }
+            if (timingEnabled) logIterationTiming(currentDepth, iterationStart, result);
         }
     }
 
@@ -716,6 +725,12 @@ public class AI {
         if (timeLimitMillis > 0) {
             this.timeLimit = timeLimitMillis;
         }
+        long effectiveTimeLimit = timeLimitMillis > 0 ? timeLimitMillis : previousTimeLimit;
+
+        boolean timingEnabled = log.isDebugEnabled();
+        long totalStart = timingEnabled ? System.nanoTime() : 0L;
+        MoveAndScore result = null;
+
         try {
             Engine simulatorEngine = mainEngine.createSimulation();
             long boardStateHash = simulatorEngine.getBoardStateHash();
@@ -756,16 +771,27 @@ public class AI {
             task.requestStop();
 
             if (searchResultReady && currentBestMove != -1 && bestMoveForHash == boardStateHash) {
-                return new MoveAndScore(currentBestMove, task.getBest().score);
+                result = new MoveAndScore(currentBestMove, task.getBest().score);
             }
-            return null;
         } catch (RuntimeException ex) {
             log.error("Synchronous search failed", ex);
-            return null;
         } finally {
             activeSearch.set(null);
             this.timeLimit = previousTimeLimit;
+            if (timingEnabled) {
+                long duration = System.nanoTime() - totalStart;
+                String moveNotation = result != null
+                        ? Move.convertIntToMove(result.getMove()).toString()
+                        : "none";
+                String score = result != null ? String.format("%.2f", result.getScore()) : "n/a";
+                log.debug("searchBestMoveBlocking completed in {} ms (limit={} ms, move={}, score={})",
+                        nanosToMillis(duration),
+                        effectiveTimeLimit,
+                        moveNotation,
+                        score);
+            }
         }
+        return result;
     }
 
 
@@ -1074,6 +1100,58 @@ public class AI {
         return t != null && t.isStopRequested();
     }
 
+    private static double nanosToMillis(long nanos) {
+        return nanos / 1_000_000.0;
+    }
+
+    private RootSearchResult logRootResult(String mode,
+                                           boolean isWhitesTurn,
+                                           int depth,
+                                           long totalStart,
+                                           long legalDuration,
+                                           long sortDuration,
+                                           int legalCount,
+                                           RootSearchResult result) {
+        if (log.isDebugEnabled()) {
+            long totalDuration = System.nanoTime() - totalStart;
+            MoveAndScore best = result != null ? result.bestMove() : null;
+            String moveNotation = best != null
+                    ? Move.convertIntToMove(best.getMove()).toString()
+                    : "none";
+            String score = best != null ? String.format("%.2f", best.getScore()) : "n/a";
+            log.debug("Root search {} [{} depth {}] total={} ms (legal={} ms, sort={} ms, moves={}, completed={}, move={}, score={})",
+                    mode,
+                    isWhitesTurn ? "white" : "black",
+                    depth,
+                    nanosToMillis(totalDuration),
+                    nanosToMillis(legalDuration),
+                    nanosToMillis(sortDuration),
+                    legalCount,
+                    result != null && result.isCompleted(),
+                    moveNotation,
+                    score);
+        }
+        return result;
+    }
+
+    private void logIterationTiming(int depth, long iterationStart, RootSearchResult result) {
+        if (!log.isDebugEnabled()) {
+            return;
+        }
+        long duration = System.nanoTime() - iterationStart;
+        MoveAndScore candidate = result != null && result.hasCandidate() ? result.bestMove() : null;
+        String moveNotation = candidate != null
+                ? Move.convertIntToMove(candidate.getMove()).toString()
+                : "none";
+        String score = candidate != null ? String.format("%.2f", candidate.getScore()) : "n/a";
+        log.debug("Iterative deepening depth {} finished in {} ms (completed={}, candidate={}, score={})",
+                depth,
+                nanosToMillis(duration),
+                result != null && result.isCompleted(),
+                moveNotation,
+                score);
+    }
+
     private RootSearchResult getBestMoveParallel(Engine simulatorEngine,
                                                  SearchTask task,
                                                  int depth,
@@ -1086,10 +1164,40 @@ public class AI {
         }
 
         final boolean isWhitesTurn = task.isWhiteToMove();
-        IntArrayList legal = simulatorEngine.getAllLegalMoves();
-        IntArrayList orderedMoves = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
-        if (orderedMoves.isEmpty()) return RootSearchResult.completed(null);
+        boolean timingEnabled = log.isDebugEnabled();
+        long totalStart = timingEnabled ? System.nanoTime() : 0L;
+        long legalDuration = 0L;
+        long sortDuration = 0L;
+
+        IntArrayList legal;
+        if (timingEnabled) {
+            long legalStart = System.nanoTime();
+            legal = simulatorEngine.getAllLegalMoves();
+            legalDuration = System.nanoTime() - legalStart;
+        } else {
+            legal = simulatorEngine.getAllLegalMoves();
+        }
+        int legalCount = legal.size();
+
+        IntArrayList orderedMoves;
+        if (timingEnabled) {
+            long sortStart = System.nanoTime();
+            orderedMoves = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
+            sortDuration = System.nanoTime() - sortStart;
+        } else {
+            orderedMoves = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
+        }
+
+        if (orderedMoves.isEmpty()) {
+            RootSearchResult result = RootSearchResult.completed(null);
+            return timingEnabled
+                    ? logRootResult("parallel(root=0,fanout=0)", isWhitesTurn, depth, totalStart, legalDuration, sortDuration, legalCount, result)
+                    : result;
+        }
         maybeRotateRootMoves(orderedMoves, rng);
+
+        final int fanout = Math.max(0, Math.min(ROOT_PARALLEL_LIMIT, orderedMoves.size() - 1));
+        final String modeLabel = String.format("parallel(root=%d,fanout=%d)", orderedMoves.size(), fanout);
 
         int firstMove = orderedMoves.getInt(0);
         int bestMove;
@@ -1098,7 +1206,10 @@ public class AI {
         boolean aborted = false;
 
         if (abortRequested(deadline)) {
-            return RootSearchResult.aborted(null);
+            RootSearchResult result = RootSearchResult.aborted(null);
+            return timingEnabled
+                    ? logRootResult(modeLabel, isWhitesTurn, depth, totalStart, legalDuration, sortDuration, legalCount, result)
+                    : result;
         }
 
         simulatorEngine.performMove(firstMove);
@@ -1113,7 +1224,10 @@ public class AI {
             firstScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, firstMove, 1, 0);
             if (firstScore == EXIT_FLAG || abortRequested(deadline)) {
                 simulatorEngine.undoLastMove();
-                return RootSearchResult.aborted(null);
+                RootSearchResult result = RootSearchResult.aborted(null);
+                return timingEnabled
+                        ? logRootResult(modeLabel, isWhitesTurn, depth, totalStart, legalDuration, sortDuration, legalCount, result)
+                        : result;
             }
         }
         simulatorEngine.undoLastMove();
@@ -1125,13 +1239,18 @@ public class AI {
         else beta = Math.min(beta, firstScore);
         if (alpha >= beta) {
             MoveAndScore candidate = createCandidate(bestMove, bestScore);
-            return RootSearchResult.completed(candidate);
+            RootSearchResult result = RootSearchResult.completed(candidate);
+            return timingEnabled
+                    ? logRootResult(modeLabel, isWhitesTurn, depth, totalStart, legalDuration, sortDuration, legalCount, result)
+                    : result;
         }
 
-        final int fanout = Math.min(ROOT_PARALLEL_LIMIT, orderedMoves.size() - 1);
         if (fanout <= 0) {
             MoveAndScore candidate = createCandidate(bestMove, bestScore);
-            return RootSearchResult.completed(candidate);
+            RootSearchResult result = RootSearchResult.completed(candidate);
+            return timingEnabled
+                    ? logRootResult(modeLabel, isWhitesTurn, depth, totalStart, legalDuration, sortDuration, legalCount, result)
+                    : result;
         }
 
         final CompletionService<MoveAndScore> ecs = new ExecutorCompletionService<>(searchPool);
@@ -1257,7 +1376,10 @@ public class AI {
         if (abortRequested(deadline)) {
             aborted = true;
         }
-        return aborted ? RootSearchResult.aborted(candidate) : RootSearchResult.completed(candidate);
+        RootSearchResult result = aborted ? RootSearchResult.aborted(candidate) : RootSearchResult.completed(candidate);
+        return timingEnabled
+                ? logRootResult(modeLabel, isWhitesTurn, depth, totalStart, legalDuration, sortDuration, legalCount, result)
+                : result;
     }
 
 
@@ -1370,14 +1492,36 @@ public class AI {
 
     private RootSearchResult getBestMove(Engine simulatorEngine, boolean isWhitesTurn, int depth, long deadline,
                                          double alpha, double beta, SplittableRandom rng) {
+        boolean timingEnabled = log.isDebugEnabled();
+        long totalStart = timingEnabled ? System.nanoTime() : 0L;
+        long legalDuration = 0L;
+        long sortDuration = 0L;
+
+        IntArrayList legal;
+        if (timingEnabled) {
+            long legalStart = System.nanoTime();
+            legal = simulatorEngine.getAllLegalMoves();
+            legalDuration = System.nanoTime() - legalStart;
+        } else {
+            legal = simulatorEngine.getAllLegalMoves();
+        }
+        int legalCount = legal.size();
+
+        IntArrayList sortedMoves;
+        if (timingEnabled) {
+            long sortStart = System.nanoTime();
+            sortedMoves = sortMovesByEfficiency(legal, depth,
+                    simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
+            sortDuration = System.nanoTime() - sortStart;
+        } else {
+            sortedMoves = sortMovesByEfficiency(legal, depth,
+                    simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
+        }
+        maybeRotateRootMoves(sortedMoves, rng);
+
         int bestMove = -1;
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
-
         boolean aborted = false;
-
-        IntArrayList sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth,
-                simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
-        maybeRotateRootMoves(sortedMoves, rng);
 
         for (int idx = 0; idx < sortedMoves.size(); idx++) {
             int moveInt = sortedMoves.getInt(idx);
@@ -1415,7 +1559,10 @@ public class AI {
             if (alpha >= beta) break;
         }
         MoveAndScore candidate = bestMove != -1 ? createCandidate(bestMove, bestScore) : null;
-        return aborted ? RootSearchResult.aborted(candidate) : RootSearchResult.completed(candidate);
+        RootSearchResult result = aborted ? RootSearchResult.aborted(candidate) : RootSearchResult.completed(candidate);
+        return timingEnabled
+                ? logRootResult("sequential", isWhitesTurn, depth, totalStart, legalDuration, sortDuration, legalCount, result)
+                : result;
     }
 
     private MoveAndScore createCandidate(int move, double score) {

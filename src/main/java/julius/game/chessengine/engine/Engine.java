@@ -97,19 +97,41 @@ public class Engine {
     }
 
     public IntArrayList getAllLegalMoves() {
+        boolean timingEnabled = log.isDebugEnabled();
+        long start = timingEnabled ? System.nanoTime() : 0L;
+
+        IntArrayList moves;
+        boolean fromCache;
+        boolean whitesTurn;
+
         synchronized (boardLock) {
+            whitesTurn = bitBoard.whitesTurn;
             long boardHash = getBoardStateHash();
             if (legalMovesNeedUpdate || cachedLegalMovesHash != boardHash) {
                 // Gate on terminality only (checkmate, stalemate, 50-move, threefold).
                 if (gameState.isTerminal()) {
-                    IntArrayList empty = new IntArrayList(0);
-                    cacheLegalMoves(boardHash, empty);
-                    return empty;
+                    moves = new IntArrayList(0);
+                    cacheLegalMoves(boardHash, moves);
+                } else {
+                    moves = generateLegalMoves();
                 }
-                return generateLegalMoves();
+                fromCache = false;
+            } else {
+                moves = copyCachedLegalMoves();
+                fromCache = true;
             }
-            return copyCachedLegalMoves();
         }
+
+        if (timingEnabled) {
+            long duration = System.nanoTime() - start;
+            log.debug("getAllLegalMoves [{}] -> {} moves in {} ms (cached={})",
+                    whitesTurn ? "white" : "black",
+                    moves.size(),
+                    nanosToMillis(duration),
+                    fromCache);
+        }
+
+        return moves;
     }
 
     public void performMove(int move) {
@@ -246,18 +268,35 @@ public class Engine {
     }
 
     private IntArrayList generateLegalMoves() {
+        boolean timingEnabled = log.isDebugEnabled();
+        long totalStart = timingEnabled ? System.nanoTime() : 0L;
+        long pseudoDuration = 0L;
+        long checkDuration = 0L;
+        long filterDuration = 0L;
+        long verifyDuration = 0L;
+        long cacheDuration = 0L;
+
         synchronized (boardLock) {
             final long boardStateHash = getBoardStateHash();
+            final boolean whitesTurn = bitBoard.whitesTurn;
 
             // Get pseudo moves + the already-computed PinState in one shot
             IntArrayList pseudoMoves = pseudoMoveBuffer;
             pseudoMoves.clear();
+            long pseudoStart = timingEnabled ? System.nanoTime() : 0L;
             BitBoard.PinState pinState = bitBoard.generateAllPossibleMovesInto(bitBoard.whitesTurn, pseudoMoves);
+            if (timingEnabled) {
+                pseudoDuration = System.nanoTime() - pseudoStart;
+            }
 
-            // NEW: detect check once
+            long checkStart = timingEnabled ? System.nanoTime() : 0L;
             boolean inCheck = bitBoard.isInCheck(bitBoard.whitesTurn);
+            if (timingEnabled) {
+                checkDuration = System.nanoTime() - checkStart;
+            }
 
             IntArrayList legalMoves = new IntArrayList(pseudoMoves.size());
+            long filterStart = timingEnabled ? System.nanoTime() : 0L;
             for (int i = 0; i < pseudoMoves.size(); i++) {
                 int move = pseudoMoves.getInt(i);
 
@@ -281,8 +320,12 @@ public class Engine {
                     legalMoves.add(move);
                 }
             }
+            if (timingEnabled) {
+                filterDuration = System.nanoTime() - filterStart;
+            }
 
             if (VERIFY_LEGAL_MOVES) {
+                long verifyStart = timingEnabled ? System.nanoTime() : 0L;
                 // Optional self-check retained for debugging
                 IntArrayList legacy = new IntArrayList(legalMoves.size());
                 for (int i = 0; i < pseudoMoves.size(); i++) {
@@ -293,13 +336,32 @@ public class Engine {
                     }
                     bitBoard.undoMove(move);
                 }
+                if (timingEnabled) {
+                    verifyDuration = System.nanoTime() - verifyStart;
+                }
                 if (!moveListsEqual(legalMoves, legacy)) {
                     throw new IllegalStateException(
                             "Mismatch between fast and legacy legal move filtering: fast=" + legalMoves + ", legacy=" + legacy
                     );
                 }
             }
+
+            long cacheStart = timingEnabled ? System.nanoTime() : 0L;
             cacheLegalMoves(boardStateHash, legalMoves);
+            if (timingEnabled) {
+                cacheDuration = System.nanoTime() - cacheStart;
+                long totalDuration = System.nanoTime() - totalStart;
+                log.debug("generateLegalMoves [{}] -> {} moves from {} pseudo in {} ms (pseudo={} ms, inCheck={} ms, filter={} ms, verify={} ms, cache={} ms)",
+                        whitesTurn ? "white" : "black",
+                        legalMoves.size(),
+                        pseudoMoves.size(),
+                        nanosToMillis(totalDuration),
+                        nanosToMillis(pseudoDuration),
+                        nanosToMillis(checkDuration),
+                        nanosToMillis(filterDuration),
+                        nanosToMillis(verifyDuration),
+                        nanosToMillis(cacheDuration));
+            }
             return legalMoves;
         }
     }
@@ -330,6 +392,10 @@ public class Engine {
     private boolean moveListsEqual(IntArrayList a, IntArrayList b) {
         return a.size() == b.size()
                 && java.util.Arrays.equals(a.elements(), 0, a.size(), b.elements(), 0, b.size());
+    }
+
+    private static double nanosToMillis(long nanos) {
+        return nanos / 1_000_000.0;
     }
 
     // Each of these methods would need to be implemented to handle the specific move generation for each piece type.
