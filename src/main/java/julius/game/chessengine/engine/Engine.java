@@ -34,6 +34,7 @@ public class Engine {
 
     private static final int MOVE_BUFFER_CAPACITY = 256;
     private final IntArrayList pseudoMoveBuffer = new IntArrayList(MOVE_BUFFER_CAPACITY);
+    private final IntArrayList captureMoveBuffer = new IntArrayList(MOVE_BUFFER_CAPACITY);
     private int[] legalMoveScratch = new int[MOVE_BUFFER_CAPACITY];
 
     @Getter
@@ -110,6 +111,51 @@ public class Engine {
                 return generateLegalMoves();
             }
             return copyCachedLegalMoves();
+        }
+    }
+
+    public IntArrayList getLegalCapturesAndPromotions() {
+        synchronized (boardLock) {
+            if (bitBoard.isInCheck(bitBoard.whitesTurn)) {
+                IntArrayList captures = captureMoveBuffer;
+                captures.clear();
+
+                IntArrayList allLegalMoves = getAllLegalMoves();
+                for (int i = 0; i < allLegalMoves.size(); i++) {
+                    int move = allLegalMoves.getInt(i);
+                    if (MoveHelper.isCapture(move) || MoveHelper.isPawnPromotionMove(move)) {
+                        captures.add(move);
+                    }
+                }
+
+                return new IntArrayList(captures);
+            }
+
+            IntArrayList pseudoMoves = pseudoMoveBuffer;
+            pseudoMoves.clear();
+            BitBoard.PinState pinState = bitBoard.generateAllPossibleMovesInto(bitBoard.whitesTurn, pseudoMoves);
+
+            IntArrayList captures = captureMoveBuffer;
+            captures.clear();
+
+            int[] pseudoElements = pseudoMoves.elements();
+            final int pseudoCount = pseudoMoves.size();
+            for (int i = 0; i < pseudoCount; i++) {
+                int move = pseudoElements[i];
+                if (!MoveHelper.isCapture(move) && !MoveHelper.isPawnPromotionMove(move)) {
+                    continue;
+                }
+
+                if (MoveHelper.isEnPassantMove(move)) {
+                    if (bitBoard.isMoveLegalFast(move, pinState)) {
+                        captures.add(move);
+                    }
+                } else {
+                    captures.add(move);
+                }
+            }
+
+            return new IntArrayList(captures);
         }
     }
 

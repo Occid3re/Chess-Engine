@@ -2251,7 +2251,7 @@ public class AI {
         // Generate moves: evasions if in check, else captures/promotions
         IntArrayList moves = inCheck
                 ? simulatorEngine.getAllLegalMoves()
-                : getPossibleCapturesOrPromotions(simulatorEngine);
+                : simulatorEngine.getLegalCapturesAndPromotions();
 
         // Order them (captures/promotions first etc.)
         IntArrayList ordered = sortMovesByEfficiency(
@@ -2321,11 +2321,6 @@ public class AI {
         }
         double scoreDifference = gameState.getScore().getScoreDifference();
         return isWhitesTurn ? scoreDifference : -scoreDifference;
-    }
-
-    private IntArrayList getPossibleCapturesOrPromotions(Engine simulatorEngine) {
-        IntArrayList allLegalMoves = simulatorEngine.getAllLegalMoves();
-        return MoveContainerUtils.filterCapturesAndPromotions(allLegalMoves);
     }
 
     /**

@@ -1,7 +1,6 @@
 package julius.game.chessengine.ai;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
-import julius.game.chessengine.board.MoveHelper;
 
 final class MoveContainerUtils {
     private MoveContainerUtils() {
@@ -56,17 +55,6 @@ final class MoveContainerUtils {
         }
         int[] elements = target.elements();
         System.arraycopy(buffer, 0, elements, 0, length);
-    }
-
-    static IntArrayList filterCapturesAndPromotions(IntArrayList moves) {
-        IntArrayList filtered = new IntArrayList(moves.size());
-        for (int i = 0; i < moves.size(); i++) {
-            int move = moves.getInt(i);
-            if (MoveHelper.isCapture(move) || MoveHelper.isPawnPromotionMove(move)) {
-                filtered.add(move);
-            }
-        }
-        return filtered;
     }
 
     private static int gcd(int a, int b) {
