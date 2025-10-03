@@ -34,6 +34,7 @@ public class Engine {
 
     private static final int MOVE_BUFFER_CAPACITY = 256;
     private final IntArrayList pseudoMoveBuffer = new IntArrayList(MOVE_BUFFER_CAPACITY);
+    private int[] legalMoveScratch = new int[MOVE_BUFFER_CAPACITY];
 
     @Getter
     private MoveStack line = new MoveStack();
@@ -103,7 +104,7 @@ public class Engine {
                 // Gate on terminality only (checkmate, stalemate, 50-move, threefold).
                 if (gameState.isTerminal()) {
                     IntArrayList empty = new IntArrayList(0);
-                    cacheLegalMoves(boardHash, empty);
+                    cacheLegalMoves(boardHash, legalMoveScratch, 0);
                     return empty;
                 }
                 return generateLegalMoves();
@@ -171,7 +172,7 @@ public class Engine {
 
             // If you auto-claim 50-move / threefold, these are terminal draws.
             if (gameState.isFiftyMoveRule() || gameState.isThreefoldRepetition()) {
-                cacheLegalMoves(getBoardStateHash(), new IntArrayList(0));
+                cacheLegalMoves(getBoardStateHash(), legalMoveScratch, 0);
                 gameState.setState(GameStateEnum.DRAW);
                 // Still surface the UI/eval hint if material is insufficient.
                 gameState.setDrawByInsufficientMaterial(bitBoard.hasInsufficientMaterial());
@@ -257,9 +258,15 @@ public class Engine {
             // NEW: detect check once
             boolean inCheck = bitBoard.isInCheck(bitBoard.whitesTurn);
 
-            IntArrayList legalMoves = new IntArrayList(pseudoMoves.size());
-            for (int i = 0; i < pseudoMoves.size(); i++) {
-                int move = pseudoMoves.getInt(i);
+            int[] pseudoElements = pseudoMoves.elements();
+            final int pseudoCount = pseudoMoves.size();
+            int[] pseudoSnapshot = null;
+            if (VERIFY_LEGAL_MOVES) {
+                pseudoSnapshot = java.util.Arrays.copyOf(pseudoElements, pseudoCount);
+            }
+            int writeIdx = 0;
+            for (int i = 0; i < pseudoCount; i++) {
+                int move = pseudoElements[i];
 
                 // Fast path when NOT in check:
                 // - pins already enforced during generation
@@ -268,25 +275,37 @@ public class Engine {
                 if (!inCheck) {
                     if (MoveHelper.isEnPassantMove(move)) {
                         if (bitBoard.isMoveLegalFast(move, pinState)) {
-                            legalMoves.add(move);
+                            pseudoElements[writeIdx++] = move;
                         }
                     } else {
-                        legalMoves.add(move);
+                        pseudoElements[writeIdx++] = move;
                     }
                     continue;
                 }
 
                 // If in check, fall back to the full legality test
                 if (bitBoard.isMoveLegalFast(move, pinState)) {
-                    legalMoves.add(move);
+                    pseudoElements[writeIdx++] = move;
                 }
+            }
+
+            pseudoMoves.size(writeIdx);
+
+            ensureLegalMoveScratchCapacity(writeIdx);
+            if (writeIdx > 0) {
+                System.arraycopy(pseudoElements, 0, legalMoveScratch, 0, writeIdx);
+            }
+
+            IntArrayList legalMoves = new IntArrayList(writeIdx);
+            if (writeIdx > 0) {
+                legalMoves.addElements(0, legalMoveScratch, 0, writeIdx);
             }
 
             if (VERIFY_LEGAL_MOVES) {
                 // Optional self-check retained for debugging
                 IntArrayList legacy = new IntArrayList(legalMoves.size());
-                for (int i = 0; i < pseudoMoves.size(); i++) {
-                    int move = pseudoMoves.getInt(i);
+                for (int i = 0; i < pseudoCount; i++) {
+                    int move = pseudoSnapshot[i];
                     bitBoard.performMove(move);
                     if (!bitBoard.isInCheck(MoveHelper.isWhitesMove(move))) {
                         legacy.add(move);
@@ -299,7 +318,7 @@ public class Engine {
                     );
                 }
             }
-            cacheLegalMoves(boardStateHash, legalMoves);
+            cacheLegalMoves(boardStateHash, legalMoveScratch, writeIdx);
             return legalMoves;
         }
     }
@@ -309,11 +328,22 @@ public class Engine {
         cachedLegalMovesHash = Long.MIN_VALUE;
     }
 
-    private void cacheLegalMoves(long boardHash, IntArrayList legalMoves) {
+    private void cacheLegalMoves(long boardHash, int[] legalMoves, int legalMoveCount) {
         this.cachedLegalMovesHash = boardHash;
-        this.cachedLegalMoveCount = legalMoves.size();
-        this.cachedLegalMoves = legalMoves.toIntArray();
+        this.cachedLegalMoveCount = legalMoveCount;
+        if (this.cachedLegalMoves.length < legalMoveCount) {
+            this.cachedLegalMoves = java.util.Arrays.copyOf(legalMoves, legalMoveCount);
+        } else {
+            System.arraycopy(legalMoves, 0, this.cachedLegalMoves, 0, legalMoveCount);
+        }
         this.legalMovesNeedUpdate = false;
+    }
+
+    private void ensureLegalMoveScratchCapacity(int requiredSize) {
+        if (legalMoveScratch.length < requiredSize) {
+            int newSize = Math.max(requiredSize, legalMoveScratch.length << 1);
+            legalMoveScratch = java.util.Arrays.copyOf(legalMoveScratch, newSize);
+        }
     }
 
     private IntArrayList copyCachedLegalMoves() {
