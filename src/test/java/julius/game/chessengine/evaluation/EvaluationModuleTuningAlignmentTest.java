@@ -91,7 +91,7 @@ class EvaluationModuleTuningAlignmentTest {
                     .withFailMessage("Missing numeric parameter %s in seed YAML", key)
                     .isNotNull();
             int actual = supplier.getAsInt();
-            int expectedInt = expected.intValue();
+            int expectedInt = (int) Math.round(expected);
             Assertions.assertThat(actual)
                     .withFailMessage("Mismatch for %s", key)
                     .isEqualTo(expectedInt);
@@ -203,9 +203,11 @@ class EvaluationModuleTuningAlignmentTest {
         Assertions.assertThat(result.midgame()).isEqualTo(expectedMid);
         Assertions.assertThat(result.endgame()).isEqualTo(expectedEnd);
 
-        long numerator = (long) expectedMid * (result.blendScale() - result.phase())
-                + (long) expectedEnd * result.phase();
-        int expectedBlended = (int) (numerator / result.blendScale());
+        int blendScale = result.blendScale();
+        int phase = Math.max(0, Math.min(result.phase(), blendScale));
+        long numerator = (long) expectedMid * (blendScale - phase)
+                + (long) expectedEnd * phase;
+        int expectedBlended = (int) (numerator / blendScale);
         Assertions.assertThat(result.blended()).isEqualTo(expectedBlended);
     }
 
