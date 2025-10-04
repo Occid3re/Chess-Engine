@@ -40,7 +40,8 @@ java ^
   -cp "%JARFILE%" ^
   org.springframework.boot.loader.launch.PropertiesLauncher ^
   --seed "%SEED%" ^
-  --generations 2 ^
+  --generations 6
+   ^
   --population 16 ^
   --matches-per-pair 2 ^
   --move-time 2000 ^
