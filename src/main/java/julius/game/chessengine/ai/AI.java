@@ -151,8 +151,6 @@ public class AI {
 
     private final ThreadLocal<SortBuffers> sortBuffers =
             ThreadLocal.withInitial(() -> new SortBuffers(MAX_MOVE_LIST_SIZE));
-    private final ThreadLocal<Map<Integer, Integer>> seeCacheThreadLocal =
-            ThreadLocal.withInitial(() -> new HashMap<>(64));
 
     private static final int LMR_MAX_DEPTH = 64;
     private static final int LMR_MAX_MOVES = MAX_MOVE_LIST_SIZE;
@@ -1086,7 +1084,8 @@ public class AI {
 
         final boolean isWhitesTurn = task.isWhiteToMove();
         IntArrayList legal = simulatorEngine.getAllLegalMoves();
-        IntArrayList orderedMoves = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
+        SortBuffers.MoveOrderingResult ordering = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
+        IntArrayList orderedMoves = ordering.moves();
         if (orderedMoves.isEmpty()) return RootSearchResult.completed(null);
         maybeRotateRootMoves(orderedMoves, rng);
 
@@ -1374,8 +1373,9 @@ public class AI {
 
         boolean aborted = false;
 
-        IntArrayList sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth,
+        SortBuffers.MoveOrderingResult rootOrdering = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth,
                 simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
+        IntArrayList sortedMoves = rootOrdering.moves();
         maybeRotateRootMoves(sortedMoves, rng);
 
         for (int idx = 0; idx < sortedMoves.size(); idx++) {
@@ -1672,10 +1672,9 @@ public class AI {
         final Heuristics heuristics = threadHeuristics.get();
         final int[][] historyTable = heuristics.history;
 
-        IntArrayList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
-        seeCache.clear();
-        for (int index = 0; index < orderedMoves.size(); index++) {
+        SortBuffers.MoveOrderingResult ordering = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
+        IntArrayList orderedMoves = ordering.moves();
+        for (int index = 0; index < ordering.size(); index++) {
             if (abortRequested(deadline)) {
                 return EXIT_FLAG;
             }
@@ -1697,7 +1696,12 @@ public class AI {
             // SEE pruning for losing captures/quiets (keep checks/promotions)
             boolean seePruneCandidate = (!inCheckAtNode && isCapture && !isPromotion) || isQuiet;
             if (seePruneCandidate) {
-                seeGain = seeCache.computeIfAbsent(move, simulatorEngine::see);
+                if (ordering.hasSeeAt(index)) {
+                    seeGain = ordering.seeAt(index);
+                } else {
+                    seeGain = simulatorEngine.see(move);
+                    ordering.storeSeeAt(index, seeGain);
+                }
                 seeEvaluated = true;
                 if (seeGain < 0) {
                     simulatorEngine.performMove(move);
@@ -1855,10 +1859,9 @@ public class AI {
         final Heuristics heuristics = threadHeuristics.get();
         final int[][] historyTable = heuristics.history;
 
-        IntArrayList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
-        seeCache.clear();
-        for (int index = 0; index < orderedMoves.size(); index++) {
+        SortBuffers.MoveOrderingResult ordering = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
+        IntArrayList orderedMoves = ordering.moves();
+        for (int index = 0; index < ordering.size(); index++) {
             if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
                 return EXIT_FLAG;
             }
@@ -1880,7 +1883,12 @@ public class AI {
 
             boolean seePruneCandidate = (!inCheckAtNode && isCapture && !isPromotion) || isQuiet;
             if (seePruneCandidate) {
-                seeGain = seeCache.computeIfAbsent(move, simulatorEngine::see);
+                if (ordering.hasSeeAt(index)) {
+                    seeGain = ordering.seeAt(index);
+                } else {
+                    seeGain = simulatorEngine.see(move);
+                    ordering.storeSeeAt(index, seeGain);
+                }
                 seeEvaluated = true;
                 if (seeGain < 0) {
                     simulatorEngine.performMove(move);
@@ -2033,20 +2041,24 @@ public class AI {
      * their capture bucket. Results are cached per move within this ordering
      * pass so repeated SEE queries are avoided.
      */
-    IntArrayList sortMovesByEfficiency(IntArrayList moves, int currentDepth, long boardHash, int prevMove,
-                                       Engine simulatorEngine) {
+    SortBuffers.MoveOrderingResult sortMovesByEfficiency(IntArrayList moves, int currentDepth, long boardHash, int prevMove,
+                                                         Engine simulatorEngine) {
         final int size = moves.size();
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
-        seeCache.clear();
 
         if (size == 0) {
-            return moves;
+            final SortBuffers buffers = sortBuffers.get();
+            return buffers.orderingResult.reset(moves, 0, buffers.orderedSeeScoreBuffer, buffers.orderedSeeComputedBuffer);
         }
 
         final SortBuffers buffers = sortBuffers.get();
         final int[] moveBuffer = buffers.moveBuffer;
         final int[] scoreBuffer = buffers.scoreBuffer;
         final long[] sortKeys = buffers.sortKeyBuffer;
+        final int[] seeScores = buffers.seeScoreBuffer;
+        final boolean[] seeComputed = buffers.seeComputedBuffer;
+        final int[] orderedMoves = buffers.orderedMoveBuffer;
+        final int[] orderedSeeScores = buffers.orderedSeeScoreBuffer;
+        final boolean[] orderedSeeComputed = buffers.orderedSeeComputedBuffer;
 
         final Heuristics heuristics = threadHeuristics.get();
         final int[][] killerMoves = heuristics.killers;
@@ -2096,7 +2108,7 @@ public class AI {
             int seeValue = 0;
             boolean hasSee = false;
             if (isCapture) {
-                seeValue = seeCache.computeIfAbsent(moveInt, simulatorEngine::see);
+                seeValue = simulatorEngine.see(moveInt);
                 hasSee = true;
             }
 
@@ -2143,41 +2155,40 @@ public class AI {
 
             moveBuffer[i] = moveInt;
             scoreBuffer[i] = score;
+            seeScores[i] = hasSee ? seeValue : 0;
+            seeComputed[i] = hasSee;
 
             int s = score;
             if (s < 0) s = 0;
             else if (s > 0x00FFFFFF) s = 0x00FFFFFF;
-            sortKeys[i] = (((long) category) << 56) | (((long) s) << 32) | (moveInt & 0xFFFFFFFFL);
+            sortKeys[i] = (((long) category) << 56) | (((long) s) << 24) | (i & 0xFFFFFFL);
         }
 
         // *** FIX: always hoist the TT move (if any) to index 0, and sort only the remainder.
-        int sortStart = 0;
-        if (ttIndex >= 0) {
-            if (ttIndex != 0) {
-                long tmp = sortKeys[0];
-                sortKeys[0] = sortKeys[ttIndex];
-                sortKeys[ttIndex] = tmp;
-            }
-            sortStart = 1; // never sort the TT slot
-        }
-
-        Arrays.sort(sortKeys, sortStart, size); // ascending
+        Arrays.sort(sortKeys, 0, size); // ascending
 
         // Emit in descending order; if TT exists, ensure it is first
         int outIndex = 0;
         if (ttIndex >= 0) {
-            moveBuffer[outIndex++] = (int) (sortKeys[0] & 0xFFFFFFFFL); // guaranteed TT move
-            for (int i = size - 1; i >= 1; i--) {
-                moveBuffer[outIndex++] = (int) (sortKeys[i] & 0xFFFFFFFFL);
-            }
-        } else {
-            for (int i = size - 1; i >= 0; i--) {
-                moveBuffer[outIndex++] = (int) (sortKeys[i] & 0xFFFFFFFFL);
-            }
+            orderedMoves[outIndex] = moveBuffer[ttIndex];
+            orderedSeeScores[outIndex] = seeScores[ttIndex];
+            orderedSeeComputed[outIndex] = seeComputed[ttIndex];
+            outIndex++;
         }
 
-        MoveContainerUtils.overwriteFromBuffer(moves, moveBuffer, size);
-        return moves;
+        for (int i = size - 1; i >= 0; i--) {
+            int originalIndex = (int) (sortKeys[i] & 0xFFFFFFL);
+            if (originalIndex == ttIndex) {
+                continue;
+            }
+            orderedMoves[outIndex] = moveBuffer[originalIndex];
+            orderedSeeScores[outIndex] = seeScores[originalIndex];
+            orderedSeeComputed[outIndex] = seeComputed[originalIndex];
+            outIndex++;
+        }
+
+        MoveContainerUtils.overwriteFromBuffer(moves, orderedMoves, size);
+        return buffers.orderingResult.reset(moves, size, orderedSeeScores, orderedSeeComputed);
     }
 
 
@@ -2253,11 +2264,12 @@ public class AI {
                 : getPossibleCapturesOrPromotions(simulatorEngine);
 
         // Order them (captures/promotions first etc.)
-        IntArrayList ordered = sortMovesByEfficiency(
+        SortBuffers.MoveOrderingResult ordering = sortMovesByEfficiency(
                 moves, 0, simulatorEngine.getBoardStateHash(), -1, simulatorEngine
         );
+        IntArrayList ordered = ordering.moves();
 
-        for (int i = 0; i < ordered.size(); i++) {
+        for (int i = 0; i < ordering.size(); i++) {
             int m = ordered.getInt(i);
             boolean isCapture = MoveHelper.isCapture(m);
             boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
@@ -2265,7 +2277,13 @@ public class AI {
 
             // --- SEE pruning: drop clearly losing captures or quiets (keeps promotions) ---
             if ((!inCheck && isCapture && !isPromotion) || isQuiet) {
-                int see = simulatorEngine.see(m);
+                int see;
+                if (ordering.hasSeeAt(i)) {
+                    see = ordering.seeAt(i);
+                } else {
+                    see = simulatorEngine.see(m);
+                    ordering.storeSeeAt(i, see);
+                }
                 if (see < 0) {
                     // Guard: do not "probe" with a make/undo if node somehow became terminal.
                     if (simulatorEngine.getGameState().isTerminal()) {
