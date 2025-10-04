@@ -1194,78 +1194,88 @@ public class AI {
         for (int i = 1; i <= fanout; i++) {
             final int moveInt = orderedMoves.getInt(i);
             futures.add(ecs.submit(() -> {
-                if (stopRef.get() || abortRequested(deadline)) return null;
-                Heuristics helperHeuristics = prepareHelperHeuristics(task, depth);
-                Engine workerEngine = null;
+                SearchTask previousTask = threadSearchTask.get();
+                threadSearchTask.set(task);
                 try {
-                    workerEngine = borrowWorkerSimulation(simulatorEngine);
-                    workerEngine.performMove(moveInt);
+                    if (task.isStopRequested() || stopRef.get() || abortRequested(deadline)) return null;
+                    Heuristics helperHeuristics = prepareHelperHeuristics(task, depth);
+                    Engine workerEngine = null;
+                    try {
+                        workerEngine = borrowWorkerSimulation(simulatorEngine);
+                        workerEngine.performMove(moveInt);
 
-                    double currentAlpha = alphaRef.get();
-                    double currentBeta = betaRef.get();
-                    double pAlpha, pBeta;
-                    if (isWhitesTurn) {
-                        pAlpha = currentAlpha;
-                        pBeta = currentAlpha + 1;
-                    } else {
-                        pAlpha = currentBeta - 1;
-                        pBeta = currentBeta;
-                    }
+                        double currentAlpha = alphaRef.get();
+                        double currentBeta = betaRef.get();
+                        double pAlpha, pBeta;
+                        if (isWhitesTurn) {
+                            pAlpha = currentAlpha;
+                            pBeta = currentAlpha + 1;
+                        } else {
+                            pAlpha = currentBeta - 1;
+                            pBeta = currentBeta;
+                        }
 
-                    double probe;
-                    if (workerEngine.getGameState().isInStateCheckMate()) {
-                        probe = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
-                    } else if (workerEngine.getGameState().isTerminal()) { // <-- terminal only
-                        probe = evaluateStaticPosition(workerEngine.getGameState(), !isWhitesTurn, depth);
-                        if (isWhitesTurn) probe = -probe;
-                    } else {
-                        probe = alphaBeta(workerEngine, depth - 1, pAlpha, pBeta, !isWhitesTurn, deadline, moveInt, 1, 0);
-                        if (probe == EXIT_FLAG || abortRequested(deadline)) return null;
-                    }
+                        double probe;
+                        if (workerEngine.getGameState().isInStateCheckMate()) {
+                            probe = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
+                        } else if (workerEngine.getGameState().isTerminal()) { // <-- terminal only
+                            probe = evaluateStaticPosition(workerEngine.getGameState(), !isWhitesTurn, depth);
+                            if (isWhitesTurn) probe = -probe;
+                        } else {
+                            probe = alphaBeta(workerEngine, depth - 1, pAlpha, pBeta, !isWhitesTurn, deadline, moveInt, 1, 0);
+                            if (probe == EXIT_FLAG || abortRequested(deadline)) return null;
+                        }
 
-                    boolean needsFull = isWhitesTurn ? (probe > alphaRef.get()) : (probe < betaRef.get());
-                    double finalScore = probe;
+                        boolean needsFull = isWhitesTurn ? (probe > alphaRef.get()) : (probe < betaRef.get());
+                        double finalScore = probe;
 
-                    if (needsFull && !stopRef.get()) {
-                        fullResLock.lock();
-                        try {
-                            if (!stopRef.get() && !abortRequested(deadline)) {
-                                double aNow = alphaRef.get(), bNow = betaRef.get();
-                                double full = alphaBeta(workerEngine, depth - 1, aNow, bNow, !isWhitesTurn, deadline, moveInt, 1, 0);
-                                if (full != EXIT_FLAG) {
-                                    finalScore = full;
-                                    if (isWhitesTurn) {
-                                        if (full > aNow) alphaRef.set(full);
-                                    } else {
-                                        if (full < bNow) betaRef.set(full);
+                        if (needsFull && !stopRef.get()) {
+                            fullResLock.lock();
+                            try {
+                                if (!stopRef.get() && !abortRequested(deadline)) {
+                                    double aNow = alphaRef.get(), bNow = betaRef.get();
+                                    double full = alphaBeta(workerEngine, depth - 1, aNow, bNow, !isWhitesTurn, deadline, moveInt, 1, 0);
+                                    if (full != EXIT_FLAG) {
+                                        finalScore = full;
+                                        if (isWhitesTurn) {
+                                            if (full > aNow) alphaRef.set(full);
+                                        } else {
+                                            if (full < bNow) betaRef.set(full);
+                                        }
+                                        Double curBest = bestScoreRef.get();
+                                        if (isBetterScore(isWhitesTurn, full, curBest)) {
+                                            bestScoreRef.set(full);
+                                            bestMoveRef.set(moveInt);
+                                        }
+                                        if (alphaRef.get() >= betaRef.get()) stopRef.set(true);
                                     }
-                                    Double curBest = bestScoreRef.get();
-                                    if (isBetterScore(isWhitesTurn, full, curBest)) {
-                                        bestScoreRef.set(full);
-                                        bestMoveRef.set(moveInt);
-                                    }
-                                    if (alphaRef.get() >= betaRef.get()) stopRef.set(true);
                                 }
+                            } finally {
+                                fullResLock.unlock();
                             }
-                        } finally {
-                            fullResLock.unlock();
+                        } else {
+                            Double curBest = bestScoreRef.get();
+                            if (isBetterScore(isWhitesTurn, finalScore, curBest)) {
+                                bestScoreRef.set(finalScore);
+                                bestMoveRef.set(moveInt);
+                                if (isWhitesTurn && finalScore > alphaRef.get()) alphaRef.set(finalScore);
+                                if (!isWhitesTurn && finalScore < betaRef.get()) betaRef.set(finalScore);
+                                if (alphaRef.get() >= betaRef.get()) stopRef.set(true);
+                            }
                         }
-                    } else {
-                        Double curBest = bestScoreRef.get();
-                        if (isBetterScore(isWhitesTurn, finalScore, curBest)) {
-                            bestScoreRef.set(finalScore);
-                            bestMoveRef.set(moveInt);
-                            if (isWhitesTurn && finalScore > alphaRef.get()) alphaRef.set(finalScore);
-                            if (!isWhitesTurn && finalScore < betaRef.get()) betaRef.set(finalScore);
-                            if (alphaRef.get() >= betaRef.get()) stopRef.set(true);
-                        }
-                    }
 
-                    return new MoveAndScore(moveInt, finalScore);
+                        return new MoveAndScore(moveInt, finalScore);
+                    } finally {
+                        releaseWorkerSimulation(workerEngine, task.getRootSnapshot());
+                        if (helperHeuristics.hasUpdates()) mergeThreadHeuristics(helperHeuristics);
+                        else helperHeuristics.resetUpdates();
+                    }
                 } finally {
-                    releaseWorkerSimulation(workerEngine, task.getRootSnapshot());
-                    if (helperHeuristics.hasUpdates()) mergeThreadHeuristics(helperHeuristics);
-                    else helperHeuristics.resetUpdates();
+                    if (previousTask != null) {
+                        threadSearchTask.set(previousTask);
+                    } else {
+                        threadSearchTask.remove();
+                    }
                 }
             }));
         }
