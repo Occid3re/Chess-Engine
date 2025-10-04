@@ -244,6 +244,22 @@ public class BestMoveSearchTest {
                 new Object[]{
                         "5k2/5p1p/2p2B2/8/2p2NPP/pr2P3/2q1BK2/3R4 b - - 1 37",
                         List.of("Rb8")
+                },
+                new Object[]{
+                        "2r3k1/p4p2/3Rp2p/1p2P1pK/8/1P4P1/P3Q2P/1q6 b - - 0 1",
+                        List.of("Qg6")
+                },
+                new Object[]{
+                        "4k2r/1R3R2/p3p1pp/4b3/1BnNr3/8/P1P5/5K2 w - - 1 1",
+                        List.of("Re7")
+                },
+                new Object[]{
+                        "4k2r/1R3R2/p3p1pp/4b3/1BnNr3/8/P1P5/5K2 w - - 1 1",
+                        List.of("Re8")
+                },
+                new Object[]{
+                        "r2qkb1r/pppb1ppp/4p3/3pP3/2PQ4/4P3/P1P2PPP/R1B1KB1R b KQkq - 0 9",
+                        List.of("Bb4")
                 }
         );
     }
@@ -341,7 +357,7 @@ public class BestMoveSearchTest {
         evaluations.sort(comparator);
 
         MoveEvaluation chosenEvaluation = evaluationMap.get(chosenMove);
-        MoveEvaluation bestEvaluation = evaluations.isEmpty() ? null : evaluations.get(0);
+        MoveEvaluation bestEvaluation = evaluations.isEmpty() ? null : evaluations.getFirst();
 
         List<MoveEvaluation> expectedEvaluationDetails = new ArrayList<>();
         for (String expected : expectedMoves) {
@@ -508,7 +524,7 @@ public class BestMoveSearchTest {
             boolean first = true;
             first = appendJsonString(sb, "fen", fen, first);
             first = appendJsonString(sb, "side", whiteToMove ? "w" : "b", first);
-            first = appendJsonStringArray(sb, "expected", expectedMoves, first);
+            first = appendJsonStringArray(sb, expectedMoves, first);
             first = appendJsonString(sb, "chosen", chosenEvaluation != null ? chosenEvaluation.move() : null, first);
             first = appendJsonNumber(sb, "chosenScore", chosenEvaluation != null ? chosenEvaluation.score() : null, 2, first);
             first = appendJsonString(sb, "best", bestEvaluation != null ? bestEvaluation.move() : null, first);
@@ -676,11 +692,11 @@ public class BestMoveSearchTest {
         return false;
     }
 
-    private static boolean appendJsonStringArray(StringBuilder sb, String key, List<String> values, boolean first) {
+    private static boolean appendJsonStringArray(StringBuilder sb, List<String> values, boolean first) {
         if (!first) {
             sb.append(',');
         }
-        sb.append('"').append(jsonEscape(key)).append('"').append(':');
+        sb.append('"').append(jsonEscape("expected")).append('"').append(':');
         sb.append('[');
         for (int i = 0; i < values.size(); i++) {
             if (i > 0) {
@@ -785,8 +801,10 @@ public class BestMoveSearchTest {
         if (!Double.isFinite(value)) {
             return null;
         }
-        return String.format(Locale.US, "%." + decimals + "f", value);
+        String format = "%." + decimals + "f";
+        return String.format(Locale.US, format, value);
     }
+
 
     private String renderPrincipalVariation(boolean whiteToMove, List<MoveAndScore> pv) {
         if (pv == null || pv.isEmpty()) {
