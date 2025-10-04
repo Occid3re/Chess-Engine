@@ -16,6 +16,7 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Component;
 
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
@@ -23,6 +24,7 @@ import java.util.concurrent.atomic.LongAdder;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.StampedLock;
+import java.util.function.IntPredicate;
 
 import static julius.game.chessengine.helper.BitHelper.FileMasks;
 import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
@@ -1127,14 +1129,16 @@ public class AI {
             return RootSearchResult.completed(candidate);
         }
 
-        final int fanout = Math.min(ROOT_PARALLEL_LIMIT, orderedMoves.size() - 1);
+        final int totalRootMoves = orderedMoves.size();
+        final int remainingMoves = totalRootMoves - 1;
+        final int fanout = Math.min(ROOT_PARALLEL_LIMIT, remainingMoves);
         if (fanout <= 0) {
             MoveAndScore candidate = createCandidate(bestMove, bestScore);
             return RootSearchResult.completed(candidate);
         }
 
         final CompletionService<MoveAndScore> ecs = new ExecutorCompletionService<>(searchPool);
-        final List<Future<MoveAndScore>> futures = new ArrayList<>(fanout);
+        final List<Future<MoveAndScore>> futures = new ArrayList<>(remainingMoves);
 
         final AtomicReference<Double> alphaRef = new AtomicReference<>(alpha);
         final AtomicReference<Double> betaRef = new AtomicReference<>(beta);
@@ -1142,96 +1146,130 @@ public class AI {
         final AtomicReference<Double> bestScoreRef = new AtomicReference<>(bestScore);
         final AtomicBoolean stopRef = new AtomicBoolean(false);
         final java.util.concurrent.locks.ReentrantLock fullResLock = new java.util.concurrent.locks.ReentrantLock();
+        final AtomicInteger nextMoveIndex = new AtomicInteger(1 + fanout);
 
-        for (int i = 1; i <= fanout; i++) {
-            final int moveInt = orderedMoves.getInt(i);
-            futures.add(ecs.submit(() -> {
-                if (stopRef.get() || abortRequested(deadline)) return null;
-                Heuristics helperHeuristics = prepareHelperHeuristics(task, depth);
-                try {
-                    Engine e = simulatorEngine.createSimulation();
-                    e.performMove(moveInt);
+        IntPredicate scheduleMove = (int moveIndex) -> {
+            final int moveInt = orderedMoves.getInt(moveIndex);
+            try {
+                Future<MoveAndScore> future = ecs.submit(() -> {
+                    if (stopRef.get() || abortRequested(deadline)) return null;
+                    Heuristics helperHeuristics = prepareHelperHeuristics(task, depth);
+                    try {
+                        Engine e = simulatorEngine.createSimulation();
+                        e.performMove(moveInt);
 
-                    double currentAlpha = alphaRef.get();
-                    double currentBeta = betaRef.get();
-                    double pAlpha, pBeta;
-                    if (isWhitesTurn) {
-                        pAlpha = currentAlpha;
-                        pBeta = currentAlpha + 1;
-                    } else {
-                        pAlpha = currentBeta - 1;
-                        pBeta = currentBeta;
-                    }
+                        double currentAlpha = alphaRef.get();
+                        double currentBeta = betaRef.get();
+                        double pAlpha, pBeta;
+                        if (isWhitesTurn) {
+                            pAlpha = currentAlpha;
+                            pBeta = currentAlpha + 1;
+                        } else {
+                            pAlpha = currentBeta - 1;
+                            pBeta = currentBeta;
+                        }
 
-                    double probe;
-                    if (e.getGameState().isInStateCheckMate()) {
-                        probe = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
-                    } else if (e.getGameState().isTerminal()) { // <-- terminal only
-                        probe = evaluateStaticPosition(e.getGameState(), !isWhitesTurn, depth);
-                        if (isWhitesTurn) probe = -probe;
-                    } else {
-                        probe = alphaBeta(e, depth - 1, pAlpha, pBeta, !isWhitesTurn, deadline, moveInt, 1, 0);
-                        if (probe == EXIT_FLAG || abortRequested(deadline)) return null;
-                    }
+                        double probe;
+                        if (e.getGameState().isInStateCheckMate()) {
+                            probe = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
+                        } else if (e.getGameState().isTerminal()) { // <-- terminal only
+                            probe = evaluateStaticPosition(e.getGameState(), !isWhitesTurn, depth);
+                            if (isWhitesTurn) probe = -probe;
+                        } else {
+                            probe = alphaBeta(e, depth - 1, pAlpha, pBeta, !isWhitesTurn, deadline, moveInt, 1, 0);
+                            if (probe == EXIT_FLAG || abortRequested(deadline)) return null;
+                        }
 
-                    boolean needsFull = isWhitesTurn ? (probe > alphaRef.get()) : (probe < betaRef.get());
-                    double finalScore = probe;
+                        boolean needsFull = isWhitesTurn ? (probe > alphaRef.get()) : (probe < betaRef.get());
+                        double finalScore = probe;
 
-                    if (needsFull && !stopRef.get()) {
-                        fullResLock.lock();
-                        try {
-                            if (!stopRef.get() && !abortRequested(deadline)) {
-                                double aNow = alphaRef.get(), bNow = betaRef.get();
-                                double full = alphaBeta(e, depth - 1, aNow, bNow, !isWhitesTurn, deadline, moveInt, 1, 0);
-                                if (full != EXIT_FLAG) {
-                                    finalScore = full;
-                                    if (isWhitesTurn) {
-                                        if (full > aNow) alphaRef.set(full);
-                                    } else {
-                                        if (full < bNow) betaRef.set(full);
+                        if (needsFull && !stopRef.get()) {
+                            fullResLock.lock();
+                            try {
+                                if (!stopRef.get() && !abortRequested(deadline)) {
+                                    double aNow = alphaRef.get(), bNow = betaRef.get();
+                                    double full = alphaBeta(e, depth - 1, aNow, bNow, !isWhitesTurn, deadline, moveInt, 1, 0);
+                                    if (full != EXIT_FLAG) {
+                                        finalScore = full;
+                                        if (isWhitesTurn) {
+                                            if (full > aNow) alphaRef.set(full);
+                                        } else {
+                                            if (full < bNow) betaRef.set(full);
+                                        }
+                                        Double curBest = bestScoreRef.get();
+                                        if (isBetterScore(isWhitesTurn, full, curBest)) {
+                                            bestScoreRef.set(full);
+                                            bestMoveRef.set(moveInt);
+                                        }
+                                        if (alphaRef.get() >= betaRef.get()) stopRef.set(true);
                                     }
-                                    Double curBest = bestScoreRef.get();
-                                    if (isBetterScore(isWhitesTurn, full, curBest)) {
-                                        bestScoreRef.set(full);
-                                        bestMoveRef.set(moveInt);
-                                    }
-                                    if (alphaRef.get() >= betaRef.get()) stopRef.set(true);
                                 }
+                            } finally {
+                                fullResLock.unlock();
                             }
-                        } finally {
-                            fullResLock.unlock();
+                        } else {
+                            Double curBest = bestScoreRef.get();
+                            if (isBetterScore(isWhitesTurn, finalScore, curBest)) {
+                                bestScoreRef.set(finalScore);
+                                bestMoveRef.set(moveInt);
+                                if (isWhitesTurn && finalScore > alphaRef.get()) alphaRef.set(finalScore);
+                                if (!isWhitesTurn && finalScore < betaRef.get()) betaRef.set(finalScore);
+                                if (alphaRef.get() >= betaRef.get()) stopRef.set(true);
+                            }
                         }
-                    } else {
-                        Double curBest = bestScoreRef.get();
-                        if (isBetterScore(isWhitesTurn, finalScore, curBest)) {
-                            bestScoreRef.set(finalScore);
-                            bestMoveRef.set(moveInt);
-                            if (isWhitesTurn && finalScore > alphaRef.get()) alphaRef.set(finalScore);
-                            if (!isWhitesTurn && finalScore < betaRef.get()) betaRef.set(finalScore);
-                            if (alphaRef.get() >= betaRef.get()) stopRef.set(true);
-                        }
-                    }
 
-                    return new MoveAndScore(moveInt, finalScore);
-                } finally {
-                    if (helperHeuristics.hasUpdates()) mergeThreadHeuristics(helperHeuristics);
-                    else helperHeuristics.resetUpdates();
-                }
-            }));
+                        return new MoveAndScore(moveInt, finalScore);
+                    } finally {
+                        if (helperHeuristics.hasUpdates()) mergeThreadHeuristics(helperHeuristics);
+                        else helperHeuristics.resetUpdates();
+                    }
+                });
+                futures.add(future);
+                return true;
+            } catch (RejectedExecutionException rex) {
+                log.warn("Parallel root executor rejected move {}", moveInt, rex);
+                return false;
+            }
+        };
+
+        int movesInFlight = 0;
+        for (int i = 1; i <= fanout; i++) {
+            if (scheduleMove.test(i)) {
+                movesInFlight++;
+            } else {
+                aborted = true;
+                break;
+            }
         }
 
-        int completed = 0;
+        int fullySearchedMoves = Math.min(1, totalRootMoves);
+        int completedAsyncMoves = 0;
+        boolean cutoffOccurred = false;
+
         try {
-            while (completed < fanout) {
-                if (stopRef.get()) break;
+            while (!aborted && !cutoffOccurred && completedAsyncMoves < remainingMoves) {
+                if (stopRef.get()) {
+                    cutoffOccurred = alphaRef.get() >= betaRef.get();
+                    break;
+                }
                 if (abortRequested(deadline)) {
                     aborted = true;
                     break;
                 }
+                if (movesInFlight <= 0) {
+                    break;
+                }
+
                 Future<MoveAndScore> f = ecs.take();
-                completed++;
+                movesInFlight--;
                 MoveAndScore res = f.get();
-                if (res == null) continue;
+                if (res == null) {
+                    aborted = true;
+                    break;
+                }
+
+                completedAsyncMoves++;
+                fullySearchedMoves++;
 
                 alpha = alphaRef.get();
                 beta = betaRef.get();
@@ -1239,8 +1277,20 @@ public class AI {
                 bestScore = bestScoreRef.get();
 
                 if (alpha >= beta) {
+                    cutoffOccurred = true;
                     stopRef.set(true);
-                    break;
+                }
+
+                if (!cutoffOccurred) {
+                    int next = nextMoveIndex.getAndIncrement();
+                    if (next <= remainingMoves) {
+                        if (scheduleMove.test(next)) {
+                            movesInFlight++;
+                        } else {
+                            aborted = true;
+                            break;
+                        }
+                    }
                 }
             }
         } catch (InterruptedException ie) {
@@ -1248,15 +1298,29 @@ public class AI {
             aborted = true;
         } catch (Exception ex) {
             log.warn("Parallel root YBWC error", ex);
+            aborted = true;
         } finally {
             for (Future<MoveAndScore> f : futures) if (!f.isDone()) f.cancel(true);
+        }
+
+        alpha = alphaRef.get();
+        beta = betaRef.get();
+        bestMove = bestMoveRef.get();
+        bestScore = bestScoreRef.get();
+
+        if (!cutoffOccurred && stopRef.get() && alpha >= beta) {
+            cutoffOccurred = true;
         }
 
         MoveAndScore candidate = bestMove != -1 ? createCandidate(bestMove, bestScore) : null;
         if (abortRequested(deadline)) {
             aborted = true;
         }
-        return aborted ? RootSearchResult.aborted(candidate) : RootSearchResult.completed(candidate);
+
+        boolean allRootMovesSearched = fullySearchedMoves >= totalRootMoves;
+        boolean completedSearch = !aborted && (cutoffOccurred || allRootMovesSearched);
+
+        return completedSearch ? RootSearchResult.completed(candidate) : RootSearchResult.aborted(candidate);
     }
 
 
