@@ -2,7 +2,9 @@ package julius.game.chessengine.engine;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.ai.OpeningBook;
-import julius.game.chessengine.board.*;
+import julius.game.chessengine.board.BitBoard;
+import julius.game.chessengine.board.FEN;
+import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.utils.Color;
 import julius.game.chessengine.utils.MoveStack;
@@ -10,7 +12,9 @@ import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
 
-import java.util.*;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
 import java.util.function.LongConsumer;
 
 import static julius.game.chessengine.board.MoveHelper.convertIndexToString;
@@ -254,78 +258,60 @@ public class Engine {
         synchronized (boardLock) {
             final long boardStateHash = getBoardStateHash();
 
-            // Get pseudo moves + the already-computed PinState in one shot
-            IntArrayList pseudoMoves = pseudoMoveBuffer;
-            pseudoMoves.clear();
-            BitBoard.PinState pinState = bitBoard.generateAllPossibleMovesInto(bitBoard.whitesTurn, pseudoMoves);
+            // 1) fill pseudo buffer + pins once
+            IntArrayList pseudo = pseudoMoveBuffer;
+            pseudo.clear();
+            BitBoard.PinState pinState = bitBoard.generateAllPossibleMovesInto(bitBoard.whitesTurn, pseudo);
 
-            // NEW: detect check once
-            boolean inCheck = bitBoard.isInCheck(bitBoard.whitesTurn);
+            final boolean inCheck = bitBoard.isInCheck(bitBoard.whitesTurn);
+            final int[] a = pseudo.elements();
+            final int n = pseudo.size();
 
-            int[] pseudoElements = pseudoMoves.elements();
-            final int pseudoCount = pseudoMoves.size();
-            int[] pseudoSnapshot = null;
-            if (VERIFY_LEGAL_MOVES) {
-                pseudoSnapshot = java.util.Arrays.copyOf(pseudoElements, pseudoCount);
-            }
-            int writeIdx = 0;
-            for (int i = 0; i < pseudoCount; i++) {
-                int move = pseudoElements[i];
+            // 2) in-place filter (branch-light)
+            int w = 0;
+            int[] snapshot = null;
+            if (VERIFY_LEGAL_MOVES) snapshot = java.util.Arrays.copyOf(a, n);
 
-                // Fast path when NOT in check:
-                // - pins already enforced during generation
-                // - king steps were prefiltered in generateKingMoves (see §2)
-                // So only EP needs a special legality test.
+            for (int i = 0; i < n; i++) {
+                final int m = a[i];
                 if (!inCheck) {
-                    if (MoveHelper.isEnPassantMove(move)) {
-                        if (bitBoard.isMoveLegalFast(move, pinState)) {
-                            pseudoElements[writeIdx++] = move;
-                        }
-                    } else {
-                        pseudoElements[writeIdx++] = move;
+                    if (!MoveHelper.isEnPassantMove(m) || bitBoard.isMoveLegalFast(m, pinState)) {
+                        a[w++] = m;
                     }
-                    continue;
-                }
-
-                // If in check, fall back to the full legality test
-                if (bitBoard.isMoveLegalFast(move, pinState)) {
-                    pseudoElements[writeIdx++] = move;
+                } else if (bitBoard.isMoveLegalFast(m, pinState)) {
+                    a[w++] = m;
                 }
             }
-
-            pseudoMoves.size(writeIdx);
-
-            ensureLegalMoveScratchCapacity(writeIdx);
-            if (writeIdx > 0) {
-                System.arraycopy(pseudoElements, 0, legalMoveScratch, 0, writeIdx);
-            }
-
-            IntArrayList legalMoves = new IntArrayList(writeIdx);
-            if (writeIdx > 0) {
-                legalMoves.addElements(0, legalMoveScratch, 0, writeIdx);
-            }
+            // shrink logical size in O(1)
+            pseudo.size(w);
 
             if (VERIFY_LEGAL_MOVES) {
-                // Optional self-check retained for debugging
-                IntArrayList legacy = new IntArrayList(legalMoves.size());
-                for (int i = 0; i < pseudoCount; i++) {
-                    int move = pseudoSnapshot[i];
-                    bitBoard.performMove(move);
-                    if (!bitBoard.isInCheck(MoveHelper.isWhitesMove(move))) {
-                        legacy.add(move);
-                    }
-                    bitBoard.undoMove(move);
+                IntArrayList legacy = new IntArrayList(w);
+                for (int i = 0; i < n; i++) {
+                    int m = snapshot[i];
+                    bitBoard.performMove(m);
+                    if (!bitBoard.isInCheck(MoveHelper.isWhitesMove(m))) legacy.add(m);
+                    bitBoard.undoMove(m);
                 }
-                if (!moveListsEqual(legalMoves, legacy)) {
-                    throw new IllegalStateException(
-                            "Mismatch between fast and legacy legal move filtering: fast=" + legalMoves + ", legacy=" + legacy
-                    );
+                if (!(legacy.size() == w &&
+                        java.util.Arrays.equals(legacy.elements(), 0, w, a, 0, w))) {
+                    throw new IllegalStateException("Mismatch between fast and legacy legal move filtering");
                 }
             }
-            cacheLegalMoves(boardStateHash, legalMoveScratch, writeIdx);
-            return legalMoves;
+
+            // 3) cache (steal a copy once)
+            // copy exactly w ints into the cache; then return a wrap of that copy (no double-copy)
+            ensureLegalMoveScratchCapacity(w);
+            System.arraycopy(a, 0, legalMoveScratch, 0, w);
+            int[] cached = java.util.Arrays.copyOf(legalMoveScratch, w);
+            cacheLegalMoves(boardStateHash, cached, w);
+
+            // 4) return a list backed by the already-copied array (no new copy here)
+            return IntArrayList.wrap(cached, w);
         }
     }
+
+
 
     private void markLegalMovesStale() {
         legalMovesNeedUpdate = true;
@@ -335,13 +321,11 @@ public class Engine {
     private void cacheLegalMoves(long boardHash, int[] legalMoves, int legalMoveCount) {
         this.cachedLegalMovesHash = boardHash;
         this.cachedLegalMoveCount = legalMoveCount;
-        if (this.cachedLegalMoves.length < legalMoveCount) {
-            this.cachedLegalMoves = java.util.Arrays.copyOf(legalMoves, legalMoveCount);
-        } else {
-            System.arraycopy(legalMoves, 0, this.cachedLegalMoves, 0, legalMoveCount);
-        }
+        // legalMoves must be a fresh array that we won’t mutate later
+        this.cachedLegalMoves = legalMoves;
         this.legalMovesNeedUpdate = false;
     }
+
 
     private void ensureLegalMoveScratchCapacity(int requiredSize) {
         if (legalMoveScratch.length < requiredSize) {
@@ -351,8 +335,10 @@ public class Engine {
     }
 
     private IntArrayList copyCachedLegalMoves() {
-        return new IntArrayList(java.util.Arrays.copyOf(cachedLegalMoves, cachedLegalMoveCount));
+        // cachedLegalMoves is *already* an exact-sized array that won’t be mutated
+        return IntArrayList.wrap(cachedLegalMoves, cachedLegalMoveCount);
     }
+
 
     private void resetCachedLegalMoves() {
         cachedLegalMoves = new int[0];
@@ -361,19 +347,11 @@ public class Engine {
         legalMovesNeedUpdate = true;
     }
 
-    private boolean moveListsEqual(IntArrayList a, IntArrayList b) {
-        return a.size() == b.size()
-                && java.util.Arrays.equals(a.elements(), 0, a.size(), b.elements(), 0, b.size());
-    }
-
     public void moveRandomFigure(boolean isWhite) {
         IntArrayList moves = getAllLegalMoves();
-        if (moves.isEmpty()) {
-            throw new RuntimeException("No moves possible for " + (isWhite ? "White" : "Black"));
-        }
-        Random rand = new Random();
-        int randomMove = moves.getInt(rand.nextInt(moves.size()));
-        performMove(randomMove);
+        if (moves.isEmpty()) throw new RuntimeException("No moves possible for " + (isWhite ? "White" : "Black"));
+        int idx = java.util.concurrent.ThreadLocalRandom.current().nextInt(moves.size());
+        performMove(moves.getInt(idx));
     }
 
     // always queen
@@ -382,32 +360,27 @@ public class Engine {
     }
 
     public void moveFigure(BitBoard bitBoard, int fromIndex, int toIndex, int promotionPiece) {
+        final int move;
         synchronized (boardLock) {
-            // Determine the piece type and color from the bitboard based on the 'from' position
-            PieceType pieceType = bitBoard.getPieceTypeAtIndex(fromIndex);
+            PieceType pt = bitBoard.getPieceTypeAtIndex(fromIndex);
             Color color = bitBoard.getPieceColorAtIndex(fromIndex);
+            if (pt == null || color == null) throw new IllegalStateException("No piece at the starting position");
 
-            if (pieceType == null || color == null) {
-                throw new IllegalStateException("No piece at the starting position");
-            }
-
-            // Check if it's the correct player's turn
-            Color pieceColor = bitBoard.getPieceColorAtIndex(fromIndex);
-            if ((pieceColor == Color.WHITE && !bitBoard.whitesTurn) || (pieceColor == Color.BLACK && bitBoard.whitesTurn)) {
+            Color mover = bitBoard.getPieceColorAtIndex(fromIndex);
+            if ((mover == Color.WHITE && !bitBoard.whitesTurn) || (mover == Color.BLACK && bitBoard.whitesTurn)) {
                 bitBoard.logBoard();
-                throw new IllegalStateException("It's not " + pieceColor + "'s turn");
+                throw new IllegalStateException("It's not " + mover + "'s turn");
             }
 
-            int move = getMove(fromIndex, toIndex, promotionPiece);
-
+            move = getMove(fromIndex, toIndex, promotionPiece);
             if (move == -1) {
                 log.warn("Move not legal!");
                 return;
             }
         }
-        // Perform the move outside of this synchronized block to reuse performMove's own locking & notification policy
-        performMove(getMove(fromIndex, toIndex, promotionPiece));
+        performMove(move); // reuse the computed move
     }
+
 
     private int getMove(int fromIndex, int toIndex, int promotionPiece) {
         IntArrayList legalMoves = getAllLegalMoves();
