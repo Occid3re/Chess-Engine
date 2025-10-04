@@ -1194,10 +1194,13 @@ public class AI {
         for (int i = 1; i <= fanout; i++) {
             final int moveInt = orderedMoves.getInt(i);
             futures.add(ecs.submit(() -> {
-                if (stopRef.get() || abortRequested(deadline)) return null;
-                Heuristics helperHeuristics = prepareHelperHeuristics(task, depth);
+                SearchTask previousTask = threadSearchTask.get();
+                threadSearchTask.set(task);
+                Heuristics helperHeuristics = null;
                 Engine workerEngine = null;
                 try {
+                    if (stopRef.get() || task.isStopRequested() || abortRequested(deadline)) return null;
+                    helperHeuristics = prepareHelperHeuristics(task, depth);
                     workerEngine = borrowWorkerSimulation(simulatorEngine);
                     workerEngine.performMove(moveInt);
 
@@ -1263,9 +1266,15 @@ public class AI {
 
                     return new MoveAndScore(moveInt, finalScore);
                 } finally {
-                    releaseWorkerSimulation(workerEngine, task.getRootSnapshot());
-                    if (helperHeuristics.hasUpdates()) mergeThreadHeuristics(helperHeuristics);
-                    else helperHeuristics.resetUpdates();
+                    try {
+                        releaseWorkerSimulation(workerEngine, task.getRootSnapshot());
+                    } finally {
+                        if (helperHeuristics != null) {
+                            if (helperHeuristics.hasUpdates()) mergeThreadHeuristics(helperHeuristics);
+                            else helperHeuristics.resetUpdates();
+                        }
+                        threadSearchTask.set(previousTask);
+                    }
                 }
             }));
         }
