@@ -192,8 +192,9 @@ class AITest_MateThreatDiagnostics {
 
             try {
                 IntArrayList legal = simulatorEngine.getAllLegalMoves();
-                IntArrayList ordered = (IntArrayList) sortMovesMethod.invoke(this, legal, depth,
+                AI.MoveOrderingResult ordering = (AI.MoveOrderingResult) sortMovesMethod.invoke(this, legal, depth,
                         simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
+                IntArrayList ordered = ordering.moves();
 
                 maybeRotateRootMovesMethod.invoke(this, ordered, rng);
 

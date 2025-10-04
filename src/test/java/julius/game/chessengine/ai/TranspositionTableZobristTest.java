@@ -205,7 +205,8 @@ class TranspositionTableZobristTest {
         log.info("Transposition table seeded with best reply {} for hash {}", describeMove(bestReply), Long.toHexString(hash));
 
         IntArrayList input = new IntArrayList(moves);
-        IntArrayList ordered = ai.sortMovesByEfficiency(input, 4, hash, -1, engine);
+        AI.MoveOrderingResult ordering = ai.sortMovesByEfficiency(input, 4, hash, -1, engine);
+        IntArrayList ordered = ordering.moves();
 
         log.info("Ordered move list ({} entries):", ordered.size());
         for (int i = 0; i < ordered.size(); i++) {

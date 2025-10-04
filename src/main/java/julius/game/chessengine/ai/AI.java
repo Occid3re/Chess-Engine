@@ -1086,7 +1086,8 @@ public class AI {
 
         final boolean isWhitesTurn = task.isWhiteToMove();
         IntArrayList legal = simulatorEngine.getAllLegalMoves();
-        IntArrayList orderedMoves = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
+        MoveOrderingResult ordering = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
+        IntArrayList orderedMoves = ordering.moves();
         if (orderedMoves.isEmpty()) return RootSearchResult.completed(null);
         maybeRotateRootMoves(orderedMoves, rng);
 
@@ -1374,8 +1375,9 @@ public class AI {
 
         boolean aborted = false;
 
-        IntArrayList sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth,
+        MoveOrderingResult rootOrdering = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth,
                 simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
+        IntArrayList sortedMoves = rootOrdering.moves();
         maybeRotateRootMoves(sortedMoves, rng);
 
         for (int idx = 0; idx < sortedMoves.size(); idx++) {
@@ -1672,7 +1674,8 @@ public class AI {
         final Heuristics heuristics = threadHeuristics.get();
         final int[][] historyTable = heuristics.history;
 
-        IntArrayList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
+        MoveOrderingResult ordering = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
+        IntArrayList orderedMoves = ordering.moves();
         final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
         for (int index = 0; index < orderedMoves.size(); index++) {
@@ -1855,7 +1858,8 @@ public class AI {
         final Heuristics heuristics = threadHeuristics.get();
         final int[][] historyTable = heuristics.history;
 
-        IntArrayList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
+        MoveOrderingResult ordering = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
+        IntArrayList orderedMoves = ordering.moves();
         final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
         for (int index = 0; index < orderedMoves.size(); index++) {
@@ -2031,22 +2035,43 @@ public class AI {
      * losing captures: winning trades (positive SEE) are promoted ahead of
      * neutral/losing captures while negative SEE trades are demoted within
      * their capture bucket. Results are cached per move within this ordering
-     * pass so repeated SEE queries are avoided.
+     * pass so repeated SEE queries are avoided. The returned {@link MoveOrderingResult}
+     * carries the SEE values alongside the ordered moves so callers can reuse
+     * the expensive SEE calculations without recomputing them.
      */
-    IntArrayList sortMovesByEfficiency(IntArrayList moves, int currentDepth, long boardHash, int prevMove,
-                                       Engine simulatorEngine) {
+    static final class MoveOrderingResult {
+        private final IntArrayList orderedMoves;
+        private final int[] seeScores;
+
+        MoveOrderingResult(IntArrayList orderedMoves, int[] seeScores) {
+            this.orderedMoves = orderedMoves;
+            this.seeScores = seeScores;
+        }
+
+        IntArrayList moves() {
+            return orderedMoves;
+        }
+
+        int[] seeScores() {
+            return seeScores;
+        }
+    }
+
+    MoveOrderingResult sortMovesByEfficiency(IntArrayList moves, int currentDepth, long boardHash, int prevMove,
+                                             Engine simulatorEngine) {
         final int size = moves.size();
         final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
 
         if (size == 0) {
-            return moves;
+            return new MoveOrderingResult(moves, SortBuffers.EMPTY_SEE_SCORES);
         }
 
         final SortBuffers buffers = sortBuffers.get();
         final int[] moveBuffer = buffers.moveBuffer;
         final int[] scoreBuffer = buffers.scoreBuffer;
         final long[] sortKeys = buffers.sortKeyBuffer;
+        final int[] seeBuffer = buffers.seeBuffer;
 
         final Heuristics heuristics = threadHeuristics.get();
         final int[][] killerMoves = heuristics.killers;
@@ -2176,8 +2201,15 @@ public class AI {
             }
         }
 
+        for (int i = 0; i < size; i++) {
+            int move = moveBuffer[i];
+            Integer cachedSee = seeCache.get(move);
+            seeBuffer[i] = cachedSee != null ? cachedSee : SortBuffers.SEE_NOT_COMPUTED;
+        }
+
         MoveContainerUtils.overwriteFromBuffer(moves, moveBuffer, size);
-        return moves;
+
+        return new MoveOrderingResult(moves, buffers.snapshotSeeScores(size));
     }
 
 
@@ -2253,9 +2285,11 @@ public class AI {
                 : getPossibleCapturesOrPromotions(simulatorEngine);
 
         // Order them (captures/promotions first etc.)
-        IntArrayList ordered = sortMovesByEfficiency(
+        MoveOrderingResult ordering = sortMovesByEfficiency(
                 moves, 0, simulatorEngine.getBoardStateHash(), -1, simulatorEngine
         );
+        IntArrayList ordered = ordering.moves();
+        int[] orderedSeeScores = ordering.seeScores();
 
         for (int i = 0; i < ordered.size(); i++) {
             int m = ordered.getInt(i);
@@ -2265,7 +2299,13 @@ public class AI {
 
             // --- SEE pruning: drop clearly losing captures or quiets (keeps promotions) ---
             if ((!inCheck && isCapture && !isPromotion) || isQuiet) {
-                int see = simulatorEngine.see(m);
+                int see = (i < orderedSeeScores.length) ? orderedSeeScores[i] : SortBuffers.SEE_NOT_COMPUTED;
+                if (see == SortBuffers.SEE_NOT_COMPUTED) {
+                    see = simulatorEngine.see(m);
+                    if (i < orderedSeeScores.length) {
+                        orderedSeeScores[i] = see;
+                    }
+                }
                 if (see < 0) {
                     // Guard: do not "probe" with a make/undo if node somehow became terminal.
                     if (simulatorEngine.getGameState().isTerminal()) {
