@@ -154,6 +154,13 @@ public class AI {
     private final ThreadLocal<Map<Integer, Integer>> seeCacheThreadLocal =
             ThreadLocal.withInitial(() -> new HashMap<>(64));
 
+    /**
+     * Root-split worker simulations. Each search thread reuses its own clone to avoid
+     * repeated allocations during parallel search fan-out.
+     */
+    private final ThreadLocal<Deque<Engine>> workerSimulationPool =
+            ThreadLocal.withInitial(ArrayDeque::new);
+
     private static final int LMR_MAX_DEPTH = 64;
     private static final int LMR_MAX_MOVES = MAX_MOVE_LIST_SIZE;
     private static final int HISTORY_BUCKETS = 5;
@@ -703,6 +710,47 @@ public class AI {
         return heuristics;
     }
 
+    private Engine borrowWorkerSimulation(Engine template) {
+        Deque<Engine> pool = workerSimulationPool.get();
+        Engine borrowed = pool.pollFirst();
+        if (borrowed == null) {
+            return template.createSimulation();
+        }
+        borrowed.copyFrom(template);
+        return borrowed;
+    }
+
+    private void releaseWorkerSimulation(Engine borrowed, Engine baseline) {
+        if (borrowed == null) {
+            return;
+        }
+        try {
+            while (borrowed.getLastMove() != -1) {
+                borrowed.undoLastMove();
+            }
+        } catch (Exception ex) {
+            log.warn("Failed to rewind pooled simulation engine", ex);
+            try {
+                if (baseline != null) {
+                    borrowed.copyFrom(baseline);
+                } else {
+                    borrowed.startNewGame();
+                }
+            } catch (Exception suppressed) {
+                log.debug("Unable to reset simulation engine via copy", suppressed);
+                try {
+                    borrowed.startNewGame();
+                } catch (Exception ignored) {
+                    log.debug("Unable to reset simulation engine via startNewGame", ignored);
+                }
+            }
+        }
+        workerSimulationPool.get().offerFirst(borrowed);
+        if (Thread.currentThread().isInterrupted()) {
+            workerSimulationPool.remove();
+        }
+    }
+
     protected RootSearchResult searchRootMoves(Engine sim, SearchTask task, int depth, double alpha, double beta, SplittableRandom rng) {
         if (searchThreads > 1) {
             return getBestMoveParallel(sim, task, depth, task.getDeadline(), alpha, beta, rng);
@@ -1148,9 +1196,10 @@ public class AI {
             futures.add(ecs.submit(() -> {
                 if (stopRef.get() || abortRequested(deadline)) return null;
                 Heuristics helperHeuristics = prepareHelperHeuristics(task, depth);
+                Engine workerEngine = null;
                 try {
-                    Engine e = simulatorEngine.createSimulation();
-                    e.performMove(moveInt);
+                    workerEngine = borrowWorkerSimulation(simulatorEngine);
+                    workerEngine.performMove(moveInt);
 
                     double currentAlpha = alphaRef.get();
                     double currentBeta = betaRef.get();
@@ -1164,13 +1213,13 @@ public class AI {
                     }
 
                     double probe;
-                    if (e.getGameState().isInStateCheckMate()) {
+                    if (workerEngine.getGameState().isInStateCheckMate()) {
                         probe = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
-                    } else if (e.getGameState().isTerminal()) { // <-- terminal only
-                        probe = evaluateStaticPosition(e.getGameState(), !isWhitesTurn, depth);
+                    } else if (workerEngine.getGameState().isTerminal()) { // <-- terminal only
+                        probe = evaluateStaticPosition(workerEngine.getGameState(), !isWhitesTurn, depth);
                         if (isWhitesTurn) probe = -probe;
                     } else {
-                        probe = alphaBeta(e, depth - 1, pAlpha, pBeta, !isWhitesTurn, deadline, moveInt, 1, 0);
+                        probe = alphaBeta(workerEngine, depth - 1, pAlpha, pBeta, !isWhitesTurn, deadline, moveInt, 1, 0);
                         if (probe == EXIT_FLAG || abortRequested(deadline)) return null;
                     }
 
@@ -1182,7 +1231,7 @@ public class AI {
                         try {
                             if (!stopRef.get() && !abortRequested(deadline)) {
                                 double aNow = alphaRef.get(), bNow = betaRef.get();
-                                double full = alphaBeta(e, depth - 1, aNow, bNow, !isWhitesTurn, deadline, moveInt, 1, 0);
+                                double full = alphaBeta(workerEngine, depth - 1, aNow, bNow, !isWhitesTurn, deadline, moveInt, 1, 0);
                                 if (full != EXIT_FLAG) {
                                     finalScore = full;
                                     if (isWhitesTurn) {
@@ -1214,6 +1263,7 @@ public class AI {
 
                     return new MoveAndScore(moveInt, finalScore);
                 } finally {
+                    releaseWorkerSimulation(workerEngine, task.getRootSnapshot());
                     if (helperHeuristics.hasUpdates()) mergeThreadHeuristics(helperHeuristics);
                     else helperHeuristics.resetUpdates();
                 }
