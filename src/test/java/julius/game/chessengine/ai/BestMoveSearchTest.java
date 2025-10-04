@@ -179,7 +179,7 @@ public class BestMoveSearchTest {
                 },
                 new Object[]{
                         "r4rk1/ppp2ppp/2nbp3/1B6/3P3q/2P1P3/PB1NQPRP/2KR4 b - - 2 15",
-                        List.of("Ne7", "g6", "a6","Qd8")
+                        List.of("Ne7", "g6", "a6", "Qd8")
                 },
                 new Object[]{
                         "r1b2rk1/ppqp2p1/1p2p2p/4nnNQ/8/P2B4/1PP2PPP/R1B1R1K1 w - - 0 17",
@@ -260,10 +260,13 @@ public class BestMoveSearchTest {
                 new Object[]{
                         "r2qkb1r/pppb1ppp/4p3/3pP3/2PQ4/4P3/P1P2PPP/R1B1KB1R b KQkq - 0 9",
                         List.of("Bb4")
+                },
+                new Object[]{
+                        "8/2b5/2k1b3/2p2r2/8/5R1P/PP1N2r1/R1B2K2 b - - 3 48",
+                        List.of("Rh2")
                 }
         );
     }
-
 
 
     @ParameterizedTest(name = "Best move {1} for FEN {0}")
@@ -272,9 +275,11 @@ public class BestMoveSearchTest {
         Engine engine = new Engine();
         engine.importBoardFromFen(fen);
 
+        final long timeLimitMs = 2000L;
+
 
         AI ai = new AI(engine);
-        ai.setTimeLimit(2000L); // milliseconds
+        ai.setTimeLimit(timeLimitMs); // milliseconds
 
         boolean whiteToMove = fen.split(" ")[1].equals("w");
         long nodesBefore = ai.getNodesVisited();
@@ -283,7 +288,7 @@ public class BestMoveSearchTest {
 
         ai.startAutoPlay(whiteToMove, !whiteToMove);
 
-        long deadline = System.currentTimeMillis() + TimeUnit.MILLISECONDS.toMillis(2200);
+        long deadline = System.currentTimeMillis() + TimeUnit.MILLISECONDS.toMillis(timeLimitMs + 200);
         int lastMove = -1;
         while (System.currentTimeMillis() < deadline) {
             lastMove = engine.getLastMove();
