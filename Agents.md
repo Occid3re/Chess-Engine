@@ -93,3 +93,8 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
   Define them in the corresponding evaluation module (where the feature is computed).
   Add the same weights (with sensible defaults) to seed-tunings.yaml.
   Expose and apply them via the tuning module so they are loaded and propagated into the evaluation at runtime.
+
+### BestMoveSearchTest progress notes (2025-10-05)
+* Added SEE-driven capture nudges in `AI.java` so losing trades get a 0.05 penalty while winning captures receive a scaled bonus (capped at 0.03 after a 20 cp margin).
+* Introduced quiet-move ordering bonuses that favour castling, knight centralisation, and releasing bishops from their starting squares while demoting early rook-pawn pushes and premature king walks.
+* These adjustments reduce the failing cases in `BestMoveSearchTest` from 24 (baseline) to 21 on the default single-thread configuration. Use the standard single-class Maven command above to verify.

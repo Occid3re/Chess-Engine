@@ -107,6 +107,118 @@ public class AI {
 
     public static final double EXIT_FLAG = Double.MAX_VALUE;
 
+    private static final double NON_WINNING_CAPTURE_PENALTY = 0.05;
+    private static final double WINNING_CAPTURE_BONUS = 0.03;
+    private static final int SEE_WINNING_MARGIN_CP = 20;
+    private static final double SEE_FULL_BONUS_SPAN_CP = 200.0;
+    private static final int QUIET_CASTLING_BONUS = 400;
+    private static final int QUIET_KNIGHT_CENTRALITY_SCALE = 64;
+    private static final int QUIET_BISHOP_CENTRALITY_SCALE = 32;
+    private static final int QUIET_BISHOP_HOME_BONUS = 96;
+    private static final int QUIET_ROOK_PAWN_PENALTY = 80;
+    private static final int QUIET_HOME_KING_PENALTY = 160;
+    private static final int[] CENTRALITY_SCORE = new int[64];
+    private static final int PIECE_PAWN = 1;
+    private static final int PIECE_KNIGHT = 2;
+    private static final int PIECE_BISHOP = 3;
+    private static final int PIECE_ROOK = 4;
+    private static final int PIECE_QUEEN = 5;
+    private static final int PIECE_KING = 6;
+
+    static {
+        for (int square = 0; square < CENTRALITY_SCORE.length; square++) {
+            CENTRALITY_SCORE[square] = computeCentralityScore(square);
+        }
+    }
+
+    private static double computeWinningCaptureBonus(int seeGain) {
+        if (seeGain <= SEE_WINNING_MARGIN_CP) {
+            return 0.0;
+        }
+
+        double scaledGain = seeGain - SEE_WINNING_MARGIN_CP;
+        double normalized = Math.min(1.0, scaledGain / SEE_FULL_BONUS_SPAN_CP);
+        return WINNING_CAPTURE_BONUS * normalized;
+    }
+
+    private static int computeCentralityScore(int square) {
+        int file = square & 7;
+        int rank = square >>> 3;
+        int fileDistance = Math.min(Math.abs(file - 3), Math.abs(file - 4));
+        int rankDistance = Math.min(Math.abs(rank - 3), Math.abs(rank - 4));
+        int maxDistance = Math.max(fileDistance, rankDistance);
+        int score = 3 - maxDistance;
+        return Math.max(0, score);
+    }
+
+    private static boolean isBishopHomeSquare(boolean isWhite, int square) {
+        return isWhite ? square == 2 || square == 5 : square == 58 || square == 61;
+    }
+
+    private static boolean isKingHomeSquare(boolean isWhite, int square) {
+        return isWhite ? square == 4 : square == 60;
+    }
+
+    private static boolean isRookPawnFile(int square) {
+        int file = square & 7;
+        return file == 0 || file == 7;
+    }
+
+    private static int quietMoveBonus(int move, int from, int to) {
+        if (MoveHelper.isCastlingMove(move)) {
+            return QUIET_CASTLING_BONUS;
+        }
+
+        int piece = MoveHelper.derivePieceTypeBits(move);
+        boolean isWhite = MoveHelper.isWhitesMove(move);
+        int bonus = 0;
+
+        switch (piece) {
+            case PIECE_KNIGHT -> {
+                int delta = CENTRALITY_SCORE[to] - CENTRALITY_SCORE[from];
+                if (delta != 0) {
+                    bonus += delta * QUIET_KNIGHT_CENTRALITY_SCALE;
+                }
+            }
+            case PIECE_BISHOP -> {
+                if (isBishopHomeSquare(isWhite, from) && from != to) {
+                    bonus += QUIET_BISHOP_HOME_BONUS;
+                }
+                int delta = CENTRALITY_SCORE[to] - CENTRALITY_SCORE[from];
+                if (delta != 0) {
+                    bonus += delta * QUIET_BISHOP_CENTRALITY_SCALE;
+                }
+                if (!isBishopHomeSquare(isWhite, from) && isBishopHomeSquare(isWhite, to)) {
+                    bonus -= QUIET_BISHOP_HOME_BONUS / 2;
+                }
+            }
+            case PIECE_KING -> {
+                if (isKingHomeSquare(isWhite, from)) {
+                    bonus -= QUIET_HOME_KING_PENALTY;
+                }
+            }
+            case PIECE_PAWN -> {
+                if (isRookPawnFile(from)) {
+                    int fromRank = from >>> 3;
+                    if (isWhite) {
+                        if (fromRank <= 2) {
+                            bonus -= QUIET_ROOK_PAWN_PENALTY;
+                        }
+                    } else {
+                        if (fromRank >= 5) {
+                            bonus -= QUIET_ROOK_PAWN_PENALTY;
+                        }
+                    }
+                }
+            }
+            default -> {
+                // no-op
+            }
+        }
+
+        return bonus;
+    }
+
     /**
      * Fixed-size transposition table. Uses a non-atomic implementation when running
      * with a single search thread to avoid the overhead of atomic operations.
@@ -2092,6 +2204,17 @@ public class AI {
 
             simulatorEngine.undoLastMove();
 
+            if (seeEvaluated && isCapture) {
+                if (!isPromotion && seeGain <= 0) {
+                    eval -= NON_WINNING_CAPTURE_PENALTY;
+                } else if (seeGain > 0) {
+                    double bonus = computeWinningCaptureBonus(seeGain);
+                    if (bonus != 0.0) {
+                        eval += bonus;
+                    }
+                }
+            }
+
             if (eval > maxEval) {
                 maxEval = eval;
                 bestMoveAtThisNode = move;
@@ -2274,6 +2397,17 @@ public class AI {
 
             simulatorEngine.undoLastMove();
 
+            if (seeEvaluated && isCapture) {
+                if (!isPromotion && seeGain <= 0) {
+                    eval += NON_WINNING_CAPTURE_PENALTY;
+                } else if (seeGain > 0) {
+                    double bonus = computeWinningCaptureBonus(seeGain);
+                    if (bonus != 0.0) {
+                        eval -= bonus;
+                    }
+                }
+            }
+
             if (eval < minEval) {
                 minEval = eval;
                 bestMoveAtThisNode = move;
@@ -2418,6 +2552,7 @@ public class AI {
                 category = CAT_QUIET;
                 score = historyTable[from][to];
                 if (moveInt == cm) score += counterMoveBonus;
+                score += quietMoveBonus(moveInt, from, to);
             }
 
             moveBuffer[i] = moveInt;
