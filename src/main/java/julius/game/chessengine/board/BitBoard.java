@@ -1333,6 +1333,7 @@ public class BitBoard {
         final long knights = whitesTurn ? whiteKnights : blackKnights;
         final long ownPieces = whitesTurn ? whitePieces : blackPieces;
         final long oppPiecesNoKing = whitesTurn ? (blackPieces & ~blackKing) : (whitePieces & ~whiteKing);
+        final long oppKing = whitesTurn ? blackKing : whiteKing;
         // KNIGHT
 
         long k = knights;
@@ -1341,6 +1342,7 @@ public class BitBoard {
             k &= k - 1;
 
             long potential = KnightHelper.knightMoveTable[from] & ~ownPieces;
+            potential &= ~oppKing;
 
             final boolean mustRespectPin =
                     pinState != null && pinState.whiteSide() == whitesTurn &&
@@ -1374,6 +1376,7 @@ public class BitBoard {
         long bishops = whitesTurn ? whiteBishops : blackBishops;
         final long ownPieces = whitesTurn ? whitePieces : blackPieces;
         final long oppPiecesNoKing = whitesTurn ? (blackPieces & ~blackKing) : (whitePieces & ~whiteKing);
+        final long oppKing = whitesTurn ? blackKing : whiteKing;
         // BISHOP
 
         while (bishops != 0) {
@@ -1382,6 +1385,7 @@ public class BitBoard {
 
             long occ = allPieces & bishopHelper.bishopMasks[from];
             long attacks = bishopHelper.calculateMovesUsingBishopMagic(from, occ) & ~ownPieces;
+            attacks &= ~oppKing;
 
             boolean pinned = pinState != null && pinState.whiteSide() == whitesTurn
                     && ((pinState.getAllPinned() & (1L << from)) != 0);
@@ -1420,6 +1424,7 @@ public class BitBoard {
         long rooks = whitesTurn ? whiteRooks : blackRooks;
         final long ownPieces = whitesTurn ? whitePieces : blackPieces;
         final long oppPiecesNoKing = whitesTurn ? (blackPieces & ~blackKing) : (whitePieces & ~whiteKing);
+        final long oppKing = whitesTurn ? blackKing : whiteKing;
         // ROOK
 
         while (rooks != 0) {
@@ -1428,6 +1433,7 @@ public class BitBoard {
 
             long occ = allPieces & rookHelper.rookMasks[from];
             long attacks = rookHelper.calculateMovesUsingRookMagic(from, occ) & ~ownPieces;
+            attacks &= ~oppKing;
 
             boolean pinned = pinState != null && pinState.whiteSide() == whitesTurn
                     && ((pinState.getAllPinned() & (1L << from)) != 0);
@@ -1467,6 +1473,7 @@ public class BitBoard {
         long queens = whitesTurn ? whiteQueens : blackQueens;
         final long ownPieces = whitesTurn ? whitePieces : blackPieces;
         final long oppPiecesNoKing = whitesTurn ? (blackPieces & ~blackKing) : (whitePieces & ~whiteKing);
+        final long oppKing = whitesTurn ? blackKing : whiteKing;
         // QUEEN
 
         while (queens != 0) {
@@ -1477,6 +1484,7 @@ public class BitBoard {
             long occR = allPieces & rookHelper.rookMasks[from];
             long attacks = (bishopHelper.calculateMovesUsingBishopMagic(from, occB)
                     | rookHelper.calculateMovesUsingRookMagic(from, occR)) & ~ownPieces;
+            attacks &= ~oppKing;
 
             boolean pinned = pinState != null && pinState.whiteSide() == whitesTurn
                     && ((pinState.getAllPinned() & (1L << from)) != 0);
@@ -1517,12 +1525,14 @@ public class BitBoard {
         final int from = Long.numberOfTrailingZeros(kingBitboard);
         final long ownPieces = whitesTurn ? whitePieces : blackPieces;
         final long oppPiecesNoKing = whitesTurn ? (blackPieces & ~blackKing) : (whitePieces & ~whiteKing);
+        final long oppKing = whitesTurn ? blackKing : whiteKing;
         final boolean isFirstKingMove = hasKingNotMoved(whitesTurn);
 
         // Recompute opponent attacks once (lazy inside getAttackBitboard)
         final long oppAttacks = getAttackBitboard(!whitesTurn);
 
         long legal = KING_ATTACKS[from] & ~ownPieces;
+        legal &= ~oppKing;
 
         while (legal != 0) {
             int to = Long.numberOfTrailingZeros(legal);
