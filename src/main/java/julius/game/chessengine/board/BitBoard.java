@@ -1333,7 +1333,6 @@ public class BitBoard {
         final long knights = whitesTurn ? whiteKnights : blackKnights;
         final long ownPieces = whitesTurn ? whitePieces : blackPieces;
         final long oppPiecesNoKing = whitesTurn ? (blackPieces & ~blackKing) : (whitePieces & ~whiteKing);
-        final long opponentKing = whitesTurn ? blackKing : whiteKing;
         // KNIGHT
 
         long k = knights;
@@ -1341,7 +1340,7 @@ public class BitBoard {
             int from = Long.numberOfTrailingZeros(k);
             k &= k - 1;
 
-            long potential = KnightHelper.knightMoveTable[from] & ~ownPieces & ~opponentKing;
+            long potential = KnightHelper.knightMoveTable[from] & ~ownPieces;
 
             final boolean mustRespectPin =
                     pinState != null && pinState.whiteSide() == whitesTurn &&
@@ -1356,8 +1355,11 @@ public class BitBoard {
                 long toMask = 1L << to;
                 boolean isCapture = (oppPiecesNoKing & toMask) != 0;
                 if (isCapture) {
+                    int capBits = pieceBitsAt(to, !whitesTurn);
+                    // capBits cannot be 6 here (king masked out), but be safe:
+                    if (capBits == 6) continue;
                     moves.add(createMoveInt(from, to, PieceType.KNIGHT, whitesTurn,
-                            true, false, false, null, pieceTypeFromBits(pieceBitsAt(to, !whitesTurn)),
+                            true, false, false, null, pieceTypeFromBits(capBits),
                             false, false, castlingState));
                 } else {
                     moves.add(createMoveInt(from, to, PieceType.KNIGHT, whitesTurn,
@@ -1372,7 +1374,6 @@ public class BitBoard {
         long bishops = whitesTurn ? whiteBishops : blackBishops;
         final long ownPieces = whitesTurn ? whitePieces : blackPieces;
         final long oppPiecesNoKing = whitesTurn ? (blackPieces & ~blackKing) : (whitePieces & ~whiteKing);
-        final long opponentKing = whitesTurn ? blackKing : whiteKing;
         // BISHOP
 
         while (bishops != 0) {
@@ -1380,7 +1381,7 @@ public class BitBoard {
             bishops &= bishops - 1;
 
             long occ = allPieces & bishopHelper.bishopMasks[from];
-            long attacks = bishopHelper.calculateMovesUsingBishopMagic(from, occ) & ~ownPieces & ~opponentKing;
+            long attacks = bishopHelper.calculateMovesUsingBishopMagic(from, occ) & ~ownPieces;
 
             boolean pinned = pinState != null && pinState.whiteSide() == whitesTurn
                     && ((pinState.getAllPinned() & (1L << from)) != 0);
@@ -1398,10 +1399,13 @@ public class BitBoard {
                 long toMask = 1L << to;
                 boolean isCapture = (oppPiecesNoKing & toMask) != 0;
                 if (isCapture) {
-                    if (pinned && pri != null && pri.pinnerSquare() != to) continue;
+                    int capBits = pieceBitsAt(to, !whitesTurn);
+                    if (capBits == 6) continue; // should not happen (king masked), but guard
+
+                    if (pinned && pri.pinnerSquare() != to) continue;
 
                     moves.add(createMoveInt(from, to, PieceType.BISHOP, whitesTurn,
-                            true, false, false, null, pieceTypeFromBits(pieceBitsAt(to, !whitesTurn)),
+                            true, false, false, null, pieceTypeFromBits(capBits),
                             false, false, castlingState));
                 } else {
                     moves.add(createMoveInt(from, to, PieceType.BISHOP, whitesTurn,
@@ -1416,7 +1420,6 @@ public class BitBoard {
         long rooks = whitesTurn ? whiteRooks : blackRooks;
         final long ownPieces = whitesTurn ? whitePieces : blackPieces;
         final long oppPiecesNoKing = whitesTurn ? (blackPieces & ~blackKing) : (whitePieces & ~whiteKing);
-        final long opponentKing = whitesTurn ? blackKing : whiteKing;
         // ROOK
 
         while (rooks != 0) {
@@ -1424,7 +1427,7 @@ public class BitBoard {
             rooks &= rooks - 1;
 
             long occ = allPieces & rookHelper.rookMasks[from];
-            long attacks = rookHelper.calculateMovesUsingRookMagic(from, occ) & ~ownPieces & ~opponentKing;
+            long attacks = rookHelper.calculateMovesUsingRookMagic(from, occ) & ~ownPieces;
 
             boolean pinned = pinState != null && pinState.whiteSide() == whitesTurn
                     && ((pinState.getAllPinned() & (1L << from)) != 0);
@@ -1444,10 +1447,12 @@ public class BitBoard {
                 long toMask = 1L << to;
                 boolean isCapture = (oppPiecesNoKing & toMask) != 0;
                 if (isCapture) {
-                    if (pinned && pri != null && pri.pinnerSquare() != to) continue;
+                    int capBits = pieceBitsAt(to, !whitesTurn);
+                    if (capBits == 6) continue;
+                    if (pinned && pri.pinnerSquare() != to) continue;
 
                     moves.add(createMoveInt(from, to, PieceType.ROOK, whitesTurn,
-                            true, false, false, null, pieceTypeFromBits(pieceBitsAt(to, !whitesTurn)),
+                            true, false, false, null, pieceTypeFromBits(capBits),
                             false, isFirstRookMove, castlingState));
                 } else {
                     moves.add(createMoveInt(from, to, PieceType.ROOK, whitesTurn,
@@ -1462,7 +1467,6 @@ public class BitBoard {
         long queens = whitesTurn ? whiteQueens : blackQueens;
         final long ownPieces = whitesTurn ? whitePieces : blackPieces;
         final long oppPiecesNoKing = whitesTurn ? (blackPieces & ~blackKing) : (whitePieces & ~whiteKing);
-        final long opponentKing = whitesTurn ? blackKing : whiteKing;
         // QUEEN
 
         while (queens != 0) {
@@ -1472,7 +1476,7 @@ public class BitBoard {
             long occB = allPieces & bishopHelper.bishopMasks[from];
             long occR = allPieces & rookHelper.rookMasks[from];
             long attacks = (bishopHelper.calculateMovesUsingBishopMagic(from, occB)
-                    | rookHelper.calculateMovesUsingRookMagic(from, occR)) & ~ownPieces & ~opponentKing;
+                    | rookHelper.calculateMovesUsingRookMagic(from, occR)) & ~ownPieces;
 
             boolean pinned = pinState != null && pinState.whiteSide() == whitesTurn
                     && ((pinState.getAllPinned() & (1L << from)) != 0);
@@ -1490,10 +1494,12 @@ public class BitBoard {
                 long toMask = 1L << to;
                 boolean isCapture = (oppPiecesNoKing & toMask) != 0;
                 if (isCapture) {
-                    if (pinned && pri != null && pri.pinnerSquare() != to) continue;
+                    int capBits = pieceBitsAt(to, !whitesTurn);
+                    if (capBits == 6) continue;
+                    if (pinned && pri.pinnerSquare() != to) continue;
 
                     moves.add(createMoveInt(from, to, PieceType.QUEEN, whitesTurn,
-                            true, false, false, null, pieceTypeFromBits(pieceBitsAt(to, !whitesTurn)),
+                            true, false, false, null, pieceTypeFromBits(capBits),
                             false, false, castlingState));
                 } else {
                     moves.add(createMoveInt(from, to, PieceType.QUEEN, whitesTurn,
@@ -1511,13 +1517,12 @@ public class BitBoard {
         final int from = Long.numberOfTrailingZeros(kingBitboard);
         final long ownPieces = whitesTurn ? whitePieces : blackPieces;
         final long oppPiecesNoKing = whitesTurn ? (blackPieces & ~blackKing) : (whitePieces & ~whiteKing);
-        final long opponentKing = whitesTurn ? blackKing : whiteKing;
         final boolean isFirstKingMove = hasKingNotMoved(whitesTurn);
 
         // Recompute opponent attacks once (lazy inside getAttackBitboard)
         final long oppAttacks = getAttackBitboard(!whitesTurn);
 
-        long legal = KING_ATTACKS[from] & ~ownPieces & ~opponentKing;
+        long legal = KING_ATTACKS[from] & ~ownPieces;
 
         while (legal != 0) {
             int to = Long.numberOfTrailingZeros(legal);
@@ -1528,8 +1533,10 @@ public class BitBoard {
 
             boolean isCapture = (oppPiecesNoKing & toMask) != 0;
             if (isCapture) {
+                int capBits = pieceBitsAt(to, !whitesTurn);
+                if (capBits == 6) continue; // masked, but guard anyway
                 moves.add(createMoveInt(from, to, PieceType.KING, whitesTurn,
-                        true, false, false, null, pieceTypeFromBits(pieceBitsAt(to, !whitesTurn)), isFirstKingMove, false, castlingState));
+                        true, false, false, null, pieceTypeFromBits(capBits), isFirstKingMove, false, castlingState));
             } else {
                 moves.add(createMoveInt(from, to, PieceType.KING, whitesTurn,
                         false, false, false, null, null, isFirstKingMove, false, castlingState));
@@ -2449,4 +2456,3 @@ public class BitBoard {
     }
 
 }
-
