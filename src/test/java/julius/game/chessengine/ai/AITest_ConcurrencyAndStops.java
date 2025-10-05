@@ -3,6 +3,7 @@ package julius.game.chessengine.ai;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.tuning.AiTuning;
+import lombok.NonNull;
 import lombok.extern.log4j.Log4j2;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,7 @@ import testsupport.TestUtils;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -290,6 +292,7 @@ class AITest_ConcurrencyAndStops {
             delegate.shutdown();
         }
 
+        @NonNull
         @Override
         public List<Runnable> shutdownNow() {
             shutdown = true;
@@ -307,12 +310,12 @@ class AITest_ConcurrencyAndStops {
         }
 
         @Override
-        public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
+        public boolean awaitTermination(long timeout, @NonNull TimeUnit unit) throws InterruptedException {
             return delegate.awaitTermination(timeout, unit);
         }
 
         @Override
-        public void execute(Runnable command) {
+        public void execute(@NonNull Runnable command) {
             delegate.execute(() -> {
                 Phaser phaser = phaserRef.get();
                 if (phaser != null) {
