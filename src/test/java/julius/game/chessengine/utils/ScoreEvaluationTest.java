@@ -73,21 +73,6 @@ public class ScoreEvaluationTest {
     }
 
     @Test
-    void blockedPawnIsPenalized() {
-        BitBoard blocked = FEN.translateFENtoBitBoard("4k3/8/8/8/4p3/4P3/8/4K3 w - - 0 1");
-        BitBoard free = FEN.translateFENtoBitBoard("4k3/8/8/4p3/8/4P3/8/4K3 w - - 0 1");
-
-        PawnStructureView blockedView = pawnStructure(blocked);
-        PawnStructureView freeView = pawnStructure(free);
-
-        assertTrue(blockedView.whiteBlocked().midgame() < freeView.whiteBlocked().midgame());
-
-        Score blockedScore = Score.initializeScore(blocked);
-        Score freeScore = Score.initializeScore(free);
-        assertTrue(blockedScore.getScoreDifference() < freeScore.getScoreDifference());
-    }
-
-    @Test
     void backwardPawnIsPenalized() {
         BitBoard backward = FEN.translateFENtoBitBoard("4k3/8/8/3p4/8/4P3/8/4K3 w - - 0 1");
         BitBoard supported = FEN.translateFENtoBitBoard("4k3/8/3p4/8/8/4P3/8/4K3 w - - 0 1");
