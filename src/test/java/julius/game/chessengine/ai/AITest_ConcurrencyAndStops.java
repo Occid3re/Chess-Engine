@@ -22,6 +22,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Phaser;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -283,6 +284,84 @@ class AITest_ConcurrencyAndStops {
         }
     }
 
+    @Test
+    @Timeout(15)
+    @DisplayName("Parallel root search shares remaining work across helpers")
+    void parallelRootSearchSharesRemainingWork() throws Exception {
+        int searchDepth = 3;
+
+        AiTuning tuning = AiTuning.builder()
+                .searchThreads(4)
+                .lazySmpThreads(1)
+                .maxDepth(5)
+                .timeLimitMillis(500)
+                .build();
+
+        Engine engine = new Engine();
+        AI ai = new AI(engine, tuning);
+
+        BarrierExecutor barrierExecutor = new BarrierExecutor(ai.getSearchThreads());
+        TestUtils.writeField(ai, "searchPool", barrierExecutor);
+
+        Field rootLimitField = AI.class.getDeclaredField("ROOT_PARALLEL_LIMIT");
+        rootLimitField.setAccessible(true);
+        int rootLimit = rootLimitField.getInt(null);
+
+        @SuppressWarnings("unchecked")
+        ThreadLocal<SearchTask> threadLocal = (ThreadLocal<SearchTask>) TestUtils.readField(ai, "threadSearchTask");
+
+        Engine sim = engine.createSimulation();
+        SearchTask task = new SearchTask(
+                20_000L,
+                sim.getBoardStateHash(),
+                sim.whitesTurn(),
+                System.nanoTime() + TimeUnit.SECONDS.toNanos(5),
+                ai.getSearchThreads(),
+                sim.createSimulation()
+        );
+
+        SearchTask previous = threadLocal.get();
+        threadLocal.set(task);
+        try {
+            IntArrayList legal = sim.getAllLegalMoves();
+            IntArrayList ordered = ai.sortMovesByEfficiency(legal, searchDepth, sim.getBoardStateHash(), -1, sim);
+
+            int fanout = Math.min(rootLimit, ordered.size() - 1);
+            int helperCapacity = ai.getSearchThreads();
+            if (helperCapacity <= 0 && fanout > 0) {
+                fanout = 0;
+            } else if (helperCapacity > 0) {
+                fanout = Math.min(fanout, helperCapacity);
+            }
+
+            assertTrue(fanout > 0, "Test position should trigger parallel fan-out");
+            assertTrue(ordered.size() - 1 > fanout,
+                    "Position should offer more root moves than the initial helper count");
+
+            barrierExecutor.setParties(fanout);
+
+            RootSearchResult result = ai.searchRootMoves(
+                    sim,
+                    task,
+                    searchDepth,
+                    Double.NEGATIVE_INFINITY,
+                    Double.POSITIVE_INFINITY,
+                    null
+            );
+
+            assertTrue(result.hasCandidate(), "Parallel search should produce a best move");
+            assertTrue(barrierExecutor.getSubmittedTasks() > fanout,
+                    "Parallel search should schedule work beyond the initial fan-out");
+        } finally {
+            if (previous != null) {
+                threadLocal.set(previous);
+            } else {
+                threadLocal.remove();
+            }
+            barrierExecutor.shutdownNow();
+        }
+    }
+
     private static class FakeAutoAI extends AI {
         private final FakeScheduler scheduler = new FakeScheduler();
 
@@ -330,6 +409,8 @@ class AITest_ConcurrencyAndStops {
     private static final class BarrierExecutor extends java.util.concurrent.AbstractExecutorService {
         private final ExecutorService delegate;
         private final AtomicReference<Phaser> phaserRef = new AtomicReference<>();
+        private final AtomicInteger submitted = new AtomicInteger();
+        private final AtomicInteger barrierPermits = new AtomicInteger();
         private volatile boolean shutdown;
 
         BarrierExecutor(int threads) {
@@ -337,11 +418,18 @@ class AITest_ConcurrencyAndStops {
         }
 
         void setParties(int parties) {
+            submitted.set(0);
             if (parties <= 1) {
                 phaserRef.set(null);
-            } else {
-                phaserRef.set(new Phaser(parties));
+                barrierPermits.set(0);
+                return;
             }
+            phaserRef.set(new Phaser(parties));
+            barrierPermits.set(parties);
+        }
+
+        int getSubmittedTasks() {
+            return submitted.get();
         }
 
         @Override
@@ -375,9 +463,16 @@ class AITest_ConcurrencyAndStops {
         @Override
         public void execute(@NonNull Runnable command) {
             delegate.execute(() -> {
+                submitted.incrementAndGet();
                 Phaser phaser = phaserRef.get();
                 if (phaser != null) {
-                    phaser.arriveAndAwaitAdvance();
+                    int remaining = barrierPermits.getAndUpdate(v -> v > 0 ? v - 1 : v);
+                    if (remaining > 0) {
+                        phaser.arriveAndAwaitAdvance();
+                        if (remaining == 1) {
+                            phaserRef.compareAndSet(phaser, null);
+                        }
+                    }
                 }
                 command.run();
             });
