@@ -43,8 +43,7 @@ public class AI {
      * can be adjusted at runtime via the UCI "Threads" option.
      */
     @Getter
-    @Setter
-    private int searchThreads = Integer.getInteger("chessengine.searchThreads", 1);
+    private volatile int searchThreads = Integer.getInteger("chessengine.searchThreads", 1);
 
     // number of Lazy SMP workers (≥1)
     @Getter
@@ -96,7 +95,7 @@ public class AI {
     /**
      * Thread pool for root-split parallel search (created only if searchThreads > 1).
      */
-    private final ExecutorService searchPool;
+    private volatile ExecutorService searchPool;
 
     /**
      * Limit how many root moves we fan out in parallel to avoid oversubscription.
@@ -399,6 +398,75 @@ public class AI {
 
         // next power-of-two (safe because value <= 2^30)
         return hib << 1;
+    }
+
+    /**
+     * Update the number of threads used for root-split search. The method stops any
+     * running search before replacing the executor service and rebuilding the
+     * transposition tables so workers never observe disposed infrastructure.
+     *
+     * @param threads requested number of search threads (values &lt;= 0 are treated as 1)
+     */
+    public void setSearchThreads(int threads) {
+        int requested = Math.max(1, threads);
+
+        SearchTask running;
+        ExecutorService oldPool;
+        int previous;
+
+        synchronized (this) {
+            previous = this.searchThreads;
+            if (requested == previous) {
+                return;
+            }
+
+            running = activeSearch.get();
+            if (running != null) {
+                running.requestStop();
+            }
+
+            oldPool = this.searchPool;
+        }
+
+        if (running != null) {
+            running.awaitCompletion();
+
+            while (activeSearch.get() == running) {
+                if (Thread.currentThread().isInterrupted()) {
+                    break;
+                }
+                try {
+                    Thread.sleep(1L);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+
+        if (oldPool != null) {
+            oldPool.shutdown();
+            try {
+                if (!oldPool.awaitTermination(5, TimeUnit.SECONDS)) {
+                    oldPool.shutdownNow();
+                }
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                oldPool.shutdownNow();
+            }
+        }
+
+        synchronized (this) {
+            this.searchThreads = requested;
+            rebuildTranspositionTables();
+            this.searchPool = createSearchPool();
+
+            if (searchPool != null) {
+                log.info("Search threads updated from {} to {} (parallel pool recreated)", previous, requested);
+            } else {
+                log.info("Search threads updated from {} to {} (parallel pool disabled)", previous, requested);
+            }
+        }
     }
 
     /**

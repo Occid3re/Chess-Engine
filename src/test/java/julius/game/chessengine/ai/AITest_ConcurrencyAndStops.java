@@ -20,6 +20,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Phaser;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -75,6 +76,56 @@ class AITest_ConcurrencyAndStops {
         assertEquals(-1, TestUtils.readField(ai, "currentBestMove"));
         assertNull(TestUtils.readField(ai, "calculationThreads"));
         assertNull(TestUtils.readField(ai, "calculationCoordinator"));
+    }
+
+    @Test
+    @Timeout(15)
+    @DisplayName("Updating Threads option rebuilds parallel infrastructure")
+    void switchingThreadsReconfiguresExecutorAndTables() throws Exception {
+        Engine engine = new Engine();
+        AI ai = new AI(engine, AiTuning.defaults());
+        ai.setMaxDepth(4);
+        ai.setTimeLimit(300);
+
+        Object initialMain = TestUtils.readField(ai, "transpositionTable");
+        Object initialCapture = TestUtils.readField(ai, "captureTranspositionTable");
+
+        assertTrue(initialMain instanceof PlainFixedSizeTranspositionTable,
+                "Single-thread mode should use the plain transposition table");
+        assertTrue(initialCapture instanceof PlainFixedSizeTranspositionTable,
+                "Single-thread mode should use the plain capture table");
+        assertNull(TestUtils.readField(ai, "searchPool"),
+                "Single-thread mode must not allocate a search pool");
+
+        try {
+            ai.setSearchThreads(3);
+
+            Object concurrentMain = TestUtils.readField(ai, "transpositionTable");
+            Object concurrentCapture = TestUtils.readField(ai, "captureTranspositionTable");
+
+            assertTrue(concurrentMain instanceof FixedSizeTranspositionTable,
+                    "Multi-thread mode should use the concurrent main table");
+            assertTrue(concurrentCapture instanceof FixedSizeTranspositionTable,
+                    "Multi-thread mode should use the concurrent capture table");
+
+            ExecutorService pool = (ExecutorService) TestUtils.readField(ai, "searchPool");
+            assertNotNull(pool, "Multi-thread mode must allocate a search pool");
+            assertFalse(pool.isShutdown(), "New search pool should be active");
+
+            ThreadPoolExecutor executor = (ThreadPoolExecutor) pool;
+            assertEquals(3, executor.getCorePoolSize(),
+                    "Search pool should match configured thread count");
+
+            long completedBefore = executor.getCompletedTaskCount();
+            MoveAndScore result = ai.searchBestMoveBlocking(300);
+            assertNotNull(result, "Search should produce a move when time remains");
+
+            long completedAfter = executor.getCompletedTaskCount();
+            assertTrue(completedAfter > completedBefore,
+                    "Parallel search must submit work to the executor");
+        } finally {
+            ai.shutdown();
+        }
     }
 
     @Test
