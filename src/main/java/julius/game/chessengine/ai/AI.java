@@ -1299,6 +1299,7 @@ public class AI {
 
         final CompletionService<MoveAndScore> ecs = new ExecutorCompletionService<>(searchPool);
         final List<Future<MoveAndScore>> futures = new ArrayList<>(fanout);
+        final ConcurrentLinkedQueue<Integer> retryMoves = new ConcurrentLinkedQueue<>();
 
         final AtomicReference<RootSearchState> stateRef = new AtomicReference<>(
                 new RootSearchState(alpha, beta, new MoveAndScore(bestMove, bestScore))
@@ -1339,7 +1340,10 @@ public class AI {
                             if (isWhitesTurn) probe = -probe;
                         } else {
                             probe = alphaBeta(workerEngine, depth - 1, pAlpha, pBeta, !isWhitesTurn, deadline, moveInt, 1, 0);
-                            if (probe == EXIT_FLAG || abortRequested(deadline)) return null;
+                            if (probe == EXIT_FLAG || abortRequested(deadline)) {
+                                retryMoves.offer(moveInt);
+                                return null;
+                            }
                         }
 
                         boolean needsFull = isWhitesTurn ? (probe > snapshot.alpha()) : (probe < snapshot.beta());
@@ -1353,10 +1357,12 @@ public class AI {
                                     double aNow = locked.alpha();
                                     double bNow = locked.beta();
                                     double full = alphaBeta(workerEngine, depth - 1, aNow, bNow, !isWhitesTurn, deadline, moveInt, 1, 0);
-                                    if (full != EXIT_FLAG) {
-                                        finalScore = full;
-                                        updateRootState(stateRef, isWhitesTurn, moveInt, full, stopRef);
+                                    if (full == EXIT_FLAG || abortRequested(deadline)) {
+                                        retryMoves.offer(moveInt);
+                                        return null;
                                     }
+                                    finalScore = full;
+                                    updateRootState(stateRef, isWhitesTurn, moveInt, full, stopRef);
                                 }
                             } finally {
                                 fullResLock.unlock();
@@ -1424,6 +1430,54 @@ public class AI {
         if (bestCandidate != null) {
             bestMove = bestCandidate.move;
             bestScore = bestCandidate.score;
+        }
+
+        if (!stopRef.get()) {
+            while (!retryMoves.isEmpty()) {
+                if (abortRequested(deadline)) {
+                    aborted = true;
+                    break;
+                }
+                Integer retryMove = retryMoves.poll();
+                if (retryMove == null) {
+                    continue;
+                }
+
+                simulatorEngine.performMove(retryMove);
+                double score;
+                if (simulatorEngine.getGameState().isInStateCheckMate()) {
+                    score = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
+                } else if (simulatorEngine.getGameState().isTerminal()) {
+                    score = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, depth);
+                    if (isWhitesTurn) {
+                        score = -score;
+                    }
+                } else {
+                    score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, retryMove, 1, 0);
+                    if (score == EXIT_FLAG || abortRequested(deadline)) {
+                        simulatorEngine.undoLastMove();
+                        aborted = true;
+                        break;
+                    }
+                }
+                simulatorEngine.undoLastMove();
+
+                if (isBetterScore(isWhitesTurn, score, bestScore)) {
+                    bestScore = score;
+                    bestMove = retryMove;
+                }
+
+                if (isWhitesTurn) {
+                    alpha = Math.max(alpha, score);
+                } else {
+                    beta = Math.min(beta, score);
+                }
+
+                if (alpha >= beta) {
+                    stopRef.set(true);
+                    break;
+                }
+            }
         }
 
         if (!stopRef.get()) {
