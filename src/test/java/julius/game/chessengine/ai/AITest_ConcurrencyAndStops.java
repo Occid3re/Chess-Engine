@@ -12,9 +12,14 @@ import testsupport.FakeScheduler;
 import testsupport.TestLoggingExtension;
 import testsupport.TestUtils;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Phaser;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -101,6 +106,123 @@ class AITest_ConcurrencyAndStops {
         assertFalse(requests.isEmpty(), "Auto-play should enqueue a new calculation request after executing a move");
     }
 
+    @Test
+    @Timeout(15)
+    @DisplayName("Parallel root search keeps best move monotonically improving")
+    void parallelRootSearchKeepsBestMoveStable() throws Exception {
+        int searchDepth = 3;
+
+        AiTuning singleThreadTuning = AiTuning.builder()
+                .searchThreads(1)
+                .lazySmpThreads(1)
+                .maxDepth(6)
+                .timeLimitMillis(500)
+                .build();
+
+        Engine singleEngine = new Engine();
+        AI singleThreadAi = new AI(singleEngine, singleThreadTuning);
+
+        Engine singleSim = singleEngine.createSimulation();
+        SearchTask singleTask = new SearchTask(
+                1L,
+                singleSim.getBoardStateHash(),
+                singleSim.whitesTurn(),
+                System.nanoTime() + TimeUnit.SECONDS.toNanos(5),
+                1,
+                singleSim.createSimulation()
+        );
+
+        @SuppressWarnings("unchecked")
+        ThreadLocal<SearchTask> singleThreadLocal = (ThreadLocal<SearchTask>) TestUtils.readField(singleThreadAi, "threadSearchTask");
+        SearchTask previousSingle = singleThreadLocal.get();
+        MoveAndScore baselineBest;
+        try {
+            singleThreadLocal.set(singleTask);
+            RootSearchResult baseline = singleThreadAi.searchRootMoves(
+                    singleSim,
+                    singleTask,
+                    searchDepth,
+                    Double.NEGATIVE_INFINITY,
+                    Double.POSITIVE_INFINITY,
+                    null
+            );
+            assertTrue(baseline.hasCandidate(), "Baseline search should provide a best move");
+            baselineBest = baseline.bestMove();
+        } finally {
+            if (previousSingle != null) {
+                singleThreadLocal.set(previousSingle);
+            } else {
+                singleThreadLocal.remove();
+            }
+        }
+
+        AiTuning parallelTuning = AiTuning.builder()
+                .searchThreads(4)
+                .lazySmpThreads(1)
+                .maxDepth(6)
+                .timeLimitMillis(500)
+                .build();
+
+        Engine parallelEngine = new Engine();
+        AI parallelAi = new AI(parallelEngine, parallelTuning);
+
+        BarrierExecutor barrierExecutor = new BarrierExecutor(parallelAi.getSearchThreads());
+        TestUtils.writeField(parallelAi, "searchPool", barrierExecutor);
+
+        Field rootLimitField = AI.class.getDeclaredField("ROOT_PARALLEL_LIMIT");
+        rootLimitField.setAccessible(true);
+        int rootLimit = rootLimitField.getInt(null);
+
+        @SuppressWarnings("unchecked")
+        ThreadLocal<SearchTask> parallelThreadLocal = (ThreadLocal<SearchTask>) TestUtils.readField(parallelAi, "threadSearchTask");
+
+        try {
+            for (int iteration = 0; iteration < 8; iteration++) {
+                Engine sim = parallelEngine.createSimulation();
+                SearchTask task = new SearchTask(
+                        10_000L + iteration,
+                        sim.getBoardStateHash(),
+                        sim.whitesTurn(),
+                        System.nanoTime() + TimeUnit.SECONDS.toNanos(5),
+                        parallelAi.getSearchThreads(),
+                        sim.createSimulation()
+                );
+
+                SearchTask previous = parallelThreadLocal.get();
+                parallelThreadLocal.set(task);
+                try {
+                    IntArrayList legal = sim.getAllLegalMoves();
+                    IntArrayList ordered = parallelAi.sortMovesByEfficiency(legal, searchDepth, sim.getBoardStateHash(), -1, sim);
+                    int fanout = Math.min(rootLimit, ordered.size() - 1);
+                    assertTrue(fanout >= 2, "Test position should trigger parallel fan-out");
+                    barrierExecutor.setParties(fanout);
+
+                    RootSearchResult result = parallelAi.searchRootMoves(
+                            sim,
+                            task,
+                            searchDepth,
+                            Double.NEGATIVE_INFINITY,
+                            Double.POSITIVE_INFINITY,
+                            null
+                    );
+
+                    assertTrue(result.hasCandidate(), "Parallel search should produce a best move");
+                    MoveAndScore best = result.bestMove();
+                    assertEquals(baselineBest.move, best.move, "Best move must not regress under contention");
+                    assertEquals(baselineBest.score, best.score, 1e-9, "Best score should remain stable");
+                } finally {
+                    if (previous != null) {
+                        parallelThreadLocal.set(previous);
+                    } else {
+                        parallelThreadLocal.remove();
+                    }
+                }
+            }
+        } finally {
+            barrierExecutor.shutdownNow();
+        }
+    }
+
     private static class FakeAutoAI extends AI {
         private final FakeScheduler scheduler = new FakeScheduler();
 
@@ -142,6 +264,62 @@ class AITest_ConcurrencyAndStops {
                     throw new IllegalStateException(e);
                 }
             }, 0, 50, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    private static final class BarrierExecutor extends java.util.concurrent.AbstractExecutorService {
+        private final ExecutorService delegate;
+        private final AtomicReference<Phaser> phaserRef = new AtomicReference<>();
+        private volatile boolean shutdown;
+
+        BarrierExecutor(int threads) {
+            this.delegate = Executors.newFixedThreadPool(threads);
+        }
+
+        void setParties(int parties) {
+            if (parties <= 1) {
+                phaserRef.set(null);
+            } else {
+                phaserRef.set(new Phaser(parties));
+            }
+        }
+
+        @Override
+        public void shutdown() {
+            shutdown = true;
+            delegate.shutdown();
+        }
+
+        @Override
+        public List<Runnable> shutdownNow() {
+            shutdown = true;
+            return delegate.shutdownNow();
+        }
+
+        @Override
+        public boolean isShutdown() {
+            return shutdown;
+        }
+
+        @Override
+        public boolean isTerminated() {
+            return delegate.isTerminated();
+        }
+
+        @Override
+        public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
+            return delegate.awaitTermination(timeout, unit);
+        }
+
+        @Override
+        public void execute(Runnable command) {
+            delegate.execute(() -> {
+                Phaser phaser = phaserRef.get();
+                if (phaser != null) {
+                    phaser.arriveAndAwaitAdvance();
+                }
+                command.run();
+            });
         }
     }
 }

@@ -1184,10 +1184,9 @@ public class AI {
         final CompletionService<MoveAndScore> ecs = new ExecutorCompletionService<>(searchPool);
         final List<Future<MoveAndScore>> futures = new ArrayList<>(fanout);
 
-        final AtomicReference<Double> alphaRef = new AtomicReference<>(alpha);
-        final AtomicReference<Double> betaRef = new AtomicReference<>(beta);
-        final java.util.concurrent.atomic.AtomicInteger bestMoveRef = new java.util.concurrent.atomic.AtomicInteger(bestMove);
-        final AtomicReference<Double> bestScoreRef = new AtomicReference<>(bestScore);
+        final AtomicReference<RootSearchState> stateRef = new AtomicReference<>(
+                new RootSearchState(alpha, beta, new MoveAndScore(bestMove, bestScore))
+        );
         final AtomicBoolean stopRef = new AtomicBoolean(false);
         final java.util.concurrent.locks.ReentrantLock fullResLock = new java.util.concurrent.locks.ReentrantLock();
 
@@ -1204,8 +1203,9 @@ public class AI {
                         workerEngine = borrowWorkerSimulation(simulatorEngine);
                         workerEngine.performMove(moveInt);
 
-                        double currentAlpha = alphaRef.get();
-                        double currentBeta = betaRef.get();
+                        RootSearchState snapshot = stateRef.get();
+                        double currentAlpha = snapshot.alpha();
+                        double currentBeta = snapshot.beta();
                         double pAlpha, pBeta;
                         if (isWhitesTurn) {
                             pAlpha = currentAlpha;
@@ -1226,42 +1226,27 @@ public class AI {
                             if (probe == EXIT_FLAG || abortRequested(deadline)) return null;
                         }
 
-                        boolean needsFull = isWhitesTurn ? (probe > alphaRef.get()) : (probe < betaRef.get());
+                        boolean needsFull = isWhitesTurn ? (probe > snapshot.alpha()) : (probe < snapshot.beta());
                         double finalScore = probe;
 
                         if (needsFull && !stopRef.get()) {
                             fullResLock.lock();
                             try {
                                 if (!stopRef.get() && !abortRequested(deadline)) {
-                                    double aNow = alphaRef.get(), bNow = betaRef.get();
+                                    RootSearchState locked = stateRef.get();
+                                    double aNow = locked.alpha();
+                                    double bNow = locked.beta();
                                     double full = alphaBeta(workerEngine, depth - 1, aNow, bNow, !isWhitesTurn, deadline, moveInt, 1, 0);
                                     if (full != EXIT_FLAG) {
                                         finalScore = full;
-                                        if (isWhitesTurn) {
-                                            if (full > aNow) alphaRef.set(full);
-                                        } else {
-                                            if (full < bNow) betaRef.set(full);
-                                        }
-                                        Double curBest = bestScoreRef.get();
-                                        if (isBetterScore(isWhitesTurn, full, curBest)) {
-                                            bestScoreRef.set(full);
-                                            bestMoveRef.set(moveInt);
-                                        }
-                                        if (alphaRef.get() >= betaRef.get()) stopRef.set(true);
+                                        updateRootState(stateRef, isWhitesTurn, moveInt, full, stopRef);
                                     }
                                 }
                             } finally {
                                 fullResLock.unlock();
                             }
                         } else {
-                            Double curBest = bestScoreRef.get();
-                            if (isBetterScore(isWhitesTurn, finalScore, curBest)) {
-                                bestScoreRef.set(finalScore);
-                                bestMoveRef.set(moveInt);
-                                if (isWhitesTurn && finalScore > alphaRef.get()) alphaRef.set(finalScore);
-                                if (!isWhitesTurn && finalScore < betaRef.get()) betaRef.set(finalScore);
-                                if (alphaRef.get() >= betaRef.get()) stopRef.set(true);
-                            }
+                            updateRootState(stateRef, isWhitesTurn, moveInt, finalScore, stopRef);
                         }
 
                         return new MoveAndScore(moveInt, finalScore);
@@ -1293,10 +1278,14 @@ public class AI {
                 MoveAndScore res = f.get();
                 if (res == null) continue;
 
-                alpha = alphaRef.get();
-                beta = betaRef.get();
-                bestMove = bestMoveRef.get();
-                bestScore = bestScoreRef.get();
+                RootSearchState state = stateRef.get();
+                alpha = state.alpha();
+                beta = state.beta();
+                MoveAndScore best = state.best();
+                if (best != null) {
+                    bestMove = best.move;
+                    bestScore = best.score;
+                }
 
                 if (alpha >= beta) {
                     stopRef.set(true);
@@ -1312,11 +1301,72 @@ public class AI {
             for (Future<MoveAndScore> f : futures) if (!f.isDone()) f.cancel(true);
         }
 
+        RootSearchState finalState = stateRef.get();
+        MoveAndScore bestCandidate = finalState.best();
+        if (bestCandidate != null) {
+            bestMove = bestCandidate.move;
+            bestScore = bestCandidate.score;
+        }
         MoveAndScore candidate = bestMove != -1 ? createCandidate(bestMove, bestScore) : null;
         if (abortRequested(deadline)) {
             aborted = true;
         }
         return aborted ? RootSearchResult.aborted(candidate) : RootSearchResult.completed(candidate);
+    }
+
+
+    private void updateRootState(AtomicReference<RootSearchState> stateRef,
+                                 boolean isWhiteToMove,
+                                 int move,
+                                 double score,
+                                 AtomicBoolean stopRef) {
+        while (true) {
+            RootSearchState current = stateRef.get();
+            double nextAlpha = current.alpha();
+            double nextBeta = current.beta();
+            MoveAndScore currentBest = current.best();
+            boolean changed = false;
+
+            if (isWhiteToMove) {
+                if (score > nextAlpha) {
+                    nextAlpha = score;
+                    changed = true;
+                }
+            } else {
+                if (score < nextBeta) {
+                    nextBeta = score;
+                    changed = true;
+                }
+            }
+
+            MoveAndScore nextBest = currentBest;
+            if (currentBest == null || isBetterScore(isWhiteToMove, score, currentBest.score)) {
+                if (currentBest == null || currentBest.move != move || Double.compare(currentBest.score, score) != 0) {
+                    nextBest = new MoveAndScore(move, score);
+                    changed = true;
+                }
+            }
+
+            if (!changed) {
+                return;
+            }
+
+            RootSearchState updated = new RootSearchState(nextAlpha, nextBeta, nextBest);
+            if (stateRef.compareAndSet(current, updated)) {
+                if (updated.alpha() >= updated.beta()) {
+                    stopRef.set(true);
+                }
+                return;
+            }
+        }
+    }
+
+    private record RootSearchState(double alpha, double beta, MoveAndScore best) {
+        private RootSearchState {
+            if (best == null) {
+                throw new IllegalArgumentException("best must not be null");
+            }
+        }
     }
 
 
