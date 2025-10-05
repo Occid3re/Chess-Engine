@@ -2510,7 +2510,10 @@ public class AI {
         // If side to move is in check, search all legal evasions (not only captures)
         boolean inCheck = isSideInCheck(simulatorEngine, isWhitesTurn);
 
+        IntArrayList legalMoves = simulatorEngine.getAllLegalMoves();
+
         double standPat = evaluateStaticPosition(simulatorEngine.getGameState(), isWhitesTurn, depth);
+        standPat += computeTacticalOpportunityBonus(simulatorEngine, legalMoves, depth);
         if (!inCheck) {
             if (standPat >= beta) {
                 return beta; // fail-hard beta
@@ -2528,8 +2531,8 @@ public class AI {
 
         // Generate moves: evasions if in check, else captures/promotions
         IntArrayList moves = inCheck
-                ? simulatorEngine.getAllLegalMoves()
-                : getPossibleCapturesOrPromotions(simulatorEngine);
+                ? legalMoves
+                : getPossibleCapturesOrPromotions(legalMoves);
 
         // Order them (captures/promotions first etc.)
         IntArrayList ordered = sortMovesByEfficiency(
@@ -2542,9 +2545,16 @@ public class AI {
             boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
             boolean isQuiet = !isCapture && !isPromotion;
 
+            int moveSee = 0;
+            boolean seeComputed = false;
+            if (isCapture || isPromotion) {
+                moveSee = simulatorEngine.see(m);
+                seeComputed = true;
+            }
+
             // --- SEE pruning: drop clearly losing captures or quiets (keeps promotions) ---
             if ((!inCheck && isCapture && !isPromotion) || isQuiet) {
-                int see = simulatorEngine.see(m);
+                int see = seeComputed ? moveSee : simulatorEngine.see(m);
                 if (see < 0) {
                     // Guard: do not "probe" with a make/undo if node somehow became terminal.
                     if (simulatorEngine.getGameState().isTerminal()) {
@@ -2571,6 +2581,10 @@ public class AI {
             if (child == EXIT_FLAG) return EXIT_FLAG;
 
             double score = -child;
+
+            if (moveSee != 0) {
+                score += scaleTacticalGain(moveSee, depth);
+            }
 
             if (score >= beta) {
                 return beta;
@@ -2603,7 +2617,52 @@ public class AI {
 
     private IntArrayList getPossibleCapturesOrPromotions(Engine simulatorEngine) {
         IntArrayList allLegalMoves = simulatorEngine.getAllLegalMoves();
-        return MoveContainerUtils.filterCapturesAndPromotions(allLegalMoves);
+        return getPossibleCapturesOrPromotions(allLegalMoves);
+    }
+
+    private IntArrayList getPossibleCapturesOrPromotions(IntArrayList legalMoves) {
+        return MoveContainerUtils.filterCapturesAndPromotions(legalMoves);
+    }
+
+    private double computeTacticalOpportunityBonus(Engine simulatorEngine,
+                                                   IntArrayList legalMoves,
+                                                   int depthOrPly) {
+        if (legalMoves == null || legalMoves.isEmpty()) {
+            return 0.0;
+        }
+
+        int bestWinningCapture = 0;
+        for (int i = 0; i < legalMoves.size(); i++) {
+            int move = legalMoves.getInt(i);
+            boolean isCapture = MoveHelper.isCapture(move);
+            boolean isPromotion = MoveHelper.isPawnPromotionMove(move);
+            if (!isCapture && !isPromotion) {
+                continue;
+            }
+
+            int seeValue = simulatorEngine.see(move);
+            if (seeValue > bestWinningCapture) {
+                bestWinningCapture = seeValue;
+            }
+        }
+
+        if (bestWinningCapture <= 0) {
+            return 0.0;
+        }
+
+        return scaleTacticalGain(bestWinningCapture, depthOrPly);
+    }
+
+    private double scaleTacticalGain(int seeValue, int depthOrPly) {
+        if (seeValue == 0) {
+            return 0.0;
+        }
+
+        final double SCALE = 0.25;
+        double magnitude = Math.min(Math.abs(seeValue), 8.0);
+        double attenuation = 1.0 / (1.0 + Math.max(0, depthOrPly) * 0.5);
+        double scaled = magnitude * SCALE * attenuation;
+        return Math.copySign(scaled, seeValue);
     }
 
     /**

@@ -81,11 +81,17 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
 ---
 
 ## Conventions
-- Prefer the **default command** unless a test explicitly benefits from concurrency.  
-- Parallel flags are **optional** and intended for stress-testing and stability checks (e.g., `BestMoveSearchTest`).  
+- Prefer the **default command** unless a test explicitly benefits from concurrency.
+- Parallel flags are **optional** and intended for stress-testing and stability checks (e.g., `BestMoveSearchTest`).
 - Keep flags in `argLine` so they apply to the **Surefire test JVM**.
 
 ### Additional notes
 * `MateSearchTest` keeps the shorter time budgets (50–500ms) for diagnostics only. The suite now requires the engine to
   succeed when it receives the largest configured per-move budget (currently 10s), so occasional misses at lower limits are
   acceptable.
+
+### 2025-10-05 – Tactical evaluation tweaks
+* `AI.evaluateBoard` / quiescence now adds a SEE-based tactical bonus for the side to move. Positive SEE captures (and promotions)
+  receive an aggressive weight (`scaleTacticalGain`), so subsequent agents should keep that helper in mind when tuning eval terms.
+* Move scores inside quiescence also apply the same scaling so that clearly winning captures rise to the top; avoid undoing this
+  without checking `BestMoveSearchTest` regression counts.
