@@ -1404,9 +1404,62 @@ public class AI {
 
         RootSearchState finalState = stateRef.get();
         MoveAndScore bestCandidate = finalState.best();
+        alpha = finalState.alpha();
+        beta = finalState.beta();
         if (bestCandidate != null) {
             bestMove = bestCandidate.move;
             bestScore = bestCandidate.score;
+        }
+
+        if (!stopRef.get()) {
+            for (int i = fanout + 1; i < orderedMoves.size(); i++) {
+                if (abortRequested(deadline)) {
+                    aborted = true;
+                    break;
+                }
+
+                int moveInt = orderedMoves.getInt(i);
+                simulatorEngine.performMove(moveInt);
+
+                double score;
+                if (simulatorEngine.getGameState().isInStateCheckMate()) {
+                    score = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
+                } else if (simulatorEngine.getGameState().isTerminal()) {
+                    score = evaluateStaticPosition(simulatorEngine.getGameState(), !isWhitesTurn, depth);
+                    if (isWhitesTurn) {
+                        score = -score;
+                    }
+                } else {
+                    score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1, 0);
+                    if (score == EXIT_FLAG || abortRequested(deadline)) {
+                        simulatorEngine.undoLastMove();
+                        aborted = true;
+                        break;
+                    }
+                }
+                simulatorEngine.undoLastMove();
+
+                if (isBetterScore(isWhitesTurn, score, bestScore)) {
+                    bestScore = score;
+                    bestMove = moveInt;
+                }
+
+                if (isWhitesTurn) {
+                    alpha = Math.max(alpha, score);
+                } else {
+                    beta = Math.min(beta, score);
+                }
+
+                if (alpha >= beta) {
+                    stopRef.set(true);
+                    break;
+                }
+            }
+
+            MoveAndScore updatedBest = createCandidate(bestMove, bestScore);
+            if (updatedBest != null) {
+                stateRef.set(new RootSearchState(alpha, beta, updatedBest));
+            }
         }
         MoveAndScore candidate = bestMove != -1 ? createCandidate(bestMove, bestScore) : null;
         if (abortRequested(deadline)) {
