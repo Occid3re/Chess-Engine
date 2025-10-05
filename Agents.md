@@ -89,3 +89,7 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
 * `MateSearchTest` keeps the shorter time budgets (50–500ms) for diagnostics only. The suite now requires the engine to
   succeed when it receives the largest configured per-move budget (currently 10s), so occasional misses at lower limits are
   acceptable.
+* Evaluation weights & tuning: All evaluation weights are wired through the tuning module using seed-tunings.yaml. When introducing new weights:
+  Define them in the corresponding evaluation module (where the feature is computed).
+  Add the same weights (with sensible defaults) to seed-tunings.yaml.
+  Expose and apply them via the tuning module so they are loaded and propagated into the evaluation at runtime.
