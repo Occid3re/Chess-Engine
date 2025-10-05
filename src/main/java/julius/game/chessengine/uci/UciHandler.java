@@ -331,14 +331,11 @@ public class UciHandler {
                 publishSearchInfo();
                 Integer bm = ai.getCurrentBestMoveInt();
                 if (bm != null && bm != -1) {
-                    engine.performMove(bm);
-                    output.accept("bestmove " + toUci(bm));
+                    respondWithMoveOrTerminal(bm, "search result");
                 } else {
                     IntArrayList legal = engine.getAllLegalMoves();
                     if (!legal.isEmpty()) {
-                        int move = legal.getInt(0);
-                        engine.performMove(move);
-                        output.accept("bestmove " + toUci(move));
+                        respondWithMoveOrTerminal(legal.getInt(0), "fallback move");
                     } else {
                         output.accept("bestmove (none)");
                     }
@@ -402,6 +399,16 @@ public class UciHandler {
         GameState gameState = ai.getMainEngine().getGameState();
         if (gameState != null && gameState.getState() != null) {
             output.accept("info string gamestate " + gameState.getState());
+        }
+    }
+
+    private void respondWithMoveOrTerminal(int move, String reason) {
+        if (engine.getGameState().isTerminal()) {
+            output.accept("info string Terminal position detected during " + reason + "; responding with bestmove (none)");
+            output.accept("bestmove (none)");
+        } else {
+            engine.performMove(move);
+            output.accept("bestmove " + toUci(move));
         }
     }
 
