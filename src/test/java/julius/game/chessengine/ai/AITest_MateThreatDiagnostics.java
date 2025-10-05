@@ -32,6 +32,7 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Produces a verbose diagnostic trace for mate-threat positions where the engine must
@@ -69,7 +70,7 @@ class AITest_MateThreatDiagnostics {
                 },
                 new Object[]{
                         "4k2r/1R3R2/p3p1pp/4b3/1BnNr3/8/P1P5/5K2 w - - 1 1",
-                        List.of("Re8")
+                        List.of("Re7")
                 }
         );
     }
@@ -109,6 +110,15 @@ class AITest_MateThreatDiagnostics {
 
         // Emit to STDOUT so the engineer can inspect the detailed breakdown when the test runs.
         System.out.println(report);
+
+        // 🔴 NEW: Fail the test if none of the expected defensive resources were
+        //         (a) selected as the best move OR (b) even considered in the root search.
+        assertTrue(
+                ai.foundAnyExpectedMove(lifesavingMoves, result),
+                () -> "Expected defensive move not found (neither chosen nor explored): "
+                        + String.join(", ", lifesavingMoves)
+                        + System.lineSeparator() + report
+        );
     }
 
     /**
@@ -455,6 +465,61 @@ class AITest_MateThreatDiagnostics {
             }
             return coords;
         }
+
+        // ======= NEW: assertion helpers =======
+
+        /**
+         * Returns true if any expected move is either:
+         *  - the final chosen best move (SAN or coordinate match), OR
+         *  - present among explored root moves in any depth/attempt trace.
+         */
+        boolean foundAnyExpectedMove(List<String> expected, MoveAndScore result) {
+            // 1) Result matches?
+            if (result != null) {
+                for (String label : expected) {
+                    if (moveMatchesLabel(result.move, label)) {
+                        return true;
+                    }
+                }
+            }
+            // 2) Any explored move matches?
+            Set<String> targets = expected.stream().map(this::normalizeMoveLabel).collect(Collectors.toSet());
+            List<DepthTrace> snapshot = getDepthTraces();
+            for (DepthTrace dt : snapshot) {
+                for (RootMoveTrace rmt : dt.moves) { // inner class access allowed
+                    // Compare SAN and coordinate forms against provided labels
+                    for (String lbl : targets) {
+                        if (moveMatchesLabel(rmt.moveInt, lbl)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        /**
+         * Checks whether a move (by internal int) matches a human label (SAN like "f4" or full SAN,
+         * or coordinate like "f2f4"). Case-insensitive, whitespace-agnostic.
+         */
+        private boolean moveMatchesLabel(int moveInt, String label) {
+            String target = normalizeMoveLabel(label);
+            if (target.isEmpty()) return false;
+
+            Move move = Move.convertIntToMove(moveInt);
+            String san = normalizeMoveLabel(move.toString());                // e.g., "f4", "Nc6", "Qg6+"
+            String coords = normalizeMoveLabel(
+                    MoveHelper.convertIndexToString(MoveHelper.deriveFromIndex(moveInt)) +
+                            MoveHelper.convertIndexToString(MoveHelper.deriveToIndex(moveInt))
+            );                                                               // e.g., "f2f4"
+
+            // Also allow the mixed "SAN [coords]" presentation used by formatMove()
+            String pretty = normalizeMoveLabel(formatMove(moveInt));         // e.g., "f4 [f2f4]"
+
+            return target.equals(san) || target.equals(coords) || pretty.startsWith(target + " ");
+        }
+
+        // ======= /NEW =======
 
         private static final class EvaluationResult {
             final Double score;
