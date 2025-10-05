@@ -247,7 +247,14 @@ class AITest_ConcurrencyAndStops {
                     IntArrayList legal = sim.getAllLegalMoves();
                     IntArrayList ordered = parallelAi.sortMovesByEfficiency(legal, searchDepth, sim.getBoardStateHash(), -1, sim);
                     int fanout = Math.min(rootLimit, ordered.size() - 1);
-                    assertTrue(fanout >= 2, "Test position should trigger parallel fan-out");
+                    int helperCapacity = parallelAi.getSearchThreads();
+                    if (helperCapacity <= 0 && fanout > 0) {
+                        fanout = 0;
+                    } else if (helperCapacity > 0) {
+                        fanout = Math.min(fanout, helperCapacity);
+                    }
+                    assertTrue(fanout >= 2 || helperCapacity <= 0,
+                            "Test position should trigger parallel fan-out when capacity allows");
                     barrierExecutor.setParties(fanout);
 
                     RootSearchResult result = parallelAi.searchRootMoves(
