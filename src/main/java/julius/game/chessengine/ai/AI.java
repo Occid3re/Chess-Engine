@@ -1237,6 +1237,22 @@ public class AI {
         IntArrayList legal = simulatorEngine.getAllLegalMoves();
         IntArrayList orderedMoves = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
         if (orderedMoves.isEmpty()) return RootSearchResult.completed(null);
+
+        int baseFanout = Math.min(ROOT_PARALLEL_LIMIT, orderedMoves.size() - 1);
+        ExecutorService pool = this.searchPool;
+        int helperCapacity = 0;
+        if (pool instanceof ThreadPoolExecutor) {
+            helperCapacity = ((ThreadPoolExecutor) pool).getMaximumPoolSize();
+        } else if (searchThreads > 0) {
+            helperCapacity = searchThreads;
+        }
+
+        if (helperCapacity <= 0 && baseFanout > 0) {
+            return getBestMove(simulatorEngine, isWhitesTurn, depth, deadline, alpha, beta, rng);
+        }
+
+        final int fanout = helperCapacity > 0 ? Math.min(baseFanout, helperCapacity) : baseFanout;
+
         maybeRotateRootMoves(orderedMoves, rng);
 
         int firstMove = orderedMoves.getInt(0);
@@ -1276,7 +1292,6 @@ public class AI {
             return RootSearchResult.completed(candidate);
         }
 
-        final int fanout = Math.min(ROOT_PARALLEL_LIMIT, orderedMoves.size() - 1);
         if (fanout <= 0) {
             MoveAndScore candidate = createCandidate(bestMove, bestScore);
             return RootSearchResult.completed(candidate);
