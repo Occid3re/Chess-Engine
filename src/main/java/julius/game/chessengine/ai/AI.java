@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.function.IntFunction;
 
 import java.util.*;
 import java.util.concurrent.*;
@@ -1298,7 +1299,7 @@ public class AI {
         }
 
         final CompletionService<MoveAndScore> ecs = new ExecutorCompletionService<>(searchPool);
-        final List<Future<MoveAndScore>> futures = new ArrayList<>(fanout);
+        final List<Future<MoveAndScore>> futures = new ArrayList<>();
 
         final AtomicReference<RootSearchState> stateRef = new AtomicReference<>(
                 new RootSearchState(alpha, beta, new MoveAndScore(bestMove, bestScore))
@@ -1306,106 +1307,130 @@ public class AI {
         final AtomicBoolean stopRef = new AtomicBoolean(false);
         final java.util.concurrent.locks.ReentrantLock fullResLock = new java.util.concurrent.locks.ReentrantLock();
 
-        for (int i = 1; i <= fanout; i++) {
-            final int moveInt = orderedMoves.getInt(i);
-            futures.add(ecs.submit(() -> {
-                SearchTask previousTask = threadSearchTask.get();
-                threadSearchTask.set(task);
+        IntFunction<Callable<MoveAndScore>> taskFactory = (moveInt) -> () -> {
+            SearchTask previousTask = threadSearchTask.get();
+            threadSearchTask.set(task);
+            try {
+                if (task.isStopRequested() || stopRef.get() || abortRequested(deadline)) return null;
+                Heuristics helperHeuristics = prepareHelperHeuristics(task, depth);
+                Engine workerEngine = null;
                 try {
-                    if (task.isStopRequested() || stopRef.get() || abortRequested(deadline)) return null;
-                    Heuristics helperHeuristics = prepareHelperHeuristics(task, depth);
-                    Engine workerEngine = null;
-                    try {
-                        workerEngine = borrowWorkerSimulation(simulatorEngine);
-                        workerEngine.performMove(moveInt);
+                    workerEngine = borrowWorkerSimulation(simulatorEngine);
+                    workerEngine.performMove(moveInt);
 
-                        RootSearchState snapshot = stateRef.get();
-                        double currentAlpha = snapshot.alpha();
-                        double currentBeta = snapshot.beta();
-                        double pAlpha, pBeta;
-                        if (isWhitesTurn) {
-                            pAlpha = currentAlpha;
-                            pBeta = currentAlpha + 1;
-                        } else {
-                            pAlpha = currentBeta - 1;
-                            pBeta = currentBeta;
-                        }
-
-                        double probe;
-                        if (workerEngine.getGameState().isInStateCheckMate()) {
-                            probe = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
-                        } else if (workerEngine.getGameState().isTerminal()) { // <-- terminal only
-                            probe = evaluateStaticPosition(workerEngine.getGameState(), !isWhitesTurn, depth);
-                            if (isWhitesTurn) probe = -probe;
-                        } else {
-                            probe = alphaBeta(workerEngine, depth - 1, pAlpha, pBeta, !isWhitesTurn, deadline, moveInt, 1, 0);
-                            if (probe == EXIT_FLAG || abortRequested(deadline)) return null;
-                        }
-
-                        boolean needsFull = isWhitesTurn ? (probe > snapshot.alpha()) : (probe < snapshot.beta());
-                        double finalScore = probe;
-
-                        if (needsFull && !stopRef.get()) {
-                            fullResLock.lock();
-                            try {
-                                if (!stopRef.get() && !abortRequested(deadline)) {
-                                    RootSearchState locked = stateRef.get();
-                                    double aNow = locked.alpha();
-                                    double bNow = locked.beta();
-                                    double full = alphaBeta(workerEngine, depth - 1, aNow, bNow, !isWhitesTurn, deadline, moveInt, 1, 0);
-                                    if (full != EXIT_FLAG) {
-                                        finalScore = full;
-                                        updateRootState(stateRef, isWhitesTurn, moveInt, full, stopRef);
-                                    }
-                                }
-                            } finally {
-                                fullResLock.unlock();
-                            }
-                        } else {
-                            updateRootState(stateRef, isWhitesTurn, moveInt, finalScore, stopRef);
-                        }
-
-                        return new MoveAndScore(moveInt, finalScore);
-                    } finally {
-                        releaseWorkerSimulation(workerEngine, task.getRootSnapshot());
-                        if (helperHeuristics.hasUpdates()) mergeThreadHeuristics(helperHeuristics);
-                        else helperHeuristics.resetUpdates();
-                    }
-                } finally {
-                    if (previousTask != null) {
-                        threadSearchTask.set(previousTask);
+                    RootSearchState snapshot = stateRef.get();
+                    double currentAlpha = snapshot.alpha();
+                    double currentBeta = snapshot.beta();
+                    double pAlpha, pBeta;
+                    if (isWhitesTurn) {
+                        pAlpha = currentAlpha;
+                        pBeta = currentAlpha + 1;
                     } else {
-                        threadSearchTask.remove();
+                        pAlpha = currentBeta - 1;
+                        pBeta = currentBeta;
                     }
-                }
-            }));
-        }
 
-        int completed = 0;
+                    double probe;
+                    if (workerEngine.getGameState().isInStateCheckMate()) {
+                        probe = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
+                    } else if (workerEngine.getGameState().isTerminal()) { // <-- terminal only
+                        probe = evaluateStaticPosition(workerEngine.getGameState(), !isWhitesTurn, depth);
+                        if (isWhitesTurn) probe = -probe;
+                    } else {
+                        probe = alphaBeta(workerEngine, depth - 1, pAlpha, pBeta, !isWhitesTurn, deadline, moveInt, 1, 0);
+                        if (probe == EXIT_FLAG || abortRequested(deadline)) return null;
+                    }
+
+                    boolean needsFull = isWhitesTurn ? (probe > snapshot.alpha()) : (probe < snapshot.beta());
+                    double finalScore = probe;
+
+                    if (needsFull && !stopRef.get()) {
+                        fullResLock.lock();
+                        try {
+                            if (!stopRef.get() && !abortRequested(deadline)) {
+                                RootSearchState locked = stateRef.get();
+                                double aNow = locked.alpha();
+                                double bNow = locked.beta();
+                                double full = alphaBeta(workerEngine, depth - 1, aNow, bNow, !isWhitesTurn, deadline, moveInt, 1, 0);
+                                if (full != EXIT_FLAG) {
+                                    finalScore = full;
+                                    updateRootState(stateRef, isWhitesTurn, moveInt, full, stopRef);
+                                }
+                            }
+                        } finally {
+                            fullResLock.unlock();
+                        }
+                    } else {
+                        updateRootState(stateRef, isWhitesTurn, moveInt, finalScore, stopRef);
+                    }
+
+                    return new MoveAndScore(moveInt, finalScore);
+                } finally {
+                    releaseWorkerSimulation(workerEngine, task.getRootSnapshot());
+                    if (helperHeuristics.hasUpdates()) mergeThreadHeuristics(helperHeuristics);
+                    else helperHeuristics.resetUpdates();
+                }
+            } finally {
+                if (previousTask != null) {
+                    threadSearchTask.set(previousTask);
+                } else {
+                    threadSearchTask.remove();
+                }
+            }
+        };
+
+        int nextMoveIndex = 1;
+        int active = 0;
+
         try {
-            while (completed < fanout) {
-                if (stopRef.get()) break;
+            while (active < fanout && nextMoveIndex < orderedMoves.size() && !stopRef.get()) {
                 if (abortRequested(deadline)) {
                     aborted = true;
                     break;
                 }
-                Future<MoveAndScore> f = ecs.take();
-                completed++;
-                MoveAndScore res = f.get();
-                if (res == null) continue;
+                int moveInt = orderedMoves.getInt(nextMoveIndex++);
+                Future<MoveAndScore> submitted = ecs.submit(taskFactory.apply(moveInt));
+                futures.add(submitted);
+                active++;
+            }
 
-                RootSearchState state = stateRef.get();
-                alpha = state.alpha();
-                beta = state.beta();
-                MoveAndScore best = state.best();
-                if (best != null) {
-                    bestMove = best.move;
-                    bestScore = best.score;
+            while (active > 0) {
+                if (abortRequested(deadline)) {
+                    aborted = true;
+                    break;
                 }
 
-                if (alpha >= beta) {
-                    stopRef.set(true);
-                    break;
+                Future<MoveAndScore> future = ecs.take();
+                active--;
+                try {
+                    MoveAndScore res = future.get();
+                    if (res != null) {
+                        RootSearchState state = stateRef.get();
+                        alpha = state.alpha();
+                        beta = state.beta();
+                        MoveAndScore best = state.best();
+                        if (best != null) {
+                            bestMove = best.move;
+                            bestScore = best.score;
+                        }
+                    }
+                } catch (ExecutionException ex) {
+                    log.warn("Parallel root worker failed", ex.getCause());
+                }
+
+                if (stopRef.get()) {
+                    continue;
+                }
+
+                while (active < fanout && nextMoveIndex < orderedMoves.size() && !stopRef.get()) {
+                    if (abortRequested(deadline)) {
+                        aborted = true;
+                        break;
+                    }
+                    int moveInt = orderedMoves.getInt(nextMoveIndex++);
+                    Future<MoveAndScore> submitted = ecs.submit(taskFactory.apply(moveInt));
+                    futures.add(submitted);
+                    active++;
                 }
             }
         } catch (InterruptedException ie) {
@@ -1427,7 +1452,7 @@ public class AI {
         }
 
         if (!stopRef.get()) {
-            for (int i = fanout + 1; i < orderedMoves.size(); i++) {
+            for (int i = nextMoveIndex; i < orderedMoves.size(); i++) {
                 if (abortRequested(deadline)) {
                     aborted = true;
                     break;
