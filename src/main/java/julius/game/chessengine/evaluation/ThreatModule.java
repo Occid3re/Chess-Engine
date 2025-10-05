@@ -1,9 +1,15 @@
 package julius.game.chessengine.evaluation;
 
-import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.ImmutableBoardView;
+import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.tuning.Tuning;
+
+import static julius.game.chessengine.evaluation.MaterialModule.bishopValue;
+import static julius.game.chessengine.evaluation.MaterialModule.knightValue;
+import static julius.game.chessengine.evaluation.MaterialModule.pawnValue;
+import static julius.game.chessengine.evaluation.MaterialModule.queenValue;
+import static julius.game.chessengine.evaluation.MaterialModule.rookValue;
 
 import java.util.Objects;
 
@@ -137,13 +143,52 @@ public final class ThreatModule implements EvaluationModule {
                 continue;
             }
 
-            penalty += hangingPenalties[typeBits];
+            penalty += ensurePieceLossPenalty(typeBits, hangingPenalties[typeBits]);
             if (typeBits > PAWN && (enemyPawnAttacks & mask) != 0) {
-                penalty += pawnThreatPenalties[typeBits];
+                penalty += ensurePawnThreatPenalty(typeBits, pawnThreatPenalties[typeBits]);
             }
             remaining ^= bit;
         }
         return penalty;
+    }
+
+    private static int ensurePieceLossPenalty(int pieceType, int configuredPenalty) {
+        int materialValue = materialValue(pieceType);
+        if (materialValue <= 0) {
+            return configuredPenalty;
+        }
+        return Math.min(configuredPenalty, -materialValue);
+    }
+
+    private static int ensurePawnThreatPenalty(int pieceType, int configuredPenalty) {
+        int materialValue = materialValue(pieceType);
+        if (materialValue <= 0) {
+            return configuredPenalty;
+        }
+        int pawnTradeLoss = Math.max(0, materialValue - pawnValue());
+        if (pawnTradeLoss == 0) {
+            return configuredPenalty;
+        }
+        return Math.min(configuredPenalty, -pawnTradeLoss);
+    }
+
+    private static int materialValue(int pieceType) {
+        if (pieceType == PAWN) {
+            return pawnValue();
+        }
+        if (pieceType == KNIGHT) {
+            return knightValue();
+        }
+        if (pieceType == BISHOP) {
+            return bishopValue();
+        }
+        if (pieceType == ROOK) {
+            return rookValue();
+        }
+        if (pieceType == QUEEN) {
+            return queenValue();
+        }
+        return 0;
     }
 
     private static long computePawnAttackMask(long pawns, int pawnColor) {

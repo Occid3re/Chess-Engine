@@ -93,3 +93,5 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
   Define them in the corresponding evaluation module (where the feature is computed).
   Add the same weights (with sensible defaults) to seed-tunings.yaml.
   Expose and apply them via the tuning module so they are loaded and propagated into the evaluation at runtime.
+* King centralisation tuning: `activity.midgameKingPlacementBonus` and `activity.endgameKingPlacementBonus` control the bonus per Chebyshev step that the king receives for moving toward the centre. Increasing these values helps the search prefer active kings in the late middlegame/endgame.
+* Threat evaluation got stricter in this iteration: hanging piece penalties are now floored to the material value of the threatened piece (and pawn threats are floored to the net material loss against a pawn). When tuning `threat.*` parameters in the future, you can still raise the magnitude, but reducing them below that floor will no longer make the engine trade full pieces for pawns (e.g. to avoid `...Bxg5??` in `BestMoveSearchTest`).
