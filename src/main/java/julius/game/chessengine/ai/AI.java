@@ -58,6 +58,8 @@ public class AI {
     private final AtomicReference<SearchTask> activeSearch = new AtomicReference<>();
     private final ThreadLocal<SearchTask> threadSearchTask = new ThreadLocal<>();
     private final AtomicLong searchIdGenerator = new AtomicLong();
+    private final Object searchConfigLock = new Object();
+    private boolean reconfiguringSearchThreads = false;
     /**
      * Requested size of the transposition table in megabytes. The current
      * implementation does not dynamically resize the table, but the value is
@@ -414,11 +416,13 @@ public class AI {
         ExecutorService oldPool;
         int previous;
 
-        synchronized (this) {
+        synchronized (searchConfigLock) {
             previous = this.searchThreads;
             if (requested == previous) {
                 return;
             }
+
+            reconfiguringSearchThreads = true;
 
             running = activeSearch.get();
             if (running != null) {
@@ -456,15 +460,20 @@ public class AI {
             }
         }
 
-        synchronized (this) {
+        synchronized (searchConfigLock) {
             this.searchThreads = requested;
-            rebuildTranspositionTables();
-            this.searchPool = createSearchPool();
+            try {
+                rebuildTranspositionTables();
+                this.searchPool = createSearchPool();
 
-            if (searchPool != null) {
-                log.info("Search threads updated from {} to {} (parallel pool recreated)", previous, requested);
-            } else {
-                log.info("Search threads updated from {} to {} (parallel pool disabled)", previous, requested);
+                if (searchPool != null) {
+                    log.info("Search threads updated from {} to {} (parallel pool recreated)", previous, requested);
+                } else {
+                    log.info("Search threads updated from {} to {} (parallel pool disabled)", previous, requested);
+                }
+            } finally {
+                reconfiguringSearchThreads = false;
+                searchConfigLock.notifyAll();
             }
         }
     }
@@ -836,24 +845,36 @@ public class AI {
             long boardStateHash = simulatorEngine.getBoardStateHash();
             long deadline = System.nanoTime() + this.timeLimit * 1_000_000L;
 
-            SearchTask task = new SearchTask(
-                    searchIdGenerator.incrementAndGet(),
-                    boardStateHash,
-                    simulatorEngine.whitesTurn(),
-                    deadline,
-                    1,
-                    simulatorEngine.createSimulation()
-            );
+            SearchTask task;
+            synchronized (searchConfigLock) {
+                while (reconfiguringSearchThreads) {
+                    try {
+                        searchConfigLock.wait();
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return null;
+                    }
+                }
 
-            activeSearch.set(task);
-            currentBoardState = boardStateHash;
-            beforeCalculationBoardState = boardStateHash;
-            currentBestMove = -1;
-            bestMoveForHash = -1;
-            previousBestMove = -1;
-            previousBestMoveHash = -1;
-            searchResultReady = false;
-            this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
+                task = new SearchTask(
+                        searchIdGenerator.incrementAndGet(),
+                        boardStateHash,
+                        simulatorEngine.whitesTurn(),
+                        deadline,
+                        1,
+                        simulatorEngine.createSimulation()
+                );
+
+                activeSearch.set(task);
+                currentBoardState = boardStateHash;
+                beforeCalculationBoardState = boardStateHash;
+                currentBestMove = -1;
+                bestMoveForHash = -1;
+                previousBestMove = -1;
+                previousBestMoveHash = -1;
+                searchResultReady = false;
+                this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
+            }
 
             SplittableRandom rng = (lazySmpThreads > 1)
                     ? new SplittableRandom(boardStateHash ^ System.nanoTime())
@@ -1082,19 +1103,31 @@ public class AI {
                 return;
             }
 
-            SearchTask task = new SearchTask(searchIdGenerator.incrementAndGet(), boardStateHash, isWhite, deadline, lazySmpThreads, simulatorEngine);
-            activeSearch.set(task);
-            if (bestMoveForHash == boardStateHash && currentBestMove != -1) {
-                previousBestMove = currentBestMove;
-                previousBestMoveHash = bestMoveForHash;
-            } else {
-                previousBestMove = -1;
-                previousBestMoveHash = -1;
+            SearchTask task;
+            synchronized (searchConfigLock) {
+                while (reconfiguringSearchThreads) {
+                    try {
+                        searchConfigLock.wait();
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
+
+                task = new SearchTask(searchIdGenerator.incrementAndGet(), boardStateHash, isWhite, deadline, lazySmpThreads, simulatorEngine);
+                activeSearch.set(task);
+                if (bestMoveForHash == boardStateHash && currentBestMove != -1) {
+                    previousBestMove = currentBestMove;
+                    previousBestMoveHash = bestMoveForHash;
+                } else {
+                    previousBestMove = -1;
+                    previousBestMoveHash = -1;
+                }
+                currentBestMove = -1;
+                bestMoveForHash = -1;
+                searchResultReady = false;
+                this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
             }
-            currentBestMove = -1;
-            bestMoveForHash = -1;
-            searchResultReady = false;
-            this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
             dispatchSearchTask(task);
             task.awaitCompletion();
             completeSearchTask(task, simulatorEngine);
