@@ -16,6 +16,7 @@ import testsupport.TestUtils;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.SplittableRandom;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -24,6 +25,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.LongAdder;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -127,6 +129,112 @@ class AITest_ConcurrencyAndStops {
         } finally {
             ai.shutdown();
         }
+    }
+
+    @Test
+    @DisplayName("Follower threads skip the heuristics write lock")
+    void prepareIterationStateSkipsWriteLockForFollowers() throws Exception {
+        Engine engine = new Engine();
+        AI ai = new AI(engine, AiTuning.defaults());
+
+        Engine sim = engine.createSimulation();
+        SearchTask task = new SearchTask(
+                42L,
+                sim.getBoardStateHash(),
+                sim.whitesTurn(),
+                System.nanoTime() + TimeUnit.SECONDS.toNanos(1),
+                1,
+                sim.createSimulation()
+        );
+
+        @SuppressWarnings("unchecked")
+        ThreadLocal<Object> heuristicsLocal = (ThreadLocal<Object>) TestUtils.readField(ai, "threadHeuristics");
+        Object heuristics = heuristicsLocal.get();
+
+        Class<?> heuristicsClass = heuristics.getClass();
+        Method prepare = AI.class.getDeclaredMethod("prepareIterationState", SearchTask.class, heuristicsClass, int.class, boolean.class);
+        prepare.setAccessible(true);
+
+        Object metrics = TestUtils.readField(ai, "heuristicsLockMetrics");
+        Field writesField = metrics.getClass().getDeclaredField("writeAcquisitions");
+        writesField.setAccessible(true);
+        LongAdder writeAcquisitions = (LongAdder) writesField.get(metrics);
+
+        long baseline = writeAcquisitions.longValue();
+
+        prepare.invoke(ai, task, heuristics, 1, true);
+        long afterLeader = writeAcquisitions.longValue();
+        assertEquals(baseline + 1, afterLeader, "Leader should acquire the write lock once");
+
+        prepare.invoke(ai, task, heuristics, 1, false);
+        long afterFollower = writeAcquisitions.longValue();
+        assertEquals(afterLeader, afterFollower, "Follower should not take the write lock again");
+
+        ai.shutdown();
+    }
+
+    @Test
+    @DisplayName("Lazy SMP leader stays deterministic while followers randomize")
+    void lazySmpLeaderRemainsDeterministic() throws Exception {
+        AiTuning tuning = AiTuning.builder()
+                .searchThreads(1)
+                .lazySmpThreads(3)
+                .timeLimitMillis(200)
+                .build();
+
+        Engine engine = new Engine();
+        AI ai = new AI(engine, tuning);
+
+        Engine sim = engine.createSimulation();
+        SearchTask task = new SearchTask(
+                77L,
+                sim.getBoardStateHash(),
+                sim.whitesTurn(),
+                System.nanoTime() + TimeUnit.SECONDS.toNanos(1),
+                tuning.lazySmpThreads(),
+                sim.createSimulation()
+        );
+
+        Method factory = AI.class.getDeclaredMethod("createLazyWorkerRng", SearchTask.class, int.class);
+        factory.setAccessible(true);
+
+        SplittableRandom leader = (SplittableRandom) factory.invoke(ai, task, 0);
+        assertNull(leader, "Leader thread should not randomize search parameters");
+
+        long baseSeed = task.getBoardHash();
+        SplittableRandom followerOne = (SplittableRandom) factory.invoke(ai, task, 1);
+        assertNotNull(followerOne, "Follower threads should receive an RNG");
+        SplittableRandom expectedOne = new SplittableRandom(baseSeed ^ (0x9E3779B97F4A7C15L * 2L));
+        assertEquals(expectedOne.nextLong(), followerOne.nextLong(),
+                "Follower one should use deterministic diversification seed");
+
+        SplittableRandom followerTwo = (SplittableRandom) factory.invoke(ai, task, 2);
+        assertNotNull(followerTwo, "Additional followers should also receive RNGs");
+        SplittableRandom expectedTwo = new SplittableRandom(baseSeed ^ (0x9E3779B97F4A7C15L * 3L));
+        assertEquals(expectedTwo.nextLong(), followerTwo.nextLong(),
+                "Follower two should use a unique deterministic seed");
+
+        AiTuning singleLazy = AiTuning.builder()
+                .searchThreads(1)
+                .lazySmpThreads(1)
+                .timeLimitMillis(200)
+                .build();
+        Engine singleEngine = new Engine();
+        AI single = new AI(singleEngine, singleLazy);
+        Engine singleSim = singleEngine.createSimulation();
+        SearchTask singleTask = new SearchTask(
+                88L,
+                singleSim.getBoardStateHash(),
+                singleSim.whitesTurn(),
+                System.nanoTime() + TimeUnit.SECONDS.toNanos(1),
+                singleLazy.lazySmpThreads(),
+                singleSim.createSimulation()
+        );
+        SplittableRandom none = (SplittableRandom) factory.invoke(single, singleTask, 1);
+        assertNull(none, "Single-threaded configuration should avoid randomization");
+
+        single.shutdown();
+        ai.shutdown();
     }
 
     @Test
@@ -270,7 +378,8 @@ class AITest_ConcurrencyAndStops {
                     assertTrue(result.hasCandidate(), "Parallel search should produce a best move");
                     MoveAndScore best = result.bestMove();
                     assertEquals(baselineBest.move, best.move, "Best move must not regress under contention");
-                    assertEquals(baselineBest.score, best.score, 1e-9, "Best score should remain stable");
+                    assertEquals(baselineBest.score, best.score, 0.05,
+                            "Best score should remain within the lazy-SMP diversification window");
                 } finally {
                     if (previous != null) {
                         parallelThreadLocal.set(previous);
