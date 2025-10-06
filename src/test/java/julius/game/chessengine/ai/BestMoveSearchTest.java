@@ -28,6 +28,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.SplittableRandom;
 import java.util.concurrent.ConcurrentHashMap;
@@ -45,6 +46,8 @@ import testsupport.TestReportWriter;
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class BestMoveSearchTest {
+
+    private static final SearchEnvironment SEARCH_ENVIRONMENT = SearchEnvironment.detect();
 
     private final List<DecisionStatistics> decisionSummaries = new ArrayList<>();
     private final List<String> decisionJsonLines = new ArrayList<>();
@@ -67,10 +70,7 @@ public class BestMoveSearchTest {
 
         final long timeLimitMs = 2000L;
 
-        AiTuning tuning = AiTuning.builder()
-                .searchThreads(1)
-                .lazySmpThreads(1)
-                .hashSizeMb(64)
+        AiTuning tuning = SEARCH_ENVIRONMENT.applyTo(AiTuning.builder())
                 .maxDepth(20)
                 .timeLimitMillis(timeLimitMs)
                 .nullMovePruning(true)
@@ -207,7 +207,7 @@ public class BestMoveSearchTest {
         if (decisionSummaries.isEmpty()) {
             return;
         }
-        AggregateStatistics summary = AggregateStatistics.from(decisionSummaries);
+        AggregateStatistics summary = AggregateStatistics.from(decisionSummaries, SEARCH_ENVIRONMENT);
         System.out.println(summary.toHumanReadable());
         System.out.println(summary.toJsonLine());
 
@@ -781,6 +781,71 @@ public class BestMoveSearchTest {
         }
     }
 
+    private record SearchEnvironment(
+            int availableProcessors,
+            int searchThreads,
+            int lazySmpThreads,
+            int rootParallelLimit,
+            int transpositionTableMb
+    ) {
+
+        static SearchEnvironment detect() {
+            int availableProcessors = Runtime.getRuntime().availableProcessors();
+            int searchThreads = clampAtLeast(readIntProperty("chessengine.searchThreads", 1), 1);
+            int lazySmpThreads = clampAtLeast(readIntProperty("chessengine.lazySmpThreads", 1), 1);
+            int rootParallelLimit = clampAtLeast(readIntProperty("chessengine.rootParallelLimit", 24), 1);
+            int ttSizeMb = clampAtLeast(readIntProperty("chessengine.tt.mb", 64), 1);
+            return new SearchEnvironment(availableProcessors, searchThreads, lazySmpThreads, rootParallelLimit, ttSizeMb);
+        }
+
+        AiTuning.Builder applyTo(AiTuning.Builder builder) {
+            Objects.requireNonNull(builder, "builder");
+            builder.searchThreads(searchThreads);
+            builder.lazySmpThreads(lazySmpThreads);
+            builder.hashSizeMb(transpositionTableMb);
+            return builder;
+        }
+
+        boolean multiThreaded() {
+            return Math.max(searchThreads, lazySmpThreads) > 1;
+        }
+
+        String inlineSummary() {
+            return String.format(Locale.ROOT,
+                    "runtimeCores=%d, searchThreads=%d, lazySmpThreads=%d, rootParallelLimit=%d, ttSize=%d MB, multiThreaded=%s",
+                    availableProcessors, searchThreads, lazySmpThreads, rootParallelLimit, transpositionTableMb,
+                    multiThreaded() ? "yes" : "no");
+        }
+
+        String describe() {
+            StringBuilder sb = new StringBuilder();
+            sb.append("Search environment:").append(System.lineSeparator());
+            sb.append("  Runtime processors: ").append(availableProcessors).append(System.lineSeparator());
+            sb.append("  Search threads: ").append(searchThreads).append(System.lineSeparator());
+            sb.append("  Lazy SMP threads: ").append(lazySmpThreads).append(System.lineSeparator());
+            sb.append("  Root parallel limit: ").append(rootParallelLimit).append(System.lineSeparator());
+            sb.append("  Transposition table: ").append(transpositionTableMb).append(" MB").append(System.lineSeparator());
+            sb.append("  Multi-threaded: ").append(multiThreaded() ? "yes" : "no").append(System.lineSeparator());
+            return sb.toString();
+        }
+
+        private static int readIntProperty(String key, int defaultValue) {
+            String value = System.getProperty(key);
+            if (value == null) {
+                return defaultValue;
+            }
+            try {
+                return Integer.parseInt(value.trim());
+            } catch (NumberFormatException ex) {
+                return defaultValue;
+            }
+        }
+
+        private static int clampAtLeast(int value, int minValue) {
+            return Math.max(minValue, value);
+        }
+    }
+
     private record DecisionStatistics(
             String fen,
             boolean whiteToMove,
@@ -813,6 +878,8 @@ public class BestMoveSearchTest {
             sb.append("Side to move: ").append(whiteToMove ? "White" : "Black").append(System.lineSeparator());
             sb.append("Expected best moves: ").append(expectedMoves).append(System.lineSeparator());
             sb.append("Baseline evaluation: ").append(formatCentipawns(baselineScore)).append(" pawns")
+                    .append(System.lineSeparator());
+            sb.append("Search configuration: ").append(SEARCH_ENVIRONMENT.inlineSummary())
                     .append(System.lineSeparator());
 
             if (chosenEvaluation != null) {
@@ -895,6 +962,7 @@ public class BestMoveSearchTest {
             StringBuilder sb = new StringBuilder();
             sb.append("[BMSTAT] {");
             boolean first = true;
+            first = appendJsonEnvironment(sb, "environment", SEARCH_ENVIRONMENT, first);
             first = appendJsonString(sb, "fen", fen, first);
             first = appendJsonString(sb, "side", whiteToMove ? "w" : "b", first);
             first = appendJsonStringArray(sb, expectedMoves, first);
@@ -918,6 +986,7 @@ public class BestMoveSearchTest {
     }
 
     private record AggregateStatistics(
+            SearchEnvironment environment,
             int positions,
             double avgCpLoss,
             double maxCpLoss,
@@ -929,7 +998,7 @@ public class BestMoveSearchTest {
             double avgDurationMs
     ) {
 
-        static AggregateStatistics from(List<DecisionStatistics> stats) {
+        static AggregateStatistics from(List<DecisionStatistics> stats, SearchEnvironment environment) {
             double totalCpLoss = 0.0;
             double maxCpLoss = Double.NEGATIVE_INFINITY;
             int cpLossCount = 0;
@@ -976,6 +1045,7 @@ public class BestMoveSearchTest {
             double avgDurationMs = stats.isEmpty() ? Double.NaN : (double) totalDuration / stats.size();
 
             return new AggregateStatistics(
+                    environment,
                     stats.size(),
                     avgCpLoss,
                     maxCpLossVal,
@@ -992,6 +1062,7 @@ public class BestMoveSearchTest {
             StringBuilder sb = new StringBuilder();
             sb.append(System.lineSeparator());
             sb.append("=== Aggregate best-move metrics ===").append(System.lineSeparator());
+            sb.append(environment.describe());
             sb.append("Positions tested: ").append(positions).append(System.lineSeparator());
             if (Double.isFinite(avgCpLoss)) {
                 sb.append("Average evaluation loss: ").append(formatCentipawns(avgCpLoss)).append(" pawns")
@@ -1038,6 +1109,7 @@ public class BestMoveSearchTest {
             StringBuilder sb = new StringBuilder();
             sb.append("[BMSUM] {");
             boolean first = true;
+            first = appendJsonEnvironment(sb, "environment", environment, first);
             first = appendJsonInt(sb, "positions", positions, first);
             first = appendJsonNumber(sb, "avgCpLoss", avgCpLoss, 2, first);
             first = appendJsonNumber(sb, "maxCpLoss", maxCpLoss, 2, first);
@@ -1114,6 +1186,39 @@ public class BestMoveSearchTest {
         } else {
             sb.append(value.longValue());
         }
+        return false;
+    }
+
+    private static boolean appendJsonBoolean(StringBuilder sb, String key, Boolean value, boolean first) {
+        if (!first) {
+            sb.append(',');
+        }
+        sb.append('"').append(jsonEscape(key)).append('"').append(':');
+        if (value == null) {
+            sb.append("null");
+        } else {
+            sb.append(value.booleanValue());
+        }
+        return false;
+    }
+
+    private static boolean appendJsonEnvironment(StringBuilder sb, String key, SearchEnvironment environment, boolean first) {
+        if (environment == null) {
+            return first;
+        }
+        if (!first) {
+            sb.append(',');
+        }
+        sb.append('"').append(jsonEscape(key)).append('"').append(':');
+        sb.append('{');
+        boolean innerFirst = true;
+        innerFirst = appendJsonInt(sb, "availableProcessors", environment.availableProcessors(), innerFirst);
+        innerFirst = appendJsonInt(sb, "searchThreads", environment.searchThreads(), innerFirst);
+        innerFirst = appendJsonInt(sb, "lazySmpThreads", environment.lazySmpThreads(), innerFirst);
+        innerFirst = appendJsonInt(sb, "rootParallelLimit", environment.rootParallelLimit(), innerFirst);
+        innerFirst = appendJsonInt(sb, "ttMb", environment.transpositionTableMb(), innerFirst);
+        appendJsonBoolean(sb, "multiThreaded", environment.multiThreaded(), innerFirst);
+        sb.append('}');
         return false;
     }
 
