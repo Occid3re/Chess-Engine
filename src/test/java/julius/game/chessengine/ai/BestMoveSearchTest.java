@@ -68,10 +68,10 @@ public class BestMoveSearchTest {
         Engine engine = new Engine();
         engine.importBoardFromFen(fen);
 
-        final long timeLimitMs = 2000L;
+        final long timeLimitMs = 3000L;
 
         AiTuning tuning = SEARCH_ENVIRONMENT.applyTo(AiTuning.builder())
-                .maxDepth(20)
+                .maxDepth(24)
                 .timeLimitMillis(timeLimitMs)
                 .nullMovePruning(true)
                 .build();
@@ -790,11 +790,20 @@ public class BestMoveSearchTest {
     ) {
 
         static SearchEnvironment detect() {
-            int availableProcessors = Runtime.getRuntime().availableProcessors();
-            int searchThreads = clampAtLeast(readIntProperty("chessengine.searchThreads", 1), 1);
-            int lazySmpThreads = clampAtLeast(readIntProperty("chessengine.lazySmpThreads", 1), 1);
-            int rootParallelLimit = clampAtLeast(readIntProperty("chessengine.rootParallelLimit", 24), 1);
-            int ttSizeMb = clampAtLeast(readIntProperty("chessengine.tt.mb", 64), 1);
+            int availableProcessors = Math.max(1, Runtime.getRuntime().availableProcessors());
+
+            int defaultSearchThreads = computeDefaultSearchThreads(availableProcessors);
+            int searchThreads = resolveIntProperty("chessengine.searchThreads", defaultSearchThreads, 1);
+
+            int defaultLazySmpThreads = computeDefaultLazySmpThreads(availableProcessors, searchThreads);
+            int lazySmpThreads = resolveIntProperty("chessengine.lazySmpThreads", defaultLazySmpThreads, 1);
+
+            int defaultRootParallelLimit = computeDefaultRootParallelLimit(availableProcessors, searchThreads, lazySmpThreads);
+            int rootParallelLimit = resolveIntProperty("chessengine.rootParallelLimit", defaultRootParallelLimit, 2);
+
+            int defaultTranspositionTableMb = computeDefaultTranspositionTableMb(availableProcessors);
+            int ttSizeMb = resolveIntProperty("chessengine.tt.mb", defaultTranspositionTableMb, 64);
+
             return new SearchEnvironment(availableProcessors, searchThreads, lazySmpThreads, rootParallelLimit, ttSizeMb);
         }
 
@@ -829,16 +838,61 @@ public class BestMoveSearchTest {
             return sb.toString();
         }
 
-        private static int readIntProperty(String key, int defaultValue) {
+        private static int resolveIntProperty(String key, int computedDefault, int minValue) {
             String value = System.getProperty(key);
-            if (value == null) {
-                return defaultValue;
+            if (value == null || value.isBlank()) {
+                int resolved = clampAtLeast(computedDefault, minValue);
+                System.setProperty(key, Integer.toString(resolved));
+                return resolved;
             }
             try {
-                return Integer.parseInt(value.trim());
+                int parsed = Integer.parseInt(value.trim());
+                int resolved = clampAtLeast(parsed, minValue);
+                if (resolved != parsed) {
+                    System.setProperty(key, Integer.toString(resolved));
+                }
+                return resolved;
             } catch (NumberFormatException ex) {
-                return defaultValue;
+                int resolved = clampAtLeast(computedDefault, minValue);
+                System.setProperty(key, Integer.toString(resolved));
+                return resolved;
             }
+        }
+
+        private static int computeDefaultSearchThreads(int availableProcessors) {
+            if (availableProcessors <= 1) {
+                return 1;
+            }
+            if (availableProcessors == 2) {
+                return 2;
+            }
+            int scaled = (int) Math.floor(availableProcessors * 0.67);
+            int capped = Math.min(availableProcessors - 1, Math.max(2, scaled));
+            return clampAtLeast(capped, 1);
+        }
+
+        private static int computeDefaultLazySmpThreads(int availableProcessors, int searchThreads) {
+            if (searchThreads <= 1) {
+                return 1;
+            }
+            int headroom = Math.max(0, availableProcessors - searchThreads);
+            if (headroom <= 1) {
+                return 1;
+            }
+            int candidate = Math.max(1, searchThreads / 2);
+            int bounded = Math.min(candidate, headroom);
+            return clampAtLeast(bounded, 1);
+        }
+
+        private static int computeDefaultRootParallelLimit(int availableProcessors, int searchThreads, int lazySmpThreads) {
+            int baseline = Math.max(2, availableProcessors * 3);
+            int required = Math.max(baseline, searchThreads + lazySmpThreads);
+            return Math.min(192, required);
+        }
+
+        private static int computeDefaultTranspositionTableMb(int availableProcessors) {
+            int scaled = Math.max(availableProcessors * 64, 128);
+            return Math.min(512, scaled);
         }
 
         private static int clampAtLeast(int value, int minValue) {

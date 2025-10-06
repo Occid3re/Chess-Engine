@@ -25,15 +25,15 @@ population:
       material.rookvalue: 510
       material.queenvalue: 940
       material.bishoppairbonus: 42
-      pawnstructure.centerpawnbonus: 12
-      pawnstructure.passedpawnbonus: 50
-      pawnstructure.connectedpawnbonus: 10
+      pawnstructure.centerpawnbonus: 18
+      pawnstructure.passedpawnbonus: 52
+      pawnstructure.connectedpawnbonus: 12
       pawnstructure.islandpenalty: -7
       pawnstructure.doubledpawnpenalty: -14
       pawnstructure.isolatedpawnpenalty: -12
       pawnstructure.advancedpawnbonus: 10
       pawnstructure.blockedpawnpenalty: -8
-      pawnstructure.backwardpawnpenalty: -14
+      pawnstructure.backwardpawnpenalty: -16
       pawnstructure.ownkingblockspassedpawnpenalty: -120
       pawnstructure.passedpawnfreepathbonusperrank: 14
       pawnstructure.rookhalfopenfilebonus: 12
@@ -43,8 +43,8 @@ population:
       threat.hangingbishoppenalty: -30
       threat.hangingrookpenalty: -50
       threat.hangingqueenpenalty: -80
-      threat.pawnthreatknightpenalty: -12
-      threat.pawnthreatbishoppenalty: -12
+      threat.pawnthreatknightpenalty: -16
+      threat.pawnthreatbishoppenalty: -14
       threat.pawnthreatrookpenalty: -22
       threat.pawnthreatqueenpenalty: -30
       activity.midgamemobilityknight: 4
@@ -57,8 +57,8 @@ population:
       activity.endgamemobilityrook: 2
       activity.endgamemobilityqueen: 1
       activity.endgamemobilityking: 2
-      activity.midgamecenterknight: 2
-      activity.midgamecenterbishop: 2
+      activity.midgamecenterknight: 3
+      activity.midgamecenterbishop: 3
       activity.midgamecenterrook: 2
       activity.midgamecenterqueen: 2
       activity.midgamecenterking: 0
