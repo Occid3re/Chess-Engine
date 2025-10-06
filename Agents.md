@@ -110,3 +110,4 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
   Add the same weights (with sensible defaults) to seed-tunings.yaml.
   Expose and apply them via the tuning module so they are loaded and propagated into the evaluation at runtime.
 * Full-suite runs currently fail in `BestMoveSearchTest` due to long-horizon move selection mismatches. Use the PGN smoke tests above when focusing on PGN changes, or investigate the AI regressions separately before expecting a green build.
+* `BestMoveSearchTest` now mirrors the diagnostic harness from `AITest_MateThreatDiagnostics`. Each position prints an in-depth iterative-deepening trace, principal variation, and transposition-table probe summary, with aggregated JSON/TXT artifacts in `target/surefire-reports/best-move-search-*`. Expect a long console log and ~28 known assertion failures; the goal is visibility, not a green suite.
