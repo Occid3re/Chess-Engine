@@ -70,16 +70,6 @@ public enum ParamId {
     THREAT_PAWN_THREAT_ROOK_PENALTY("threat.pawnThreatRookPenalty", -18),
     THREAT_PAWN_THREAT_QUEEN_PENALTY("threat.pawnThreatQueenPenalty", -25),
 
-    PIECE_SQUARE_DEVELOPMENT_PHASE_THRESHOLD("pieceSquare.developmentPhaseThreshold", 64, 0.0, 256.0),
-    PIECE_SQUARE_QUEEN_DEVELOPMENT_PHASE_THRESHOLD("pieceSquare.queenDevelopmentPhaseThreshold", 80, 0.0, 256.0),
-    PIECE_SQUARE_UNDEVELOPED_MINOR_PENALTY("pieceSquare.undevelopedMinorPenalty", -20),
-    PIECE_SQUARE_EARLY_QUEEN_DEVELOPMENT_PENALTY_PER_MINOR("pieceSquare.earlyQueenDevelopmentPenaltyPerMinor", -15),
-    PIECE_SQUARE_MIN_UNDEVELOPED_MINORS_FOR_QUEEN_PENALTY("pieceSquare.minUndevelopedMinorsForQueenPenalty", 2, 0.0, 8.0),
-    PIECE_SQUARE_START_POSITION_PENALTY("pieceSquare.startPositionPenalty", -40),
-    PIECE_SQUARE_BLEND_SCALE("pieceSquare.blendScale", 256, 1.0, 1024.0),
-    PIECE_SQUARE_CASTLING_BONUS("pieceSquare.castlingBonus", 20),
-    PIECE_SQUARE_NOT_CASTLED_ROOK_MOVE_PENALTY("pieceSquare.notCastledRookMovePenalty", -10),
-
     EVALUATION_BLEND_SCALE("evaluation.blendScale", 256, 1.0, 1024.0),
 
     MOVE_ORDERING_KILLER_MOVE_SCORE("moveOrdering.killerMoveScore", 10_000),

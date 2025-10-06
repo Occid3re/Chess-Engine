@@ -20,7 +20,6 @@ public final class EvaluationParameterRegistry {
         }
         initialize(MaterialModule.class);
         initialize(PawnStructureModule.class);
-        initialize(PieceSquareModule.class);
         initialize(ActivityModule.class);
         initialize(KingSafetyModule.class);
         initialize(ThreatModule.class);

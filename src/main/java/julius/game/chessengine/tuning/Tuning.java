@@ -80,7 +80,6 @@ public final class Tuning {
     private static int earlyQueenDevelopmentPenaltyPerMinor;
     private static int minUndevelopedMinorsForQueenPenalty;
     private static int startPositionPenalty;
-    private static int pieceSquareBlendScale;
     private static int castlingBonus;
     private static int notCastledRookMovePenalty;
 
@@ -366,10 +365,6 @@ public final class Tuning {
         return startPositionPenalty;
     }
 
-    public static int pieceSquareBlendScale() {
-        return pieceSquareBlendScale;
-    }
-
     public static int castlingBonus() {
         return castlingBonus;
     }
@@ -484,16 +479,6 @@ public final class Tuning {
             pawnThreatBishopPenalty = loadInt(ParamId.THREAT_PAWN_THREAT_BISHOP_PENALTY);
             pawnThreatRookPenalty = loadInt(ParamId.THREAT_PAWN_THREAT_ROOK_PENALTY);
             pawnThreatQueenPenalty = loadInt(ParamId.THREAT_PAWN_THREAT_QUEEN_PENALTY);
-
-            developmentPhaseThreshold = loadInt(ParamId.PIECE_SQUARE_DEVELOPMENT_PHASE_THRESHOLD);
-            queenDevelopmentPhaseThreshold = loadInt(ParamId.PIECE_SQUARE_QUEEN_DEVELOPMENT_PHASE_THRESHOLD);
-            undevelopedMinorPenalty = loadInt(ParamId.PIECE_SQUARE_UNDEVELOPED_MINOR_PENALTY);
-            earlyQueenDevelopmentPenaltyPerMinor = loadInt(ParamId.PIECE_SQUARE_EARLY_QUEEN_DEVELOPMENT_PENALTY_PER_MINOR);
-            minUndevelopedMinorsForQueenPenalty = loadInt(ParamId.PIECE_SQUARE_MIN_UNDEVELOPED_MINORS_FOR_QUEEN_PENALTY);
-            startPositionPenalty = loadInt(ParamId.PIECE_SQUARE_START_POSITION_PENALTY);
-            pieceSquareBlendScale = loadInt(ParamId.PIECE_SQUARE_BLEND_SCALE);
-            castlingBonus = loadInt(ParamId.PIECE_SQUARE_CASTLING_BONUS);
-            notCastledRookMovePenalty = loadInt(ParamId.PIECE_SQUARE_NOT_CASTLED_ROOK_MOVE_PENALTY);
 
             evaluationBlendScale = loadInt(ParamId.EVALUATION_BLEND_SCALE);
 
