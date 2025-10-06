@@ -19,6 +19,8 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
+import testsupport.TestReportWriter;
+
 /**
  * Verifies that the AI selects the expected best move from a set of FEN
  * positions within a small time budget. Similar in spirit to
@@ -30,6 +32,8 @@ import java.util.stream.Stream;
 public class BestMoveSearchTest {
 
     private final List<DecisionStatistics> decisionSummaries = new ArrayList<>();
+    private final List<String> decisionJsonLines = new ArrayList<>();
+    private final List<String> decisionTextBlocks = new ArrayList<>();
 
     /**
      * Test matrix: (fen, expected moves in algebraic notation). Some positions
@@ -327,6 +331,9 @@ public class BestMoveSearchTest {
         System.out.println(humanReadable);
         System.out.println(statistics.toJsonLine());
 
+        decisionJsonLines.add(statistics.toJsonLine());
+        decisionTextBlocks.add(humanReadable);
+
         Assertions.assertTrue(expectedMoves.contains(moveString),
                 "Expected one of " + expectedMoves + " but got " + moveString + " for FEN: " + fen
                         + humanReadable);
@@ -419,6 +426,23 @@ public class BestMoveSearchTest {
         AggregateStatistics summary = AggregateStatistics.from(decisionSummaries);
         System.out.println(summary.toHumanReadable());
         System.out.println(summary.toJsonLine());
+
+        TestReportWriter.writeLines(
+                "best-move-search-decisions.jsonl",
+                decisionJsonLines
+        );
+        TestReportWriter.writeLines(
+                "best-move-search-decisions.txt",
+                decisionTextBlocks
+        );
+        TestReportWriter.writeLines(
+                "best-move-search-summary.json",
+                List.of(summary.toJsonLine())
+        );
+        TestReportWriter.writeLines(
+                "best-move-search-summary.txt",
+                List.of(summary.toHumanReadable())
+        );
     }
 
     private record DecisionStatistics(

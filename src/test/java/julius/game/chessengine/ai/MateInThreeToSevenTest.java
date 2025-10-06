@@ -3,6 +3,7 @@ package julius.game.chessengine.ai;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -10,6 +11,11 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import testsupport.TestReportWriter;
 
 /**
  * Focused regression covering deeper forced mates (N = 3..7).
@@ -23,6 +29,8 @@ import java.util.stream.Stream;
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class MateInThreeToSevenTest {
+
+    private final List<MateObservation> observations = new ArrayList<>();
 
     private Stream<Object[]> matePuzzles() {
         return Stream.of(
@@ -86,6 +94,18 @@ class MateInThreeToSevenTest {
         ai.stopCalculation();
 
         GameState state = engine.getGameState();
+        MateObservation observation = new MateObservation(
+                fen,
+                mateInMoves,
+                expectedWinner,
+                state.getState(),
+                observedPlies,
+                maxPlies,
+                timeLimitMs,
+                state.getState() == expectedWinner && observedPlies <= maxPlies
+        );
+        observations.add(observation);
+
         String failInfo = String.format(
                 "FEN='%s', mateIn=%d, plies=%d/%d, expected=%s, actual=%s",
                 fen, mateInMoves, observedPlies, maxPlies, expectedWinner, state.getState()
@@ -93,6 +113,57 @@ class MateInThreeToSevenTest {
 
         Assertions.assertEquals(expectedWinner, state.getState(), failInfo);
         Assertions.assertTrue(observedPlies <= maxPlies, "Exceeded ply cap: " + failInfo);
+    }
+
+    @AfterAll
+    void writeDiagnostics() {
+        if (observations.isEmpty()) {
+            return;
+        }
+        List<String> jsonLines = observations.stream()
+                .map(MateObservation::toJsonLine)
+                .toList();
+        List<String> textLines = observations.stream()
+                .map(MateObservation::toHumanReadable)
+                .toList();
+
+        TestReportWriter.writeLines("mate-in-three-to-seven.jsonl", jsonLines);
+        TestReportWriter.writeLines("mate-in-three-to-seven.txt", textLines);
+    }
+
+    private record MateObservation(
+            String fen,
+            int mateIn,
+            GameStateEnum expected,
+            GameStateEnum actual,
+            int plies,
+            int maxPlies,
+            long timeLimitMs,
+            boolean success
+    ) {
+        String toHumanReadable() {
+            return String.format(
+                    "FEN=%s | mateIn=%d | plies=%d/%d | expected=%s | actual=%s | success=%s",
+                    fen, mateIn, plies, maxPlies, expected, actual, success
+            );
+        }
+
+        String toJsonLine() {
+            return "{"
+                    + "\"fen\":\"" + escape(fen) + "\"," 
+                    + "\"mateIn\":" + mateIn + ','
+                    + "\"expected\":\"" + expected + "\"," 
+                    + "\"actual\":\"" + actual + "\"," 
+                    + "\"plies\":" + plies + ','
+                    + "\"maxPlies\":" + maxPlies + ','
+                    + "\"timeLimitMs\":" + timeLimitMs + ','
+                    + "\"success\":" + success
+                    + "}";
+        }
+
+        private static String escape(String input) {
+            return input.replace("\\", "\\\\").replace("\"", "\\\"");
+        }
     }
 }
 
