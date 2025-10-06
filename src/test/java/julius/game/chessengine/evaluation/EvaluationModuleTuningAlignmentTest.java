@@ -79,7 +79,6 @@ class EvaluationModuleTuningAlignmentTest {
                 Map.entry("pawnstructure.rookopenfilebonus", Tuning::rookOpenFileBonus),
                 Map.entry("threat.hangingpawnpenalty", Tuning::hangingPawnPenalty),
                 Map.entry("activity.midgamemobilityknight", Tuning::activityMidgameKnightMobility),
-                Map.entry("piecesquare.blendscale", Tuning::pieceSquareBlendScale),
                 Map.entry("kingsafety.missingpawnshieldpenalty", Tuning::missingPawnShieldPenalty),
                 Map.entry("kingsafety.attackweightqueen", Tuning::kingSafetyQueenAttackWeight),
                 Map.entry("evaluation.blendscale", Tuning::evaluationBlendScale)
@@ -263,7 +262,6 @@ class EvaluationModuleTuningAlignmentTest {
         return List.of(
                 material,
                 pawnStructure,
-                new PieceSquareModule(),
                 new ActivityModule(),
                 new KingSafetyModule(),
                 new ThreatModule()

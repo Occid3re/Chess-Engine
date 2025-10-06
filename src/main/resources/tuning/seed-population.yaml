@@ -8,9 +8,6 @@ population:
         pawnstructuremodule:
           midgame: 1.0
           endgame: 1.0
-        piecesquaremodule:
-          midgame: 1.0
-          endgame: 1.0
         activitymodule:
           midgame: 1.0
           endgame: 1.0
@@ -70,15 +67,6 @@ population:
       activity.endgamecenterrook: 3
       activity.endgamecenterqueen: 3
       activity.endgamecenterking: 3
-      piecesquare.developmentphasethreshold: 64
-      piecesquare.queendevelopmentphasethreshold: 96
-      piecesquare.undevelopedminorpenalty: -22
-      piecesquare.earlyqueendevelopmentpenaltyperminor: -18
-      piecesquare.minundevelopedminorsforqueenpenalty: 2
-      piecesquare.startpositionpenalty: -35
-      piecesquare.blendscale: 384
-      piecesquare.castlingbonus: 30
-      piecesquare.notcastledrookmovepenalty: -12
       kingsafety.missingpawnshieldpenalty: -18
       kingsafety.halfopenfilepenalty: -18
       kingsafety.openfilepenalty: -28

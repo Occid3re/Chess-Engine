@@ -11,7 +11,6 @@ import julius.game.chessengine.evaluation.EvaluationPipeline;
 import julius.game.chessengine.evaluation.KingSafetyModule;
 import julius.game.chessengine.evaluation.MaterialModule;
 import julius.game.chessengine.evaluation.PawnStructureModule;
-import julius.game.chessengine.evaluation.PieceSquareModule;
 import julius.game.chessengine.evaluation.KingSafetyModule.KingSafetyView;
 import julius.game.chessengine.evaluation.PawnStructureModule.PawnStructureView;
 import julius.game.chessengine.figures.PieceType;
@@ -166,14 +165,12 @@ public class ScoreEvaluationTest {
     private static ScoreSnapshot evaluate(BitBoard board, GameStateEnum state) {
         MaterialModule material = new MaterialModule();
         PawnStructureModule pawns = new PawnStructureModule();
-        PieceSquareModule pieceSquares = new PieceSquareModule();
         ActivityModule activity = new ActivityModule();
         KingSafetyModule kingSafety = new KingSafetyModule();
         material.setPawnChangeListener(pawns);
         EvaluationPipeline pipeline = new EvaluationPipeline(List.of(
                 material,
                 pawns,
-                pieceSquares,
                 activity,
                 kingSafety
         ));
