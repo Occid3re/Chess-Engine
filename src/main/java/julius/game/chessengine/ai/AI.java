@@ -2563,6 +2563,7 @@ public class AI {
         boolean inCheck = isSideInCheck(simulatorEngine, isWhitesTurn);
 
         double standPat = evaluateStaticPosition(simulatorEngine.getGameState(), isWhitesTurn, depth);
+        double originalAlpha = alpha;
         if (!inCheck) {
             if (standPat >= beta) {
                 return beta; // fail-hard beta
@@ -2573,8 +2574,8 @@ public class AI {
 
             // Simple delta/futility-like guard: if even a big swing cannot beat alpha, cut
             final int BIG_DELTA = 1000; // ~queen swing
-            if (standPat + BIG_DELTA < alpha) {
-                return alpha;
+            if (standPat + BIG_DELTA < originalAlpha) {
+                return originalAlpha;
             }
         }
 
