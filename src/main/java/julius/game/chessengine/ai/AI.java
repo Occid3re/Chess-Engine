@@ -54,6 +54,7 @@ public class AI {
     private Thread[] calculationThreads;
 
     private static final int MAX_CHECK_EXTENSIONS_IN_A_ROW = 2;
+    private static final int SEE_PRUNE_NEAR_ROOT_PLY = 2;
     private static final int ABS_PLY_LIMIT_MARGIN = 32;
 
     private final AtomicReference<SearchTask> activeSearch = new AtomicReference<>();
@@ -2003,7 +2004,10 @@ public class AI {
             if (seePruneCandidate) {
                 seeGain = seeCache.computeIfAbsent(move, simulatorEngine::see);
                 seeEvaluated = true;
-                if (seeGain < 0) {
+                boolean losingCapture = isCapture && !isPromotion && seeGain < 0;
+                boolean nearRoot = plyFromRoot <= SEE_PRUNE_NEAR_ROOT_PLY;
+                boolean allowSeePrune = seeGain < 0 && !(losingCapture && nearRoot);
+                if (allowSeePrune) {
                     simulatorEngine.performMove(move);
                     boolean givesCheckTmp = isSideInCheck(simulatorEngine, false);
                     simulatorEngine.undoLastMove();
@@ -2186,7 +2190,10 @@ public class AI {
             if (seePruneCandidate) {
                 seeGain = seeCache.computeIfAbsent(move, simulatorEngine::see);
                 seeEvaluated = true;
-                if (seeGain < 0) {
+                boolean losingCapture = isCapture && !isPromotion && seeGain < 0;
+                boolean nearRoot = plyFromRoot <= SEE_PRUNE_NEAR_ROOT_PLY;
+                boolean allowSeePrune = seeGain < 0 && !(losingCapture && nearRoot);
+                if (allowSeePrune) {
                     simulatorEngine.performMove(move);
                     boolean givesCheckTmp = isSideInCheck(simulatorEngine, true);
                     simulatorEngine.undoLastMove();
