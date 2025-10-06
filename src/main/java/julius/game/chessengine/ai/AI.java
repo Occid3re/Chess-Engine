@@ -59,6 +59,7 @@ public class AI {
 
     private final AtomicReference<SearchTask> activeSearch = new AtomicReference<>();
     private final ThreadLocal<SearchTask> threadSearchTask = new ThreadLocal<>();
+    private final ThreadLocal<Integer> lazyWorkerSlot = new ThreadLocal<>();
     private final AtomicLong searchIdGenerator = new AtomicLong();
     private final Object searchConfigLock = new Object();
     private boolean reconfiguringSearchThreads = false;
@@ -605,43 +606,48 @@ public class AI {
             return;
         }
 
-        while (!Thread.currentThread().isInterrupted()) {
-            SearchJob job;
-            try {
-                job = searchJobs.take();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
+        lazyWorkerSlot.set(workerIndex);
+        try {
+            while (!Thread.currentThread().isInterrupted()) {
+                SearchJob job;
+                try {
+                    job = searchJobs.take();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
 
-            if (job.stop || !keepCalculating) {
-                break;
-            }
+                if (job.stop || !keepCalculating) {
+                    break;
+                }
 
-            SearchTask task = job.task;
-            if (task == null) {
-                continue;
-            }
+                SearchTask task = job.task;
+                if (task == null) {
+                    continue;
+                }
 
-            try {
-                simulator.copyFrom(task.getRootSnapshot());
-            } catch (RuntimeException e) {
-                log.error("Failed to sync simulation for worker {}", workerIndex, e);
-                task.workerDone();
-                continue;
-            }
+                try {
+                    simulator.copyFrom(task.getRootSnapshot());
+                } catch (RuntimeException e) {
+                    log.error("Failed to sync simulation for worker {}", workerIndex, e);
+                    task.workerDone();
+                    continue;
+                }
 
-            SplittableRandom rng = createLazyWorkerRng(task, workerIndex);
+                SplittableRandom rng = createLazyWorkerRng(task, workerIndex);
 
-            threadSearchTask.set(task);
-            try {
-                iterativeDeepening(task, simulator, rng);
-            } catch (Exception e) {
-                log.error("Search worker {} encountered an error", workerIndex, e);
-            } finally {
-                threadSearchTask.remove();
-                task.workerDone();
+                threadSearchTask.set(task);
+                try {
+                    iterativeDeepening(task, simulator, rng);
+                } catch (Exception e) {
+                    log.error("Search worker {} encountered an error", workerIndex, e);
+                } finally {
+                    threadSearchTask.remove();
+                    task.workerDone();
+                }
             }
+        } finally {
+            lazyWorkerSlot.remove();
         }
     }
 
@@ -897,11 +903,13 @@ public class AI {
                     ? new SplittableRandom(boardStateHash ^ System.nanoTime())
                     : null;
 
+            lazyWorkerSlot.set(0);
             threadSearchTask.set(task);
             try {
                 iterativeDeepening(task, simulatorEngine, rng);
             } finally {
                 threadSearchTask.remove();
+                lazyWorkerSlot.remove();
             }
 
             task.workerDone();
@@ -1289,7 +1297,12 @@ public class AI {
             return getBestMove(simulatorEngine, isWhitesTurn, depth, deadline, alpha, beta, rng);
         }
 
-        final int fanout = helperCapacity > 0 ? Math.min(baseFanout, helperCapacity) : baseFanout;
+        int helpersPerWorker = perWorkerHelperBudget(helperCapacity, lazySmpThreads, lazyWorkerSlot.get());
+        if (helpersPerWorker <= 0 && baseFanout > 0) {
+            return getBestMove(simulatorEngine, isWhitesTurn, depth, deadline, alpha, beta, rng);
+        }
+
+        final int fanout = Math.min(baseFanout, helpersPerWorker);
 
         maybeRotateRootMoves(orderedMoves, rng);
 
@@ -1543,6 +1556,24 @@ public class AI {
             aborted = true;
         }
         return aborted ? RootSearchResult.aborted(candidate) : RootSearchResult.completed(candidate);
+    }
+
+    static int perWorkerHelperBudget(int helperCapacity, int lazyWorkers, Integer workerIndex) {
+        if (helperCapacity <= 0) {
+            return 0;
+        }
+        int workers = Math.max(1, lazyWorkers);
+        int index = workerIndex == null ? 0 : Math.max(0, workerIndex);
+        if (index >= workers) {
+            index = workers - 1;
+        }
+        int baseShare = helperCapacity / workers;
+        int remainder = helperCapacity % workers;
+        int budget = baseShare;
+        if (index < remainder) {
+            budget++;
+        }
+        return budget;
     }
 
 

@@ -115,3 +115,4 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
 ### AI search & evaluation notes
 * Quiescence delta pruning now compares against the alpha window captured before the stand-pat update. Earlier builds raised `alpha` first, which meant `standPat + Δ < alpha` never triggered and the pruning shortcut was effectively disabled.
 * Static evaluation adds a lightweight knight placement adjustment (central bonuses) plus a tempo tie-breaker on top of the pipeline score. Future positional tweaks should extend `computePositionalAdjustment` so the orientation logic stays centralised.
+* Mixed parallelism fix: lazy SMP workers now split the shared root helper pool instead of each requesting the full `searchThreads` capacity. Earlier builds over-subscribed the helper executor which throttled depth and caused additional `BestMoveSearchTest` regressions when both modes were enabled.
