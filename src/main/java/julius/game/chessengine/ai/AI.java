@@ -922,7 +922,10 @@ public class AI {
     }
 
     private SplittableRandom createLazyWorkerRng(SearchTask task, int workerIndex) {
-        if (lazySmpThreads <= 1 || workerIndex <= 0 || task == null) {
+        if (lazySmpThreads <= 1 || task == null) {
+            return null;
+        }
+        if (task.claimLeader()) {
             return null;
         }
         long seed = task.getBoardHash() ^ (0x9E3779B97F4A7C15L * (workerIndex + 1L));

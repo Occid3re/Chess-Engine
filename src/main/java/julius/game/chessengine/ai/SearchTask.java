@@ -21,6 +21,7 @@ public final class SearchTask {
     private final long deadline;
     private final CountDownLatch completion;
     private final AtomicBoolean stop = new AtomicBoolean(false);
+    private final AtomicBoolean leaderClaimed = new AtomicBoolean(false);
     private final AtomicReference<BestMoveDepth> best;
     private final AtomicInteger iterationDepth = new AtomicInteger(0);
     private final Engine rootSnapshot;
@@ -46,6 +47,10 @@ public final class SearchTask {
     void workerDone() { completion.countDown(); }
     void requestStop() { stop.set(true); }
     boolean isStopRequested() { return stop.get(); }
+
+    boolean claimLeader() {
+        return !stop.get() && leaderClaimed.compareAndSet(false, true);
+    }
 
     boolean beginIteration(int depth) {
         while (true) {
