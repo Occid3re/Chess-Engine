@@ -2,21 +2,37 @@ package julius.game.chessengine.ai;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.board.Move;
+import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
+import julius.game.chessengine.engine.GameState;
+import julius.game.chessengine.tuning.AiTuning;
+import julius.game.chessengine.ai.MoveAndScore;
+import julius.game.chessengine.ai.TranspositionTable;
+import julius.game.chessengine.ai.TranspositionTableEntry;
 import julius.game.chessengine.utils.Score;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
+import java.util.Set;
+import java.util.SplittableRandom;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import testsupport.TestReportWriter;
 
@@ -34,6 +50,11 @@ public class BestMoveSearchTest {
     private final List<String> decisionJsonLines = new ArrayList<>();
     private final List<String> decisionTextBlocks = new ArrayList<>();
 
+    @BeforeEach
+    void ensureLocale() {
+        Locale.setDefault(Locale.ROOT);
+    }
+
     /**
      * Test matrix: (fen, expected moves in algebraic notation). Some positions
      * have multiple acceptable best moves, so we keep a list.
@@ -46,36 +67,35 @@ public class BestMoveSearchTest {
 
         final long timeLimitMs = 2000L;
 
+        AiTuning tuning = AiTuning.builder()
+                .searchThreads(1)
+                .lazySmpThreads(1)
+                .hashSizeMb(64)
+                .maxDepth(20)
+                .timeLimitMillis(timeLimitMs)
+                .nullMovePruning(true)
+                .build();
 
-        AI ai = new AI(engine);
-        ai.setTimeLimit(timeLimitMs); // milliseconds
+        DiagnosticAI ai = new DiagnosticAI(engine, tuning);
 
-        boolean whiteToMove = fen.split(" ")[1].equals("w");
         long nodesBefore = ai.getNodesVisited();
         long nullMovesBefore = ai.getNullMoveCount();
         long startNanos = System.nanoTime();
 
-        ai.startAutoPlay(whiteToMove, !whiteToMove);
+        MoveAndScore result = ai.searchBestMoveBlocking(timeLimitMs);
+        Duration wallClock = Duration.ofNanos(System.nanoTime() - startNanos);
 
-        long deadline = System.currentTimeMillis() + TimeUnit.MILLISECONDS.toMillis(timeLimitMs + 200);
-        int lastMove = -1;
-        while (System.currentTimeMillis() < deadline) {
-            lastMove = engine.getLastMove();
-            if (lastMove != -1) break;
-            TimeUnit.MILLISECONDS.sleep(50);
-        }
+        Assertions.assertNotNull(result, () -> "Engine failed to produce a move for FEN: " + fen);
 
-        ai.stopCalculation();
-
-        long durationMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
+        long durationMillis = wallClock.toMillis();
         long nodesVisited = Math.max(0, ai.getNodesVisited() - nodesBefore);
         long nullMoves = Math.max(0, ai.getNullMoveCount() - nullMovesBefore);
 
-        Assertions.assertNotEquals(-1, lastMove, "Engine failed to make a move for FEN: " + fen);
-        String moveString = Move.convertIntToMove(lastMove).toString();
+        String moveString = Move.convertIntToMove(result.getMove()).toString();
         DecisionStatistics statistics = compileDecisionStatistics(
                 fen,
                 moveString,
+                result,
                 ai,
                 expectedMoves,
                 durationMillis,
@@ -85,20 +105,23 @@ public class BestMoveSearchTest {
         decisionSummaries.add(statistics);
 
         String humanReadable = statistics.toHumanReadable();
+        String diagnostics = ai.buildDiagnosticsReport(fen, expectedMoves, result, wallClock);
         System.out.println(humanReadable);
         System.out.println(statistics.toJsonLine());
+        System.out.println(diagnostics);
 
         decisionJsonLines.add(statistics.toJsonLine());
-        decisionTextBlocks.add(humanReadable);
+        decisionTextBlocks.add(humanReadable + diagnostics);
 
         Assertions.assertTrue(expectedMoves.contains(moveString),
-                "Expected one of " + expectedMoves + " but got " + moveString + " for FEN: " + fen
-                        + humanReadable);
+                () -> "Expected one of " + expectedMoves + " but got " + moveString + " for FEN: " + fen
+                        + humanReadable + System.lineSeparator() + diagnostics);
     }
 
     private DecisionStatistics compileDecisionStatistics(String fen,
                                                          String chosenMove,
-                                                         AI ai,
+                                                         MoveAndScore searchResult,
+                                                         DiagnosticAI ai,
                                                          List<String> expectedMoves,
                                                          long durationMillis,
                                                          long nodesVisited,
@@ -134,6 +157,10 @@ public class BestMoveSearchTest {
         evaluations.sort(comparator);
 
         MoveEvaluation chosenEvaluation = evaluationMap.get(chosenMove);
+        if (chosenEvaluation == null && searchResult != null) {
+            double oriented = orientScoreForMover(whiteToMove, searchResult.getScore());
+            chosenEvaluation = new MoveEvaluation(chosenMove, oriented);
+        }
         MoveEvaluation bestEvaluation = evaluations.isEmpty() ? null : evaluations.getFirst();
 
         List<MoveEvaluation> expectedEvaluationDetails = new ArrayList<>();
@@ -154,7 +181,7 @@ public class BestMoveSearchTest {
                 : Double.NaN;
         int rank = chosenEvaluation != null ? evaluations.indexOf(chosenEvaluation) + 1 : -1;
 
-        String pvString = renderPrincipalVariation(whiteToMove, ai.getCalculatedLine());
+        String pvString = renderPrincipalVariation(whiteToMove, ai.principalVariation());
 
         return new DecisionStatistics(
                 fen,
@@ -200,6 +227,558 @@ public class BestMoveSearchTest {
                 "best-move-search-summary.txt",
                 List.of(summary.toHumanReadable())
         );
+    }
+
+    private static final class DiagnosticAI extends AI {
+
+        private final Method sortMovesMethod;
+        private final Method maybeRotateRootMovesMethod;
+        private final Method abortRequestedMethod;
+        private final Method alphaBetaMethod;
+        private final Method evaluateStaticPositionMethod;
+        private final Method isBetterScoreMethod;
+        private final Field nodesVisitedField;
+        private final Field nullMoveCountField;
+        private final Field transpositionTableField;
+        private final Field calculatedLineField;
+        private final Map<Integer, AtomicInteger> depthAttemptCounter = new ConcurrentHashMap<>();
+        private final List<DepthTrace> depthTraces = Collections.synchronizedList(new ArrayList<>());
+
+        DiagnosticAI(Engine engine, AiTuning tuning) {
+            super(engine, tuning);
+            try {
+                sortMovesMethod = AI.class.getDeclaredMethod("sortMovesByEfficiency", IntArrayList.class,
+                        int.class, long.class, int.class, Engine.class);
+                sortMovesMethod.setAccessible(true);
+
+                isBetterScoreMethod = AI.class.getDeclaredMethod("isBetterScore", boolean.class, double.class, double.class);
+                isBetterScoreMethod.setAccessible(true);
+
+                maybeRotateRootMovesMethod = AI.class.getDeclaredMethod("maybeRotateRootMoves", IntArrayList.class,
+                        SplittableRandom.class);
+                maybeRotateRootMovesMethod.setAccessible(true);
+
+                abortRequestedMethod = AI.class.getDeclaredMethod("abortRequested", long.class);
+                abortRequestedMethod.setAccessible(true);
+
+                alphaBetaMethod = AI.class.getDeclaredMethod("alphaBeta", Engine.class, int.class, double.class,
+                        double.class, boolean.class, long.class, int.class, int.class, int.class);
+                alphaBetaMethod.setAccessible(true);
+
+                evaluateStaticPositionMethod = AI.class.getDeclaredMethod("evaluateStaticPosition", GameState.class,
+                        boolean.class, int.class);
+                evaluateStaticPositionMethod.setAccessible(true);
+
+                nodesVisitedField = AI.class.getDeclaredField("nodesVisited");
+                nodesVisitedField.setAccessible(true);
+
+                nullMoveCountField = AI.class.getDeclaredField("nullMoveCount");
+                nullMoveCountField.setAccessible(true);
+
+                transpositionTableField = AI.class.getDeclaredField("transpositionTable");
+                transpositionTableField.setAccessible(true);
+
+                calculatedLineField = AI.class.getDeclaredField("calculatedLine");
+                calculatedLineField.setAccessible(true);
+            } catch (NoSuchMethodException | NoSuchFieldException e) {
+                throw new IllegalStateException("Unable to bootstrap DiagnosticAI instrumentation", e);
+            }
+        }
+
+        @SuppressWarnings("unchecked")
+        private TranspositionTable<TranspositionTableEntry> transpositionTable() {
+            try {
+                return (TranspositionTable<TranspositionTableEntry>) transpositionTableField.get(this);
+            } catch (IllegalAccessException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+
+        @SuppressWarnings("unchecked")
+        List<MoveAndScore> principalVariation() {
+            try {
+                Object value = calculatedLineField.get(this);
+                if (value instanceof List<?> list) {
+                    return new ArrayList<>((List<MoveAndScore>) list);
+                }
+                return List.of();
+            } catch (IllegalAccessException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+
+        @Override
+        protected RootSearchResult searchRootMoves(Engine simulatorEngine, SearchTask task, int depth,
+                                                   double alpha, double beta, SplittableRandom rng) {
+            DepthTrace trace = beginDepthTrace(task, depth, alpha, beta);
+
+            long deadline = task.getDeadline();
+            boolean isWhite = task.isWhiteToMove();
+
+            try {
+                IntArrayList legal = simulatorEngine.getAllLegalMoves();
+                IntArrayList ordered = (IntArrayList) sortMovesMethod.invoke(this, legal, depth,
+                        simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
+
+                maybeRotateRootMovesMethod.invoke(this, ordered, rng);
+
+                if (ordered.isEmpty()) {
+                    trace.addNote("No legal moves available at the root");
+                    trace.finish(alpha, beta, null);
+                    return RootSearchResult.completed(null);
+                }
+
+                double bestScore = isWhite ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
+                int bestMove = -1;
+                boolean aborted = false;
+
+                for (int index = 0; index < ordered.size(); index++) {
+                    if (abortRequested(deadline)) {
+                        trace.addNote("Abort requested before analysing move index " + index);
+                        aborted = true;
+                        break;
+                    }
+
+                    int moveInt = ordered.getInt(index);
+                    long nodesBefore = nodesVisited();
+                    long nanosBefore = System.nanoTime();
+                    double alphaBefore = alpha;
+                    double betaBefore = beta;
+
+                    simulatorEngine.performMove(moveInt);
+
+                    EvaluationResult evaluation = evaluateAfterRootMove(simulatorEngine, depth, alpha, beta,
+                            isWhite, deadline, moveInt);
+
+                    simulatorEngine.undoLastMove();
+
+                    long nanosAfter = System.nanoTime();
+                    long nodesAfter = nodesVisited();
+
+                    trace.record(moveInt, index, evaluation, nodesAfter - nodesBefore,
+                            nanosAfter - nanosBefore, alphaBefore, betaBefore, alpha, beta);
+
+                    if (evaluation.exitEarly) {
+                        trace.addNote("Search aborted while analysing move " + formatMove(moveInt));
+                        aborted = true;
+                        break;
+                    }
+
+                    if (evaluation.hasScore() && isBetterScore(isWhite, evaluation.score, bestScore)) {
+                        bestScore = evaluation.score;
+                        bestMove = moveInt;
+                    }
+
+                    if (evaluation.hasScore()) {
+                        if (isWhite) {
+                            alpha = Math.max(alpha, evaluation.score);
+                        } else {
+                            beta = Math.min(beta, evaluation.score);
+                        }
+                    }
+
+                    if (alpha >= beta) {
+                        trace.markCutoff(moveInt, alpha, beta);
+                        break;
+                    }
+                }
+
+                MoveAndScore result = bestMove != -1 ? new MoveAndScore(bestMove, bestScore) : null;
+                trace.finish(alpha, beta, result);
+                return aborted ? RootSearchResult.aborted(result) : RootSearchResult.completed(result);
+            } catch (IllegalAccessException | InvocationTargetException e) {
+                throw new IllegalStateException("Failed to capture diagnostic data", e);
+            }
+        }
+
+        private boolean isBetterScore(boolean isWhite, double score, double bestScore) {
+            try {
+                return (boolean) isBetterScoreMethod.invoke(this, isWhite, score, bestScore);
+            } catch (IllegalAccessException | InvocationTargetException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+
+        private DepthTrace beginDepthTrace(SearchTask task, int depth, double alpha, double beta) {
+            int attempt = depthAttemptCounter
+                    .computeIfAbsent(depth, d -> new AtomicInteger())
+                    .incrementAndGet();
+            DepthTrace trace = new DepthTrace(depth, attempt, task.isWhiteToMove(), alpha, beta);
+            depthTraces.add(trace);
+            return trace;
+        }
+
+        private boolean abortRequested(long deadline) {
+            try {
+                return (boolean) abortRequestedMethod.invoke(this, deadline);
+            } catch (IllegalAccessException | InvocationTargetException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+
+        private EvaluationResult evaluateAfterRootMove(Engine simulatorEngine, int depth, double alpha, double beta,
+                                                       boolean isWhite, long deadline, int moveInt)
+                throws InvocationTargetException, IllegalAccessException {
+            GameState state = simulatorEngine.getGameState();
+            if (state.isInStateCheckMate()) {
+                double score = isWhite ? (Score.CHECKMATE - 1) : -(Score.CHECKMATE - 1);
+                return EvaluationResult.mate(score);
+            }
+            if (state.isTerminal()) {
+                double eval = (double) evaluateStaticPositionMethod.invoke(this, state, !isWhite, depth);
+                if (isWhite) {
+                    eval = -eval;
+                }
+                return EvaluationResult.terminal(eval);
+            }
+
+            double score = (double) alphaBetaMethod.invoke(this, simulatorEngine, depth - 1, alpha, beta,
+                    !isWhite, deadline, moveInt, 1, 0);
+            if (score == EXIT_FLAG || abortRequested(deadline)) {
+                return EvaluationResult.exit();
+            }
+            return EvaluationResult.search(score);
+        }
+
+        private long nodesVisited() {
+            try {
+                return nodesVisitedField.getLong(this);
+            } catch (IllegalAccessException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+
+        long nullMovesUsed() {
+            try {
+                return nullMoveCountField.getLong(this);
+            } catch (IllegalAccessException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+
+        List<DepthTrace> getDepthTraces() {
+            synchronized (depthTraces) {
+                return new ArrayList<>(depthTraces);
+            }
+        }
+
+        String buildDiagnosticsReport(String fen, List<String> expectedMoves, MoveAndScore result,
+                                      Duration wallClockDuration) {
+            StringBuilder sb = new StringBuilder(4096);
+            sb.append(System.lineSeparator());
+            sb.append("================ Best Move Search Diagnostic ================").append(System.lineSeparator());
+            sb.append("FEN: ").append(fen).append(System.lineSeparator());
+            sb.append("Expected best moves: ")
+                    .append(String.join(", ", expectedMoves)).append(System.lineSeparator());
+
+            sb.append("Search result: ");
+            if (result == null) {
+                sb.append("<no move found>");
+            } else {
+                sb.append(formatMove(result.move)).append(" (score=")
+                        .append(String.format(Locale.ROOT, "%.2f", result.score)).append(')');
+            }
+            sb.append(System.lineSeparator());
+
+            sb.append("Principal variation: ");
+            List<MoveAndScore> pv = principalVariation();
+            if (pv.isEmpty()) {
+                sb.append("<empty>");
+            } else {
+                String pvString = pv.stream()
+                        .map(ms -> formatMove(ms.move))
+                        .collect(Collectors.joining(" → "));
+                sb.append(pvString);
+            }
+            sb.append(System.lineSeparator());
+
+            sb.append("Nodes visited: ").append(nodesVisited()).append(System.lineSeparator());
+            sb.append("Null moves tried: ").append(nullMovesUsed()).append(System.lineSeparator());
+            sb.append("Elapsed wall-clock: ").append(wallClockDuration.toMillis()).append(" ms")
+                    .append(System.lineSeparator());
+
+            sb.append(System.lineSeparator());
+            sb.append("-- Iterative deepening overview --").append(System.lineSeparator());
+
+            Set<String> normalizedCriticalMoves = expectedMoves.stream()
+                    .map(this::normalizeMoveLabel)
+                    .collect(Collectors.toSet());
+
+            List<DepthTrace> tracesSnapshot = getDepthTraces();
+            tracesSnapshot.sort(Comparator.comparingInt(DepthTrace::depth)
+                    .thenComparingInt(DepthTrace::attempt));
+
+            for (DepthTrace trace : tracesSnapshot) {
+                sb.append(trace.describe(normalizedCriticalMoves)).append(System.lineSeparator());
+            }
+
+            sb.append(System.lineSeparator());
+            sb.append("-- Transposition table lookups for expected moves --").append(System.lineSeparator());
+            for (String label : expectedMoves) {
+                sb.append(describeTranspositionEntry(label)).append(System.lineSeparator());
+            }
+
+            sb.append("========================================================").append(System.lineSeparator());
+            return sb.toString();
+        }
+
+        private String describeTranspositionEntry(String moveLabel) {
+            Engine probe = getMainEngine().createSimulation();
+            IntArrayList legal = probe.getAllLegalMoves();
+            TranspositionTable<TranspositionTableEntry> tt = transpositionTable();
+            String normalizedTarget = normalizeMoveLabel(moveLabel);
+
+            for (int i = 0; i < legal.size(); i++) {
+                int move = legal.getInt(i);
+                if (!normalizedTarget.equals(normalizeMoveLabel(Move.convertIntToMove(move).toString()))) {
+                    continue;
+                }
+                probe.performMove(move);
+                long hash = probe.getBoardStateHash();
+                TranspositionTableEntry entry = tt != null ? tt.get(hash) : null;
+                probe.undoLastMove();
+
+                if (entry == null) {
+                    return String.format(Locale.ROOT,
+                            "%-4s → no TT entry (move likely unsearched or pruned early)", moveLabel);
+                }
+                return String.format(Locale.ROOT,
+                        "%-4s → TT depth=%d score=%.2f type=%s bestMove=%s",
+                        moveLabel, entry.getDepth(), entry.getScore(), entry.getNodeType(),
+                        formatMove(entry.getBestMove()));
+            }
+            return String.format(Locale.ROOT,
+                    "%-4s → not present in root move list (illegal or filtered)", moveLabel);
+        }
+
+        private String normalizeMoveLabel(String moveLabel) {
+            return moveLabel == null ? "" : moveLabel.trim().toLowerCase(Locale.ROOT);
+        }
+
+        private String formatMove(int moveInt) {
+            if (moveInt == -1) {
+                return "<none>";
+            }
+            Move move = Move.convertIntToMove(moveInt);
+            String coords = MoveHelper.convertIndexToString(MoveHelper.deriveFromIndex(moveInt))
+                    + MoveHelper.convertIndexToString(MoveHelper.deriveToIndex(moveInt));
+            String san = move.toString();
+            if (!san.isBlank() && !san.equalsIgnoreCase(coords)) {
+                return san + " [" + coords + "]";
+            }
+            return coords;
+        }
+
+        boolean foundAnyExpectedMove(List<String> expected, MoveAndScore result) {
+            if (result != null) {
+                for (String label : expected) {
+                    if (moveMatchesLabel(result.move, label)) {
+                        return true;
+                    }
+                }
+            }
+            Set<String> targets = expected.stream().map(this::normalizeMoveLabel).collect(Collectors.toSet());
+            List<DepthTrace> snapshot = getDepthTraces();
+            for (DepthTrace dt : snapshot) {
+                for (RootMoveTrace rmt : dt.moves) {
+                    for (String lbl : targets) {
+                        if (moveMatchesLabel(rmt.moveInt, lbl)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        private boolean moveMatchesLabel(int moveInt, String label) {
+            String target = normalizeMoveLabel(label);
+            if (target.isEmpty()) return false;
+
+            Move move = Move.convertIntToMove(moveInt);
+            String san = normalizeMoveLabel(move.toString());
+            String coords = normalizeMoveLabel(
+                    MoveHelper.convertIndexToString(MoveHelper.deriveFromIndex(moveInt)) +
+                            MoveHelper.convertIndexToString(MoveHelper.deriveToIndex(moveInt))
+            );
+            String pretty = normalizeMoveLabel(formatMove(moveInt));
+
+            return target.equals(san) || target.equals(coords) || pretty.startsWith(target + " ");
+        }
+
+        private final class DepthTrace {
+            private final int depth;
+            private final int attempt;
+            private final boolean whiteToMove;
+            private final double initialAlpha;
+            private final double initialBeta;
+            private final long startedAt = System.nanoTime();
+            private final List<RootMoveTrace> moves = new ArrayList<>();
+            private final List<String> notes = new ArrayList<>();
+            private boolean betaCutoff;
+            private int cutoffMove = -1;
+            private double finalAlpha;
+            private double finalBeta;
+            private MoveAndScore finalBest;
+
+            DepthTrace(int depth, int attempt, boolean whiteToMove, double initialAlpha, double initialBeta) {
+                this.depth = depth;
+                this.attempt = attempt;
+                this.whiteToMove = whiteToMove;
+                this.initialAlpha = initialAlpha;
+                this.initialBeta = initialBeta;
+            }
+
+            void record(int moveInt, int order, EvaluationResult evaluation, long nodesSpent, long nanosSpent,
+                        double alphaBefore, double betaBefore, double alphaAfter, double betaAfter) {
+                moves.add(new RootMoveTrace(moveInt, order, evaluation, nodesSpent, nanosSpent,
+                        alphaBefore, betaBefore, alphaAfter, betaAfter));
+            }
+
+            void addNote(String note) {
+                notes.add(note);
+            }
+
+            void markCutoff(int moveInt, double alpha, double beta) {
+                this.betaCutoff = true;
+                this.cutoffMove = moveInt;
+                this.finalAlpha = alpha;
+                this.finalBeta = beta;
+            }
+
+            void finish(double alpha, double beta, MoveAndScore best) {
+                this.finalAlpha = alpha;
+                this.finalBeta = beta;
+                this.finalBest = best;
+            }
+
+            int depth() {
+                return depth;
+            }
+
+            int attempt() {
+                return attempt;
+            }
+
+            String describe(Set<String> criticalMoves) {
+                StringBuilder sb = new StringBuilder();
+                sb.append(String.format(Locale.ROOT,
+                        "Depth %2d (attempt %d, %s to move, window=[%.2f, %.2f])",
+                        depth, attempt, whiteToMove ? "white" : "black",
+                        initialAlpha, initialBeta));
+                sb.append(System.lineSeparator());
+
+                if (moves.isEmpty()) {
+                    sb.append("  <no moves explored>").append(System.lineSeparator());
+                } else {
+                    moves.sort(Comparator.comparingInt(RootMoveTrace::order));
+                    for (RootMoveTrace trace : moves) {
+                        sb.append("  ").append(trace.describe(criticalMoves)).append(System.lineSeparator());
+                    }
+                }
+
+                if (betaCutoff) {
+                    sb.append("  Cutoff after ").append(formatMove(cutoffMove))
+                            .append(String.format(Locale.ROOT, " (alpha=%.2f, beta=%.2f)", finalAlpha, finalBeta))
+                            .append(System.lineSeparator());
+                }
+
+                if (finalBest != null) {
+                    sb.append("  Best so far: ").append(formatMove(finalBest.move))
+                            .append(String.format(Locale.ROOT, " score=%.2f", finalBest.score))
+                            .append(System.lineSeparator());
+                }
+
+                long elapsedMs = Duration.ofNanos(System.nanoTime() - startedAt).toMillis();
+                sb.append("  Final window: [").append(String.format(Locale.ROOT, "%.2f", finalAlpha))
+                        .append(", ").append(String.format(Locale.ROOT, "%.2f", finalBeta)).append("]")
+                        .append(" after ").append(elapsedMs).append(" ms").append(System.lineSeparator());
+
+                if (!notes.isEmpty()) {
+                    for (String note : notes) {
+                        sb.append("  Note: ").append(note).append(System.lineSeparator());
+                    }
+                }
+                return sb.toString().stripTrailing();
+            }
+        }
+
+        private final class RootMoveTrace {
+            private final int moveInt;
+            private final int order;
+            private final EvaluationResult evaluation;
+            private final long nodesSpent;
+            private final long nanosSpent;
+            private final double alphaBefore;
+            private final double betaBefore;
+            private final double alphaAfter;
+            private final double betaAfter;
+
+            RootMoveTrace(int moveInt, int order, EvaluationResult evaluation, long nodesSpent, long nanosSpent,
+                          double alphaBefore, double betaBefore, double alphaAfter, double betaAfter) {
+                this.moveInt = moveInt;
+                this.order = order;
+                this.evaluation = evaluation;
+                this.nodesSpent = nodesSpent;
+                this.nanosSpent = nanosSpent;
+                this.alphaBefore = alphaBefore;
+                this.betaBefore = betaBefore;
+                this.alphaAfter = alphaAfter;
+                this.betaAfter = betaAfter;
+            }
+
+            int order() {
+                return order;
+            }
+
+            String describe(Set<String> criticalMoves) {
+                String coord = formatMove(moveInt);
+                Move move = Move.convertIntToMove(moveInt);
+                String normalizedSan = normalizeMoveLabel(move.toString());
+                boolean isCritical = criticalMoves.contains(normalizedSan)
+                        || criticalMoves.contains(normalizeMoveLabel(coord));
+
+                StringBuilder sb = new StringBuilder();
+                sb.append(String.format(Locale.ROOT,
+                        "#%02d %-12s | nodes=%-6d time=%4dµs | window [%.2f, %.2f] → [%.2f, %.2f]",
+                        order + 1, coord + (isCritical ? " *" : ""), nodesSpent,
+                        nanosSpent / 1_000, alphaBefore, betaBefore, alphaAfter, betaAfter));
+                sb.append(" | result=");
+
+                if (evaluation.exitEarly) {
+                    sb.append("<abort>");
+                } else if (evaluation.score == null) {
+                    sb.append("<none>");
+                } else {
+                    sb.append(String.format(Locale.ROOT, "%.2f", evaluation.score));
+                }
+
+                sb.append(" (via ").append(evaluation.reason).append(')');
+                return sb.toString();
+            }
+        }
+
+        private record EvaluationResult(Double score, boolean exitEarly, String reason) {
+            static EvaluationResult search(double score) {
+                return new EvaluationResult(score, false, "alphaBeta");
+            }
+
+            static EvaluationResult mate(double score) {
+                return new EvaluationResult(score, false, "checkmate");
+            }
+
+            static EvaluationResult terminal(double score) {
+                return new EvaluationResult(score, false, "terminal");
+            }
+
+            static EvaluationResult exit() {
+                return new EvaluationResult(null, true, "exit");
+            }
+
+            boolean hasScore() {
+                return score != null;
+            }
+        }
     }
 
     private record DecisionStatistics(
