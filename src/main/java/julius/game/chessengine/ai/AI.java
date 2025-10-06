@@ -202,10 +202,27 @@ public class AI {
 
     private ScheduledExecutorService scheduler;
 
-    private final BlockingQueue<CalculationRequest> calculationRequests = new LinkedBlockingQueue<>();
+    private final CalculationQueue calculationRequests = new CalculationQueue();
     private final BlockingQueue<SearchJob> searchJobs = new LinkedBlockingQueue<>();
 
     private record CalculationRequest(long boardHash, boolean stop) {
+    }
+
+    private static final class CalculationQueue extends LinkedBlockingQueue<CalculationRequest> {
+        private final AtomicBoolean inFlight = new AtomicBoolean(false);
+
+        @Override
+        public boolean isEmpty() {
+            return super.isEmpty() && !inFlight.get();
+        }
+
+        void markProcessingStart() {
+            inFlight.set(true);
+        }
+
+        void markProcessingEnd() {
+            inFlight.set(false);
+        }
     }
 
     private record SearchJob(SearchTask task, boolean stop) {
@@ -1065,19 +1082,24 @@ public class AI {
                 break;
             }
 
-            if (request.stop || !keepCalculating) {
-                break;
-            }
+            calculationRequests.markProcessingStart();
+            try {
+                if (request.stop || !keepCalculating) {
+                    break;
+                }
 
-            long targetHash = request.boardHash;
-            if (targetHash == lastObservedHash) {
-                continue;
-            }
+                long targetHash = request.boardHash;
+                if (targetHash == lastObservedHash) {
+                    continue;
+                }
 
-            currentBoardState = mainEngine.getBoardStateHash();
-            beforeCalculationBoardState = currentBoardState;
-            performCalculation();
-            lastObservedHash = currentBoardState;
+                currentBoardState = mainEngine.getBoardStateHash();
+                beforeCalculationBoardState = currentBoardState;
+                performCalculation();
+                lastObservedHash = currentBoardState;
+            } finally {
+                calculationRequests.markProcessingEnd();
+            }
         }
     }
 
@@ -2004,9 +2026,8 @@ public class AI {
             if (seePruneCandidate) {
                 seeGain = seeCache.computeIfAbsent(move, simulatorEngine::see);
                 seeEvaluated = true;
-                boolean losingCapture = isCapture && !isPromotion && seeGain < 0;
                 boolean nearRoot = plyFromRoot <= SEE_PRUNE_NEAR_ROOT_PLY;
-                boolean allowSeePrune = seeGain < 0 && !(losingCapture && nearRoot);
+                boolean allowSeePrune = seeGain < 0 && !nearRoot;
                 if (allowSeePrune) {
                     simulatorEngine.performMove(move);
                     boolean givesCheckTmp = isSideInCheck(simulatorEngine, false);
@@ -2190,9 +2211,8 @@ public class AI {
             if (seePruneCandidate) {
                 seeGain = seeCache.computeIfAbsent(move, simulatorEngine::see);
                 seeEvaluated = true;
-                boolean losingCapture = isCapture && !isPromotion && seeGain < 0;
                 boolean nearRoot = plyFromRoot <= SEE_PRUNE_NEAR_ROOT_PLY;
-                boolean allowSeePrune = seeGain < 0 && !(losingCapture && nearRoot);
+                boolean allowSeePrune = seeGain < 0 && !nearRoot;
                 if (allowSeePrune) {
                     simulatorEngine.performMove(move);
                     boolean givesCheckTmp = isSideInCheck(simulatorEngine, true);
