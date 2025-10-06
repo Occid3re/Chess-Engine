@@ -135,12 +135,13 @@ public class PgnParser {
                 AmbiguityType ambiguityType = isMoveAmbiguous(pieceType, fromIndex, toIndex);
 
                 if (ambiguityType != AmbiguityType.NONE) {
-                    if (ambiguityType == AmbiguityType.BOTH) {
-                        movePgn += from; // Include full 'from' position
-                    } else if (ambiguityType == AmbiguityType.FILE || ambiguityType == AmbiguityType.NONE_BUT_SAME_TO_SQUARE) {
-                        movePgn += from.charAt(1); // Include only 'from' rank
-                    } else if (ambiguityType == AmbiguityType.RANK) {
-                        movePgn += from.charAt(0); // Include only 'from' file
+                    switch (ambiguityType) {
+                        case BOTH -> movePgn += from; // Include full 'from' position
+                        case FILE -> movePgn += from.charAt(1); // Same file -> disambiguate by rank
+                        case RANK -> movePgn += from.charAt(0); // Same rank -> disambiguate by file
+                        case NONE_BUT_SAME_TO_SQUARE -> movePgn += from.charAt(0); // Prefer file when only target overlaps
+                        default -> {
+                        }
                     }
                 }
                 if (MoveHelper.isCapture(moveInt)) {
