@@ -1138,7 +1138,15 @@ public class AI {
                     }
                 }
 
-                task = new SearchTask(searchIdGenerator.incrementAndGet(), boardStateHash, isWhite, deadline, lazySmpThreads, simulatorEngine);
+                Engine rootSnapshot = simulatorEngine.createSimulation();
+                task = new SearchTask(
+                        searchIdGenerator.incrementAndGet(),
+                        boardStateHash,
+                        isWhite,
+                        deadline,
+                        lazySmpThreads,
+                        rootSnapshot
+                );
                 activeSearch.set(task);
                 if (bestMoveForHash == boardStateHash && currentBestMove != -1) {
                     previousBestMove = currentBestMove;
