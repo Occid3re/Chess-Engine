@@ -19,6 +19,10 @@ mvn -Djava.version=21     -Dmaven.compiler.release=21     -Dmaven.compiler.enabl
   ```bash
   mvn -Djava.version=21       -Dmaven.compiler.release=21       -Dmaven.compiler.enablePreview=true       -DargLine="--enable-preview"       -Dtest=AITest*,AITest_*       test
   ```
+- **PGN module smoke tests**
+  ```bash
+  mvn -Djava.version=21       -Dmaven.compiler.release=21       -Dmaven.compiler.enablePreview=true       -DargLine="--enable-preview"       -Dtest=PgnParserTest,OpeningPgnReaderTest       test
+  ```
 - **Single class / method**
   ```bash
   # Class
@@ -105,3 +109,4 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
   Define them in the corresponding evaluation module (where the feature is computed).
   Add the same weights (with sensible defaults) to seed-tunings.yaml.
   Expose and apply them via the tuning module so they are loaded and propagated into the evaluation at runtime.
+* Full-suite runs currently fail in `BestMoveSearchTest` due to long-horizon move selection mismatches. Use the PGN smoke tests above when focusing on PGN changes, or investigate the AI regressions separately before expecting a green build.
