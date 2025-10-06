@@ -12,8 +12,8 @@ population:
           midgame: 1.0
           endgame: 1.0
         kingsafetymodule:
-          midgame: 1.0
-          endgame: 1.0
+          midgame: 0.9
+          endgame: 0.9
         threatmodule:
           midgame: 1.0
           endgame: 1.0
