@@ -28,6 +28,13 @@ mvn -Djava.version=21     -Dmaven.compiler.release=21     -Dmaven.compiler.enabl
   mvn -Djava.version=21 -Dmaven.compiler.release=21 -Dmaven.compiler.enablePreview=true       -DargLine="--enable-preview"       -Dtest=BestMoveSearchTest#shouldFindSameBestMoveUnderParallelLoad       test
   ```
 
+- **PGN & utility smoke tests** (quick verification for PGN ingestion and move history utilities)
+  ```bash
+  mvn -Djava.version=21       -Dmaven.compiler.release=21       -Dmaven.compiler.enablePreview=true       -DargLine="--enable-preview"       -Dtest=OpeningPgnReaderTest,MoveStackTest       test
+  ```
+
+  These focused tests parse representative PGN samples (including comments, nested variations, SAN promotions, and `0-0` castling tokens) and exercise `MoveStack` growth/copy semantics. Review their logs when diagnosing PGN import or move-history regressions.
+
 > Keep `--enable-preview` in **`argLine`** so the test JVM receives it.
 
 ---
