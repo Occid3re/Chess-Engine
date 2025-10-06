@@ -631,9 +631,7 @@ public class AI {
                 continue;
             }
 
-            SplittableRandom rng = lazySmpThreads > 1
-                    ? new SplittableRandom(task.getBoardHash() ^ (0x9E3779B97F4A7C15L * (workerIndex + 1L)))
-                    : null;
+            SplittableRandom rng = createLazyWorkerRng(task, workerIndex);
 
             threadSearchTask.set(task);
             try {
@@ -760,10 +758,10 @@ public class AI {
     }
 
     private void prepareIterationState(SearchTask task, Heuristics heuristics, int currentDepth, boolean firstAtDepth) {
-        long stamp = acquireWriteLock();
-        try {
-            globalHeuristics.ensureCapacity(maxDepth);
-            if (firstAtDepth) {
+        if (firstAtDepth) {
+            long stamp = acquireWriteLock();
+            try {
+                globalHeuristics.ensureCapacity(maxDepth);
                 if (transpositionTable != null) {
                     transpositionTable.advanceAge();
                 }
@@ -771,9 +769,9 @@ public class AI {
                     captureTranspositionTable.advanceAge();
                 }
                 globalHeuristics.decayHistory();
+            } finally {
+                releaseWriteLock(stamp);
             }
-        } finally {
-            releaseWriteLock(stamp);
         }
         Heuristics.Snapshot snapshot = captureHeuristicsSnapshot(maxDepth);
         heuristics.beginIteration(snapshot, maxDepth);
@@ -921,6 +919,14 @@ public class AI {
             activeSearch.set(null);
             this.timeLimit = previousTimeLimit;
         }
+    }
+
+    private SplittableRandom createLazyWorkerRng(SearchTask task, int workerIndex) {
+        if (lazySmpThreads <= 1 || workerIndex <= 0 || task == null) {
+            return null;
+        }
+        long seed = task.getBoardHash() ^ (0x9E3779B97F4A7C15L * (workerIndex + 1L));
+        return new SplittableRandom(seed);
     }
 
 
