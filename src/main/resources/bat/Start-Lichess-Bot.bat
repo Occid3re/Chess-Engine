@@ -9,7 +9,6 @@ rem Choose your time control preset: bullet | blitz | rapid | classical
 if not defined BOT_TC set "BOT_TC=blitz"
 
 rem (Recommended: store LICHESS_TOKEN in your user env, not here)
-rem set "LICHESS_TOKEN=YOUR_TOKEN_HERE"
 
 rem Workdir where lichess_bot.py lives
 set "WORKDIR=C:\Development\Chess-Engine\src\main\resources\py"
@@ -29,31 +28,31 @@ rem ---- Time-control presets ----
 if /I "%BOT_TC%"=="bullet" (
     rem Ultra-low latency
     set "CHESSENGINE_THREADS=6"
-    set "CHESSENGINE_LAZY_THREADS=2"
+    set "CHESSENGINE_LAZY_THREADS=1"
     set "CHESSENGINE_ROOT_PAR_LIMIT=72"
     set "CHESSENGINE_TT_MB=512"
     set "JAVA_XMS=8g"
     set "JAVA_XMX=8g"
 ) else if /I "%BOT_TC%"=="blitz" (
     rem Great all-round default
-    set "CHESSENGINE_THREADS=10"
-    set "CHESSENGINE_LAZY_THREADS=4"
+    set "CHESSENGINE_THREADS=16"
+    set "CHESSENGINE_LAZY_THREADS=1"
     set "CHESSENGINE_ROOT_PAR_LIMIT=120"
     set "CHESSENGINE_TT_MB=1024"
     set "JAVA_XMS=10g"
     set "JAVA_XMX=10g"
 ) else if /I "%BOT_TC%"=="rapid" (
     rem Deeper search; still leaves OS headroom
-    set "CHESSENGINE_THREADS=12"
-    set "CHESSENGINE_LAZY_THREADS=6"
+    set "CHESSENGINE_THREADS=20"
+    set "CHESSENGINE_LAZY_THREADS=1"
     set "CHESSENGINE_ROOT_PAR_LIMIT=144"
     set "CHESSENGINE_TT_MB=1536"
     set "JAVA_XMS=12g"
     set "JAVA_XMX=12g"
 ) else if /I "%BOT_TC%"=="classical" (
     rem Similar to rapid; adjust to your RAM if wanted
-    set "CHESSENGINE_THREADS=12"
-    set "CHESSENGINE_LAZY_THREADS=6"
+    set "CHESSENGINE_THREADS=24"
+    set "CHESSENGINE_LAZY_THREADS=1"
     set "CHESSENGINE_ROOT_PAR_LIMIT=144"
     set "CHESSENGINE_TT_MB=1536"
     set "JAVA_XMS=12g"
@@ -62,7 +61,7 @@ if /I "%BOT_TC%"=="bullet" (
     echo [!] Unknown BOT_TC value "%BOT_TC%". Using blitz defaults.
     set "BOT_TC=blitz"
     set "CHESSENGINE_THREADS=10"
-    set "CHESSENGINE_LAZY_THREADS=4"
+    set "CHESSENGINE_LAZY_THREADS=1"
     set "CHESSENGINE_ROOT_PAR_LIMIT=120"
     set "CHESSENGINE_TT_MB=1024"
     set "JAVA_XMS=10g"
@@ -106,3 +105,6 @@ echo.
 echo Bot exited with code %EXITCODE%.
 pause
 exit /b %EXITCODE%
+
+
+
