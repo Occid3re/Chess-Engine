@@ -81,9 +81,21 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
 ---
 
 ## Conventions
-- Prefer the **default command** unless a test explicitly benefits from concurrency.  
-- Parallel flags are **optional** and intended for stress-testing and stability checks (e.g., `BestMoveSearchTest`).  
+- Prefer the **default command** unless a test explicitly benefits from concurrency.
+- Parallel flags are **optional** and intended for stress-testing and stability checks (e.g., `BestMoveSearchTest`).
 - Keep flags in `argLine` so they apply to the **Surefire test JVM**.
+
+### Test instrumentation & WebSocket coverage
+* `TestLoggingExtension` is now registered on the new `UciWebSocketHandlerTest`. The extension logs **start**, **end**, **success**,
+  and **failure** events for every method, plus a full thread dump on errors. Inspect the logs in the Maven output or in
+  `target/surefire-reports/*.txt` to understand how the engine behaved during the test run.
+* To focus on the WebSocket lifecycle tests (useful when debugging frontend connectivity), run:
+  ```bash
+  mvn -Djava.version=21 -Dmaven.compiler.release=21 -Dmaven.compiler.enablePreview=true \
+      -DargLine="--enable-preview" -Dtest=UciWebSocketHandlerTest test
+  ```
+  This suite covers handler registration, command routing, and error handling, giving future agents concrete logs of the
+  WebSocket handshake and teardown paths.
 
 ### Additional notes
 * `MateSearchTest` keeps the shorter time budgets (50–500ms) for diagnostics only. The suite now requires the engine to
