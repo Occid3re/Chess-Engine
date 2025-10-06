@@ -857,12 +857,14 @@ public class AI {
         if (timeLimitMillis > 0) {
             this.timeLimit = timeLimitMillis;
         }
+        List<Thread> localLazyWorkers = new ArrayList<>();
+        SearchTask task = null;
         try {
             Engine simulatorEngine = mainEngine.createSimulation();
             long boardStateHash = simulatorEngine.getBoardStateHash();
             long deadline = System.nanoTime() + this.timeLimit * 1_000_000L;
 
-            SearchTask task;
+            int workerCount = Math.max(1, lazySmpThreads);
             synchronized (searchConfigLock) {
                 while (reconfiguringSearchThreads) {
                     try {
@@ -878,7 +880,7 @@ public class AI {
                         boardStateHash,
                         simulatorEngine.whitesTurn(),
                         deadline,
-                        1,
+                        workerCount,
                         simulatorEngine.createSimulation()
                 );
 
@@ -893,18 +895,29 @@ public class AI {
                 this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
             }
 
-            SplittableRandom rng = (lazySmpThreads > 1)
-                    ? new SplittableRandom(boardStateHash ^ System.nanoTime())
-                    : null;
-
-            threadSearchTask.set(task);
-            try {
-                iterativeDeepening(task, simulatorEngine, rng);
-            } finally {
-                threadSearchTask.remove();
+            if (lazySmpThreads <= 1) {
+                runBlockingSearchWorker(task, simulatorEngine, 0);
+            } else {
+                final SearchTask searchTask = task;
+                for (int i = 0; i < lazySmpThreads; i++) {
+                    final int workerIndex = i;
+                    final Engine workerEngine;
+                    try {
+                        workerEngine = mainEngine.createSimulation();
+                    } catch (RuntimeException ex) {
+                        log.error("Failed to create simulation for blocking lazy worker {}", workerIndex, ex);
+                        task.workerDone();
+                        continue;
+                    }
+                    Thread worker = new Thread(() -> runBlockingSearchWorker(searchTask, workerEngine, workerIndex),
+                            "Blocking-Lazy-" + workerIndex);
+                    worker.setDaemon(true);
+                    worker.start();
+                    localLazyWorkers.add(worker);
+                }
             }
 
-            task.workerDone();
+            task.awaitCompletion();
             completeSearchTask(task, simulatorEngine);
             task.requestStop();
 
@@ -916,8 +929,61 @@ public class AI {
             log.error("Synchronous search failed", ex);
             return null;
         } finally {
+            if (task != null) {
+                task.requestStop();
+            }
+            for (Thread worker : localLazyWorkers) {
+                if (worker == null) {
+                    continue;
+                }
+                try {
+                    worker.join();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    log.error("Interrupted while waiting for blocking lazy worker to finish", e);
+                }
+            }
             activeSearch.set(null);
             this.timeLimit = previousTimeLimit;
+        }
+    }
+
+    private void runBlockingSearchWorker(SearchTask task, Engine workerEngine, int workerIndex) {
+        if (task == null) {
+            return;
+        }
+
+        if (workerEngine == null) {
+            task.workerDone();
+            return;
+        }
+
+        try {
+            workerEngine.copyFrom(task.getRootSnapshot());
+        } catch (RuntimeException ex) {
+            log.error("Failed to initialise blocking lazy worker {}", workerIndex, ex);
+            task.workerDone();
+            return;
+        }
+
+        SplittableRandom rng = createLazyWorkerRng(task, workerIndex);
+        SearchTask previousTask = threadSearchTask.get();
+        boolean installed = false;
+        try {
+            threadSearchTask.set(task);
+            installed = true;
+            iterativeDeepening(task, workerEngine, rng);
+        } catch (Exception ex) {
+            log.error("Blocking search worker {} encountered an error", workerIndex, ex);
+        } finally {
+            if (installed) {
+                if (previousTask != null) {
+                    threadSearchTask.set(previousTask);
+                } else {
+                    threadSearchTask.remove();
+                }
+            }
+            task.workerDone();
         }
     }
 

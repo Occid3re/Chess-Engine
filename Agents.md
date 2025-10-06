@@ -111,6 +111,7 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
   Expose and apply them via the tuning module so they are loaded and propagated into the evaluation at runtime.
 * Full-suite runs currently fail in `BestMoveSearchTest` due to long-horizon move selection mismatches. Use the PGN smoke tests above when focusing on PGN changes, or investigate the AI regressions separately before expecting a green build.
 * `BestMoveSearchTest` now mirrors the diagnostic harness from `AITest_MateThreatDiagnostics`. Each position prints an in-depth iterative-deepening trace, principal variation, and transposition-table probe summary, with aggregated JSON/TXT artifacts in `target/surefire-reports/best-move-search-*`. Expect a long console log and ~28 known assertion failures; the goal is visibility, not a green suite.
+* `searchBestMoveBlocking` now launches dedicated lazy SMP worker threads when `chessengine.lazySmpThreads > 1`, ensuring that enabling the option in tests diversifies the search instead of randomly reshuffling a single worker. Mixing `searchThreads` with lazy SMP is now stable in `BestMoveSearchTest`.
 
 ### AI search & evaluation notes
 * Quiescence delta pruning now compares against the alpha window captured before the stand-pat update. Earlier builds raised `alpha` first, which meant `standPat + Δ < alpha` never triggered and the pruning shortcut was effectively disabled.
