@@ -165,6 +165,9 @@ public class AI {
                 return map;
             });
 
+    private final ThreadLocal<ArrayDeque<IntArrayList>> quiescenceMovePool =
+            ThreadLocal.withInitial(ArrayDeque::new);
+
     /**
      * Root-split worker simulations. Each search thread reuses its own clone to avoid
      * repeated allocations during parallel search fan-out.
@@ -2664,64 +2667,95 @@ public class AI {
         }
 
         // Generate moves: evasions if in check, else captures/promotions
-        IntArrayList moves = inCheck
-                ? simulatorEngine.getAllLegalMoves()
-                : getPossibleCapturesOrPromotions(simulatorEngine);
+        IntArrayList moves;
+        boolean borrowedMoves = false;
+        if (inCheck) {
+            moves = simulatorEngine.getAllLegalMoves();
+        } else {
+            moves = borrowQuiescenceMoveBuffer();
+            IntArrayList legalMoves = simulatorEngine.getAllLegalMoves();
+            MoveContainerUtils.filterCapturesAndPromotions(legalMoves, moves);
+            borrowedMoves = true;
+            if (moves.isEmpty()) {
+                recycleQuiescenceMoveBuffer(moves);
+                return alpha;
+            }
+        }
 
         // Order them (captures/promotions first etc.)
         IntArrayList ordered = sortMovesByEfficiency(
                 moves, 0, simulatorEngine.getBoardStateHash(), -1, simulatorEngine
         );
 
-        for (int i = 0; i < ordered.size(); i++) {
-            int m = ordered.getInt(i);
-            boolean isCapture = MoveHelper.isCapture(m);
-            boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
-            boolean isQuiet = !isCapture && !isPromotion;
+        try {
+            for (int i = 0; i < ordered.size(); i++) {
+                int m = ordered.getInt(i);
+                boolean isCapture = MoveHelper.isCapture(m);
+                boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
+                boolean isQuiet = !isCapture && !isPromotion;
 
-            // --- SEE pruning: drop clearly losing captures or quiets (keeps promotions) ---
-            if ((!inCheck && isCapture && !isPromotion) || isQuiet) {
-                int see = simulatorEngine.see(m);
-                if (see < 0) {
-                    // Guard: do not "probe" with a make/undo if node somehow became terminal.
-                    if (simulatorEngine.getGameState().isTerminal()) {
-                        continue;
+                // --- SEE pruning: drop clearly losing captures or quiets (keeps promotions) ---
+                if ((!inCheck && isCapture && !isPromotion) || isQuiet) {
+                    int see = simulatorEngine.see(m);
+                    if (see < 0) {
+                        // Guard: do not "probe" with a make/undo if node somehow became terminal.
+                        if (simulatorEngine.getGameState().isTerminal()) {
+                            continue;
+                        }
+                        simulatorEngine.performMove(m);
+                        boolean givesCheck = isSideInCheck(simulatorEngine, !isWhitesTurn);
+                        simulatorEngine.undoLastMove();
+                        if (!givesCheck) continue;
                     }
-                    simulatorEngine.performMove(m);
-                    boolean givesCheck = isSideInCheck(simulatorEngine, !isWhitesTurn);
-                    simulatorEngine.undoLastMove();
-                    if (!givesCheck) continue;
+                }
+
+                // Guard again before actually making the move (paranoia; usually redundant)
+                if (simulatorEngine.getGameState().isTerminal()) {
+                    return standPat;
+                }
+
+                simulatorEngine.performMove(m);
+
+                // Propagate timeout BEFORE negation
+                double child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
+                simulatorEngine.undoLastMove();
+
+                if (child == EXIT_FLAG) return EXIT_FLAG;
+
+                double score = -child;
+
+                if (score >= beta) {
+                    return beta;
+                }
+                if (score > alpha) {
+                    alpha = score;
                 }
             }
-
-            // Guard again before actually making the move (paranoia; usually redundant)
-            if (simulatorEngine.getGameState().isTerminal()) {
-                return standPat;
-            }
-
-            simulatorEngine.performMove(m);
-
-            // Propagate timeout BEFORE negation
-            double child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
-            simulatorEngine.undoLastMove();
-
-            if (child == EXIT_FLAG) return EXIT_FLAG;
-
-            double score = -child;
-
-            if (score >= beta) {
-                return beta;
-            }
-            if (score > alpha) {
-                alpha = score;
+            return alpha;
+        } finally {
+            if (borrowedMoves) {
+                recycleQuiescenceMoveBuffer(ordered);
             }
         }
-        return alpha;
     }
 
     private double evaluateStaticPosition(GameState gameState, boolean isWhitesTurn, int depthOrPly) {
         long boardHash = (gameState != null) ? gameState.getLastZobrist() : 0L;
         return evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depthOrPly);
+    }
+
+    private IntArrayList borrowQuiescenceMoveBuffer() {
+        ArrayDeque<IntArrayList> pool = quiescenceMovePool.get();
+        IntArrayList list = pool.pollFirst();
+        if (list == null) {
+            list = new IntArrayList(32);
+        }
+        return list;
+    }
+
+    private void recycleQuiescenceMoveBuffer(IntArrayList buffer) {
+        buffer.clear();
+        quiescenceMovePool.get().offerFirst(buffer);
     }
 
     private double evaluateStaticPosition(GameState gameState, long boardHash, boolean isWhitesTurn, int depthOrPly) {
@@ -2741,11 +2775,6 @@ public class AI {
         }
         double scoreDifference = resolveScoreDifference(gameState, boardHash);
         return isWhitesTurn ? scoreDifference : -scoreDifference;
-    }
-
-    private IntArrayList getPossibleCapturesOrPromotions(Engine simulatorEngine) {
-        IntArrayList allLegalMoves = simulatorEngine.getAllLegalMoves();
-        return MoveContainerUtils.filterCapturesAndPromotions(allLegalMoves);
     }
 
     /**

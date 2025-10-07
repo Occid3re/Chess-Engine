@@ -60,13 +60,19 @@ final class MoveContainerUtils {
 
     static IntArrayList filterCapturesAndPromotions(IntArrayList moves) {
         IntArrayList filtered = new IntArrayList(moves.size());
+        return filterCapturesAndPromotions(moves, filtered);
+    }
+
+    static IntArrayList filterCapturesAndPromotions(IntArrayList moves, IntArrayList target) {
+        target.clear();
+        target.ensureCapacity(moves.size());
         for (int i = 0; i < moves.size(); i++) {
             int move = moves.getInt(i);
             if (MoveHelper.isCapture(move) || MoveHelper.isPawnPromotionMove(move)) {
-                filtered.add(move);
+                target.add(move);
             }
         }
-        return filtered;
+        return target;
     }
 
     private static int gcd(int a, int b) {
