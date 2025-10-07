@@ -1,7 +1,10 @@
 package julius.game.chessengine.ai;
 
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameStateEnum;
+import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.tuning.AiTuning;
 import julius.game.chessengine.utils.Score;
 import lombok.SneakyThrows;
@@ -14,6 +17,8 @@ import testsupport.DeterministicAiHelper;
 import testsupport.TestLoggingExtension;
 import testsupport.TestUtils;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -83,6 +88,88 @@ class AITest_QuiescenceAndTerminalInvariants {
         }
     }
 
+    @Test
+    @DisplayName("Quiescence move ordering ranks promotions and winning captures first")
+    void quiescenceOrderingPrefersPromotionsAndWinningCaptures() {
+        StaticSeeEngine engine = new StaticSeeEngine();
+        AI ai = new AI(engine, AiTuning.defaults());
+
+        int promotion = MoveHelper.createMoveInt(
+                MoveHelper.convertStringToIndex("a7"),
+                MoveHelper.convertStringToIndex("a8"),
+                PieceType.PAWN,
+                true,
+                false,
+                false,
+                false,
+                PieceType.QUEEN,
+                null,
+                false,
+                false,
+                0
+        );
+
+        int goodCapture = MoveHelper.createMoveInt(
+                MoveHelper.convertStringToIndex("h1"),
+                MoveHelper.convertStringToIndex("h8"),
+                PieceType.ROOK,
+                true,
+                true,
+                false,
+                false,
+                null,
+                PieceType.QUEEN,
+                false,
+                false,
+                0
+        );
+
+        int equalCapture = MoveHelper.createMoveInt(
+                MoveHelper.convertStringToIndex("b1"),
+                MoveHelper.convertStringToIndex("b8"),
+                PieceType.ROOK,
+                true,
+                true,
+                false,
+                false,
+                null,
+                PieceType.ROOK,
+                false,
+                false,
+                0
+        );
+
+        int badCapture = MoveHelper.createMoveInt(
+                MoveHelper.convertStringToIndex("c1"),
+                MoveHelper.convertStringToIndex("c8"),
+                PieceType.BISHOP,
+                true,
+                true,
+                false,
+                false,
+                null,
+                PieceType.PAWN,
+                false,
+                false,
+                0
+        );
+
+        engine.setSeeScore(goodCapture, 400);
+        engine.setSeeScore(equalCapture, 0);
+        engine.setSeeScore(badCapture, -250);
+
+        IntArrayList moves = new IntArrayList(new int[]{badCapture, equalCapture, promotion, goodCapture});
+
+        ai.orderQuiescenceMoves(moves, engine);
+
+        assertEquals(promotion, moves.getInt(0), "Promotions should be explored before captures");
+        assertEquals(goodCapture, moves.getInt(1), "Winning captures should follow promotions");
+        assertEquals(equalCapture, moves.getInt(2), "Neutral captures should precede losing captures");
+        assertEquals(badCapture, moves.getInt(3), "Losing captures should be delayed");
+
+        ai.shutdown();
+    }
+
     private static class CountingEngine extends Engine {
         private int performCount;
 
@@ -107,6 +194,23 @@ class AITest_QuiescenceAndTerminalInvariants {
 
         int getPerformCount() {
             return performCount;
+        }
+    }
+
+    private static class StaticSeeEngine extends Engine {
+        private final Map<Integer, Integer> seeScores = new HashMap<>();
+
+        StaticSeeEngine() {
+            super();
+        }
+
+        @Override
+        public int see(int move) {
+            return seeScores.getOrDefault(move, 0);
+        }
+
+        void setSeeScore(int move, int score) {
+            seeScores.put(move, score);
         }
     }
 }

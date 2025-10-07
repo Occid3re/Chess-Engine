@@ -2593,6 +2593,82 @@ public class AI {
     }
 
 
+    IntArrayList orderQuiescenceMoves(IntArrayList moves, Engine simulatorEngine) {
+        final int size = moves.size();
+        if (size <= 1) {
+            return moves;
+        }
+
+        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
+        seeCache.clear();
+
+        final SortBuffers buffers = sortBuffers.get();
+        final int[] moveBuffer = buffers.moveBuffer;
+        final long[] sortKeys = buffers.sortKeyBuffer;
+
+        final int promotionBonus = moveOrderingParameters.promotionBonus();
+        final int captureMvvMultiplier = moveOrderingParameters.captureMvvMultiplier();
+        final int captureSeeMultiplier = moveOrderingParameters.captureSeeMultiplier();
+        final int promotionSeeMultiplier = moveOrderingParameters.promotionSeeMultiplier();
+
+        final int CAT_QUIET = 0;
+        final int CAT_CAP_BAD = 1;
+        final int CAT_CAP_EQUAL = 2;
+        final int CAT_CAP_GOOD = 3;
+        final int CAT_PROMO = 4;
+
+        for (int i = 0; i < size; i++) {
+            final int move = moves.getInt(i);
+
+            final boolean isPromotion = MoveHelper.isPawnPromotionMove(move);
+            final boolean isCapture = MoveHelper.isCapture(move);
+
+            int category = CAT_QUIET;
+            int score = 0;
+            int seeValue = 0;
+
+            if (isCapture) {
+                seeValue = seeCache.computeIfAbsent(move, simulatorEngine::see);
+            }
+
+            if (isPromotion) {
+                category = CAT_PROMO;
+                int base = isCapture ? calculateMvvLvaScore(move) : 0;
+                int cappedSee = Math.max(-512, Math.min(512, seeValue));
+                score = base + promotionBonus + (cappedSee * promotionSeeMultiplier);
+            } else if (isCapture) {
+                int mvvLva = calculateMvvLvaScore(move);
+                int cappedSee = Math.max(-2048, Math.min(2048, seeValue));
+                score = (mvvLva * captureMvvMultiplier) + (cappedSee * captureSeeMultiplier);
+                if (score < 0) score = 0;
+                if (seeValue > 0) {
+                    category = CAT_CAP_GOOD;
+                } else if (seeValue == 0) {
+                    category = CAT_CAP_EQUAL;
+                } else {
+                    category = CAT_CAP_BAD;
+                }
+            }
+
+            moveBuffer[i] = move;
+            int normalized = Math.max(0, Math.min(0x00FFFFFF, score));
+            sortKeys[i] = (((long) category) << 56)
+                    | (((long) normalized) << 32)
+                    | (move & 0xFFFFFFFFL);
+        }
+
+        Arrays.sort(sortKeys, 0, size);
+
+        int out = 0;
+        for (int i = size - 1; i >= 0; i--) {
+            moveBuffer[out++] = (int) (sortKeys[i] & 0xFFFFFFFFL);
+        }
+
+        MoveContainerUtils.overwriteFromBuffer(moves, moveBuffer, size);
+        return moves;
+    }
+
+
     public double evaluateBoard(Engine simulatorEngine, boolean isWhitesTurn, long deadline) {
         if (simulatorEngine.getGameState().isInStateCheckMate()) {
             return -CHECKMATE;
@@ -2669,9 +2745,11 @@ public class AI {
                 : getPossibleCapturesOrPromotions(simulatorEngine);
 
         // Order them (captures/promotions first etc.)
-        IntArrayList ordered = sortMovesByEfficiency(
-                moves, 0, simulatorEngine.getBoardStateHash(), -1, simulatorEngine
-        );
+        IntArrayList ordered = inCheck
+                ? sortMovesByEfficiency(moves, 0, simulatorEngine.getBoardStateHash(), -1, simulatorEngine)
+                : orderQuiescenceMoves(moves, simulatorEngine);
+
+        Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
 
         for (int i = 0; i < ordered.size(); i++) {
             int m = ordered.getInt(i);
@@ -2681,7 +2759,7 @@ public class AI {
 
             // --- SEE pruning: drop clearly losing captures or quiets (keeps promotions) ---
             if ((!inCheck && isCapture && !isPromotion) || isQuiet) {
-                int see = simulatorEngine.see(m);
+                int see = seeCache.computeIfAbsent(m, simulatorEngine::see);
                 if (see < 0) {
                     // Guard: do not "probe" with a make/undo if node somehow became terminal.
                     if (simulatorEngine.getGameState().isTerminal()) {
