@@ -1,6 +1,7 @@
 package julius.game.chessengine.ai;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
+import julius.game.chessengine.ai.time.TimeManager;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.tuning.AiTuning;
 import lombok.NonNull;
@@ -142,7 +143,7 @@ class AITest_ConcurrencyAndStops {
                 42L,
                 sim.getBoardStateHash(),
                 sim.whitesTurn(),
-                System.nanoTime() + TimeUnit.SECONDS.toNanos(1),
+                new TimeManager(1_000L).beginSearchWithOverride(TimeUnit.SECONDS.toMillis(1)),
                 1,
                 sim.createSimulation()
         );
@@ -190,7 +191,7 @@ class AITest_ConcurrencyAndStops {
                 77L,
                 sim.getBoardStateHash(),
                 sim.whitesTurn(),
-                System.nanoTime() + TimeUnit.SECONDS.toNanos(1),
+                new TimeManager(1_000L).beginSearchWithOverride(TimeUnit.SECONDS.toMillis(1)),
                 tuning.lazySmpThreads(),
                 sim.createSimulation()
         );
@@ -226,7 +227,7 @@ class AITest_ConcurrencyAndStops {
                 88L,
                 singleSim.getBoardStateHash(),
                 singleSim.whitesTurn(),
-                System.nanoTime() + TimeUnit.SECONDS.toNanos(1),
+                new TimeManager(1_000L).beginSearchWithOverride(TimeUnit.SECONDS.toMillis(1)),
                 singleLazy.lazySmpThreads(),
                 singleSim.createSimulation()
         );
@@ -289,7 +290,7 @@ class AITest_ConcurrencyAndStops {
                 1L,
                 singleSim.getBoardStateHash(),
                 singleSim.whitesTurn(),
-                System.nanoTime() + TimeUnit.SECONDS.toNanos(5),
+                new TimeManager(5_000L).beginSearchWithOverride(TimeUnit.SECONDS.toMillis(5)),
                 1,
                 singleSim.createSimulation()
         );
@@ -345,7 +346,7 @@ class AITest_ConcurrencyAndStops {
                         10_000L + iteration,
                         sim.getBoardStateHash(),
                         sim.whitesTurn(),
-                        System.nanoTime() + TimeUnit.SECONDS.toNanos(5),
+                        new TimeManager(5_000L).beginSearchWithOverride(TimeUnit.SECONDS.toMillis(5)),
                         parallelAi.getSearchThreads(),
                         sim.createSimulation()
                 );
@@ -424,7 +425,7 @@ class AITest_ConcurrencyAndStops {
                 20_000L,
                 sim.getBoardStateHash(),
                 sim.whitesTurn(),
-                System.nanoTime() + TimeUnit.SECONDS.toNanos(5),
+                new TimeManager(5_000L).beginSearchWithOverride(TimeUnit.SECONDS.toMillis(5)),
                 ai.getSearchThreads(),
                 sim.createSimulation()
         );

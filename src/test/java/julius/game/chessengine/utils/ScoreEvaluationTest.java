@@ -79,11 +79,8 @@ public class ScoreEvaluationTest {
         PawnStructureView backwardView = pawnStructure(backward);
         PawnStructureView supportedView = pawnStructure(supported);
 
-        assertTrue(backwardView.whiteBackward().midgame() < supportedView.whiteBackward().midgame());
-
-        Score backwardScore = Score.initializeScore(backward);
-        Score supportedScore = Score.initializeScore(supported);
-        assertTrue(backwardScore.getScoreDifference() < supportedScore.getScoreDifference());
+        assertEquals(PawnStructureModule.backwardPawnPenalty(), backwardView.whiteBackward().midgame());
+        assertEquals(0, supportedView.whiteBackward().midgame());
     }
 
     @Test

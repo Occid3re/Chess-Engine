@@ -1,5 +1,6 @@
 package julius.game.chessengine.ai;
 
+import julius.game.chessengine.ai.time.TimeManager;
 import julius.game.chessengine.engine.Engine;
 
 import java.util.concurrent.CountDownLatch;
@@ -7,6 +8,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static julius.game.chessengine.utils.Score.CHECKMATE;
 
@@ -18,28 +20,40 @@ public final class SearchTask {
     private final long id;
     private final long boardHash;
     private final boolean whiteToMove;
-    private final long deadline;
+    private final AtomicLong hardDeadline;
+    private final AtomicLong softDeadline;
     private final CountDownLatch completion;
     private final AtomicBoolean stop = new AtomicBoolean(false);
     private final AtomicReference<BestMoveDepth> best;
     private final AtomicInteger iterationDepth = new AtomicInteger(0);
     private final Engine rootSnapshot;
+    private volatile long allocationMillis;
 
-    SearchTask(long id, long boardHash, boolean whiteToMove, long deadline, int threadCount, Engine rootSnapshot) {
+    SearchTask(long id,
+               long boardHash,
+               boolean whiteToMove,
+               TimeManager.TimeBudget budget,
+               int threadCount,
+               Engine rootSnapshot) {
         this.id = id;
         this.boardHash = boardHash;
         this.whiteToMove = whiteToMove;
-        this.deadline = deadline;
+        this.hardDeadline = new AtomicLong(budget.hardDeadlineNanos());
+        this.softDeadline = new AtomicLong(budget.softDeadlineNanos());
         this.completion = new CountDownLatch(Math.max(1, threadCount));
         double initialScore = whiteToMove ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
         this.best = new AtomicReference<>(new BestMoveDepth(-1, initialScore, 0));
         this.rootSnapshot = rootSnapshot;
+        this.allocationMillis = budget.allocationMillis();
     }
 
     long getId() { return id; }
     long getBoardHash() { return boardHash; }
     boolean isWhiteToMove() { return whiteToMove; }
-    long getDeadline() { return deadline; }
+    long getDeadline() { return hardDeadline.get(); }
+    long getHardDeadline() { return hardDeadline.get(); }
+    long getSoftDeadline() { return softDeadline.get(); }
+    long getAllocationMillis() { return allocationMillis; }
     BestMoveDepth getBest() { return best.get(); }
     Engine getRootSnapshot() { return rootSnapshot; }
 
@@ -64,11 +78,20 @@ public final class SearchTask {
             // Wake periodically so we can notice interrupts or deadline expiry
             while (!completion.await(50, TimeUnit.MILLISECONDS)) {
                 if (Thread.currentThread().isInterrupted()) return;
-                if (System.nanoTime() >= deadline) { stop.set(true); return; }
+                if (System.nanoTime() >= hardDeadline.get()) { stop.set(true); return; }
             }
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    void updateBudget(TimeManager.TimeBudget budget) {
+        if (budget == null) {
+            return;
+        }
+        allocationMillis = budget.allocationMillis();
+        hardDeadline.set(budget.hardDeadlineNanos());
+        softDeadline.set(budget.softDeadlineNanos());
     }
 
     /**

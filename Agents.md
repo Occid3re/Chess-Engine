@@ -115,3 +115,7 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
 ### AI search & evaluation notes
 * Quiescence delta pruning now compares against the alpha window captured before the stand-pat update. Earlier builds raised `alpha` first, which meant `standPat + Δ < alpha` never triggered and the pruning shortcut was effectively disabled.
 * Static evaluation adds a lightweight knight placement adjustment (central bonuses) plus a tempo tie-breaker on top of the pipeline score. Future positional tweaks should extend `computePositionalAdjustment` so the orientation logic stays centralised.
+
+### 2025-10-07 Time management + evaluation notes
+* The engine now relies on `TimeManager` (under `ai/time/`) for soft/hard deadlines. Update UCI tests to expect the new bullet allocation of **500ms** when a ponder search is promoted.
+* `ScoreEvaluationTest.backwardPawnIsPenalized` now validates the pawn-structure view directly. The overall blended score remains neutral with current tuning, so assert against `PawnStructureModule.backwardPawnPenalty()` instead of a blended delta.
