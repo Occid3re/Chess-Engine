@@ -2626,6 +2626,9 @@ public class AI {
 
         if (!isSideInCheck(simulatorEngine, isWhitesTurn)
                 && !hasImmediateTacticalMoves(simulatorEngine)) {
+            if (abortRequested(deadline)) {
+                return EXIT_FLAG;
+            }
             double quietScore = evaluateStaticPosition(
                     simulatorEngine.getGameState(), boardStateHash, isWhitesTurn, 0
             );
