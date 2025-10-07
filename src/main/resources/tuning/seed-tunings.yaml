@@ -27,7 +27,7 @@ population:
       material.bishoppairbonus: 42
       pawnstructure.centerpawnbonus: 12
       pawnstructure.passedpawnbonus: 50
-      pawnstructure.connectedpawnbonus: 10
+      pawnstructure.connectedpawnbonus: 5
       pawnstructure.islandpenalty: -7
       pawnstructure.doubledpawnpenalty: -14
       pawnstructure.isolatedpawnpenalty: -12
