@@ -362,46 +362,58 @@ public class BitBoard {
         long enemyRooks = whiteSide ? blackRooks : whiteRooks;
         long enemyQueens = whiteSide ? blackQueens : whiteQueens;
 
+        int kingRank = kingSquare >>> 3;
+        int kingFile = kingSquare & 7;
+
         long diagonalPinned = 0L;
         long straightPinned = 0L;
 
-        long diagonalSliders = enemyBishops | enemyQueens;
-        while (diagonalSliders != 0) {
-            int sliderSq = Long.numberOfTrailingZeros(diagonalSliders);
-            diagonalSliders &= diagonalSliders - 1;
-            if (!areAlignedDiagonal(kingSquare, sliderSq)) {
-                continue;
-            }
-            long between = BitboardHelper.lineBetweenIndices(kingSquare, sliderSq);
-            long blockers = occ & between;
-            if (blockers == 0) {
-                continue;
-            }
-            long ownBlockers = blockers & ownPieces;
-            if (ownBlockers != 0 && (ownBlockers & (ownBlockers - 1)) == 0 && blockers == ownBlockers) {
-                diagonalPinned |= ownBlockers;
-            }
-        }
+        diagonalPinned |= scanPinRay(kingRank, kingFile, 1, 1, ownPieces, occ, enemyBishops | enemyQueens);
+        diagonalPinned |= scanPinRay(kingRank, kingFile, 1, -1, ownPieces, occ, enemyBishops | enemyQueens);
+        diagonalPinned |= scanPinRay(kingRank, kingFile, -1, 1, ownPieces, occ, enemyBishops | enemyQueens);
+        diagonalPinned |= scanPinRay(kingRank, kingFile, -1, -1, ownPieces, occ, enemyBishops | enemyQueens);
 
-        long straightSliders = enemyRooks | enemyQueens;
-        while (straightSliders != 0) {
-            int sliderSq = Long.numberOfTrailingZeros(straightSliders);
-            straightSliders &= straightSliders - 1;
-            if (!areAlignedStraight(kingSquare, sliderSq)) {
-                continue;
-            }
-            long between = BitboardHelper.lineBetweenIndices(kingSquare, sliderSq);
-            long blockers = occ & between;
-            if (blockers == 0) {
-                continue;
-            }
-            long ownBlockers = blockers & ownPieces;
-            if (ownBlockers != 0 && (ownBlockers & (ownBlockers - 1)) == 0 && blockers == ownBlockers) {
-                straightPinned |= ownBlockers;
-            }
-        }
+        straightPinned |= scanPinRay(kingRank, kingFile, 1, 0, ownPieces, occ, enemyRooks | enemyQueens);
+        straightPinned |= scanPinRay(kingRank, kingFile, -1, 0, ownPieces, occ, enemyRooks | enemyQueens);
+        straightPinned |= scanPinRay(kingRank, kingFile, 0, 1, ownPieces, occ, enemyRooks | enemyQueens);
+        straightPinned |= scanPinRay(kingRank, kingFile, 0, -1, ownPieces, occ, enemyRooks | enemyQueens);
 
         return new PinState(whiteSide, kingSquare, diagonalPinned, straightPinned);
+    }
+
+    private long scanPinRay(int kingRank, int kingFile, int rankStep, int fileStep,
+                            long ownPieces, long occ, long sliderMask) {
+        int currentRank = kingRank + rankStep;
+        int currentFile = kingFile + fileStep;
+        int pinnedSquare = -1;
+
+        while (currentRank >= 0 && currentRank < 8 && currentFile >= 0 && currentFile < 8) {
+            int idx = (currentRank << 3) + currentFile;
+            long bit = 1L << idx;
+            if ((occ & bit) != 0) {
+                if ((ownPieces & bit) != 0) {
+                    pinnedSquare = idx;
+                    currentRank += rankStep;
+                    currentFile += fileStep;
+                    while (currentRank >= 0 && currentRank < 8 && currentFile >= 0 && currentFile < 8) {
+                        idx = (currentRank << 3) + currentFile;
+                        bit = 1L << idx;
+                        if ((occ & bit) != 0) {
+                            if ((sliderMask & bit) != 0) {
+                                return 1L << pinnedSquare;
+                            }
+                            break;
+                        }
+                        currentRank += rankStep;
+                        currentFile += fileStep;
+                    }
+                }
+                break;
+            }
+            currentRank += rankStep;
+            currentFile += fileStep;
+        }
+        return 0L;
     }
 
     private boolean isMoveAllowedByPin(PinState pinState, int from, int to) {
