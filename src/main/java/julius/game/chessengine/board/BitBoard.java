@@ -1141,6 +1141,120 @@ public class BitBoard {
         allPieces = whitePieces | blackPieces;
     }
 
+    public boolean hasAnyCaptureOrPromotion() {
+        return hasAnyCaptureOrPromotion(whitesTurn);
+    }
+
+    public boolean hasAnyCaptureOrPromotion(boolean sideToMoveWhite) {
+        long ownPawns = sideToMoveWhite ? whitePawns : blackPawns;
+        long ownKnights = sideToMoveWhite ? whiteKnights : blackKnights;
+        long ownBishops = sideToMoveWhite ? whiteBishops : blackBishops;
+        long ownRooks = sideToMoveWhite ? whiteRooks : blackRooks;
+        long ownQueens = sideToMoveWhite ? whiteQueens : blackQueens;
+        long ownKing = sideToMoveWhite ? whiteKing : blackKing;
+
+        long opponentPieces = sideToMoveWhite ? blackPieces : whitePieces;
+        long opponentPiecesNoKing = sideToMoveWhite
+                ? (blackPieces & ~blackKing)
+                : (whitePieces & ~whiteKing);
+
+        long promotionRank = sideToMoveWhite ? RankMasks[7] : RankMasks[0];
+        long emptySquares = ~allPieces;
+
+        if (ownPawns != 0) {
+            long pushPromotions = sideToMoveWhite
+                    ? ((ownPawns << 8) & emptySquares & promotionRank)
+                    : ((ownPawns >>> 8) & emptySquares & promotionRank);
+            if (pushPromotions != 0) {
+                return true;
+            }
+
+            long pawnLeftAttacks = sideToMoveWhite
+                    ? (ownPawns & ~FileMasks[0]) << 7
+                    : (ownPawns & ~FileMasks[7]) >>> 7;
+            long pawnRightAttacks = sideToMoveWhite
+                    ? (ownPawns & ~FileMasks[7]) << 9
+                    : (ownPawns & ~FileMasks[0]) >>> 9;
+            long pawnAttacks = pawnLeftAttacks | pawnRightAttacks;
+
+            if ((pawnAttacks & opponentPiecesNoKing & promotionRank) != 0) {
+                return true;
+            }
+            if ((pawnAttacks & opponentPiecesNoKing & ~promotionRank) != 0) {
+                return true;
+            }
+
+            int epTarget = getEnPassantTargetIndex();
+            if (epTarget != -1) {
+                int epFile = epTarget & 7;
+                int dir = sideToMoveWhite ? -8 : +8;
+                int pawnRowFrom = epTarget + dir;
+                if (pawnRowFrom >= 0 && pawnRowFrom < 64) {
+                    int leftFrom = epFile > 0 ? pawnRowFrom - 1 : -1;
+                    int rightFrom = epFile < 7 ? pawnRowFrom + 1 : -1;
+                    long pawnMask = ownPawns;
+                    if (leftFrom >= 0 && (pawnMask & (1L << leftFrom)) != 0) {
+                        return true;
+                    }
+                    if (rightFrom >= 0 && (pawnMask & (1L << rightFrom)) != 0) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        long knights = ownKnights;
+        while (knights != 0) {
+            int from = Long.numberOfTrailingZeros(knights);
+            knights &= knights - 1;
+            long attacks = KnightHelper.knightMoveTable[from] & opponentPiecesNoKing;
+            if (attacks != 0) {
+                return true;
+            }
+        }
+
+        long bishops = ownBishops;
+        while (bishops != 0) {
+            int from = Long.numberOfTrailingZeros(bishops);
+            bishops &= bishops - 1;
+            long attacks = bishopHelper.calculateMovesUsingBishopMagic(from, allPieces) & opponentPiecesNoKing;
+            if (attacks != 0) {
+                return true;
+            }
+        }
+
+        long rooks = ownRooks;
+        while (rooks != 0) {
+            int from = Long.numberOfTrailingZeros(rooks);
+            rooks &= rooks - 1;
+            long attacks = rookHelper.calculateMovesUsingRookMagic(from, allPieces) & opponentPiecesNoKing;
+            if (attacks != 0) {
+                return true;
+            }
+        }
+
+        long queens = ownQueens;
+        while (queens != 0) {
+            int from = Long.numberOfTrailingZeros(queens);
+            queens &= queens - 1;
+            long attacks = (bishopHelper.calculateMovesUsingBishopMagic(from, allPieces)
+                    | rookHelper.calculateMovesUsingRookMagic(from, allPieces)) & opponentPiecesNoKing;
+            if (attacks != 0) {
+                return true;
+            }
+        }
+
+        if (ownKing != 0) {
+            int from = Long.numberOfTrailingZeros(ownKing);
+            long kingAttacks = KING_ATTACKS[from] & opponentPiecesNoKing;
+            if (kingAttacks != 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void recomputeWhiteAttackMap() {
         whiteAttackMap = generateAttackBitboard(true);
         whiteAttackDirty = false;

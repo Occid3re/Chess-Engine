@@ -58,6 +58,16 @@ final class MoveContainerUtils {
         System.arraycopy(buffer, 0, elements, 0, length);
     }
 
+    static boolean hasCapturesOrPromotions(IntArrayList moves) {
+        for (int i = 0; i < moves.size(); i++) {
+            int move = moves.getInt(i);
+            if (MoveHelper.isCapture(move) || MoveHelper.isPawnPromotionMove(move)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     static IntArrayList filterCapturesAndPromotions(IntArrayList moves) {
         IntArrayList filtered = new IntArrayList(moves.size());
         for (int i = 0; i < moves.size(); i++) {
