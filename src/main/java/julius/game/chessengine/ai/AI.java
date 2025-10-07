@@ -2719,6 +2719,11 @@ public class AI {
         return alpha;
     }
 
+    private double evaluateStaticPosition(GameState gameState, boolean isWhitesTurn, int depthOrPly) {
+        long boardHash = (gameState != null) ? gameState.getLastZobrist() : 0L;
+        return evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depthOrPly);
+    }
+
     private double evaluateStaticPosition(GameState gameState, long boardHash, boolean isWhitesTurn, int depthOrPly) {
         if (gameState.isInStateCheckMate()) {
             return -(CHECKMATE - depthOrPly);
