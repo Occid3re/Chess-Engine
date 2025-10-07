@@ -244,6 +244,7 @@ public class AI {
     private volatile long beforeCalculationBoardState = UNINITIALIZED_BOARD_STATE;
 
     private volatile int currentBestMove = -1;
+    private volatile double currentBestScore = Double.NaN;
     private volatile int previousBestMove = -1;
     private volatile long previousBestMoveHash = -1;
     private volatile boolean searchResultReady = false;
@@ -769,9 +770,6 @@ public class AI {
             MoveAndScore sealed = result.bestMove();
 
             if (!result.isCompleted()) {
-                if (currentDepth == 1) {
-                    task.publishBest(sealed, currentDepth, simulatorEngine);
-                }
                 if (heuristics.hasUpdates()) mergeThreadHeuristics(heuristics);
                 break;
             }
@@ -779,6 +777,7 @@ public class AI {
             lastIterScore = sealed.score;
             aspirationController.finishIteration(sealed.score, attemptedAspiration, usedFullWindow);
             task.publishBest(sealed, currentDepth, simulatorEngine);
+            storeRootExactEntry(simulatorEngine, currentDepth, sealed);
 
             if (heuristics.hasUpdates()) mergeThreadHeuristics(heuristics);
             if (task.isStopRequested()) break;
@@ -912,6 +911,7 @@ public class AI {
                 currentBoardState = boardStateHash;
                 beforeCalculationBoardState = boardStateHash;
                 currentBestMove = -1;
+                currentBestScore = Double.NaN;
                 bestMoveForHash = -1;
                 previousBestMove = -1;
                 previousBestMoveHash = -1;
@@ -958,6 +958,7 @@ public class AI {
     public void reset() {
         stopCalculation();
         currentBestMove = -1;
+        currentBestScore = Double.NaN;
         bestMoveForHash = -1;
         previousBestMove = -1;
         previousBestMoveHash = -1;
@@ -1017,6 +1018,7 @@ public class AI {
         activeSearch.set(null);
         calculatedLine = Collections.synchronizedList(new ArrayList<>());
         currentBestMove = -1;
+        currentBestScore = Double.NaN;
         bestMoveForHash = -1;
         previousBestMove = -1;
         previousBestMoveHash = -1;
@@ -1074,6 +1076,7 @@ public class AI {
         if (now != bestMoveForHash) {
             log.info("Stale best move for hash {}, current {}", bestMoveForHash, now);
             currentBestMove = -1;                           // <-- stop re-trying the stale move
+            currentBestScore = Double.NaN;
             bestMoveForHash = -1;
             previousBestMove = -1;
             previousBestMoveHash = -1;
@@ -1085,6 +1088,7 @@ public class AI {
         if (MoveHelper.isWhitesMove(currentBestMove) != mainEngine.whitesTurn()) {
             log.info("Best move {} not for side to move", Move.convertIntToMove(currentBestMove));
             currentBestMove = -1;                           // (optional) also drop here
+            currentBestScore = Double.NaN;
             bestMoveForHash = -1;
             previousBestMove = -1;
             previousBestMoveHash = -1;
@@ -1095,6 +1099,7 @@ public class AI {
         mainEngine.performMove(currentBestMove);
         enqueueCalculationRequest();
         currentBestMove = -1; // don’t re-play it
+        currentBestScore = Double.NaN;
         bestMoveForHash = -1;
         previousBestMove = -1;
         previousBestMoveHash = -1;
@@ -1150,6 +1155,7 @@ public class AI {
             int bookMove = mainEngine.getOpeningBook().getRandomMoveForBoardStateHash(boardStateHash);
             if (bookMove != -1) {
                 currentBestMove = bookMove;
+                currentBestScore = 0.0;
                 bestMoveForHash = boardStateHash;
                 previousBestMove = bookMove;
                 previousBestMoveHash = boardStateHash;
@@ -1187,6 +1193,7 @@ public class AI {
                     previousBestMoveHash = -1;
                 }
                 currentBestMove = -1;
+                currentBestScore = Double.NaN;
                 bestMoveForHash = -1;
                 searchResultReady = false;
                 this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
@@ -1204,6 +1211,7 @@ public class AI {
                 searchResultReady = true;
             } else {
                 currentBestMove = -1;
+                currentBestScore = Double.NaN;
                 bestMoveForHash = -1;
                 previousBestMove = -1;
                 previousBestMoveHash = -1;
@@ -1225,6 +1233,7 @@ public class AI {
 
         if (move != -1) {
             currentBestMove = move;
+            currentBestScore = best.score;
             bestMoveForHash = task.getBoardHash();
             previousBestMove = move;
             previousBestMoveHash = task.getBoardHash();
@@ -1242,6 +1251,7 @@ public class AI {
         if (previousBestMove != -1 && previousBestMoveHash == task.getBoardHash() &&
                 isMoveStillLegal(simulatorEngine, previousBestMove)) {
             currentBestMove = previousBestMove;
+            currentBestScore = best.score;
             bestMoveForHash = task.getBoardHash();
             previousBestMoveHash = task.getBoardHash();
             searchResultReady = true;
@@ -1250,11 +1260,31 @@ public class AI {
         }
 
         currentBestMove = -1;
+        currentBestScore = Double.NaN;
         bestMoveForHash = -1;
         previousBestMove = -1;
         previousBestMoveHash = -1;
         searchResultReady = false;
         this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
+    }
+
+    private void storeRootExactEntry(Engine simulatorEngine, int depth, MoveAndScore sealed) {
+        if (transpositionTable == null) {
+            return;
+        }
+        if (sealed == null || sealed.move == -1) {
+            return;
+        }
+        long rootHash = simulatorEngine.getBoardStateHash();
+        TranspositionTableEntry existing = transpositionTable.get(rootHash);
+        if (existing != null
+                && existing.nodeType == NodeType.EXACT
+                && existing.depth > depth) {
+            return;
+        }
+        transpositionTable.put(rootHash,
+                new TranspositionTableEntry(sealed.score, depth, NodeType.EXACT, sealed.move),
+                depth);
     }
 
     private boolean isMoveStillLegal(Engine simulatorEngine, int move) {
@@ -1666,19 +1696,21 @@ public class AI {
         Double seedScore = null;
 
         if (rootEntry != null
+                && rootEntry.nodeType == NodeType.EXACT
                 && rootEntry.bestMove != -1
                 && MoveHelper.isWhitesMove(rootEntry.bestMove) == simulation.whitesTurn()
                 && isLegalNow.test(rootEntry.bestMove)) {
             seedMove = rootEntry.bestMove;
-            if (rootEntry.nodeType == NodeType.EXACT) {
-                seedScore = rootEntry.score;
-            }
+            seedScore = rootEntry.score;
         }
 
         if (seedMove == -1 && currentBestMove != -1
                 && MoveHelper.isWhitesMove(currentBestMove) == simulation.whitesTurn()
                 && isLegalNow.test(currentBestMove)) {
             seedMove = currentBestMove;
+            if (Double.isFinite(currentBestScore)) {
+                seedScore = currentBestScore;
+            }
         }
 
         if (seedMove == -1) {
