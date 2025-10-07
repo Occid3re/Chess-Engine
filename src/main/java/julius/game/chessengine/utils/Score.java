@@ -39,12 +39,6 @@ public class Score {
     public static final int CHECK = 50;
     public static final int DRAW = 0;
 
-    private final MaterialModule materialModule = new MaterialModule();
-    private final PawnStructureModule pawnStructureModule = new PawnStructureModule();
-    private final ActivityModule activityModule = new ActivityModule();
-    private final KingSafetyModule kingSafetyModule = new KingSafetyModule();
-    private final ThreatModule threatModule = new ThreatModule();
-
     @JsonIgnore
     private final EvaluationWeights weights;
     private final EvaluationPipeline evaluationPipeline;
@@ -59,6 +53,13 @@ public class Score {
 
     public Score(EvaluationWeights weights) {
         this.weights = weights != null ? weights : EvaluationWeights.identity();
+
+        MaterialModule materialModule = new MaterialModule();
+        PawnStructureModule pawnStructureModule = new PawnStructureModule();
+        ActivityModule activityModule = new ActivityModule();
+        KingSafetyModule kingSafetyModule = new KingSafetyModule();
+        ThreatModule threatModule = new ThreatModule();
+
         materialModule.setPawnChangeListener(pawnStructureModule);
         this.evaluationPipeline = new EvaluationPipeline(List.of(
                 materialModule,
