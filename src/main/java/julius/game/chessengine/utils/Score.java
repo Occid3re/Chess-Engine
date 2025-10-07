@@ -206,7 +206,7 @@ public class Score {
         if (!evaluationPipeline.isInitialized()) {
             evaluationPipeline.initialize(context);
         } else {
-            evaluationPipeline.updateContext(context);
+            evaluationPipeline.attachContext(context);
         }
     }
 
