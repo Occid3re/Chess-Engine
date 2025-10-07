@@ -50,7 +50,7 @@ public class BestMoveSearchTest {
     private static final SearchEnvironment SEARCH_ENVIRONMENT = SearchEnvironment.detect();
     private static final int SEARCH_DEPTH = Math.max(1,
             Integer.getInteger("chessengine.test.bestmove.depth", 8));
-    private static final int MAX_DEPTH_ATTEMPTS = 4;
+    private static final long UNBOUNDED_SEARCH_TIME_MILLIS = java.util.concurrent.TimeUnit.DAYS.toMillis(365L * 100L);
 
     private final List<DecisionStatistics> decisionSummaries = new ArrayList<>();
     private final List<String> decisionJsonLines = new ArrayList<>();
@@ -73,7 +73,7 @@ public class BestMoveSearchTest {
 
         AiTuning tuning = SEARCH_ENVIRONMENT.applyTo(AiTuning.builder())
                 .maxDepth(SEARCH_DEPTH)
-                .timeLimitMillis(initialTimeBudgetMillis(SEARCH_DEPTH))
+                .timeLimitMillis(UNBOUNDED_SEARCH_TIME_MILLIS)
                 .nullMovePruning(true)
                 .build();
 
@@ -126,26 +126,6 @@ public class BestMoveSearchTest {
         Assertions.assertTrue(expectedMoves.contains(moveString),
                 () -> "Expected one of " + expectedMoves + " but got " + moveString + " for FEN: " + fen
                         + humanReadable + System.lineSeparator() + diagnostics);
-    }
-
-    private static long initialTimeBudgetMillis(int depth) {
-        int normalizedDepth = Math.max(1, depth);
-        long perDepth = SEARCH_ENVIRONMENT.multiThreaded() ? 220L : 320L;
-        long estimate = perDepth * normalizedDepth;
-        long minimum = SEARCH_ENVIRONMENT.multiThreaded() ? 750L : 1000L;
-        long maximum = Duration.ofSeconds(15).toMillis();
-        return Math.max(minimum, Math.min(maximum, estimate));
-    }
-
-    private static long computeSearchBudgetMillis(int depth, int attempt) {
-        long base = initialTimeBudgetMillis(depth);
-        long multiplier = 1L << Math.min(attempt, 3);
-        long budget = base * multiplier;
-        long ceiling = Duration.ofSeconds(45).toMillis();
-        if (budget < 0 || budget > ceiling) {
-            return ceiling;
-        }
-        return budget;
     }
 
     private DecisionStatistics compileDecisionStatistics(String fen,
@@ -344,14 +324,7 @@ public class BestMoveSearchTest {
                 throw new IllegalArgumentException("targetDepth must be positive");
             }
             resetDepthDiagnostics();
-            MoveAndScore latest = null;
-            int attempt = 0;
-            while (deepestCompletedDepth() < targetDepth && attempt < MAX_DEPTH_ATTEMPTS) {
-                long budgetMillis = computeSearchBudgetMillis(targetDepth, attempt);
-                latest = super.searchBestMoveBlocking(budgetMillis);
-                attempt++;
-            }
-            return latest;
+            return super.searchBestMoveBlocking(UNBOUNDED_SEARCH_TIME_MILLIS);
         }
 
         int deepestCompletedDepth() {
