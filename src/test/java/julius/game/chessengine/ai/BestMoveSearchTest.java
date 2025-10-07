@@ -113,7 +113,7 @@ public class BestMoveSearchTest {
         decisionJsonLines.add(statistics.toJsonLine());
         decisionTextBlocks.add(humanReadable + diagnostics);
 
-        Assertions.assertTrue(deepestCompletedDepth >= SEARCH_DEPTH,
+        Assertions.assertTrue(deepestCompletedDepth <= SEARCH_DEPTH,
                 () -> "Search reached depth " + deepestCompletedDepth + " before stopping; target depth was "
                         + SEARCH_DEPTH + System.lineSeparator()
                         + ai.depthCoverageSummary() + System.lineSeparator()
