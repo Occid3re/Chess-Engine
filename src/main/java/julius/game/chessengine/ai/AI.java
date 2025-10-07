@@ -152,11 +152,19 @@ public class AI {
     // Buffers used for move ordering. Reused across calls to avoid repeated
     // allocations when ordering moves.
     private static final int MAX_MOVE_LIST_SIZE = 218; // maximum legal moves
+    private static final int MAX_QUIESCENCE_PLY = 256;
 
     private final ThreadLocal<SortBuffers> sortBuffers =
             ThreadLocal.withInitial(() -> new SortBuffers(MAX_MOVE_LIST_SIZE));
     private final ThreadLocal<Map<Integer, Integer>> seeCacheThreadLocal =
             ThreadLocal.withInitial(() -> new HashMap<>(64));
+
+    private final ThreadLocal<Deque<IntArrayList>> quiescenceMovePool =
+            ThreadLocal.withInitial(ArrayDeque::new);
+    private final ThreadLocal<int[]> quiescenceMoveOrderBuffer =
+            ThreadLocal.withInitial(() -> new int[MAX_MOVE_LIST_SIZE]);
+    private final ThreadLocal<int[]> quiescenceSeeScores =
+            ThreadLocal.withInitial(() -> new int[MAX_MOVE_LIST_SIZE * MAX_QUIESCENCE_PLY]);
 
     private final ThreadLocal<Long2DoubleOpenHashMap> staticEvalCache =
             ThreadLocal.withInitial(() -> {
@@ -178,6 +186,11 @@ public class AI {
     private static final double[] HISTORY_BUCKET_NORMALIZED = new double[HISTORY_BUCKETS];
     private static final int[][][] LMR_REDUCTION_TABLE =
             new int[LMR_MAX_DEPTH + 1][LMR_MAX_MOVES][HISTORY_BUCKETS];
+
+    private static final int[] QUIESCENCE_PIECE_VALUES = {0, 100, 320, 330, 500, 900, 20000};
+    private static final int QUIESCENCE_PROMOTION_BONUS = 5000;
+    private static final int QUIESCENCE_CAPTURE_BONUS = 2000;
+    private static final int QUIESCENCE_SEE_CLAMP = 2000;
 
     static {
         if (HISTORY_BUCKETS < 1) {
@@ -2593,6 +2606,85 @@ public class AI {
     }
 
 
+    private IntArrayList borrowQuiescenceMoveList() {
+        Deque<IntArrayList> pool = quiescenceMovePool.get();
+        IntArrayList list = pool.pollFirst();
+        if (list == null) {
+            return new IntArrayList(MAX_MOVE_LIST_SIZE);
+        }
+        list.clear();
+        return list;
+    }
+
+    private void recycleQuiescenceMoveList(IntArrayList list) {
+        list.clear();
+        quiescenceMovePool.get().addFirst(list);
+    }
+
+
+    private IntArrayList orderQuiescenceMoves(IntArrayList moves, Engine simulatorEngine,
+                                             int[] seeBuffer, int seeOffset) {
+        final int size = moves.size();
+        if (size == 0) {
+            return moves;
+        }
+        if (size == 1) {
+            int singleMove = moves.getInt(0);
+            seeBuffer[seeOffset] = MoveHelper.isCapture(singleMove) ? simulatorEngine.see(singleMove) : 0;
+            return moves;
+        }
+
+        final SortBuffers buffers = sortBuffers.get();
+        final int[] originalMoves = buffers.moveBuffer;
+        final int[] originalSee = buffers.scoreBuffer;
+        final long[] sortKeys = buffers.sortKeyBuffer;
+        final int[] orderedMoves = quiescenceMoveOrderBuffer.get();
+
+        System.arraycopy(moves.elements(), 0, originalMoves, 0, size);
+
+        for (int i = 0; i < size; i++) {
+            int move = originalMoves[i];
+            boolean isCapture = MoveHelper.isCapture(move);
+            boolean isPromotion = MoveHelper.isPawnPromotionMove(move);
+
+            int captured = MoveHelper.deriveCapturedPieceTypeBits(move);
+            int attacker = MoveHelper.derivePieceTypeBits(move);
+
+            int see = isCapture ? simulatorEngine.see(move) : 0;
+            originalSee[i] = see;
+
+            int mvvLva = (QUIESCENCE_PIECE_VALUES[captured] << 3) - QUIESCENCE_PIECE_VALUES[attacker];
+            int score = (isPromotion ? QUIESCENCE_PROMOTION_BONUS : 0)
+                    + (isCapture ? QUIESCENCE_CAPTURE_BONUS : 0)
+                    + mvvLva
+                    + clampMagnitude(see, QUIESCENCE_SEE_CLAMP);
+
+            sortKeys[i] = (((long) score) << 32) | (i & 0xFFFFFFFFL);
+        }
+
+        Arrays.sort(sortKeys, 0, size);
+
+        for (int dst = 0, src = size - 1; src >= 0; src--, dst++) {
+            int idx = (int) (sortKeys[src] & 0xFFFFFFFFL);
+            orderedMoves[dst] = originalMoves[idx];
+            seeBuffer[seeOffset + dst] = originalSee[idx];
+        }
+
+        MoveContainerUtils.overwriteFromBuffer(moves, orderedMoves, size);
+        return moves;
+    }
+
+    private static int clampMagnitude(int value, int limit) {
+        if (value > limit) {
+            return limit;
+        }
+        if (value < -limit) {
+            return -limit;
+        }
+        return value;
+    }
+
+
     public double evaluateBoard(Engine simulatorEngine, boolean isWhitesTurn, long deadline) {
         if (simulatorEngine.getGameState().isInStateCheckMate()) {
             return -CHECKMATE;
@@ -2668,55 +2760,66 @@ public class AI {
                 ? simulatorEngine.getAllLegalMoves()
                 : getPossibleCapturesOrPromotions(simulatorEngine);
 
-        // Order them (captures/promotions first etc.)
-        IntArrayList ordered = sortMovesByEfficiency(
-                moves, 0, simulatorEngine.getBoardStateHash(), -1, simulatorEngine
-        );
+        boolean borrowedMoves = !inCheck;
 
-        for (int i = 0; i < ordered.size(); i++) {
-            int m = ordered.getInt(i);
-            boolean isCapture = MoveHelper.isCapture(m);
-            boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
-            boolean isQuiet = !isCapture && !isPromotion;
+        try {
+            // Order them (captures/promotions first etc.)
+            int[] quiescenceSee = quiescenceSeeScores.get();
+            int depthSlot = Math.min(depth, MAX_QUIESCENCE_PLY - 1);
+            int seeOffset = depthSlot * MAX_MOVE_LIST_SIZE;
+            IntArrayList ordered = orderQuiescenceMoves(
+                    moves, simulatorEngine, quiescenceSee, seeOffset
+            );
 
-            // --- SEE pruning: drop clearly losing captures or quiets (keeps promotions) ---
-            if ((!inCheck && isCapture && !isPromotion) || isQuiet) {
-                int see = simulatorEngine.see(m);
-                if (see < 0) {
-                    // Guard: do not "probe" with a make/undo if node somehow became terminal.
-                    if (simulatorEngine.getGameState().isTerminal()) {
-                        continue;
+            for (int i = 0; i < ordered.size(); i++) {
+                int m = ordered.getInt(i);
+                boolean isCapture = MoveHelper.isCapture(m);
+                boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
+                boolean isQuiet = !isCapture && !isPromotion;
+
+                // --- SEE pruning: drop clearly losing captures or quiets (keeps promotions) ---
+                if ((!inCheck && isCapture && !isPromotion) || isQuiet) {
+                    int see = quiescenceSee[seeOffset + i];
+                    if (see < 0) {
+                        // Guard: do not "probe" with a make/undo if node somehow became terminal.
+                        if (simulatorEngine.getGameState().isTerminal()) {
+                            continue;
+                        }
+                        simulatorEngine.performMove(m);
+                        boolean givesCheck = isSideInCheck(simulatorEngine, !isWhitesTurn);
+                        simulatorEngine.undoLastMove();
+                        if (!givesCheck) continue;
                     }
-                    simulatorEngine.performMove(m);
-                    boolean givesCheck = isSideInCheck(simulatorEngine, !isWhitesTurn);
-                    simulatorEngine.undoLastMove();
-                    if (!givesCheck) continue;
+                }
+
+                // Guard again before actually making the move (paranoia; usually redundant)
+                if (simulatorEngine.getGameState().isTerminal()) {
+                    return standPat;
+                }
+
+                simulatorEngine.performMove(m);
+
+                // Propagate timeout BEFORE negation
+                double child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
+                simulatorEngine.undoLastMove();
+
+                if (child == EXIT_FLAG) return EXIT_FLAG;
+
+                double score = -child;
+
+                if (score >= beta) {
+                    return beta;
+                }
+                if (score > alpha) {
+                    alpha = score;
                 }
             }
-
-            // Guard again before actually making the move (paranoia; usually redundant)
-            if (simulatorEngine.getGameState().isTerminal()) {
-                return standPat;
-            }
-
-            simulatorEngine.performMove(m);
-
-            // Propagate timeout BEFORE negation
-            double child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
-            simulatorEngine.undoLastMove();
-
-            if (child == EXIT_FLAG) return EXIT_FLAG;
-
-            double score = -child;
-
-            if (score >= beta) {
-                return beta;
-            }
-            if (score > alpha) {
-                alpha = score;
+            return alpha;
+        } finally {
+            if (borrowedMoves) {
+                recycleQuiescenceMoveList(moves);
             }
         }
-        return alpha;
     }
 
     private double evaluateStaticPosition(GameState gameState, boolean isWhitesTurn, int depthOrPly) {
@@ -2745,7 +2848,17 @@ public class AI {
 
     private IntArrayList getPossibleCapturesOrPromotions(Engine simulatorEngine) {
         IntArrayList allLegalMoves = simulatorEngine.getAllLegalMoves();
-        return MoveContainerUtils.filterCapturesAndPromotions(allLegalMoves);
+        IntArrayList buffer = borrowQuiescenceMoveList();
+
+        int size = allLegalMoves.size();
+        int[] moves = allLegalMoves.elements();
+        for (int i = 0; i < size; i++) {
+            int move = moves[i];
+            if (MoveHelper.isCapture(move) || MoveHelper.isPawnPromotionMove(move)) {
+                buffer.add(move);
+            }
+        }
+        return buffer;
     }
 
     /**
