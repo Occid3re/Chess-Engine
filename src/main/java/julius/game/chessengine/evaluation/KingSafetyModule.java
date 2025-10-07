@@ -33,14 +33,6 @@ public final class KingSafetyModule implements EvaluationModule {
     private static final int QUEEN = MoveHelper.pieceTypeToInt(PieceType.QUEEN);
     private static final int KING = MoveHelper.pieceTypeToInt(PieceType.KING);
 
-    private static final int DEFAULT_MISSING_PAWN_SHIELD_PENALTY = -15;
-    private static final int DEFAULT_HALF_OPEN_FILE_PENALTY = -15;
-    private static final int DEFAULT_OPEN_FILE_PENALTY = -25;
-    private static final int DEFAULT_DEFENDER_BONUS = 5;
-    private static final int DEFAULT_QUEEN_ATTACKED_PENALTY = -75;
-    private static final int DEFAULT_BACKRANK_WEAKNESS_MIDGAME_PENALTY = -100;
-    private static final int DEFAULT_BACKRANK_WEAKNESS_ENDGAME_PENALTY = -50;
-
     private static final long NOT_A_FILE = ~FileMasks[0];
     private static final long NOT_H_FILE = ~FileMasks[7];
 
@@ -115,7 +107,11 @@ public final class KingSafetyModule implements EvaluationModule {
         boolean updateBlack = sideNeedsUpdate(BLACK, moveContext);
         if (updateWhite || updateBlack) {
             rebuildFromContext(current);
+            return;
         }
+        // No relevant king-safety features were affected by the move; keep the cached
+        // contribution rather than forcing a full rebuild on the next evaluation cycle.
+        dirty = false;
     }
 
     @Override
@@ -246,10 +242,7 @@ public final class KingSafetyModule implements EvaluationModule {
             }
             queenMask ^= q;
         }
-        if (state.backrankMask != 0 && ((prevFriendlyAttacks ^ currFriendlyAttacks) & state.backrankMask) != 0) {
-            return true;
-        }
-        return false;
+        return state.backrankMask != 0 && ((prevFriendlyAttacks ^ currFriendlyAttacks) & state.backrankMask) != 0;
     }
 
     private void rebuildSideState(SideState state, ImmutableBoardView board, boolean isWhite,

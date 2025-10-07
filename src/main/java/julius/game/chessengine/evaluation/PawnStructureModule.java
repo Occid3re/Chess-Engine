@@ -4,9 +4,9 @@ import julius.game.chessengine.board.ImmutableBoardView;
 import julius.game.chessengine.helper.PawnHelper;
 import julius.game.chessengine.tuning.Tuning;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 
 import static julius.game.chessengine.helper.BitHelper.FileMasks;
 import static julius.game.chessengine.helper.BitHelper.RankMasks;
@@ -69,7 +69,7 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         }
     }
 
-    private final ConcurrentMap<PawnStructureKey, CachedStructure> structureCache = new ConcurrentHashMap<>();
+    private final Map<PawnStructureKey, CachedStructure> structureCache = new HashMap<>();
 
     private int midgameScoreCache;
     private int endgameScoreCache;
@@ -406,13 +406,37 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         return value << 1;
     }
 
-    private record PawnStructureKey(long white, long black) {
+    private static final class PawnStructureKey {
+        private final long white;
+        private final long black;
+        private final int hash;
+
+        private PawnStructureKey(long white, long black) {
+            this.white = white;
+            this.black = black;
+            this.hash = computeHash(white, black);
+        }
+
+        private static int computeHash(long white, long black) {
+            int h = Long.hashCode(white);
+            h = 31 * h + Long.hashCode(black);
+            return h;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) {
+                return true;
+            }
+            if (!(obj instanceof PawnStructureKey other)) {
+                return false;
+            }
+            return white == other.white && black == other.black;
+        }
 
         @Override
         public int hashCode() {
-            int whiteHash = Long.hashCode(white);
-            int blackHash = Long.hashCode(black);
-            return 31 * whiteHash + blackHash;
+            return hash;
         }
     }
 
