@@ -162,8 +162,10 @@ class AITest_MateThreatDiagnostics {
                         double.class, boolean.class, long.class, int.class, int.class, int.class);
                 alphaBetaMethod.setAccessible(true);
 
-                evaluateStaticPositionMethod = AI.class.getDeclaredMethod("evaluateStaticPosition", GameState.class,
-                        boolean.class, int.class);
+                evaluateStaticPositionMethod = AI.class.getDeclaredMethod(
+                        "evaluateStaticPosition",
+                        GameState.class, long.class, boolean.class, int.class
+                );
                 evaluateStaticPositionMethod.setAccessible(true);
 
                 nodesVisitedField = AI.class.getDeclaredField("nodesVisited");
@@ -322,12 +324,17 @@ class AITest_MateThreatDiagnostics {
                 return EvaluationResult.mate(score);
             }
             if (state.isTerminal()) {
-                double eval = (double) evaluateStaticPositionMethod.invoke(this, state, !isWhite, depth);
-                if (isWhite) {
+                long boardHash = simulatorEngine.getBoardStateHash();
+                // after a root move by 'isWhite', it's now opponent to move → !isWhite
+                double eval = (double) evaluateStaticPositionMethod.invoke(this, state, boardHash, !isWhite, depth);
+                // keep your orientation: alpha-beta below already returns scores from the root’s POV.
+                // If your eval is from side-to-move POV, flip to root POV:
+                if (isWhite) { // same condition you had before
                     eval = -eval;
                 }
                 return EvaluationResult.terminal(eval);
             }
+
 
             double score = (double) alphaBetaMethod.invoke(this, simulatorEngine, depth - 1, alpha, beta,
                     !isWhite, deadline, moveInt, 1, 0);
@@ -470,8 +477,8 @@ class AITest_MateThreatDiagnostics {
 
         /**
          * Returns true if any expected move is either:
-         *  - the final chosen best move (SAN or coordinate match), OR
-         *  - present among explored root moves in any depth/attempt trace.
+         * - the final chosen best move (SAN or coordinate match), OR
+         * - present among explored root moves in any depth/attempt trace.
          */
         boolean foundAnyExpectedMove(List<String> expected, MoveAndScore result) {
             // 1) Result matches?
