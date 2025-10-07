@@ -60,6 +60,8 @@ public class AI {
 
     //Quiescence search parameters
     private static final double MAX_DELTA_PAWN = 9.0;
+    private static final double DELTA_SAFETY_MARGIN = 0.75;
+    private static final double PAWN_VALUE = getPieceValue(1);
 
 
     private final AtomicReference<SearchTask> activeSearch = new AtomicReference<>();
@@ -2624,7 +2626,12 @@ public class AI {
             return entry.getScore();
         }
 
-        double score = quiescenceSearch(simulatorEngine, isWhitesTurn, alpha, beta, deadline, 0);
+        double score;
+        if (shouldSkipQuiescence(simulatorEngine, isWhitesTurn)) {
+            score = evaluateStaticPosition(simulatorEngine.getGameState(), boardStateHash, isWhitesTurn, 0);
+        } else {
+            score = quiescenceSearch(simulatorEngine, isWhitesTurn, alpha, beta, deadline, 0);
+        }
         if (score != EXIT_FLAG) {
             captureTranspositionTable.put(boardStateHash, new CaptureTranspositionTableEntry(score, isWhitesTurn), 0);
         }
@@ -2653,6 +2660,9 @@ public class AI {
         long boardHash = simulatorEngine.getBoardStateHash();
         double standPat = evaluateStaticPosition(simulatorEngine.getGameState(), boardHash, isWhitesTurn, depth);
 
+        double alphaBeforeStandPat = alpha;
+        IntArrayList moves = null;
+
         if (!inCheck) {
             // Fail-hard beta cut on stand-pat
             if (standPat >= beta) {
@@ -2666,15 +2676,21 @@ public class AI {
             // Delta (futility-like) pruning in qsearch:
             // If even the biggest plausible swing can't reach alpha, cut.
             // (Disabled when in check, already guarded above.)
-            if (standPat + MAX_DELTA_PAWN <= alpha) {
+            IntArrayList tacticalMoves = getPossibleCapturesOrPromotions(simulatorEngine);
+            if (tacticalMoves.isEmpty()) {
                 return alpha;
             }
-        }
 
-        // Move gen: evasions if in check; else captures/promotions (and optional checking moves if you add them)
-        IntArrayList moves = inCheck
-                ? simulatorEngine.getAllLegalMoves()                // all evasions
-                : getPossibleCapturesOrPromotions(simulatorEngine);  // tactical moves only
+            double maxTacticalSwing = estimateMaxTacticalSwing(tacticalMoves);
+            double deltaMargin = Math.min(MAX_DELTA_PAWN, maxTacticalSwing + DELTA_SAFETY_MARGIN);
+            if (standPat + deltaMargin <= alphaBeforeStandPat) {
+                return alphaBeforeStandPat;
+            }
+
+            moves = tacticalMoves;
+        } else {
+            moves = simulatorEngine.getAllLegalMoves();
+        }
 
         // Order moves (MVV-LVA, history, hash-move etc.)
         IntArrayList ordered = sortMovesByEfficiency(
@@ -2764,6 +2780,37 @@ public class AI {
     private IntArrayList getPossibleCapturesOrPromotions(Engine simulatorEngine) {
         IntArrayList allLegalMoves = simulatorEngine.getAllLegalMoves();
         return MoveContainerUtils.filterCapturesAndPromotions(allLegalMoves);
+    }
+
+    private boolean shouldSkipQuiescence(Engine simulatorEngine, boolean isWhitesTurn) {
+        GameState state = simulatorEngine.getGameState();
+        if (state.isTerminal()) {
+            return false;
+        }
+        if (isSideInCheck(simulatorEngine, isWhitesTurn)) {
+            return false;
+        }
+        IntArrayList tacticalMoves = getPossibleCapturesOrPromotions(simulatorEngine);
+        return tacticalMoves.isEmpty();
+    }
+
+    private double estimateMaxTacticalSwing(IntArrayList moves) {
+        double maxSwing = 0.0;
+        for (int i = 0; i < moves.size(); i++) {
+            int move = moves.getInt(i);
+            double swing = 0.0;
+            if (MoveHelper.isCapture(move)) {
+                swing += getPieceValue(MoveHelper.deriveCapturedPieceTypeBits(move));
+            }
+            if (MoveHelper.isPawnPromotionMove(move)) {
+                int promotionBits = MoveHelper.derivePromotionPieceTypeBits(move);
+                swing += Math.max(0, getPieceValue(promotionBits) - PAWN_VALUE);
+            }
+            if (swing > maxSwing) {
+                maxSwing = swing;
+            }
+        }
+        return maxSwing;
     }
 
     /**
