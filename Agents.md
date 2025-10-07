@@ -115,6 +115,7 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
 ### AI search & evaluation notes
 * Quiescence delta pruning now compares against the alpha window captured before the stand-pat update. Earlier builds raised `alpha` first, which meant `standPat + Δ < alpha` never triggered and the pruning shortcut was effectively disabled.
 * Static evaluation adds a lightweight knight placement adjustment (central bonuses) plus a tempo tie-breaker on top of the pipeline score. Future positional tweaks should extend `computePositionalAdjustment` so the orientation logic stays centralised.
+* Aspiration windows now derive their initial span from recent score volatility and decay as searches stabilise. Repeated fail-high/low streaks widen the relevant side of the window more aggressively before conceding to a full-window retry, reducing the number of depth≥3 re-searches that fall back immediately to `(-∞, +∞)`.
 
 ### 2025-10-07 Time management + evaluation notes
 * The engine now relies on `TimeManager` (under `ai/time/`) for soft/hard deadlines. Update UCI tests to expect the bullet promotion allocation of **250ms** (the Java planner now mirrors the conservative reserves used in `src/main/resources/py/lichess_bot.py`). Document any future tuning against that Python helper here so the two stay aligned.
