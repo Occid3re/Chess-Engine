@@ -691,6 +691,7 @@ public class AI {
     private void iterativeDeepening(SearchTask task, Engine simulatorEngine, SplittableRandom rng) {
         Double lastIterScore = null;
         Heuristics heuristics = threadHeuristics.get();
+        AspirationController aspirationController = new AspirationController();
 
         for (int currentDepth = 1; currentDepth <= maxDepth; currentDepth++) {
             if (shouldStopCalculating(task)) break;
@@ -699,16 +700,15 @@ public class AI {
             prepareIterationState(task, heuristics, currentDepth, firstAtDepth);
 
             RootSearchResult result = null;
+            boolean usedFullWindow = false;
+            boolean attemptedAspiration = false;
 
             if (lastIterScore != null && currentDepth >= 3) {
-                double window = 50.0;
-                if (rng != null) window = Math.max(10.0, window + rng.nextDouble(-10.0, 10.0));
-
-                double alpha = lastIterScore - window;
-                double beta = lastIterScore + window;
-
-                int retries = 0;
-                boolean didFullWindow = false;
+                attemptedAspiration = true;
+                AspirationController.State aspirationState =
+                        aspirationController.beginDepth(currentDepth, lastIterScore, rng);
+                double alpha = aspirationState.alpha();
+                double beta = aspirationState.beta();
 
                 while (!shouldStopCalculating(task)) {
                     result = searchRootMoves(simulatorEngine, task, currentDepth, alpha, beta, rng);
@@ -717,33 +717,35 @@ public class AI {
                     MoveAndScore candidate = result.bestMove();
                     if (!result.isCompleted()) break;
 
-                    // fail-low
                     if (candidate.score <= alpha) {
-                        if (!didFullWindow && retries++ >= 3) {
+                        AspirationController.Adjustment adjustment =
+                                aspirationController.onFailLow(candidate.score);
+                        if (adjustment.isFullWindow()) {
                             alpha = Double.NEGATIVE_INFINITY;
-                            beta = Double.POSITIVE_INFINITY; // retry once with full window
-                            didFullWindow = true;
+                            beta = Double.POSITIVE_INFINITY;
+                            usedFullWindow = true;
                             continue;
                         }
-                        window *= 2.0;
-                        alpha = candidate.score - window;
+                        alpha = adjustment.alpha();
+                        beta = adjustment.beta();
                         continue;
                     }
 
-                    // fail-high
                     if (candidate.score >= beta) {
-                        if (!didFullWindow && retries++ >= 3) {
+                        AspirationController.Adjustment adjustment =
+                                aspirationController.onFailHigh(candidate.score);
+                        if (adjustment.isFullWindow()) {
                             alpha = Double.NEGATIVE_INFINITY;
-                            beta = Double.POSITIVE_INFINITY; // retry once with full window
-                            didFullWindow = true;
+                            beta = Double.POSITIVE_INFINITY;
+                            usedFullWindow = true;
                             continue;
                         }
-                        window *= 2.0;
-                        beta = candidate.score + window;
+                        alpha = adjustment.alpha();
+                        beta = adjustment.beta();
                         continue;
                     }
 
-                    // inside window => good; stop re-searching
+                    aspirationController.onSuccess(candidate.score);
                     break;
                 }
             }
@@ -751,6 +753,9 @@ public class AI {
             if (result == null || !result.hasCandidate()) {
                 result = searchRootMoves(simulatorEngine, task, currentDepth,
                         Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, rng);
+                if (attemptedAspiration) {
+                    usedFullWindow = true;
+                }
             }
 
             if (!result.hasCandidate()) {
@@ -772,6 +777,7 @@ public class AI {
             }
 
             lastIterScore = sealed.score;
+            aspirationController.finishIteration(sealed.score, attemptedAspiration, usedFullWindow);
             task.publishBest(sealed, currentDepth, simulatorEngine);
 
             if (heuristics.hasUpdates()) mergeThreadHeuristics(heuristics);
@@ -2752,6 +2758,276 @@ public class AI {
         int victimValue = Score.getPieceValue(MoveHelper.deriveCapturedPieceTypeBits(move));
         int attackerValue = Score.getPieceValue(MoveHelper.derivePieceTypeBits(move));
         return victimValue - attackerValue;
+    }
+
+    private static final class AspirationController {
+        private static final int MAX_HISTORY = 8;
+        private static final double MIN_SPAN = 12.0;
+        private static final double MAX_SPAN = 800.0;
+
+        private final Deque<Double> recentScores = new ArrayDeque<>(MAX_HISTORY);
+
+        private double lastWindowSpan = 50.0;
+        private int failLowMomentum;
+        private int failHighMomentum;
+        private State currentState;
+
+        AspirationController() {
+        }
+
+        State beginDepth(int depth, double lastScore, SplittableRandom rng) {
+            double volatility = estimateVolatility();
+            double swing = estimateAverageSwing();
+            double baseSpan = computeBaseSpan(depth, volatility, swing);
+            if (rng != null) {
+                double jitter = rng.nextDouble(-5.0, 5.0);
+                baseSpan = clampSpan(baseSpan + jitter);
+            }
+            double lower = clampSpan(baseSpan * (1.0 + 0.18 * failLowMomentum));
+            double upper = clampSpan(baseSpan * (1.0 + 0.18 * failHighMomentum));
+            int maxRetries = computeMaxRetries(depth, volatility);
+            currentState = new State(depth, lastScore, lower, upper, maxRetries);
+            return currentState;
+        }
+
+        Adjustment onFailLow(double candidateScore) {
+            if (currentState == null) {
+                return Adjustment.fullWindow();
+            }
+            currentState.retries++;
+            currentState.failLowStreak++;
+            currentState.failHighStreak = 0;
+            failLowMomentum = Math.min(8, failLowMomentum + 1);
+            failHighMomentum = Math.max(0, failHighMomentum - 1);
+
+            double volatility = estimateVolatility();
+            double floor = clampSpan((volatility * (1.1 + 0.1 * currentState.failLowStreak)) + 12.0);
+            double growth = 1.35 + 0.25 * currentState.failLowStreak + 0.05 * Math.max(0, currentState.depth - 3);
+            double historyBoost = 1.0 + 0.12 * failLowMomentum;
+            currentState.lowerSpan = clampSpan(Math.max(currentState.lowerSpan * growth, floor) * historyBoost);
+            currentState.center = Math.min(currentState.center, candidateScore);
+            currentState.upperSpan = Math.max(currentState.upperSpan, currentState.lowerSpan * 0.7);
+
+            if (currentState.retries >= currentState.maxRetries) {
+                return Adjustment.fullWindow();
+            }
+            return Adjustment.window(currentState.alpha(), currentState.beta());
+        }
+
+        Adjustment onFailHigh(double candidateScore) {
+            if (currentState == null) {
+                return Adjustment.fullWindow();
+            }
+            currentState.retries++;
+            currentState.failHighStreak++;
+            currentState.failLowStreak = 0;
+            failHighMomentum = Math.min(8, failHighMomentum + 1);
+            failLowMomentum = Math.max(0, failLowMomentum - 1);
+
+            double volatility = estimateVolatility();
+            double floor = clampSpan((volatility * (1.1 + 0.1 * currentState.failHighStreak)) + 12.0);
+            double growth = 1.35 + 0.25 * currentState.failHighStreak + 0.05 * Math.max(0, currentState.depth - 3);
+            double historyBoost = 1.0 + 0.12 * failHighMomentum;
+            currentState.upperSpan = clampSpan(Math.max(currentState.upperSpan * growth, floor) * historyBoost);
+            currentState.center = Math.max(currentState.center, candidateScore);
+            currentState.lowerSpan = Math.max(currentState.lowerSpan, currentState.upperSpan * 0.7);
+
+            if (currentState.retries >= currentState.maxRetries) {
+                return Adjustment.fullWindow();
+            }
+            return Adjustment.window(currentState.alpha(), currentState.beta());
+        }
+
+        void onSuccess(double bestScore) {
+            if (currentState == null) {
+                return;
+            }
+            currentState.center = bestScore;
+            currentState.success = true;
+            currentState.failHighStreak = 0;
+            currentState.failLowStreak = 0;
+            failLowMomentum = Math.max(0, failLowMomentum - 1);
+            failHighMomentum = Math.max(0, failHighMomentum - 1);
+        }
+
+        void finishIteration(double score, boolean attemptedAspiration, boolean usedFullWindow) {
+            if (attemptedAspiration) {
+                double candidateSpan = Double.NaN;
+                if (currentState != null) {
+                    candidateSpan = (currentState.lowerSpan + currentState.upperSpan) * 0.5;
+                    if (usedFullWindow) {
+                        lastWindowSpan = adjustAfterFullWindow(candidateSpan);
+                    } else if (currentState.success) {
+                        lastWindowSpan = blendSpan(lastWindowSpan, candidateSpan);
+                    }
+                } else if (usedFullWindow) {
+                    lastWindowSpan = adjustAfterFullWindow(lastWindowSpan);
+                }
+                if (!usedFullWindow && currentState != null && !currentState.success) {
+                    lastWindowSpan = blendSpan(lastWindowSpan, candidateSpan);
+                }
+            } else {
+                lastWindowSpan = blendSpan(lastWindowSpan, lastWindowSpan);
+            }
+            pushScore(score);
+            currentState = null;
+        }
+
+        private double computeBaseSpan(int depth, double volatility, double swing) {
+            double baseline = 28.0 + 0.5 * swing + 1.15 * volatility;
+            if (lastWindowSpan > 0.0 && Double.isFinite(lastWindowSpan)) {
+                baseline = 0.55 * baseline + 0.45 * lastWindowSpan;
+            }
+            double depthFactor = 1.0 + 0.08 * Math.max(0, depth - 3);
+            baseline *= depthFactor;
+            return clampSpan(baseline);
+        }
+
+        private int computeMaxRetries(int depth, double volatility) {
+            int base = 4;
+            if (volatility > 60.0) {
+                base += 2;
+            } else if (volatility > 25.0) {
+                base += 1;
+            }
+            base += Math.max(0, depth - 4) / 2;
+            base += Math.max(failLowMomentum, failHighMomentum) / 2;
+            return Math.min(10, Math.max(3, base));
+        }
+
+        private void pushScore(double score) {
+            if (!Double.isFinite(score)) {
+                return;
+            }
+            if (recentScores.size() == MAX_HISTORY) {
+                recentScores.removeFirst();
+            }
+            recentScores.addLast(score);
+        }
+
+        private double estimateVolatility() {
+            if (recentScores.size() < 2) {
+                return 0.0;
+            }
+            double mean = 0.0;
+            for (double score : recentScores) {
+                mean += score;
+            }
+            mean /= recentScores.size();
+            double variance = 0.0;
+            for (double score : recentScores) {
+                double diff = score - mean;
+                variance += diff * diff;
+            }
+            variance /= (recentScores.size() - 1);
+            return Math.sqrt(Math.max(variance, 0.0));
+        }
+
+        private double estimateAverageSwing() {
+            if (recentScores.size() < 2) {
+                return 0.0;
+            }
+            Iterator<Double> it = recentScores.iterator();
+            double prev = it.next();
+            double total = 0.0;
+            int count = 0;
+            while (it.hasNext()) {
+                double current = it.next();
+                total += Math.abs(current - prev);
+                prev = current;
+                count++;
+            }
+            return count == 0 ? 0.0 : total / count;
+        }
+
+        private static double clampSpan(double span) {
+            if (Double.isNaN(span) || Double.isInfinite(span)) {
+                return 50.0;
+            }
+            return Math.max(MIN_SPAN, Math.min(MAX_SPAN, span));
+        }
+
+        private double blendSpan(double baseline, double candidate) {
+            if (!Double.isFinite(candidate) || candidate <= 0.0) {
+                return baseline;
+            }
+            if (!Double.isFinite(baseline) || baseline <= 0.0) {
+                return clampSpan(candidate);
+            }
+            return clampSpan(baseline * 0.6 + candidate * 0.4);
+        }
+
+        private double adjustAfterFullWindow(double candidate) {
+            double base = candidate;
+            if (!Double.isFinite(base) || base <= 0.0) {
+                base = Math.max(lastWindowSpan, 60.0);
+            }
+            double scaled = clampSpan(base * 1.1);
+            if (!Double.isFinite(lastWindowSpan) || lastWindowSpan <= 0.0) {
+                return scaled;
+            }
+            return Math.max(clampSpan(lastWindowSpan * 1.05), scaled);
+        }
+
+        private static final class State {
+            final int depth;
+            double center;
+            double lowerSpan;
+            double upperSpan;
+            final int maxRetries;
+            int retries;
+            int failLowStreak;
+            int failHighStreak;
+            boolean success;
+
+            State(int depth, double center, double lowerSpan, double upperSpan, int maxRetries) {
+                this.depth = depth;
+                this.center = center;
+                this.lowerSpan = lowerSpan;
+                this.upperSpan = upperSpan;
+                this.maxRetries = maxRetries;
+            }
+
+            double alpha() {
+                return center - lowerSpan;
+            }
+
+            double beta() {
+                return center + upperSpan;
+            }
+        }
+
+        static final class Adjustment {
+            private final double alpha;
+            private final double beta;
+            private final boolean fullWindow;
+
+            private Adjustment(double alpha, double beta, boolean fullWindow) {
+                this.alpha = alpha;
+                this.beta = beta;
+                this.fullWindow = fullWindow;
+            }
+
+            static Adjustment window(double alpha, double beta) {
+                return new Adjustment(alpha, beta, false);
+            }
+
+            static Adjustment fullWindow() {
+                return new Adjustment(Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, true);
+            }
+
+            double alpha() {
+                return alpha;
+            }
+
+            double beta() {
+                return beta;
+            }
+
+            boolean isFullWindow() {
+                return fullWindow;
+            }
+        }
     }
 
     private static final class LockMetrics {
