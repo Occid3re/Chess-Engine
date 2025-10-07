@@ -192,22 +192,28 @@ public final class TimeManager {
             return adjusted;
         }
 
-        long movesToGo = request.movesToGo() > 0
-                ? request.movesToGo()
-                : estimateMovesToGo(request.timeLeftMillis(), request.incrementMillis());
-        if (movesToGo <= 0) {
-            movesToGo = 1;
+        long timeLeft = Math.max(0L, request.timeLeftMillis());
+        long increment = Math.max(0L, request.incrementMillis());
+        long overhead = Math.max(0L, request.moveOverheadMillis());
+
+        long available = timeLeft > overhead ? timeLeft - overhead : 0L;
+        if (available <= 0L) {
+            return 1L;
         }
 
-        long share = request.timeLeftMillis() > 0 ? request.timeLeftMillis() / movesToGo : 0;
-        long allocation = share + request.incrementMillis() - request.moveOverheadMillis();
+        TimeProfile profile = TimeProfile.forRequest(timeLeft, increment, request.movesToGo());
+        int horizon = determineHorizon(profile, request, timeLeft, increment);
 
-        if (request.timeLeftMillis() > request.moveOverheadMillis()) {
-            long cap = request.timeLeftMillis() - request.moveOverheadMillis();
-            if (allocation > cap) {
-                allocation = cap;
-            }
-        }
+        double share = available / (double) Math.max(1, horizon);
+        double incContribution = increment * profile.incrementScale();
+
+        long reserve = computeReserveMillis(profile, available, horizon, increment);
+        long cap = Math.max(1L, available - reserve);
+        long floor = Math.min(cap, Math.max(1L, profile.floorMillis()));
+
+        long allocation = Math.round(share * profile.shareScale() + incContribution);
+        allocation = Math.max(floor, Math.min(cap, allocation));
+
         return Math.max(1L, allocation);
     }
 
@@ -222,5 +228,90 @@ public final class TimeManager {
             return 40;
         }
         return 30;
+    }
+
+    private static int determineHorizon(TimeProfile profile,
+                                        Request request,
+                                        long timeLeft,
+                                        long increment) {
+        if (request.movesToGo() > 0) {
+            return Math.max(1, request.movesToGo());
+        }
+        int estimate = (int) Math.max(1L, estimateMovesToGo(timeLeft, increment));
+        if (profile.fallbackMoves() > 0) {
+            estimate = Math.max(estimate, profile.fallbackMoves());
+        }
+        return estimate;
+    }
+
+    private static long computeReserveMillis(TimeProfile profile,
+                                             long available,
+                                             int horizon,
+                                             long increment) {
+        double stageRatio = profile.stageReferenceMoves() > 0
+                ? Math.min(1.0, Math.max(0.0, horizon / (double) profile.stageReferenceMoves()))
+                : 1.0;
+        double reserveFraction = Math.max(profile.minReserveFraction(), profile.baseReserveFraction() * stageRatio);
+        long reserve = (long) Math.ceil(available * reserveFraction);
+        if (reserve < profile.minReserveMillis()) {
+            reserve = profile.minReserveMillis();
+        }
+        if (increment > 0L) {
+            long incrementRelief = Math.min(available, Math.round(increment * profile.incrementReserveRelief()));
+            reserve = Math.max(profile.minReserveMillis(), reserve - incrementRelief);
+        }
+        if (reserve >= available) {
+            reserve = Math.max(0L, available - 1L);
+        }
+        return reserve;
+    }
+
+    private enum TimeControlBucket {
+        BULLET,
+        BLITZ,
+        RAPID,
+        CLASSICAL;
+
+        static TimeControlBucket classify(long timeLeftMillis, long incrementMillis, int movesToGo) {
+            long horizon = Math.max(0L, timeLeftMillis);
+            if (incrementMillis > 0L) {
+                int moves = movesToGo > 0 ? movesToGo : 20;
+                long incrementHorizon = Math.min(720_000L, incrementMillis * (long) Math.max(20, moves));
+                horizon = Math.min(Long.MAX_VALUE / 2L, horizon + incrementHorizon);
+            }
+            if (horizon <= 90_000L) {
+                return BULLET;
+            }
+            if (horizon <= 540_000L) {
+                return BLITZ;
+            }
+            if (horizon <= 1_800_000L) {
+                return RAPID;
+            }
+            return CLASSICAL;
+        }
+    }
+
+    private record TimeProfile(TimeControlBucket bucket,
+                               double shareScale,
+                               double incrementScale,
+                               double baseReserveFraction,
+                               double minReserveFraction,
+                               double incrementReserveRelief,
+                               long minReserveMillis,
+                               long floorMillis,
+                               int fallbackMoves,
+                               int stageReferenceMoves) {
+
+        static TimeProfile forRequest(long timeLeftMillis, long incrementMillis, int movesToGo) {
+            TimeControlBucket bucket = TimeControlBucket.classify(timeLeftMillis, incrementMillis, movesToGo);
+            return switch (bucket) {
+                case BULLET -> new TimeProfile(bucket, 0.50, 0.50, 0.35, 0.18, 0.35, 80L, 120L, 48, 48);
+                case BLITZ -> new TimeProfile(bucket, 0.75, 0.65, 0.25, 0.12, 0.30, 120L, 200L, 36, 36);
+                case RAPID -> new TimeProfile(bucket, 0.85, 0.75, 0.18, 0.08, 0.25, 180L, 260L, 30, 32);
+                case CLASSICAL -> new TimeProfile(bucket, 0.95, 0.80, 0.12, 0.05, 0.20, 220L, 320L, 24, 28);
+            };
+        }
+
     }
 }

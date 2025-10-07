@@ -21,7 +21,7 @@ class UciTimeManagementTest {
         TimeManager manager = new TimeManager(5_000L);
         manager.submit(new TimeManager.Request(60_000L, 0L, 0L, 0, 0, false));
         TimeManager.TimeBudget budget = manager.beginSearch();
-        assertEquals(1_000L, budget.allocationMillis());
+        assertEquals(500L, budget.allocationMillis());
     }
 
     @Test
@@ -45,7 +45,7 @@ class UciTimeManagementTest {
         TimeManager manager = new TimeManager(5_000L);
         manager.submit(new TimeManager.Request(300L, 5_000L, 0L, 0, 0, false));
         TimeManager.TimeBudget budget = manager.beginSearch();
-        assertEquals(300L, budget.allocationMillis());
+        assertEquals(180L, budget.allocationMillis());
     }
 
     @Test
@@ -59,6 +59,6 @@ class UciTimeManagementTest {
         TimeManager.TimeBudget promoted = manager.promotePonderHit();
         assertFalse(promoted.isPonder());
         assertTrue(promoted.hardDeadlineNanos() < Long.MAX_VALUE);
-        assertEquals(500L, promoted.allocationMillis());
+        assertEquals(250L, promoted.allocationMillis());
     }
 }
