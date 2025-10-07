@@ -4,7 +4,7 @@ import julius.game.chessengine.board.ImmutableBoardView;
 import julius.game.chessengine.helper.PawnHelper;
 import julius.game.chessengine.tuning.Tuning;
 
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 
@@ -69,7 +69,15 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         }
     }
 
-    private final Map<PawnStructureKey, CachedStructure> structureCache = new HashMap<>();
+    private static final int MAX_STRUCTURE_CACHE_SIZE = 4096;
+
+    private final Map<PawnStructureKey, CachedStructure> structureCache = new LinkedHashMap<>(256, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<PawnStructureKey, CachedStructure> eldest) {
+            return size() > MAX_STRUCTURE_CACHE_SIZE;
+        }
+    };
+    private final PawnStructureKey lookupKey = new PawnStructureKey();
 
     private int midgameScoreCache;
     private int endgameScoreCache;
@@ -260,15 +268,22 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
     }
 
     private CachedStructure getStructure(long whitePawns, long blackPawns) {
-        PawnStructureKey key = new PawnStructureKey(whitePawns, blackPawns);
-        return structureCache.computeIfAbsent(key, k -> new CachedStructure(
+        PawnStructureKey key = lookupKey.set(whitePawns, blackPawns);
+        CachedStructure cached = structureCache.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        PawnStructureKey storedKey = new PawnStructureKey(whitePawns, blackPawns);
+        CachedStructure structure = new CachedStructure(
                 whitePawns,
                 blackPawns,
                 centerPawnBonus,
                 doubledPawnPenalty,
                 isolatedPawnPenalty,
                 connectedPawnBonus,
-                pawnIslandPenalty));
+                pawnIslandPenalty);
+        structureCache.put(storedKey, structure);
+        return structure;
     }
 
     private int calculatePawnAdvanceBonus(long pawns, long allPieces, long enemyAttacks, boolean isWhite) {
@@ -406,15 +421,24 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         return value << 1;
     }
 
-    private static final class PawnStructureKey {
-        private final long white;
-        private final long black;
-        private final int hash;
+    private static class PawnStructureKey {
+        private long white;
+        private long black;
+        private int hash;
+
+        private PawnStructureKey() {
+            this(0L, 0L);
+        }
 
         private PawnStructureKey(long white, long black) {
+            set(white, black);
+        }
+
+        private PawnStructureKey set(long white, long black) {
             this.white = white;
             this.black = black;
             this.hash = computeHash(white, black);
+            return this;
         }
 
         private static int computeHash(long white, long black) {

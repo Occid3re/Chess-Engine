@@ -49,7 +49,7 @@ public final class KingSafetyModule implements EvaluationModule {
     private final int[] attackWeights = new int[7];
 
     private final SideState[] sideStates = {new SideState(), new SideState()};
-    private KingSafetyView currentView = KingSafetyView.empty();
+    private final KingSafetyView currentView = new KingSafetyView();
     private boolean initialized;
     private boolean dirty = true;
     private int midgameScoreCache;
@@ -146,7 +146,7 @@ public final class KingSafetyModule implements EvaluationModule {
             }
             midgameScoreCache = 0;
             endgameScoreCache = 0;
-            currentView = KingSafetyView.empty();
+            currentView.reset();
             dirty = false;
             return currentView;
         }
@@ -558,11 +558,11 @@ public final class KingSafetyModule implements EvaluationModule {
         int blackEnd = sideStates[BLACK].endgameKingSafety + sideStates[BLACK].endgameQueenPenalty;
         midgameScoreCache = whiteMid - blackMid;
         endgameScoreCache = whiteEnd - blackEnd;
-        currentView = new KingSafetyView(
-                PhaseScore.of(sideStates[WHITE].midgameKingSafety, sideStates[WHITE].endgameKingSafety),
-                PhaseScore.of(sideStates[BLACK].midgameKingSafety, sideStates[BLACK].endgameKingSafety),
-                PhaseScore.of(sideStates[WHITE].midgameQueenPenalty, sideStates[WHITE].endgameQueenPenalty),
-                PhaseScore.of(sideStates[BLACK].midgameQueenPenalty, sideStates[BLACK].endgameQueenPenalty)
+        currentView.update(
+                sideStates[WHITE].midgameKingSafety, sideStates[WHITE].endgameKingSafety,
+                sideStates[BLACK].midgameKingSafety, sideStates[BLACK].endgameKingSafety,
+                sideStates[WHITE].midgameQueenPenalty, sideStates[WHITE].endgameQueenPenalty,
+                sideStates[BLACK].midgameQueenPenalty, sideStates[BLACK].endgameQueenPenalty
         );
     }
 
@@ -571,22 +571,23 @@ public final class KingSafetyModule implements EvaluationModule {
     }
 
     public static final class KingSafetyView {
-        private final PhaseScore whiteKing;
-        private final PhaseScore blackKing;
-        private final PhaseScore whiteQueen;
-        private final PhaseScore blackQueen;
+        private final PhaseScore whiteKing = new PhaseScore();
+        private final PhaseScore blackKing = new PhaseScore();
+        private final PhaseScore whiteQueen = new PhaseScore();
+        private final PhaseScore blackQueen = new PhaseScore();
 
-        private KingSafetyView(PhaseScore whiteKing, PhaseScore blackKing,
-                               PhaseScore whiteQueen, PhaseScore blackQueen) {
-            this.whiteKing = whiteKing;
-            this.blackKing = blackKing;
-            this.whiteQueen = whiteQueen;
-            this.blackQueen = blackQueen;
+        private void update(int whiteKingMid, int whiteKingEnd,
+                             int blackKingMid, int blackKingEnd,
+                             int whiteQueenMid, int whiteQueenEnd,
+                             int blackQueenMid, int blackQueenEnd) {
+            whiteKing.update(whiteKingMid, whiteKingEnd);
+            blackKing.update(blackKingMid, blackKingEnd);
+            whiteQueen.update(whiteQueenMid, whiteQueenEnd);
+            blackQueen.update(blackQueenMid, blackQueenEnd);
         }
 
-        public static KingSafetyView empty() {
-            PhaseScore zero = PhaseScore.of(0, 0);
-            return new KingSafetyView(zero, zero, zero, zero);
+        private void reset() {
+            update(0, 0, 0, 0, 0, 0, 0, 0);
         }
 
         public PhaseScore whiteKing() {
@@ -623,16 +624,15 @@ public final class KingSafetyModule implements EvaluationModule {
     }
 
     public static final class PhaseScore {
-        private final int midgame;
-        private final int endgame;
+        private int midgame;
+        private int endgame;
 
-        private PhaseScore(int midgame, int endgame) {
-            this.midgame = midgame;
-            this.endgame = endgame;
+        private PhaseScore() {
         }
 
-        public static PhaseScore of(int midgame, int endgame) {
-            return new PhaseScore(midgame, endgame);
+        private void update(int midgame, int endgame) {
+            this.midgame = midgame;
+            this.endgame = endgame;
         }
 
         public int blend(int phase) {
