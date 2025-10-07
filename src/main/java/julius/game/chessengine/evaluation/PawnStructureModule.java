@@ -406,7 +406,15 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         return value << 1;
     }
 
-    private record PawnStructureKey(long white, long black) { }
+    private record PawnStructureKey(long white, long black) {
+
+        @Override
+        public int hashCode() {
+            int whiteHash = Long.hashCode(white);
+            int blackHash = Long.hashCode(black);
+            return 31 * whiteHash + blackHash;
+        }
+    }
 
     private static final class CachedStructure {
         private final int whiteCenterPawnBonus;
