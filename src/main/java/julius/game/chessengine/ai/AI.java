@@ -58,7 +58,7 @@ public class AI {
     private static final int SEE_PRUNE_NEAR_ROOT_PLY = 2;
     private static final int ABS_PLY_LIMIT_MARGIN = 32;
 
-    //Quiescence search parameters
+    // Quiescence search parameters (base fallback margin expressed in pawn units)
     private static final double MAX_DELTA_PAWN = 9.0;
 
 
@@ -2624,7 +2624,13 @@ public class AI {
             return entry.getScore();
         }
 
-        double score = quiescenceSearch(simulatorEngine, isWhitesTurn, alpha, beta, deadline, 0);
+        double quietScore = evaluateStaticPosition(simulatorEngine.getGameState(), boardStateHash, isWhitesTurn, 0);
+        double score;
+        if (!hasWorthwhileQuiescenceTactics(simulatorEngine, isWhitesTurn)) {
+            score = quietScore;
+        } else {
+            score = quiescenceSearch(simulatorEngine, isWhitesTurn, alpha, beta, deadline, 0);
+        }
         if (score != EXIT_FLAG) {
             captureTranspositionTable.put(boardStateHash, new CaptureTranspositionTableEntry(score, isWhitesTurn), 0);
         }
@@ -2652,6 +2658,7 @@ public class AI {
 
         long boardHash = simulatorEngine.getBoardStateHash();
         double standPat = evaluateStaticPosition(simulatorEngine.getGameState(), boardHash, isWhitesTurn, depth);
+        double alphaBeforeStandPat = alpha;
 
         if (!inCheck) {
             // Fail-hard beta cut on stand-pat
@@ -2662,19 +2669,26 @@ public class AI {
             if (standPat > alpha) {
                 alpha = standPat;
             }
-
-            // Delta (futility-like) pruning in qsearch:
-            // If even the biggest plausible swing can't reach alpha, cut.
-            // (Disabled when in check, already guarded above.)
-            if (standPat + MAX_DELTA_PAWN <= alpha) {
-                return alpha;
-            }
         }
 
         // Move gen: evasions if in check; else captures/promotions (and optional checking moves if you add them)
         IntArrayList moves = inCheck
                 ? simulatorEngine.getAllLegalMoves()                // all evasions
                 : getPossibleCapturesOrPromotions(simulatorEngine);  // tactical moves only
+
+        if (!inCheck) {
+            if (moves.isEmpty()) {
+                return alpha;
+            }
+
+            double deltaMargin = computeQuiescenceDeltaMargin(moves);
+            // Delta (futility-like) pruning in qsearch:
+            // If even the biggest plausible swing can't reach the pre stand-pat alpha, cut.
+            // (Disabled when in check, already guarded above.)
+            if (standPat + deltaMargin <= alphaBeforeStandPat) {
+                return alpha;
+            }
+        }
 
         // Order moves (MVV-LVA, history, hash-move etc.)
         IntArrayList ordered = sortMovesByEfficiency(
@@ -2764,6 +2778,74 @@ public class AI {
     private IntArrayList getPossibleCapturesOrPromotions(Engine simulatorEngine) {
         IntArrayList allLegalMoves = simulatorEngine.getAllLegalMoves();
         return MoveContainerUtils.filterCapturesAndPromotions(allLegalMoves);
+    }
+
+    private double computeQuiescenceDeltaMargin(IntArrayList moves) {
+        if (moves.isEmpty()) {
+            return MAX_DELTA_PAWN;
+        }
+
+        double maxDelta = 0.0;
+        int pawnValue = Score.getPieceValue(1);
+        for (int i = 0; i < moves.size(); i++) {
+            int move = moves.getInt(i);
+            double delta = 0.0;
+            if (MoveHelper.isCapture(move)) {
+                int capturedType = MoveHelper.deriveCapturedPieceTypeBits(move);
+                if (capturedType != 0) {
+                    delta += Score.getPieceValue(capturedType);
+                }
+            }
+            if (MoveHelper.isPawnPromotionMove(move)) {
+                int promotionType = MoveHelper.derivePromotionPieceTypeBits(move);
+                if (promotionType != 0) {
+                    delta += Math.max(0, Score.getPieceValue(promotionType) - pawnValue);
+                }
+            }
+            if (delta > maxDelta) {
+                maxDelta = delta;
+            }
+        }
+
+        return Math.max(MAX_DELTA_PAWN, maxDelta);
+    }
+
+    private boolean hasWorthwhileQuiescenceTactics(Engine simulatorEngine, boolean isWhitesTurn) {
+        if (isSideInCheck(simulatorEngine, isWhitesTurn)) {
+            return true;
+        }
+
+        IntArrayList tacticalMoves = getPossibleCapturesOrPromotions(simulatorEngine);
+        if (tacticalMoves.isEmpty()) {
+            return false;
+        }
+
+        for (int i = 0; i < tacticalMoves.size(); i++) {
+            int move = tacticalMoves.getInt(i);
+            if (MoveHelper.isPawnPromotionMove(move)) {
+                return true;
+            }
+
+            if (!MoveHelper.isCapture(move)) {
+                continue;
+            }
+
+            int see = simulatorEngine.see(move);
+            if (see >= 0) {
+                return true;
+            }
+
+            if (see < 0 && !simulatorEngine.getGameState().isTerminal()) {
+                simulatorEngine.performMove(move);
+                boolean givesCheck = isSideInCheck(simulatorEngine, !isWhitesTurn);
+                simulatorEngine.undoLastMove();
+                if (givesCheck) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
