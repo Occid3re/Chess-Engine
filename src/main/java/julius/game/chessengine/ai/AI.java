@@ -2785,8 +2785,7 @@ public class AI {
     }
 
     private boolean hasImmediateTacticalMoves(Engine simulatorEngine) {
-        IntArrayList allLegalMoves = simulatorEngine.getAllLegalMoves();
-        return MoveContainerUtils.hasCapturesOrPromotions(allLegalMoves);
+        return simulatorEngine.hasAnyCaptureOrPromotion();
     }
 
     private double estimateMaxTacticalSwing(IntArrayList moves) {

@@ -116,6 +116,15 @@ public class Engine {
         }
     }
 
+    public boolean hasAnyCaptureOrPromotion() {
+        synchronized (boardLock) {
+            if (gameState.isTerminal()) {
+                return false;
+            }
+            return bitBoard.hasAnyCaptureOrPromotion();
+        }
+    }
+
     public void performMove(int move) {
         long notifyHash; // sentinel: only notify if we actually set it
 
