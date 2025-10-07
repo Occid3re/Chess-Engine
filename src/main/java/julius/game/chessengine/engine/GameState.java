@@ -191,6 +191,10 @@ public class GameState {
         lastZobrist = hashHistory.isEmpty() ? 0L : hashHistory.getLong(hashHistory.size() - 1);
     }
 
+    public long getLastZobrist() {
+        return lastZobrist;
+    }
+
     public boolean isThreefoldRepetition() {
         return repetition.get(lastZobrist) >= 3;
     }
