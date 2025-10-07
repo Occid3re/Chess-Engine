@@ -1,6 +1,7 @@
 package julius.game.chessengine.ai;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
+import julius.game.chessengine.ai.time.TimeManager;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.Move;
 import julius.game.chessengine.board.MoveHelper;
@@ -11,7 +12,6 @@ import julius.game.chessengine.tuning.AiTuning;
 import julius.game.chessengine.tuning.MoveOrderingParameters;
 import julius.game.chessengine.utils.Score;
 import lombok.Getter;
-import lombok.Setter;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Component;
 
@@ -258,9 +258,7 @@ public class AI {
     @Getter
     private int maxDepth = 32; // Adjust the level of depth according to your requirements
 
-    @Getter
-    @Setter
-    private long timeLimit; // milliseconds
+    private final TimeManager timeManager;
 
     private boolean useNullMovePruning = Boolean.parseBoolean(
             System.getProperty("chessengine.nullMove", "true")
@@ -282,7 +280,7 @@ public class AI {
         this.lazySmpThreads = Math.max(1, this.tuning.lazySmpThreads());
         this.hashSizeMb = this.tuning.hashSizeMb();
         this.maxDepth = this.tuning.maxDepth();
-        this.timeLimit = this.tuning.timeLimitMillis();
+        this.timeManager = new TimeManager(this.tuning.timeLimitMillis());
         this.useNullMovePruning = this.tuning.nullMovePruning();
 
         log.info("### SearchThreads = {}, LazySmpThreads = {}", searchThreads, lazySmpThreads);
@@ -541,6 +539,30 @@ public class AI {
         this.maxDepth = requestedDepth;
     }
 
+    public void setTimeLimit(long timeLimitMillis) {
+        timeManager.setDefaultPerMoveMillis(Math.max(1L, timeLimitMillis));
+    }
+
+    public long getTimeLimit() {
+        return timeManager.getDefaultPerMoveMillis();
+    }
+
+    public void submitTimeRequest(TimeManager.Request request) {
+        timeManager.submit(request);
+    }
+
+    public void promotePonderHit() {
+        TimeManager.TimeBudget budget = timeManager.promotePonderHit();
+        SearchTask task = activeSearch.get();
+        if (task != null && budget != null) {
+            task.updateBudget(budget);
+        }
+    }
+
+    public TimeManager.TimeBudget getActiveTimeBudget() {
+        return timeManager.activeBudget();
+    }
+
 
     public Integer getCurrentBestMoveInt() {
         if (!searchResultReady) {
@@ -671,7 +693,7 @@ public class AI {
         Heuristics heuristics = threadHeuristics.get();
 
         for (int currentDepth = 1; currentDepth <= maxDepth; currentDepth++) {
-            if (shouldStopCalculating(task.getDeadline())) break;
+            if (shouldStopCalculating(task)) break;
 
             boolean firstAtDepth = task.beginIteration(currentDepth);
             prepareIterationState(task, heuristics, currentDepth, firstAtDepth);
@@ -688,7 +710,7 @@ public class AI {
                 int retries = 0;
                 boolean didFullWindow = false;
 
-                while (!shouldStopCalculating(task.getDeadline())) {
+                while (!shouldStopCalculating(task)) {
                     result = searchRootMoves(simulatorEngine, task, currentDepth, alpha, beta, rng);
                     if (!result.hasCandidate()) break;
 
@@ -847,20 +869,18 @@ public class AI {
 
     protected RootSearchResult searchRootMoves(Engine sim, SearchTask task, int depth, double alpha, double beta, SplittableRandom rng) {
         if (searchThreads > 1) {
-            return getBestMoveParallel(sim, task, depth, task.getDeadline(), alpha, beta, rng);
+            return getBestMoveParallel(sim, task, depth, task.getHardDeadline(), alpha, beta, rng);
         }
-        return getBestMove(sim, task.isWhiteToMove(), depth, task.getDeadline(), alpha, beta, rng);
+        return getBestMove(sim, task.isWhiteToMove(), depth, task.getHardDeadline(), alpha, beta, rng);
     }
 
     public synchronized MoveAndScore searchBestMoveBlocking(long timeLimitMillis) {
-        long previousTimeLimit = this.timeLimit;
-        if (timeLimitMillis > 0) {
-            this.timeLimit = timeLimitMillis;
-        }
         try {
             Engine simulatorEngine = mainEngine.createSimulation();
             long boardStateHash = simulatorEngine.getBoardStateHash();
-            long deadline = System.nanoTime() + this.timeLimit * 1_000_000L;
+            TimeManager.TimeBudget budget = (timeLimitMillis > 0)
+                    ? timeManager.beginSearchWithOverride(timeLimitMillis)
+                    : timeManager.beginSearch();
 
             SearchTask task;
             synchronized (searchConfigLock) {
@@ -877,7 +897,7 @@ public class AI {
                         searchIdGenerator.incrementAndGet(),
                         boardStateHash,
                         simulatorEngine.whitesTurn(),
-                        deadline,
+                        budget,
                         1,
                         simulatorEngine.createSimulation()
                 );
@@ -917,7 +937,6 @@ public class AI {
             return null;
         } finally {
             activeSearch.set(null);
-            this.timeLimit = previousTimeLimit;
         }
     }
 
@@ -1119,7 +1138,7 @@ public class AI {
             log.debug("boardStateBeforeCalculation {}, currentBoardState {}", beforeCalculationBoardState, currentBoardState);
 
             boolean isWhite = simulatorEngine.whitesTurn();
-            long deadline = System.nanoTime() + timeLimit * 1_000_000;
+            TimeManager.TimeBudget budget = timeManager.beginSearch();
             beforeCalculationBoardState = boardStateHash;
 
             int bookMove = mainEngine.getOpeningBook().getRandomMoveForBoardStateHash(boardStateHash);
@@ -1149,7 +1168,7 @@ public class AI {
                         searchIdGenerator.incrementAndGet(),
                         boardStateHash,
                         isWhite,
-                        deadline,
+                        budget,
                         lazySmpThreads,
                         rootSnapshot
                 );
@@ -1252,11 +1271,21 @@ public class AI {
         MoveContainerUtils.rotateLeft(moves, rotation);
     }
 
-    private boolean abortRequested(long deadline) {
+    private boolean abortRequested(long fallbackDeadline) {
         if (Thread.currentThread().isInterrupted()) return true;
-        if (System.nanoTime() > deadline) return true;
-        if (positionChanged()) return true;
         SearchTask t = threadSearchTask.get();
+        long hardDeadline = fallbackDeadline;
+        long softDeadline = Long.MAX_VALUE;
+        if (t != null) {
+            hardDeadline = t.getHardDeadline();
+            softDeadline = t.getSoftDeadline();
+        }
+        long now = System.nanoTime();
+        if (now >= hardDeadline) return true;
+        if (now >= softDeadline && t != null) {
+            t.requestStop();
+        }
+        if (positionChanged()) return true;
         return t != null && t.isStopRequested();
     }
 
@@ -1601,7 +1630,8 @@ public class AI {
     }
 
 
-    private boolean shouldStopCalculating(long deadline) {
+    private boolean shouldStopCalculating(SearchTask task) {
+        long deadline = task != null ? task.getHardDeadline() : Long.MAX_VALUE;
         return abortRequested(deadline);
     }
 

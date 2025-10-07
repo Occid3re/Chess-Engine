@@ -3,6 +3,7 @@ package julius.game.chessengine.uci;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.ai.AI;
 import julius.game.chessengine.ai.MoveAndScore;
+import julius.game.chessengine.ai.time.TimeManager;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
@@ -68,6 +69,10 @@ public class UciHandler {
             case "position" -> setPosition(tokens);
             case "go" -> go(tokens);
             case "stop" -> stop();
+            case "ponderhit" -> {
+                ai.promotePonderHit();
+                lastInfoNanos.set(0L);
+            }
             case "setoption" -> setOption(tokens);
             case "quit" -> {
                 stop();
@@ -230,51 +235,6 @@ public class UciHandler {
         return from + to;
     }
 
-    static long estimateMovesToGo(long timeLeft, long increment) {
-        if (timeLeft <= 0) {
-            return 1;
-        }
-        if (increment <= 0 && timeLeft <= 75_000) {
-            // Bullet-style controls burn through many moves with little time
-            return 60;
-        }
-        if (timeLeft <= 300_000) {
-            // Rapid/blitz without an explicit movestogo hint
-            return 40;
-        }
-        return 30;
-    }
-
-    static long computeTimeLimit(long timeLeft, long increment, long movetime, int movestogo, int overheadMs) {
-        if (movetime > 0) {
-            long adjusted = movetime - overheadMs;
-            if (timeLeft > overheadMs) {
-                long maxAvailable = timeLeft - overheadMs;
-                if (adjusted > maxAvailable) {
-                    adjusted = maxAvailable;
-                }
-            }
-            return Math.max(adjusted, 1);
-        }
-
-        long movesToGo = movestogo > 0 ? movestogo : estimateMovesToGo(timeLeft, increment);
-        if (movesToGo <= 0) {
-            movesToGo = 1;
-        }
-
-        long share = timeLeft > 0 ? timeLeft / movesToGo : 0;
-        long limit = share + increment - overheadMs;
-
-        if (timeLeft > overheadMs) {
-            long maxAvailable = timeLeft - overheadMs;
-            if (limit > maxAvailable) {
-                limit = maxAvailable;
-            }
-        }
-
-        return Math.max(limit, 1);
-    }
-
     private void go(String[] tokens) {
         // Stop any previous search thread
         stop();
@@ -282,8 +242,10 @@ public class UciHandler {
         long wtime = 0, btime = 0, winc = 0, binc = 0, movetime = 0;
         int depth = 0;
         int movestogo = 0;
+        boolean ponder = false;
         for (int i = 1; i < tokens.length; i++) {
             switch (tokens[i]) {
+                case "ponder" -> ponder = true;
                 case "wtime" -> wtime = Long.parseLong(tokens[++i]);
                 case "btime" -> btime = Long.parseLong(tokens[++i]);
                 case "winc" -> winc = Long.parseLong(tokens[++i]);
@@ -302,8 +264,19 @@ public class UciHandler {
         boolean whitesTurn = engine.whitesTurn();
         long timeLeft = whitesTurn ? wtime : btime;
         long inc = whitesTurn ? winc : binc;
-        long limit = computeTimeLimit(timeLeft, inc, movetime, movestogo, moveOverheadMs);
-        ai.setTimeLimit(limit);
+
+        boolean hasTimeSpec = movetime > 0 || wtime > 0 || btime > 0 || winc > 0 || binc > 0 || movestogo > 0;
+        if (hasTimeSpec || ponder) {
+            TimeManager.Request request = new TimeManager.Request(
+                    timeLeft,
+                    inc,
+                    movetime,
+                    movestogo,
+                    moveOverheadMs,
+                    ponder
+            );
+            ai.submitTimeRequest(request);
+        }
 
         lastInfoNanos.set(0L);
         searchThread = new Thread(() -> {

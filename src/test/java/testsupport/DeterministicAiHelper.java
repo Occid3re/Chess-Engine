@@ -36,20 +36,11 @@ public final class DeterministicAiHelper {
     }
 
     public static AutoCloseable withShortTimeLimit(AI ai, long millis) {
-        long previous;
-        try {
-            previous = (long) TestUtils.readField(ai, "timeLimit");
-            TestUtils.writeField(ai, "timeLimit", millis);
-        } catch (ReflectiveOperationException e) {
-            throw new IllegalStateException("Unable to adjust AI time limit", e);
-        }
+        long previous = ai.getTimeLimit();
+        ai.setTimeLimit(millis);
         log.debug("Temporary time limit set to {} ms", millis);
         return () -> {
-            try {
-                TestUtils.writeField(ai, "timeLimit", previous);
-            } catch (ReflectiveOperationException e) {
-                throw new IllegalStateException("Unable to restore AI time limit", e);
-            }
+            ai.setTimeLimit(previous);
         };
     }
 }
