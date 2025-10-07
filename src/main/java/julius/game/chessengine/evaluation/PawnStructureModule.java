@@ -23,21 +23,6 @@ import static julius.game.chessengine.helper.PawnMoveTables.PAWN_PUSHES;
  * can blend them consistently.
  */
 public final class PawnStructureModule implements EvaluationModule, MaterialModule.PawnChangeListener {
-
-    public static final int DEFAULT_CENTER_PAWN_BONUS = 15;
-    public static final int DEFAULT_PASSED_PAWN_BONUS = 60;
-    public static final int DEFAULT_CONNECTED_PAWN_BONUS = 8;
-    public static final int DEFAULT_PAWN_ISLAND_PENALTY = -5;
-    public static final int DEFAULT_DOUBLED_PAWN_PENALTY = -12;
-    public static final int DEFAULT_ISOLATED_PAWN_PENALTY = -10;
-    public static final int DEFAULT_ADVANCED_PAWN_BONUS = 8;
-    public static final int DEFAULT_BLOCKED_PAWN_PENALTY = -10;
-    public static final int DEFAULT_BACKWARD_PAWN_PENALTY = -12;
-    public static final int DEFAULT_OWN_KING_BLOCKS_PASSED_PAWN_PENALTY = -150;
-    public static final int DEFAULT_PASSED_PAWN_FREE_PATH_BONUS_PER_RANK = 12;
-    public static final int DEFAULT_ROOK_HALF_OPEN_FILE_BONUS = 15;
-    public static final int DEFAULT_ROOK_OPEN_FILE_BONUS = 25;
-
     private static final int WHITE = 0;
     private static final int BLACK = 1;
     private static final int PAWN = MoveHelper.pieceTypeToInt(PieceType.PAWN);
