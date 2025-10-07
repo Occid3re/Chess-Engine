@@ -13,6 +13,8 @@ import julius.game.chessengine.evaluation.MaterialModule;
 import julius.game.chessengine.evaluation.PawnStructureModule;
 import julius.game.chessengine.evaluation.KingSafetyModule.KingSafetyView;
 import julius.game.chessengine.evaluation.PawnStructureModule.PawnStructureView;
+import julius.game.chessengine.evaluation.SpaceControlModule;
+import julius.game.chessengine.evaluation.ThreatModule;
 import julius.game.chessengine.figures.PieceType;
 import org.junit.jupiter.api.Test;
 
@@ -169,7 +171,9 @@ public class ScoreEvaluationTest {
                 material,
                 pawns,
                 activity,
-                kingSafety
+                new SpaceControlModule(),
+                kingSafety,
+                new ThreatModule()
         ));
         pipeline.initialize(EvaluationContext.from(board, state));
         return new ScoreSnapshot(

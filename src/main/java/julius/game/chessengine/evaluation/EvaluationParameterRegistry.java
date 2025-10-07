@@ -22,6 +22,7 @@ public final class EvaluationParameterRegistry {
         initialize(PawnStructureModule.class);
         initialize(ActivityModule.class);
         initialize(KingSafetyModule.class);
+        initialize(SpaceControlModule.class);
         initialize(ThreatModule.class);
         initialize(EvaluationPipeline.class);
     }

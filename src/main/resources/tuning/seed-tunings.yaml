@@ -17,6 +17,9 @@ population:
         threatmodule:
           midgame: 1.0
           endgame: 1.0
+        spacecontrolmodule:
+          midgame: 1.0
+          endgame: 1.0
     numericParameters:
       evaluation.blendscale: 320
       material.pawnvalue: 100
@@ -47,6 +50,12 @@ population:
       threat.pawnthreatbishoppenalty: -12
       threat.pawnthreatrookpenalty: -22
       threat.pawnthreatqueenpenalty: -30
+      space.safesquaremidgame: 6
+      space.safesquareendgame: 4
+      space.outpostmidgame: 12
+      space.outpostendgame: 8
+      space.crampmidgame: 5
+      space.crampendgame: 3
       activity.midgamemobilityknight: 4
       activity.midgamemobilitybishop: 7
       activity.midgamemobilityrook: 3

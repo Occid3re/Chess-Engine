@@ -74,6 +74,13 @@ public final class Tuning {
     private static int pawnThreatRookPenalty;
     private static int pawnThreatQueenPenalty;
 
+    private static int spaceSafeSquareMidgame;
+    private static int spaceSafeSquareEndgame;
+    private static int spaceOutpostMidgame;
+    private static int spaceOutpostEndgame;
+    private static int spaceCrampMidgame;
+    private static int spaceCrampEndgame;
+
     private static int developmentPhaseThreshold;
     private static int queenDevelopmentPhaseThreshold;
     private static int undevelopedMinorPenalty;
@@ -341,6 +348,30 @@ public final class Tuning {
         return pawnThreatQueenPenalty;
     }
 
+    public static int spaceSafeSquareMidgame() {
+        return spaceSafeSquareMidgame;
+    }
+
+    public static int spaceSafeSquareEndgame() {
+        return spaceSafeSquareEndgame;
+    }
+
+    public static int spaceOutpostMidgame() {
+        return spaceOutpostMidgame;
+    }
+
+    public static int spaceOutpostEndgame() {
+        return spaceOutpostEndgame;
+    }
+
+    public static int spaceCrampMidgame() {
+        return spaceCrampMidgame;
+    }
+
+    public static int spaceCrampEndgame() {
+        return spaceCrampEndgame;
+    }
+
     public static int developmentPhaseThreshold() {
         return developmentPhaseThreshold;
     }
@@ -479,6 +510,13 @@ public final class Tuning {
             pawnThreatBishopPenalty = loadInt(ParamId.THREAT_PAWN_THREAT_BISHOP_PENALTY);
             pawnThreatRookPenalty = loadInt(ParamId.THREAT_PAWN_THREAT_ROOK_PENALTY);
             pawnThreatQueenPenalty = loadInt(ParamId.THREAT_PAWN_THREAT_QUEEN_PENALTY);
+
+            spaceSafeSquareMidgame = loadInt(ParamId.SPACE_SAFE_SQUARE_MIDGAME);
+            spaceSafeSquareEndgame = loadInt(ParamId.SPACE_SAFE_SQUARE_ENDGAME);
+            spaceOutpostMidgame = loadInt(ParamId.SPACE_OUTPOST_MIDGAME);
+            spaceOutpostEndgame = loadInt(ParamId.SPACE_OUTPOST_ENDGAME);
+            spaceCrampMidgame = loadInt(ParamId.SPACE_CRAMP_MIDGAME);
+            spaceCrampEndgame = loadInt(ParamId.SPACE_CRAMP_ENDGAME);
 
             evaluationBlendScale = loadInt(ParamId.EVALUATION_BLEND_SCALE);
 

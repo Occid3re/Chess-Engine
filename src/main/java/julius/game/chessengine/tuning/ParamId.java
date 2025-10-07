@@ -70,6 +70,13 @@ public enum ParamId {
     THREAT_PAWN_THREAT_ROOK_PENALTY("threat.pawnThreatRookPenalty", -18),
     THREAT_PAWN_THREAT_QUEEN_PENALTY("threat.pawnThreatQueenPenalty", -25),
 
+    SPACE_SAFE_SQUARE_MIDGAME("space.safeSquareMidgame", 6),
+    SPACE_SAFE_SQUARE_ENDGAME("space.safeSquareEndgame", 4),
+    SPACE_OUTPOST_MIDGAME("space.outpostMidgame", 12),
+    SPACE_OUTPOST_ENDGAME("space.outpostEndgame", 8),
+    SPACE_CRAMP_MIDGAME("space.crampMidgame", 5),
+    SPACE_CRAMP_ENDGAME("space.crampEndgame", 3),
+
     EVALUATION_BLEND_SCALE("evaluation.blendScale", 256, 1.0, 1024.0),
 
     MOVE_ORDERING_KILLER_MOVE_SCORE("moveOrdering.killerMoveScore", 10_000),

@@ -81,7 +81,13 @@ class EvaluationModuleTuningAlignmentTest {
                 Map.entry("activity.midgamemobilityknight", Tuning::activityMidgameKnightMobility),
                 Map.entry("kingsafety.missingpawnshieldpenalty", Tuning::missingPawnShieldPenalty),
                 Map.entry("kingsafety.attackweightqueen", Tuning::kingSafetyQueenAttackWeight),
-                Map.entry("evaluation.blendscale", Tuning::evaluationBlendScale)
+                Map.entry("evaluation.blendscale", Tuning::evaluationBlendScale),
+                Map.entry("space.safesquaremidgame", Tuning::spaceSafeSquareMidgame),
+                Map.entry("space.safesquareendgame", Tuning::spaceSafeSquareEndgame),
+                Map.entry("space.outpostmidgame", Tuning::spaceOutpostMidgame),
+                Map.entry("space.outpostendgame", Tuning::spaceOutpostEndgame),
+                Map.entry("space.crampmidgame", Tuning::spaceCrampMidgame),
+                Map.entry("space.crampendgame", Tuning::spaceCrampEndgame)
         );
 
         trackedParameters.forEach((key, supplier) -> {
@@ -263,6 +269,7 @@ class EvaluationModuleTuningAlignmentTest {
                 material,
                 pawnStructure,
                 new ActivityModule(),
+                new SpaceControlModule(),
                 new KingSafetyModule(),
                 new ThreatModule()
         );

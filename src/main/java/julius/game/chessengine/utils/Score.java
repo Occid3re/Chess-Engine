@@ -11,6 +11,7 @@ import julius.game.chessengine.evaluation.KingSafetyModule;
 import julius.game.chessengine.evaluation.MaterialModule;
 import julius.game.chessengine.evaluation.MoveContext;
 import julius.game.chessengine.evaluation.PawnStructureModule;
+import julius.game.chessengine.evaluation.SpaceControlModule;
 import julius.game.chessengine.evaluation.ThreatModule;
 import julius.game.chessengine.tuning.EngineTuningBootstrap;
 import julius.game.chessengine.tuning.MoveOrderingParameters;
@@ -43,6 +44,7 @@ public class Score {
     private final PawnStructureModule pawnStructureModule = new PawnStructureModule();
     private final ActivityModule activityModule = new ActivityModule();
     private final KingSafetyModule kingSafetyModule = new KingSafetyModule();
+    private final SpaceControlModule spaceControlModule = new SpaceControlModule();
     private final ThreatModule threatModule = new ThreatModule();
 
     @JsonIgnore
@@ -64,6 +66,7 @@ public class Score {
                 materialModule,
                 pawnStructureModule,
                 activityModule,
+                spaceControlModule,
                 kingSafetyModule,
                 threatModule
         ), this.weights);
