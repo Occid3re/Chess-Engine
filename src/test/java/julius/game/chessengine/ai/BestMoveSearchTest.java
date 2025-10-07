@@ -6,9 +6,6 @@ import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.tuning.AiTuning;
-import julius.game.chessengine.ai.MoveAndScore;
-import julius.game.chessengine.ai.TranspositionTable;
-import julius.game.chessengine.ai.TranspositionTableEntry;
 import julius.game.chessengine.utils.Score;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
@@ -48,8 +45,7 @@ import testsupport.TestReportWriter;
 public class BestMoveSearchTest {
 
     private static final SearchEnvironment SEARCH_ENVIRONMENT = SearchEnvironment.detect();
-    private static final int SEARCH_DEPTH = Math.max(1,
-            Integer.getInteger("chessengine.test.bestmove.depth", 8));
+    private static final int SEARCH_DEPTH = 4;
     private static final long UNBOUNDED_SEARCH_TIME_MILLIS = java.util.concurrent.TimeUnit.DAYS.toMillis(365L * 100L);
 
     private final List<DecisionStatistics> decisionSummaries = new ArrayList<>();
@@ -141,15 +137,19 @@ public class BestMoveSearchTest {
         analysisEngine.importBoardFromFen(fen);
 
         boolean whiteToMove = fen.split(" ")[1].equals("w");
-        double baselineForMover = orientScoreForMover(whiteToMove,
-                analysisEngine.getGameState().getScore().getScoreDifference());
+        double baselineForMover = orientScoreForMover(
+                whiteToMove,
+                analysisEngine.getGameState().getScore().getScoreDifference()
+        );
 
+        // Snapshot legal moves
         IntArrayList legalMovesSnapshot = analysisEngine.getAllLegalMoves();
         List<Integer> legalMoves = new ArrayList<>(legalMovesSnapshot.size());
         for (int i = 0; i < legalMovesSnapshot.size(); i++) {
             legalMoves.add(legalMovesSnapshot.getInt(i));
         }
 
+        // Build 0-ply static evaluations for each legal move (push once, read eval, undo)
         List<MoveEvaluation> evaluations = new ArrayList<>(legalMoves.size());
         Map<String, MoveEvaluation> evaluationMap = new HashMap<>(Math.max(legalMoves.size(), 1));
         for (int moveInt : legalMoves) {
@@ -157,23 +157,32 @@ public class BestMoveSearchTest {
             double scoreDiff = analysisEngine.getGameState().getScore().getScoreDifference();
             double moverScore = orientScoreForMover(whiteToMove, scoreDiff);
             analysisEngine.undoLastMove();
-            MoveEvaluation evaluation = new MoveEvaluation(Move.convertIntToMove(moveInt).toString(), moverScore);
+
+            String san = Move.convertIntToMove(moveInt).toString();
+            MoveEvaluation evaluation = new MoveEvaluation(san, moverScore);
             evaluations.add(evaluation);
-            evaluationMap.putIfAbsent(evaluation.move(), evaluation);
+            // Use the SAN as the key (consistent with how you lookups later)
+            evaluationMap.putIfAbsent(san, evaluation);
         }
 
+        // Sort static candidates best→worst for the mover
         Comparator<MoveEvaluation> comparator = whiteToMove
                 ? Comparator.comparingDouble(MoveEvaluation::score).reversed()
                 : Comparator.comparingDouble(MoveEvaluation::score);
         evaluations.sort(comparator);
 
+        // Chosen move:
+        // start with static score if present, but if we have a search result,
+        // override it so the displayed score matches the diagnostics/search.
         MoveEvaluation chosenEvaluation = evaluationMap.get(chosenMove);
-        if (chosenEvaluation == null && searchResult != null) {
+        if (searchResult != null) {
             double oriented = orientScoreForMover(whiteToMove, searchResult.getScore());
             chosenEvaluation = new MoveEvaluation(chosenMove, oriented);
         }
+
         MoveEvaluation bestEvaluation = evaluations.isEmpty() ? null : evaluations.getFirst();
 
+        // Expected moves (static, just for display)
         List<MoveEvaluation> expectedEvaluationDetails = new ArrayList<>();
         for (String expected : expectedMoves) {
             MoveEvaluation evaluation = evaluationMap.get(expected);
@@ -182,15 +191,34 @@ public class BestMoveSearchTest {
             }
         }
 
-        List<MoveEvaluation> topCandidates = new ArrayList<>(evaluations.subList(0, Math.min(5, evaluations.size())));
+        // Top 5 static candidates
+        List<MoveEvaluation> topCandidates =
+                new ArrayList<>(evaluations.subList(0, Math.min(5, evaluations.size())));
 
+        // Scalars
         double bestScore = bestEvaluation != null ? bestEvaluation.score() : Double.NaN;
         double chosenScore = chosenEvaluation != null ? chosenEvaluation.score() : Double.NaN;
-        double cpLoss = Double.isFinite(bestScore) && Double.isFinite(chosenScore) ? bestScore - chosenScore : Double.NaN;
+
+        // If chosenEvaluation is from search (our override above), don't compute cpLoss
+        // against the static "best" because that mixes metrics. Leave it NaN so it won't print.
+        Double cpLoss;
+        if (searchResult == null && Double.isFinite(bestScore) && Double.isFinite(chosenScore)) {
+            cpLoss = bestScore - chosenScore; // both static
+        } else {
+            cpLoss = Double.NaN;
+        }
+
         double cpGain = Double.isFinite(chosenScore) && Double.isFinite(baselineForMover)
                 ? chosenScore - baselineForMover
                 : Double.NaN;
-        int rank = chosenEvaluation != null ? evaluations.indexOf(chosenEvaluation) + 1 : -1;
+
+        // Rank is based on static ordering; if desired, you could recompute rank from search ordering
+        int rank = -1;
+        if (searchResult == null && chosenEvaluation != null) {
+            // Only meaningful when chosenEvaluation came from the static list
+            rank = evaluations.indexOf(evaluationMap.get(chosenMove)) + 1;
+            if (rank == 0) rank = -1;
+        }
 
         String pvString = renderPrincipalVariation(whiteToMove, ai.principalVariation());
 
@@ -213,6 +241,7 @@ public class BestMoveSearchTest {
                 deepestDepth
         );
     }
+
 
     @AfterAll
     void emitAggregateStatistics() {
@@ -940,7 +969,7 @@ public class BestMoveSearchTest {
             sb.append("FEN: ").append(fen).append(System.lineSeparator());
             sb.append("Side to move: ").append(whiteToMove ? "White" : "Black").append(System.lineSeparator());
             sb.append("Expected best moves: ").append(expectedMoves).append(System.lineSeparator());
-            sb.append("Baseline evaluation: ").append(formatCentipawns(baselineScore)).append(" pawns")
+            sb.append("Baseline evaluation: ").append(formatScore(baselineScore)).append(" pawns")
                     .append(System.lineSeparator());
             sb.append("Search configuration: ").append(SEARCH_ENVIRONMENT.inlineSummary())
                     .append(System.lineSeparator());
@@ -950,9 +979,9 @@ public class BestMoveSearchTest {
 
             if (chosenEvaluation != null) {
                 sb.append("Chosen move: ").append(chosenEvaluation.move())
-                        .append(" -> ").append(formatCentipawns(chosenEvaluation.score())).append(" pawns");
+                        .append(" -> ").append(formatScore(chosenEvaluation.score())).append(" pawns");
                 if (Double.isFinite(cpGain)) {
-                    sb.append(" (Δ vs baseline: ").append(formatCentipawns(cpGain)).append(")");
+                    sb.append(" (Δ vs baseline: ").append(formatScore(cpGain)).append(")");
                 }
                 if (rank > 0) {
                     sb.append(" [rank #").append(rank).append(']');
@@ -969,9 +998,9 @@ public class BestMoveSearchTest {
                         ? -cpLoss
                         : Double.NaN;
                 sb.append("Engine top move: ").append(bestEvaluation.move())
-                        .append(" -> ").append(formatCentipawns(bestEvaluation.score())).append(" pawns");
+                        .append(" -> ").append(formatScore(bestEvaluation.score())).append(" pawns");
                 if (Double.isFinite(deltaVsChosen)) {
-                    sb.append(" (Δ vs chosen: ").append(formatCentipawns(deltaVsChosen)).append(")");
+                    sb.append(" (Δ vs chosen: ").append(formatScore(deltaVsChosen)).append(")");
                 }
                 sb.append(System.lineSeparator());
             }
@@ -985,13 +1014,13 @@ public class BestMoveSearchTest {
             for (int i = 0; i < topCandidates.size(); i++) {
                 MoveEvaluation ev = topCandidates.get(i);
                 sb.append("  ").append(i + 1).append(". ").append(ev.move())
-                        .append(" -> ").append(formatCentipawns(ev.score())).append(" pawns");
+                        .append(" -> ").append(formatScore(ev.score())).append(" pawns");
                 if (chosenEvaluation != null) {
                     double delta = ev.score() - chosenEvaluation.score();
                     if (Math.abs(delta) < 0.5) {
                         sb.append(" (matches chosen)");
                     } else if (Double.isFinite(delta)) {
-                        sb.append(" (Δ vs chosen: ").append(formatCentipawns(delta)).append(")");
+                        sb.append(" (Δ vs chosen: ").append(formatScore(delta)).append(")");
                     }
                 }
                 sb.append(System.lineSeparator());
@@ -1001,11 +1030,11 @@ public class BestMoveSearchTest {
                 sb.append("Expected move evaluations:").append(System.lineSeparator());
                 for (MoveEvaluation ev : expectedEvaluations) {
                     sb.append("  ").append(ev.move())
-                            .append(" -> ").append(formatCentipawns(ev.score())).append(" pawns");
+                            .append(" -> ").append(formatScore(ev.score())).append(" pawns");
                     if (chosenEvaluation != null && !ev.move().equals(chosenEvaluation.move())) {
                         double delta = ev.score() - chosenEvaluation.score();
                         if (Double.isFinite(delta)) {
-                            sb.append(" (Δ vs chosen: ").append(formatCentipawns(delta)).append(")");
+                            sb.append(" (Δ vs chosen: ").append(formatScore(delta)).append(")");
                         }
                     }
                     sb.append(System.lineSeparator());
@@ -1014,7 +1043,7 @@ public class BestMoveSearchTest {
 
             if (Double.isFinite(cpLoss)) {
                 sb.append("Evaluation delta vs engine best: ")
-                        .append(formatCentipawns(-cpLoss)).append(" pawns")
+                        .append(formatScore(-cpLoss)).append(" pawns")
                         .append(System.lineSeparator());
             }
 
@@ -1139,15 +1168,15 @@ public class BestMoveSearchTest {
             sb.append("Positions tested: ").append(positions).append(System.lineSeparator());
             sb.append("Target depth: ").append(SEARCH_DEPTH).append(System.lineSeparator());
             if (Double.isFinite(avgCpLoss)) {
-                sb.append("Average evaluation loss: ").append(formatCentipawns(avgCpLoss)).append(" pawns")
+                sb.append("Average evaluation loss: ").append(formatScore(avgCpLoss)).append(" pawns")
                         .append(System.lineSeparator());
             }
             if (Double.isFinite(maxCpLoss)) {
-                sb.append("Worst evaluation loss: ").append(formatCentipawns(maxCpLoss)).append(" pawns")
+                sb.append("Worst evaluation loss: ").append(formatScore(maxCpLoss)).append(" pawns")
                         .append(System.lineSeparator());
             }
             if (Double.isFinite(avgCpGain)) {
-                sb.append("Average gain vs baseline: ").append(formatCentipawns(avgCpGain)).append(" pawns")
+                sb.append("Average gain vs baseline: ").append(formatScore(avgCpGain)).append(" pawns")
                         .append(System.lineSeparator());
             }
             if (Double.isFinite(avgRank)) {
@@ -1375,7 +1404,7 @@ public class BestMoveSearchTest {
         for (MoveAndScore moveAndScore : pv) {
             String notation = Move.convertIntToMove(moveAndScore.getMove()).toString();
             double orientedScore = moverIsWhite ? moveAndScore.getScore() : -moveAndScore.getScore();
-            segments.add(notation + " (" + formatCentipawns(orientedScore) + " pawns)");
+            segments.add(notation + " (" + formatScore(orientedScore) + " pawns)");
             moverIsWhite = !moverIsWhite;
         }
         return String.join(" -> ", segments);
@@ -1385,16 +1414,15 @@ public class BestMoveSearchTest {
         return whiteToMove ? scoreDifference : -scoreDifference;
     }
 
-    private static String formatCentipawns(double centipawns) {
-        if (!Double.isFinite(centipawns)) {
-            return "n/a";
-        }
-        if (Math.abs(centipawns) >= Score.CHECKMATE - 1000) {
-            double mateDistance = Score.CHECKMATE - Math.abs(centipawns);
+    private static String formatScore(double pawns) {
+        if (!Double.isFinite(pawns)) return "n/a";
+        // If you keep CHECKMATE in pawns too:
+        if (Math.abs(pawns) >= Score.CHECKMATE - 10) {
+            double mateDistance = Score.CHECKMATE - Math.abs(pawns);
             long plies = Math.max(0, Math.round(mateDistance));
-            return (centipawns > 0 ? "#+" : "#-") + (plies > 0 ? plies : "");
+            return (pawns > 0 ? "#+" : "#-") + (plies > 0 ? plies : "");
         }
-        return String.format(Locale.US, "%+.2f", centipawns / 100.0);
+        return String.format(Locale.US, "%+.2f", pawns);
     }
 
     private record MoveEvaluation(String move, double score) {
