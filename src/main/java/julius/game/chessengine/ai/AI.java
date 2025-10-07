@@ -2437,10 +2437,12 @@ public class AI {
         final int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
 
         // Category encoding (higher is earlier):
-        // 7: TT move, 6: promotions, 5: good captures, 4: equal captures,
-        // 3: killer[0], 2: killer[1], 1: quiets (history), 0: bad captures
-        final int CAT_TT = 7, CAT_PROMO = 6, CAT_CAP_GOOD = 5, CAT_CAP_EQUAL = 4,
-                CAT_KILLER0 = 3, CAT_KILLER1 = 2, CAT_QUIET = 1, CAT_CAP_BAD = 0;
+        // 8: TT move, 7: promotions, 6: good captures, 5: equal captures,
+        // 4: killer[0], 3: killer[1], 2: forcing quiets (checks/threats/counter),
+        // 1: quiets (history), 0: bad captures
+        final int CAT_TT = 8, CAT_PROMO = 7, CAT_CAP_GOOD = 6, CAT_CAP_EQUAL = 5,
+                CAT_KILLER0 = 4, CAT_KILLER1 = 3, CAT_QUIET_FORCE = 2,
+                CAT_QUIET = 1, CAT_CAP_BAD = 0;
 
         final int promotionBonus = moveOrderingParameters.promotionBonus();
         final int killer0Bonus = moveOrderingParameters.killer0Bonus();
@@ -2449,6 +2451,14 @@ public class AI {
         final int captureMvvMultiplier = moveOrderingParameters.captureMvvMultiplier();
         final int captureSeeMultiplier = moveOrderingParameters.captureSeeMultiplier();
         final int promotionSeeMultiplier = moveOrderingParameters.promotionSeeMultiplier();
+        final int counterMoveBonus = moveOrderingParameters.counterMoveBonus();
+
+        final boolean moverIsWhite = simulatorEngine.whitesTurn();
+
+        final int quietCheckBonus = counterMoveBonus + (captureSeeMultiplier << 3);
+        final int quietQueenBonus = Math.max(counterMoveBonus / 2, captureSeeMultiplier << 2);
+        final int quietKingZoneBonus = Math.max(counterMoveBonus / 3, captureSeeMultiplier << 1);
+        final int recaptureBonus = counterMoveBonus + (captureSeeMultiplier << 3);
 
         // Hash move (TT)
         TranspositionTableEntry ttEntry = transpositionTable.get(boardHash);
@@ -2461,7 +2471,6 @@ public class AI {
         final int prevFrom = (prevMove >= 0) ? (prevMove & 0x3F) : -1;
         final int prevTo = (prevMove >= 0) ? ((prevMove >>> 6) & 0x3F) : -1;
         final int cm = (prevFrom >= 0) ? counterMove[prevFrom][prevTo] : -1;
-        final int counterMoveBonus = moveOrderingParameters.counterMoveBonus();
 
         int ttIndex = -1;
 
@@ -2473,6 +2482,7 @@ public class AI {
 
             final boolean isCapture = MoveHelper.isCapture(moveInt);
             final boolean isPromotion = MoveHelper.isPawnPromotionMove(moveInt);
+            final boolean isCastling = MoveHelper.isCastlingMove(moveInt);
 
             int seeValue = 0;
             boolean hasSee = false;
@@ -2498,15 +2508,22 @@ public class AI {
                 score = base + promotionBonus + seeBonus;
             } else if (isCapture) {
                 final int mvvLva = calculateMvvLvaScore(moveInt);
+                boolean isRecapture = prevTo >= 0 && MoveHelper.deriveToIndex(moveInt) == prevTo;
                 if (seeValue > 0) {
                     category = CAT_CAP_GOOD;
-                } else if (seeValue == 0) {
+                } else if (seeValue == 0 || isRecapture) {
                     category = CAT_CAP_EQUAL;
                 } else {
                     category = CAT_CAP_BAD;
                 }
                 int cappedSee = Math.max(-2048, Math.min(2048, seeValue));
                 score = (mvvLva * captureMvvMultiplier) + (cappedSee * captureSeeMultiplier);
+                if (isRecapture) {
+                    score += recaptureBonus;
+                }
+                if (moveInt == cm) {
+                    score += counterMoveBonus / 2;
+                }
                 if (score < 0) score = 0;
             } else if (moveInt == k0) {
                 category = CAT_KILLER0;
@@ -2517,9 +2534,29 @@ public class AI {
             } else {
                 final int from = moveInt & 0x3F;
                 final int to = (moveInt >>> 6) & 0x3F;
-                category = CAT_QUIET;
+                boolean givesCheck = false;
+                boolean attacksQueen = false;
+                boolean attacksKingZone = false;
+
+                // Probe forcing traits for quiet moves to prioritise aggressive replies.
+                simulatorEngine.performMove(moveInt);
+                try {
+                    givesCheck = isSideInCheck(simulatorEngine, !moverIsWhite);
+                    attacksQueen = attacksOpponentQueenNow(simulatorEngine, moverIsWhite);
+                    attacksKingZone = attacksOpponentKingZone(simulatorEngine, moverIsWhite);
+                } finally {
+                    simulatorEngine.undoLastMove();
+                }
+
+                boolean isCounterMove = moveInt == cm;
+                boolean quietIsForcing = givesCheck || attacksQueen || attacksKingZone || isCounterMove || isCastling;
+
+                category = quietIsForcing ? CAT_QUIET_FORCE : CAT_QUIET;
                 score = historyTable[from][to];
-                if (moveInt == cm) score += counterMoveBonus;
+                if (isCounterMove) score += counterMoveBonus;
+                if (givesCheck) score += quietCheckBonus;
+                if (attacksQueen) score += quietQueenBonus;
+                if (attacksKingZone || isCastling) score += quietKingZoneBonus;
             }
 
             moveBuffer[i] = moveInt;
