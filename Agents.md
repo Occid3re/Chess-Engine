@@ -111,6 +111,7 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
   Expose and apply them via the tuning module so they are loaded and propagated into the evaluation at runtime.
 * Full-suite runs currently fail in `BestMoveSearchTest` due to long-horizon move selection mismatches. Use the PGN smoke tests above when focusing on PGN changes, or investigate the AI regressions separately before expecting a green build.
 * `BestMoveSearchTest` now mirrors the diagnostic harness from `AITest_MateThreatDiagnostics`. Each position prints an in-depth iterative-deepening trace, principal variation, and transposition-table probe summary, with aggregated JSON/TXT artifacts in `target/surefire-reports/best-move-search-*`. Expect a long console log and ~28 known assertion failures; the goal is visibility, not a green suite.
+* 2025-10-07: Restored incremental evaluation performance by avoiding `EvaluationPipeline.updateContext` during search. `Score` now uses the new `attachContext` helper so move applications no longer force every module to recompute from scratch. The worst depth-4 case in `BestMoveSearchTest` dropped from ~96s back to ~5s.
 
 ### AI search & evaluation notes
 * Quiescence delta pruning now compares against the alpha window captured before the stand-pat update. Earlier builds raised `alpha` first, which meant `standPat + Δ < alpha` never triggered and the pruning shortcut was effectively disabled.

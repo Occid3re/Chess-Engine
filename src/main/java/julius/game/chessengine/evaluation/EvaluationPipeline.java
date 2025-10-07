@@ -76,6 +76,15 @@ public final class EvaluationPipeline {
         markAllDirty();
     }
 
+    public void attachContext(EvaluationContext context) {
+        Objects.requireNonNull(context, "context");
+        if (!initialized) {
+            initialize(context);
+            return;
+        }
+        this.context = context;
+    }
+
     public void applyMove(MoveContext moveContext) {
         ensureInitialized();
         for (ModuleState state : modules) {
