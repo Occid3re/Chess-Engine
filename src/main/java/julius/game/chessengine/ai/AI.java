@@ -58,6 +58,10 @@ public class AI {
     private static final int SEE_PRUNE_NEAR_ROOT_PLY = 2;
     private static final int ABS_PLY_LIMIT_MARGIN = 32;
 
+    //Quiescence search parameters
+    private static final double MAX_DELTA_PAWN = 9.0;
+
+
     private final AtomicReference<SearchTask> activeSearch = new AtomicReference<>();
     private final ThreadLocal<SearchTask> threadSearchTask = new ThreadLocal<>();
     private final AtomicLong searchIdGenerator = new AtomicLong();
@@ -2627,102 +2631,116 @@ public class AI {
         return score;
     }
 
-    private double quiescenceSearch(Engine simulatorEngine, boolean isWhitesTurn,
-                                    double alpha, double beta, long deadline, int depth) {
+    private double quiescenceSearch(Engine simulatorEngine,
+                                    boolean isWhitesTurn,
+                                    double alpha,
+                                    double beta,
+                                    long deadline,
+                                    int depth) {
         // Early stop
         if (abortRequested(deadline)) {
             return AI.EXIT_FLAG;
         }
 
-        long boardHash = simulatorEngine.getBoardStateHash();
-
-        // *** REAL TRUTH: absolutely never expand terminal nodes. ***
-        // (Stalemate / 50-move / threefold are terminal for move-handling.
-        // Insufficient material is NOT terminal and will continue.)
+        // Never expand terminal nodes in qsearch: just evaluate
         if (simulatorEngine.getGameState().isTerminal()) {
+            long boardHash = simulatorEngine.getBoardStateHash();
             return evaluateStaticPosition(simulatorEngine.getGameState(), boardHash, isWhitesTurn, depth);
         }
 
-        // If side to move is in check, search all legal evasions (not only captures)
-        boolean inCheck = isSideInCheck(simulatorEngine, isWhitesTurn);
+        final boolean inCheck = isSideInCheck(simulatorEngine, isWhitesTurn);
 
+        long boardHash = simulatorEngine.getBoardStateHash();
         double standPat = evaluateStaticPosition(simulatorEngine.getGameState(), boardHash, isWhitesTurn, depth);
-        double originalAlpha = alpha;
+
         if (!inCheck) {
+            // Fail-hard beta cut on stand-pat
             if (standPat >= beta) {
-                return beta; // fail-hard beta
+                return beta;
             }
-            if (alpha < standPat) {
-                alpha = standPat; // raise alpha via stand-pat
+            // Raise alpha to stand-pat
+            if (standPat > alpha) {
+                alpha = standPat;
             }
 
-            // Simple delta/futility-like guard: if even a big swing cannot beat alpha, cut
-            final int BIG_DELTA = 1000; // ~queen swing
-            if (standPat + BIG_DELTA < originalAlpha) {
-                return originalAlpha;
+            // Delta (futility-like) pruning in qsearch:
+            // If even the biggest plausible swing can't reach alpha, cut.
+            // (Disabled when in check, already guarded above.)
+            if (standPat + MAX_DELTA_PAWN <= alpha) {
+                return alpha;
             }
         }
 
-        // Generate moves: evasions if in check, else captures/promotions
+        // Move gen: evasions if in check; else captures/promotions (and optional checking moves if you add them)
         IntArrayList moves = inCheck
-                ? simulatorEngine.getAllLegalMoves()
-                : getPossibleCapturesOrPromotions(simulatorEngine);
+                ? simulatorEngine.getAllLegalMoves()                // all evasions
+                : getPossibleCapturesOrPromotions(simulatorEngine);  // tactical moves only
 
-        // Order them (captures/promotions first etc.)
+        // Order moves (MVV-LVA, history, hash-move etc.)
         IntArrayList ordered = sortMovesByEfficiency(
                 moves, 0, simulatorEngine.getBoardStateHash(), -1, simulatorEngine
         );
 
         for (int i = 0; i < ordered.size(); i++) {
             int m = ordered.getInt(i);
-            boolean isCapture = MoveHelper.isCapture(m);
-            boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
-            boolean isQuiet = !isCapture && !isPromotion;
 
-            // --- SEE pruning: drop clearly losing captures or quiets (keeps promotions) ---
-            if ((!inCheck && isCapture && !isPromotion) || isQuiet) {
+            boolean isCapture   = MoveHelper.isCapture(m);
+            boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
+            boolean isQuiet     = !isCapture && !isPromotion;
+
+            // In qsearch (not in check), we normally do NOT consider quiet moves.
+            // If you want to allow some checks, you can selectively allow quiet check moves.
+            if (!inCheck && isQuiet) {
+                continue;
+            }
+
+            // SEE pruning: drop clearly losing captures (keep promotions).
+            // Optionally keep losing captures that give check (aggressive but sometimes good).
+            if (!inCheck && isCapture && !isPromotion) {
                 int see = simulatorEngine.see(m);
                 if (see < 0) {
-                    // Guard: do not "probe" with a make/undo if node somehow became terminal.
-                    if (simulatorEngine.getGameState().isTerminal()) {
+                    // Cheap “gives check?” probe; only spend the make/undo if node didn't turn terminal.
+                    if (!simulatorEngine.getGameState().isTerminal()) {
+                        simulatorEngine.performMove(m);
+                        boolean givesCheck = isSideInCheck(simulatorEngine, !isWhitesTurn);
+                        simulatorEngine.undoLastMove();
+                        if (!givesCheck) {
+                            continue; // prune losing capture that doesn't give check
+                        }
+                    } else {
                         continue;
                     }
-                    simulatorEngine.performMove(m);
-                    boolean givesCheck = isSideInCheck(simulatorEngine, !isWhitesTurn);
-                    simulatorEngine.undoLastMove();
-                    if (!givesCheck) continue;
                 }
             }
 
-            // Guard again before actually making the move (paranoia; usually redundant)
+            // Safety guard before making the move (rare but keeps invariants)
             if (simulatorEngine.getGameState().isTerminal()) {
-                return standPat;
+                return standPat; // nothing more to do from here
             }
 
             simulatorEngine.performMove(m);
-
-            // Propagate timeout BEFORE negation
             double child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
             simulatorEngine.undoLastMove();
 
-            if (child == EXIT_FLAG) return EXIT_FLAG;
+            if (child == EXIT_FLAG) {
+                return EXIT_FLAG;
+            }
 
             double score = -child;
 
+            // Fail-hard beta cutoff
             if (score >= beta) {
                 return beta;
             }
+            // Raise alpha
             if (score > alpha) {
                 alpha = score;
             }
         }
+
         return alpha;
     }
 
-    private double evaluateStaticPosition(GameState gameState, boolean isWhitesTurn, int depthOrPly) {
-        long boardHash = (gameState != null) ? gameState.getLastZobrist() : 0L;
-        return evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depthOrPly);
-    }
 
     private double evaluateStaticPosition(GameState gameState, long boardHash, boolean isWhitesTurn, int depthOrPly) {
         if (gameState.isInStateCheckMate()) {
