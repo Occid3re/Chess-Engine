@@ -328,6 +328,8 @@ public class BestMoveSearchTest {
                     return RootSearchResult.completed(null);
                 }
 
+                double alphaOriginal = alpha;
+                double betaOriginal = beta;
                 double bestScore = isWhite ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
                 int bestMove = -1;
                 boolean aborted = false;
@@ -383,9 +385,32 @@ public class BestMoveSearchTest {
                     }
                 }
 
-                MoveAndScore result = bestMove != -1 ? new MoveAndScore(bestMove, bestScore) : null;
+                MoveAndScore result = (!aborted && bestMove != -1)
+                        ? new MoveAndScore(bestMove, bestScore)
+                        : null;
                 trace.finish(alpha, beta, result);
-                return aborted ? RootSearchResult.aborted(result) : RootSearchResult.completed(result);
+                if (aborted) {
+                    return RootSearchResult.aborted(result);
+                }
+
+                NodeType boundType = NodeType.EXACT;
+                if (result != null) {
+                    boolean failLow;
+                    boolean failHigh;
+                    if (isWhite) {
+                        failLow = Double.isFinite(alphaOriginal) && result.score <= alphaOriginal;
+                        failHigh = Double.isFinite(betaOriginal) && result.score >= betaOriginal;
+                    } else {
+                        failLow = Double.isFinite(betaOriginal) && result.score >= betaOriginal;
+                        failHigh = Double.isFinite(alphaOriginal) && result.score <= alphaOriginal;
+                    }
+                    if (failLow) {
+                        boundType = NodeType.UPPERBOUND;
+                    } else if (failHigh) {
+                        boundType = NodeType.LOWERBOUND;
+                    }
+                }
+                return RootSearchResult.completed(result, boundType);
             } catch (IllegalAccessException | InvocationTargetException e) {
                 throw new IllegalStateException("Failed to capture diagnostic data", e);
             }

@@ -76,7 +76,7 @@ class AITest_IterativeDeepeningAndWindows {
             if (depth >= 3 && invocation.isAspirationWindow() && aspirationFailures < 4) {
                 aspirationFailures++;
                 // Return a score below alpha to simulate fail-low and trigger another iteration.
-                return RootSearchResult.completed(new MoveAndScore(0, alpha - 25.0));
+                return RootSearchResult.completed(new MoveAndScore(0, alpha - 25.0), NodeType.UPPERBOUND);
             }
 
             double score;

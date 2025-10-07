@@ -711,46 +711,58 @@ public class AI {
                 double beta = aspirationState.beta();
 
                 while (!shouldStopCalculating(task)) {
-                    result = searchRootMoves(simulatorEngine, task, currentDepth, alpha, beta, rng);
-                    if (!result.hasCandidate()) break;
+                    RootSearchResult attempt = searchRootMoves(simulatorEngine, task, currentDepth, alpha, beta, rng);
+                    result = attempt;
+                    if (attempt == null || !attempt.hasCandidate()) {
+                        break;
+                    }
+                    if (!attempt.isCompleted()) {
+                        break;
+                    }
 
-                    MoveAndScore candidate = result.bestMove();
-                    if (!result.isCompleted()) break;
-
-                    if (candidate.score <= alpha) {
+                    NodeType bound = attempt.boundType();
+                    if (bound == NodeType.UPPERBOUND) {
                         AspirationController.Adjustment adjustment =
-                                aspirationController.onFailLow(candidate.score);
+                                aspirationController.onFailLow(attempt.bestMove().score);
                         if (adjustment.isFullWindow()) {
                             alpha = Double.NEGATIVE_INFINITY;
                             beta = Double.POSITIVE_INFINITY;
                             usedFullWindow = true;
-                            continue;
+                        } else {
+                            alpha = adjustment.alpha();
+                            beta = adjustment.beta();
                         }
-                        alpha = adjustment.alpha();
-                        beta = adjustment.beta();
+                        result = null; // force re-search with widened window
                         continue;
                     }
 
-                    if (candidate.score >= beta) {
+                    if (bound == NodeType.LOWERBOUND) {
                         AspirationController.Adjustment adjustment =
-                                aspirationController.onFailHigh(candidate.score);
+                                aspirationController.onFailHigh(attempt.bestMove().score);
                         if (adjustment.isFullWindow()) {
                             alpha = Double.NEGATIVE_INFINITY;
                             beta = Double.POSITIVE_INFINITY;
                             usedFullWindow = true;
-                            continue;
+                        } else {
+                            alpha = adjustment.alpha();
+                            beta = adjustment.beta();
                         }
-                        alpha = adjustment.alpha();
-                        beta = adjustment.beta();
+                        result = null;
                         continue;
                     }
 
-                    aspirationController.onSuccess(candidate.score);
+                    aspirationController.onSuccess(attempt.bestMove().score);
+                    result = attempt;
                     break;
                 }
             }
 
-            if (result == null || !result.hasCandidate()) {
+            boolean needsFullWindow = result == null
+                    || !result.isCompleted()
+                    || !result.hasCandidate()
+                    || result.boundType() != NodeType.EXACT;
+
+            if (needsFullWindow) {
                 result = searchRootMoves(simulatorEngine, task, currentDepth,
                         Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, rng);
                 if (attemptedAspiration) {
@@ -758,9 +770,9 @@ public class AI {
                 }
             }
 
-            if (!result.hasCandidate()) {
+            if (result == null || !result.hasCandidate()) {
                 if (heuristics.hasUpdates()) mergeThreadHeuristics(heuristics);
-                if (!result.isCompleted() && currentDepth == 1) {
+                if (result != null && !result.isCompleted() && currentDepth == 1) {
                     // Depth-1 special-case still requires a candidate; none here.
                 }
                 break;
@@ -768,7 +780,7 @@ public class AI {
 
             MoveAndScore sealed = result.bestMove();
 
-            if (!result.isCompleted()) {
+            if (!result.isCompleted() || result.boundType() != NodeType.EXACT) {
                 if (currentDepth == 1) {
                     task.publishBest(sealed, currentDepth, simulatorEngine);
                 }
@@ -1302,6 +1314,8 @@ public class AI {
                                                  double alpha,
                                                  double beta,
                                                  SplittableRandom rng) {
+        final double alphaOriginal = alpha;
+        final double betaOriginal = beta;
         if (searchPool == null || abortRequested(deadline)) {
             return getBestMove(simulatorEngine, task.isWhiteToMove(), depth, deadline, alpha, beta, rng);
         }
@@ -1573,11 +1587,24 @@ public class AI {
                 stateRef.set(new RootSearchState(alpha, beta, updatedBest));
             }
         }
-        MoveAndScore candidate = bestMove != -1 ? createCandidate(bestMove, bestScore) : null;
         if (abortRequested(deadline)) {
             aborted = true;
         }
-        return aborted ? RootSearchResult.aborted(candidate) : RootSearchResult.completed(candidate);
+
+        MoveAndScore candidate = null;
+        NodeType boundType = NodeType.EXACT;
+        if (!aborted && bestMove != -1) {
+            candidate = createCandidate(bestMove, bestScore);
+            if (candidate != null) {
+                boundType = classifyRootBound(isWhitesTurn, candidate.score,
+                        alphaOriginal, betaOriginal);
+            }
+        }
+
+        if (aborted) {
+            return RootSearchResult.aborted(candidate);
+        }
+        return RootSearchResult.completed(candidate, boundType);
     }
 
 
@@ -1746,6 +1773,8 @@ public class AI {
 
     private RootSearchResult getBestMove(Engine simulatorEngine, boolean isWhitesTurn, int depth, long deadline,
                                          double alpha, double beta, SplittableRandom rng) {
+        final double alphaOriginal = alpha;
+        final double betaOriginal = beta;
         int bestMove = -1;
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
 
@@ -1790,14 +1819,57 @@ public class AI {
             else beta = Math.min(beta, score);
             if (alpha >= beta) break;
         }
-        MoveAndScore candidate = bestMove != -1 ? createCandidate(bestMove, bestScore) : null;
-        return aborted ? RootSearchResult.aborted(candidate) : RootSearchResult.completed(candidate);
+        if (abortRequested(deadline)) {
+            aborted = true;
+        }
+
+        MoveAndScore candidate = null;
+        NodeType boundType = NodeType.EXACT;
+        if (!aborted && bestMove != -1) {
+            candidate = createCandidate(bestMove, bestScore);
+            if (candidate != null) {
+                boundType = classifyRootBound(isWhitesTurn, candidate.score,
+                        alphaOriginal, betaOriginal);
+            }
+        }
+
+        if (aborted) {
+            return RootSearchResult.aborted(candidate);
+        }
+        return RootSearchResult.completed(candidate, boundType);
     }
 
     private MoveAndScore createCandidate(int move, double score) {
         if (move == -1) return null;
         if (!Double.isFinite(score)) return null;
         return new MoveAndScore(move, score);
+    }
+
+    private NodeType classifyRootBound(boolean isWhitesTurn,
+                                       double score,
+                                       double alphaOriginal,
+                                       double betaOriginal) {
+        if (!Double.isFinite(score)) {
+            return NodeType.EXACT;
+        }
+
+        boolean failLow;
+        boolean failHigh;
+        if (isWhitesTurn) {
+            failLow = Double.isFinite(alphaOriginal) && score <= alphaOriginal;
+            failHigh = Double.isFinite(betaOriginal) && score >= betaOriginal;
+        } else {
+            failLow = Double.isFinite(betaOriginal) && score >= betaOriginal;
+            failHigh = Double.isFinite(alphaOriginal) && score <= alphaOriginal;
+        }
+
+        if (failLow) {
+            return NodeType.UPPERBOUND;
+        }
+        if (failHigh) {
+            return NodeType.LOWERBOUND;
+        }
+        return NodeType.EXACT;
     }
 
     /**
@@ -1861,7 +1933,15 @@ public class AI {
         boolean allowNullMove = useNullMovePruning
                 && !inCheck
                 && !simulatorEngine.isEndgame()
-                && !previousMoveWasNull;
+                && !previousMoveWasNull
+                && plyFromRoot >= 2;
+
+        if (allowNullMove) {
+            boolean cramped = mobility <= 3;
+            if (cramped) {
+                allowNullMove = false;
+            }
+        }
 
         if (allowNullMove) {
             double mateThreatScore = CHECKMATE - (plyFromRoot + 1);
