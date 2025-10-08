@@ -10,6 +10,7 @@ import julius.game.chessengine.utils.Score;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -22,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -122,6 +124,226 @@ public class BestMoveSearchTest {
         Assertions.assertTrue(expectedMoves.contains(moveString),
                 () -> "Expected one of " + expectedMoves + " but got " + moveString + " for FEN: " + fen
                         + humanReadable + System.lineSeparator() + diagnostics);
+    }
+
+    @Test
+    void diagnoseNe4SearchHotSpot() throws InterruptedException {
+        final String fen = "3rk2r/1bqpbppp/p1n1p3/1p2P3/5Bn1/2NQ1N2/PPP1BPPP/R2R2K1 w k - 5 14";
+        final List<String> expectedMoves = List.of("Ne4");
+
+        Engine engine = new Engine();
+        engine.importBoardFromFen(fen);
+
+        AiTuning tuning = SEARCH_ENVIRONMENT.applyTo(AiTuning.builder())
+                .maxDepth(SEARCH_DEPTH)
+                .timeLimitMillis(UNBOUNDED_SEARCH_TIME_MILLIS)
+                .nullMovePruning(true)
+                .build();
+
+        DiagnosticAI ai = new DiagnosticAI(engine, tuning);
+
+        long nodesBefore = ai.getNodesVisited();
+        long nullBefore = ai.getNullMoveCount();
+        long startNanos = System.nanoTime();
+
+        MoveAndScore result = ai.searchToDepthBlocking(SEARCH_DEPTH);
+
+        long elapsedNanos = System.nanoTime() - startNanos;
+        long nodesVisited = Math.max(0, ai.getNodesVisited() - nodesBefore);
+        long nullMoves = Math.max(0, ai.getNullMoveCount() - nullBefore);
+
+        Assertions.assertNotNull(result, () -> "Engine failed to produce a move for FEN: " + fen);
+
+        String moveString = Move.convertIntToMove(result.getMove()).toString();
+        boolean expectedMoveChosen = matchesExpectedMove(result.getMove(), expectedMoves);
+        if (!expectedMoveChosen) {
+            System.out.printf(Locale.ROOT,
+                    "WARNING: expected one of %s but the engine chose %s%n",
+                    expectedMoves,
+                    moveString);
+        }
+
+        Duration wallClock = Duration.ofNanos(elapsedNanos);
+
+        System.out.println("================ Slow Ne4 diagnostic ================");
+        System.out.printf(Locale.ROOT,
+                "Result=%s score=%.2f depth=%d wallClock=%d ms nodes=%d nullMoves=%d%n",
+                moveString,
+                result.getScore(),
+                ai.deepestCompletedDepth(),
+                wallClock.toMillis(),
+                nodesVisited,
+                nullMoves);
+        System.out.println("Expected moves: " + expectedMoves);
+        System.out.println("Result matches expected set: " + (expectedMoveChosen ? "yes" : "no"));
+        System.out.println("Environment: " + SEARCH_ENVIRONMENT.inlineSummary());
+
+        List<DiagnosticAI.DepthTraceSnapshot> depthSnapshots = ai.snapshotDepthTraces();
+        depthSnapshots.sort(Comparator
+                .comparingInt(DiagnosticAI.DepthTraceSnapshot::depth)
+                .thenComparingInt(DiagnosticAI.DepthTraceSnapshot::attempt));
+
+        Map<Integer, Long> nodesByDepth = new LinkedHashMap<>();
+        Map<Integer, Long> timeByDepth = new LinkedHashMap<>();
+        Map<Integer, Integer> attemptsByDepth = new LinkedHashMap<>();
+        Map<Integer, Integer> movesByDepth = new LinkedHashMap<>();
+        Map<String, Long> nodesByMove = new HashMap<>();
+        Map<String, Long> timeByMove = new HashMap<>();
+        Map<String, Boolean> expectedMoveFlags = new HashMap<>();
+
+        for (DiagnosticAI.DepthTraceSnapshot depth : depthSnapshots) {
+            long depthNodes = depth.rootMoves().stream()
+                    .mapToLong(DiagnosticAI.RootMoveSnapshot::nodesSpent)
+                    .sum();
+            long depthTime = depth.rootMoves().stream()
+                    .mapToLong(DiagnosticAI.RootMoveSnapshot::nanosSpent)
+                    .sum();
+
+            nodesByDepth.merge(depth.depth(), depthNodes, Long::sum);
+            timeByDepth.merge(depth.depth(), depthTime, Long::sum);
+            attemptsByDepth.merge(depth.depth(), 1, Integer::sum);
+            movesByDepth.merge(depth.depth(), depth.rootMoves().size(), Integer::sum);
+
+            for (DiagnosticAI.RootMoveSnapshot move : depth.rootMoves()) {
+                String label = describeMove(move.moveInt());
+                nodesByMove.merge(label, move.nodesSpent(), Long::sum);
+                timeByMove.merge(label, move.nanosSpent(), Long::sum);
+                if (matchesExpectedMove(move.moveInt(), expectedMoves)) {
+                    expectedMoveFlags.merge(label, true, Boolean::logicalOr);
+                }
+            }
+        }
+
+        System.out.println("-- Depth aggregates --");
+        for (Map.Entry<Integer, Long> entry : nodesByDepth.entrySet()) {
+            int depth = entry.getKey();
+            long nodes = entry.getValue();
+            long millis = Duration.ofNanos(timeByDepth.getOrDefault(depth, 0L)).toMillis();
+            int attempts = attemptsByDepth.getOrDefault(depth, 0);
+            int totalMoves = movesByDepth.getOrDefault(depth, 0);
+            double avgMoves = attempts == 0 ? 0.0 : totalMoves / (double) attempts;
+            System.out.printf(Locale.ROOT,
+                    "Depth %d: attempts=%d avgRootMoves=%.2f nodes=%d time=%d ms%n",
+                    depth,
+                    attempts,
+                    avgMoves,
+                    nodes,
+                    millis);
+        }
+
+        System.out.println("-- Root move hot spots (aggregated) --");
+        nodesByMove.entrySet().stream()
+                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+                .limit(8)
+                .forEach(entry -> {
+                    String move = entry.getKey();
+                    long nodes = entry.getValue();
+                    long nanos = timeByMove.getOrDefault(move, 0L);
+                    double percentage = nodesVisited == 0 ? 0.0 : (nodes * 100.0) / nodesVisited;
+                    boolean highlight = expectedMoveFlags.getOrDefault(move, false);
+                    System.out.printf(Locale.ROOT,
+                            "  %-8s nodes=%-8d (%.2f%%) time=%.2f ms%n",
+                            highlight ? move + " *" : move,
+                            nodes,
+                            percentage,
+                            nanos / 1_000_000.0);
+                });
+
+        System.out.println("-- Per-depth top candidates by nodes --");
+        for (DiagnosticAI.DepthTraceSnapshot depth : depthSnapshots) {
+            long depthNodes = depth.rootMoves().stream()
+                    .mapToLong(DiagnosticAI.RootMoveSnapshot::nodesSpent)
+                    .sum();
+            double elapsedMs = depth.elapsedNanos() / 1_000_000.0;
+            System.out.printf(Locale.ROOT,
+                    "Depth %d attempt %d (%s to move): nodes=%d time=%.2f ms betaCutoff=%s completed=%s%n",
+                    depth.depth(),
+                    depth.attempt(),
+                    depth.whiteToMove() ? "white" : "black",
+                    depthNodes,
+                    elapsedMs,
+                    depth.betaCutoff() ? "yes" : "no",
+                    depth.completed() ? "yes" : "no");
+
+            List<DiagnosticAI.RootMoveSnapshot> ordered = depth.rootMoves().stream()
+                    .sorted(Comparator.comparingLong(DiagnosticAI.RootMoveSnapshot::nodesSpent).reversed())
+                    .collect(Collectors.toList());
+
+            int limit = Math.min(5, ordered.size());
+            for (int i = 0; i < limit; i++) {
+                DiagnosticAI.RootMoveSnapshot move = ordered.get(i);
+                String moveLabel = describeMove(move.moveInt());
+                boolean highlight = matchesExpectedMove(move.moveInt(), expectedMoves);
+                String score = formatScore(move.score());
+                System.out.printf(Locale.ROOT,
+                        "    #%02d %-10s nodes=%-7d time=%6.2f ms window=[%.2f, %.2f]→[%.2f, %.2f] result=%s via=%s%s%s%n",
+                        move.order() + 1,
+                        highlight ? moveLabel + " *" : moveLabel,
+                        move.nodesSpent(),
+                        move.nanosSpent() / 1_000_000.0,
+                        move.alphaBefore(),
+                        move.betaBefore(),
+                        move.alphaAfter(),
+                        move.betaAfter(),
+                        score,
+                        move.reason(),
+                        move.exitEarly() ? " (aborted)" : "",
+                        highlight ? " <- expected" : "");
+            }
+        }
+
+        System.out.println("=======================================================");
+    }
+
+    private static String describeMove(int moveInt) {
+        if (moveInt == -1) {
+            return "<none>";
+        }
+        Move move = Move.convertIntToMove(moveInt);
+        String coords = MoveHelper.convertIndexToString(MoveHelper.deriveFromIndex(moveInt))
+                + MoveHelper.convertIndexToString(MoveHelper.deriveToIndex(moveInt));
+        String san = move.toString();
+        if (!san.isBlank() && !san.equalsIgnoreCase(coords)) {
+            return san + " [" + coords + "]";
+        }
+        return coords;
+    }
+
+    private static String formatScore(Double score) {
+        if (score == null) {
+            return "<none>";
+        }
+        if (score.isNaN()) {
+            return "NaN";
+        }
+        if (score.isInfinite()) {
+            return score > 0 ? "+Inf" : "-Inf";
+        }
+        return String.format(Locale.ROOT, "%.2f", score);
+    }
+
+    private static boolean matchesExpectedMove(int moveInt, List<String> expectedMoves) {
+        if (expectedMoves == null || expectedMoves.isEmpty()) {
+            return false;
+        }
+        String san = Move.convertIntToMove(moveInt).toString();
+        String coords = MoveHelper.convertIndexToString(MoveHelper.deriveFromIndex(moveInt))
+                + MoveHelper.convertIndexToString(MoveHelper.deriveToIndex(moveInt));
+        String normalizedSan = san.toLowerCase(Locale.ROOT);
+        String normalizedCoords = coords.toLowerCase(Locale.ROOT);
+        for (String expected : expectedMoves) {
+            if (expected == null) {
+                continue;
+            }
+            String normalized = expected.trim().toLowerCase(Locale.ROOT);
+            if (normalized.isEmpty()) {
+                continue;
+            }
+            if (normalized.equals(normalizedSan) || normalized.equals(normalizedCoords)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private DecisionStatistics compileDecisionStatistics(String fen,
@@ -537,6 +759,46 @@ public class BestMoveSearchTest {
             }
         }
 
+        List<DepthTraceSnapshot> snapshotDepthTraces() {
+            List<DepthTrace> traces = getDepthTraces();
+            long capturedAt = System.nanoTime();
+            List<DepthTraceSnapshot> snapshots = new ArrayList<>(traces.size());
+            for (DepthTrace trace : traces) {
+                List<RootMoveSnapshot> moves = new ArrayList<>(trace.moves.size());
+                for (RootMoveTrace moveTrace : trace.moves) {
+                    moves.add(new RootMoveSnapshot(
+                            moveTrace.moveInt,
+                            moveTrace.order,
+                            moveTrace.nodesSpent,
+                            moveTrace.nanosSpent,
+                            moveTrace.alphaBefore,
+                            moveTrace.betaBefore,
+                            moveTrace.alphaAfter,
+                            moveTrace.betaAfter,
+                            moveTrace.evaluation.score,
+                            moveTrace.evaluation.exitEarly,
+                            moveTrace.evaluation.reason
+                    ));
+                }
+                long finishedAt = trace.finishedAt != 0L ? trace.finishedAt : capturedAt;
+                snapshots.add(new DepthTraceSnapshot(
+                        trace.depth,
+                        trace.attempt,
+                        trace.whiteToMove,
+                        trace.completed,
+                        trace.betaCutoff,
+                        trace.cutoffMove,
+                        trace.initialAlpha,
+                        trace.initialBeta,
+                        trace.finalAlpha,
+                        trace.finalBeta,
+                        Math.max(0L, finishedAt - trace.startedAt),
+                        List.copyOf(moves)
+                ));
+            }
+            return snapshots;
+        }
+
         private void resetDepthDiagnostics() {
             depthAttemptCounter.clear();
             synchronized (depthTraces) {
@@ -708,6 +970,7 @@ public class BestMoveSearchTest {
             private double finalBeta;
             private MoveAndScore finalBest;
             private boolean completed;
+            private long finishedAt;
 
             DepthTrace(int depth, int attempt, boolean whiteToMove, double initialAlpha, double initialBeta) {
                 this.depth = depth;
@@ -739,6 +1002,7 @@ public class BestMoveSearchTest {
                 this.finalBeta = beta;
                 this.finalBest = best;
                 this.completed = completed;
+                this.finishedAt = System.nanoTime();
             }
 
             int depth() {
@@ -782,7 +1046,8 @@ public class BestMoveSearchTest {
                             .append(System.lineSeparator());
                 }
 
-                long elapsedMs = Duration.ofNanos(System.nanoTime() - startedAt).toMillis();
+                long end = finishedAt != 0L ? finishedAt : System.nanoTime();
+                long elapsedMs = Duration.ofNanos(Math.max(0L, end - startedAt)).toMillis();
                 sb.append("  Final window: [").append(String.format(Locale.ROOT, "%.2f", finalAlpha))
                         .append(", ").append(String.format(Locale.ROOT, "%.2f", finalBeta)).append("]")
                         .append(" after ").append(elapsedMs).append(" ms").append(System.lineSeparator());
@@ -852,6 +1117,37 @@ public class BestMoveSearchTest {
                 sb.append(" (via ").append(evaluation.reason).append(')');
                 return sb.toString();
             }
+        }
+
+        record DepthTraceSnapshot(
+                int depth,
+                int attempt,
+                boolean whiteToMove,
+                boolean completed,
+                boolean betaCutoff,
+                int cutoffMove,
+                double initialAlpha,
+                double initialBeta,
+                double finalAlpha,
+                double finalBeta,
+                long elapsedNanos,
+                List<RootMoveSnapshot> rootMoves
+        ) {
+        }
+
+        record RootMoveSnapshot(
+                int moveInt,
+                int order,
+                long nodesSpent,
+                long nanosSpent,
+                double alphaBefore,
+                double betaBefore,
+                double alphaAfter,
+                double betaAfter,
+                Double score,
+                boolean exitEarly,
+                String reason
+        ) {
         }
 
         private record EvaluationResult(Double score, boolean exitEarly, String reason) {

@@ -111,6 +111,18 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
   Expose and apply them via the tuning module so they are loaded and propagated into the evaluation at runtime.
 * Full-suite runs currently fail in `BestMoveSearchTest` due to long-horizon move selection mismatches. Use the PGN smoke tests above when focusing on PGN changes, or investigate the AI regressions separately before expecting a green build.
 * `BestMoveSearchTest` now mirrors the diagnostic harness from `AITest_MateThreatDiagnostics`. Each position prints an in-depth iterative-deepening trace, principal variation, and transposition-table probe summary, with aggregated JSON/TXT artifacts in `target/surefire-reports/best-move-search-*`. Expect a long console log and ~28 known assertion failures; the goal is visibility, not a green suite.
+* `BestMoveSearchTest#diagnoseNe4SearchHotSpot` isolates the slow `Ne4` fixture (`3rk2r/1bqpbppp/p1n1p3/1p2P3/5Bn1/2NQ1N2/PPP1BPPP/R2R2K1 w k - 5 14`). Run it with
+  ```bash
+  mvn -Djava.version=21 -Dmaven.compiler.release=21 -Dmaven.compiler.enablePreview=true \
+      -DargLine="--enable-preview" \
+      -Dtest=BestMoveSearchTest#diagnoseNe4SearchHotSpot test
+  ```
+  The test takes ~2 minutes on the reference hardware and prints:
+  - A search summary (result, depth reached, nodes, null-move usage, environment).
+  - **Depth aggregates** (attempt count, average root branching factor, total nodes/time).
+  - **Root move hot spots** showing which root candidates dominate the node budget.
+  - **Per-depth leaderboards** of the most expensive moves, including alpha/beta windows and evaluation sources.
+  Use these logs to spot missing beta cut-offs, ineffective move ordering, or null-move pruning gaps before adjusting pruning heuristics.
 
 ### AI search & evaluation notes
 * Quiescence delta pruning now compares against the alpha window captured before the stand-pat update. Earlier builds raised `alpha` first, which meant `standPat + Δ < alpha` never triggered and the pruning shortcut was effectively disabled.
