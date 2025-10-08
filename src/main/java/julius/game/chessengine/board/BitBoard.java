@@ -805,12 +805,16 @@ public class BitBoard {
             // Push gain and toggle
             d++;
             gain[d] = victimValue - gain[d - 1];
+            int continuation = Math.max(-gain[d - 1], gain[d]);
+            if (continuation < 0) {
+                break;
+            }
             victimValue = Score.getPieceValue(attBits);
             toPieceBits = attBits;
             toPieceWhite = sideWhite;
             sideWhite = !sideWhite;
 
-            if (thresholded && Math.max(-gain[d - 1], gain[d]) <= 0) {
+            if (thresholded && continuation <= 0) {
                 break;
             }
         }

@@ -194,6 +194,25 @@ public class BitBoardTest {
     }
 
     @Test
+    void seeKeepsLongCaptureChainOutcomeStable() {
+        Engine engine = new Engine();
+        engine.importBoardFromFen("3r2k1/8/2p1pn2/3b4/4PN2/1B3Q2/8/3R2K1 w - - 0 1");
+
+        BitBoard board = engine.getBitBoard();
+        int from = convertStringToIndex("f4");
+        int to = convertStringToIndex("d5");
+        PieceType captured = board.getPieceTypeAtIndex(to);
+
+        int move = MoveHelper.createMoveInt(from, to, PieceType.KNIGHT, true,
+                true, false, false, null, captured, false, false,
+                board.getLastMoveDoubleStepPawnIndex());
+
+        int see = engine.see(move);
+
+        assertEquals(1, see, "Long capture chains should not change the SEE result");
+    }
+
+    @Test
     public void PERFT() {
         long startTime = System.nanoTime(); // Start timing
 
