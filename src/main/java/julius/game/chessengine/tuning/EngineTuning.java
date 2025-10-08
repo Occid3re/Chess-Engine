@@ -19,6 +19,7 @@ public final class EngineTuning {
 
     static {
         MoveOrderingParameters.defaults();
+        SearchPruningParameters.defaults();
     }
 
     private final String name;

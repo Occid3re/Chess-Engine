@@ -88,3 +88,13 @@ population:
       moveordering.captureseemultiplier: 40
       moveordering.promotionseemultiplier: 20
       moveordering.castlingbonus: 2000
+      search.futilitymargindepth1: 0
+      search.futilitymargindepth2: 0
+      search.lmpbase: 8
+      search.lmpperdepth: 2
+      search.hmpminindex: 999
+      search.hmphistorymax: -1
+      search.iidreducedepth: 0
+      search.lmrprotectplymax: 1
+      search.lmrprotectindexmax: 2
+      search.lmrcapforgoodquiet: 64
