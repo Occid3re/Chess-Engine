@@ -95,6 +95,17 @@ public final class Tuning {
     private static int moveOrderingPromotionSeeMultiplier;
     private static int moveOrderingCastlingBonus;
 
+    private static int searchFutilityMarginDepth1;
+    private static int searchFutilityMarginDepth2;
+    private static int searchLateMovePruningBase;
+    private static int searchLateMovePruningPerDepth;
+    private static int searchHistoryPruneMinIndex;
+    private static int searchHistoryPruneMax;
+    private static int searchIidReduceDepth;
+    private static int searchLmrProtectPlyMax;
+    private static int searchLmrProtectIndexMax;
+    private static int searchLmrCapGoodQuiet;
+
     static {
         refresh();
     }
@@ -414,6 +425,46 @@ public final class Tuning {
         return moveOrderingCastlingBonus;
     }
 
+    public static int searchFutilityMarginDepth1() {
+        return searchFutilityMarginDepth1;
+    }
+
+    public static int searchFutilityMarginDepth2() {
+        return searchFutilityMarginDepth2;
+    }
+
+    public static int searchLateMovePruningBase() {
+        return searchLateMovePruningBase;
+    }
+
+    public static int searchLateMovePruningPerDepth() {
+        return searchLateMovePruningPerDepth;
+    }
+
+    public static int searchHistoryPruneMinIndex() {
+        return searchHistoryPruneMinIndex;
+    }
+
+    public static int searchHistoryPruneMax() {
+        return searchHistoryPruneMax;
+    }
+
+    public static int searchIidReduceDepth() {
+        return searchIidReduceDepth;
+    }
+
+    public static int searchLmrProtectPlyMax() {
+        return searchLmrProtectPlyMax;
+    }
+
+    public static int searchLmrProtectIndexMax() {
+        return searchLmrProtectIndexMax;
+    }
+
+    public static int searchLmrCapGoodQuiet() {
+        return searchLmrCapGoodQuiet;
+    }
+
     /**
      * Reloads all cached tuning values from the current {@link ParameterRegistry} snapshot.
      * Callers should invoke this once after applying a new parameter set (e.g. via hot reload).
@@ -496,6 +547,17 @@ public final class Tuning {
             moveOrderingCaptureSeeMultiplier = loadInt(ParamId.MOVE_ORDERING_CAPTURE_SEE_MULTIPLIER);
             moveOrderingPromotionSeeMultiplier = loadInt(ParamId.MOVE_ORDERING_PROMOTION_SEE_MULTIPLIER);
             moveOrderingCastlingBonus = loadInt(ParamId.MOVE_ORDERING_CASTLING_BONUS);
+
+            searchFutilityMarginDepth1 = loadInt(ParamId.SEARCH_FUTILITY_MARGIN_DEPTH1);
+            searchFutilityMarginDepth2 = loadInt(ParamId.SEARCH_FUTILITY_MARGIN_DEPTH2);
+            searchLateMovePruningBase = loadInt(ParamId.SEARCH_LMP_BASE);
+            searchLateMovePruningPerDepth = loadInt(ParamId.SEARCH_LMP_PER_DEPTH);
+            searchHistoryPruneMinIndex = loadInt(ParamId.SEARCH_HMP_MIN_INDEX);
+            searchHistoryPruneMax = loadInt(ParamId.SEARCH_HMP_HISTORY_MAX);
+            searchIidReduceDepth = loadInt(ParamId.SEARCH_IID_REDUCE_DEPTH);
+            searchLmrProtectPlyMax = loadInt(ParamId.SEARCH_LMR_PROTECT_PLY_MAX);
+            searchLmrProtectIndexMax = loadInt(ParamId.SEARCH_LMR_PROTECT_INDEX_MAX);
+            searchLmrCapGoodQuiet = loadInt(ParamId.SEARCH_LMR_CAP_GOOD_QUIET);
         }
     }
 
