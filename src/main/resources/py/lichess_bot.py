@@ -1048,7 +1048,12 @@ def outbound_challenge_loop(stop_event: threading.Event,
                 for _ in range(period):
                     if stop_event.is_set():
                         return
+                    if active_counter.get() == 0:
+                        print("[outbound] no active games detected; resuming outbound scans")
+                        break
                     time.sleep(1)
+                else:
+                    continue
                 continue
 
             print("[outbound] scanning for targets...")
