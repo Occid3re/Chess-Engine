@@ -2236,7 +2236,7 @@ public class AI {
             if (beta <= alpha) {
                 updateKillerMoves(depth, move);
                 incrementHistory(move, depth);
-                heuristics.recordCounterMove(prevMove, move);
+                heuristics.recordCounterMove(prevMove, move, depth);
                 break;
             }
         }
@@ -2420,7 +2420,7 @@ public class AI {
             if (alpha >= beta) {
                 updateKillerMoves(depth, move);
                 incrementHistory(move, depth);
-                heuristics.recordCounterMove(prevMove, move);
+                heuristics.recordCounterMove(prevMove, move, depth);
                 break;
             }
         }
@@ -2442,12 +2442,16 @@ public class AI {
 
     /**
      * Orders moves using a combination of transposition-table hints, promotions,
-     * SEE-aware capture sorting, killer moves and history heuristics. Static
-     * Exchange Evaluation (SEE) is used to distinguish between winning and
-     * losing captures: winning trades (positive SEE) are promoted ahead of
-     * neutral/losing captures while negative SEE trades are demoted within
-     * their capture bucket. Results are cached per move within this ordering
-     * pass so repeated SEE queries are avoided.
+     * SEE-aware capture sorting, killer moves, multi-level history and counter
+     * heuristics. Static Exchange Evaluation (SEE) is used to distinguish
+     * between winning and losing captures: winning trades (positive SEE) are
+     * promoted ahead of neutral/losing captures while negative SEE trades are
+     * demoted within their capture bucket. Results are cached per move within
+     * this ordering pass so repeated SEE queries are avoided. Quiet moves are
+     * ranked using both the classical history table and a piece-specific
+     * continuation history augmented by refutation (counter) strength so that
+     * the engine quickly revisits move sequences that have previously caused
+     * fail-high cut-offs.
      */
     IntArrayList sortMovesByEfficiency(IntArrayList moves, int currentDepth, long boardHash, int prevMove,
                                        Engine simulatorEngine) {
@@ -2467,7 +2471,9 @@ public class AI {
         final Heuristics heuristics = threadHeuristics.get();
         final int[][] killerMoves = heuristics.killers;
         final int[][] historyTable = heuristics.history;
+        final int[][][] pieceHistoryTable = heuristics.pieceHistory;
         final int[][] counterMove = heuristics.counter;
+        final int[][] counterStrength = heuristics.counterStrength;
 
         final int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
 
@@ -2496,6 +2502,7 @@ public class AI {
         final int prevFrom = (prevMove >= 0) ? (prevMove & 0x3F) : -1;
         final int prevTo = (prevMove >= 0) ? ((prevMove >>> 6) & 0x3F) : -1;
         final int cm = (prevFrom >= 0) ? counterMove[prevFrom][prevTo] : -1;
+        final int counterBaseScore = (prevFrom >= 0) ? counterStrength[prevFrom][prevTo] : 0;
         final int counterMoveBonus = moveOrderingParameters.counterMoveBonus();
 
         int ttIndex = -1;
@@ -2508,6 +2515,9 @@ public class AI {
 
             final boolean isCapture = MoveHelper.isCapture(moveInt);
             final boolean isPromotion = MoveHelper.isPawnPromotionMove(moveInt);
+            final int from = moveInt & 0x3F;
+            final int to = (moveInt >>> 6) & 0x3F;
+            final int piece = (moveInt >>> 12) & 0x7;
 
             int seeValue = 0;
             boolean hasSee = false;
@@ -2531,6 +2541,11 @@ public class AI {
                     seeBonus = cappedSee * promotionSeeMultiplier;
                 }
                 score = base + promotionBonus + seeBonus;
+                if (moveInt == cm) {
+                    score += counterMoveBonus + counterBaseScore;
+                } else if (counterBaseScore > 0) {
+                    score += Math.max(1, counterBaseScore >> 4);
+                }
             } else if (isCapture) {
                 final int mvvLva = calculateMvvLvaScore(moveInt);
                 if (seeValue > 0) {
@@ -2542,6 +2557,14 @@ public class AI {
                 }
                 int cappedSee = Math.max(-2048, Math.min(2048, seeValue));
                 score = (mvvLva * captureMvvMultiplier) + (cappedSee * captureSeeMultiplier);
+                if (piece > 0 && piece < pieceHistoryTable.length) {
+                    score += Math.max(0, pieceHistoryTable[piece][from][to] >> 1);
+                }
+                if (moveInt == cm) {
+                    score += counterMoveBonus + counterBaseScore;
+                } else if (counterBaseScore > 0) {
+                    score += Math.max(1, counterBaseScore >> 4);
+                }
                 if (score < 0) score = 0;
             } else if (moveInt == k0) {
                 category = CAT_KILLER0;
@@ -2550,11 +2573,21 @@ public class AI {
                 category = CAT_KILLER1;
                 score = killerMoveScore + killer1Bonus;
             } else {
-                final int from = moveInt & 0x3F;
-                final int to = (moveInt >>> 6) & 0x3F;
                 category = CAT_QUIET;
-                score = historyTable[from][to];
-                if (moveInt == cm) score += counterMoveBonus;
+                int historyScore = historyTable[from][to];
+                if (piece > 0 && piece < pieceHistoryTable.length) {
+                    historyScore += pieceHistoryTable[piece][from][to];
+                }
+                if (historyScore < 0) {
+                    historyScore = 0;
+                }
+
+                score = historyScore;
+                if (moveInt == cm) {
+                    score += counterMoveBonus + counterBaseScore;
+                } else if (counterBaseScore > 0) {
+                    score += Math.max(1, counterBaseScore >> 3);
+                }
             }
 
             moveBuffer[i] = moveInt;
@@ -2918,10 +2951,15 @@ public class AI {
     private static final class Heuristics {
         private static final int BOARD_SQUARES = 64;
         private static final int HISTORY_SIZE = BOARD_SQUARES * BOARD_SQUARES;
+        private static final int PIECE_TYPE_COUNT = 7;
+        private static final int PIECE_HISTORY_SIZE = PIECE_TYPE_COUNT * HISTORY_SIZE;
+        private static final int COUNTER_STRENGTH_MAX = 1 << 20;
 
         private int[][] killers;
         private final int[][] history;
         private final int[][] counter;
+        private final int[][][] pieceHistory;
+        private final int[][] counterStrength;
 
         private boolean[] killerDirty;
         private int[] killerDirtyList;
@@ -2937,6 +2975,11 @@ public class AI {
         private final int[] counterDirtyList;
         private int counterDirtyCount;
 
+        private final int[] pieceHistoryDelta;
+        private final boolean[] pieceHistoryDirty;
+        private final int[] pieceHistoryDirtyList;
+        private int pieceHistoryDirtyCount;
+
         private long preparedTaskId = Long.MIN_VALUE;
         private int preparedDepth = -1;
 
@@ -2944,6 +2987,8 @@ public class AI {
             this.killers = allocateKillers(Math.max(1, depth));
             this.history = new int[BOARD_SQUARES][BOARD_SQUARES];
             this.counter = new int[BOARD_SQUARES][BOARD_SQUARES];
+            this.pieceHistory = new int[PIECE_TYPE_COUNT][BOARD_SQUARES][BOARD_SQUARES];
+            this.counterStrength = new int[BOARD_SQUARES][BOARD_SQUARES];
             for (int f = 0; f < BOARD_SQUARES; f++) {
                 Arrays.fill(counter[f], -1);
             }
@@ -2956,6 +3001,9 @@ public class AI {
             Arrays.fill(counterUpdates, -1);
             this.counterDirty = new boolean[HISTORY_SIZE];
             this.counterDirtyList = new int[HISTORY_SIZE];
+            this.pieceHistoryDelta = new int[PIECE_HISTORY_SIZE];
+            this.pieceHistoryDirty = new boolean[PIECE_HISTORY_SIZE];
+            this.pieceHistoryDirtyList = new int[PIECE_HISTORY_SIZE];
         }
 
         private static int[][] allocateKillers(int depth) {
@@ -2992,6 +3040,12 @@ public class AI {
             for (int f = 0; f < BOARD_SQUARES; f++) {
                 System.arraycopy(snapshot.history[f], 0, history[f], 0, BOARD_SQUARES);
                 System.arraycopy(snapshot.counter[f], 0, counter[f], 0, BOARD_SQUARES);
+                System.arraycopy(snapshot.counterStrength[f], 0, counterStrength[f], 0, BOARD_SQUARES);
+            }
+            for (int p = 0; p < PIECE_TYPE_COUNT; p++) {
+                for (int f = 0; f < BOARD_SQUARES; f++) {
+                    System.arraycopy(snapshot.pieceHistory[p][f], 0, pieceHistory[p][f], 0, BOARD_SQUARES);
+                }
             }
         }
 
@@ -3003,14 +3057,23 @@ public class AI {
             }
             int[][] historyCopy = new int[BOARD_SQUARES][];
             int[][] counterCopy = new int[BOARD_SQUARES][];
+            int[][] counterStrengthCopy = new int[BOARD_SQUARES][];
             for (int f = 0; f < BOARD_SQUARES; f++) {
                 historyCopy[f] = Arrays.copyOf(history[f], BOARD_SQUARES);
                 counterCopy[f] = Arrays.copyOf(counter[f], BOARD_SQUARES);
+                counterStrengthCopy[f] = Arrays.copyOf(counterStrength[f], BOARD_SQUARES);
             }
-            return new Snapshot(killerCopy, historyCopy, counterCopy);
+            int[][][] pieceHistoryCopy = new int[PIECE_TYPE_COUNT][][];
+            for (int p = 0; p < PIECE_TYPE_COUNT; p++) {
+                pieceHistoryCopy[p] = new int[BOARD_SQUARES][];
+                for (int f = 0; f < BOARD_SQUARES; f++) {
+                    pieceHistoryCopy[p][f] = Arrays.copyOf(pieceHistory[p][f], BOARD_SQUARES);
+                }
+            }
+            return new Snapshot(killerCopy, historyCopy, counterCopy, pieceHistoryCopy, counterStrengthCopy);
         }
 
-        record Snapshot(int[][] killers, int[][] history, int[][] counter) {
+        record Snapshot(int[][] killers, int[][] history, int[][] counter, int[][][] pieceHistory, int[][] counterStrength) {
         }
 
         boolean isPreparedFor(long taskId, int depth) {
@@ -3041,12 +3104,19 @@ public class AI {
                 counterUpdates[idx] = -1;
             }
             counterDirtyCount = 0;
+
+            for (int i = 0; i < pieceHistoryDirtyCount; i++) {
+                int idx = pieceHistoryDirtyList[i];
+                pieceHistoryDirty[idx] = false;
+                pieceHistoryDelta[idx] = 0;
+            }
+            pieceHistoryDirtyCount = 0;
             preparedTaskId = Long.MIN_VALUE;
             preparedDepth = -1;
         }
 
         boolean hasUpdates() {
-            return killerDirtyCount > 0 || historyDirtyCount > 0 || counterDirtyCount > 0;
+            return killerDirtyCount > 0 || historyDirtyCount > 0 || counterDirtyCount > 0 || pieceHistoryDirtyCount > 0;
         }
 
         void recordKiller(int depth, int move) {
@@ -3084,14 +3154,26 @@ public class AI {
                 historyDirtyList[historyDirtyCount++] = idx;
             }
             historyDelta[idx] += delta;
+
+            int piece = (move >>> 12) & 0x7;
+            if (piece > 0 && piece < PIECE_TYPE_COUNT) {
+                pieceHistory[piece][from][to] += delta;
+                int pieceIdx = (piece << 12) | idx;
+                if (!pieceHistoryDirty[pieceIdx]) {
+                    pieceHistoryDirty[pieceIdx] = true;
+                    pieceHistoryDirtyList[pieceHistoryDirtyCount++] = pieceIdx;
+                }
+                pieceHistoryDelta[pieceIdx] += delta;
+            }
         }
 
-        void recordCounterMove(int prevMove, int move) {
+        void recordCounterMove(int prevMove, int move, int depth) {
             if (prevMove < 0) {
                 return;
             }
             int pf = prevMove & 0x3F;
             int pt = (prevMove >>> 6) & 0x3F;
+            int previous = counter[pf][pt];
             counter[pf][pt] = move;
             int idx = (pf << 6) | pt;
             if (!counterDirty[idx]) {
@@ -3099,6 +3181,17 @@ public class AI {
                 counterDirtyList[counterDirtyCount++] = idx;
             }
             counterUpdates[idx] = move;
+
+            int bonus = depth * depth;
+            if (previous != move) {
+                counterStrength[pf][pt] = bonus;
+            } else {
+                int strengthened = counterStrength[pf][pt] + bonus;
+                if (strengthened < 0) {
+                    strengthened = COUNTER_STRENGTH_MAX;
+                }
+                counterStrength[pf][pt] = Math.min(COUNTER_STRENGTH_MAX, strengthened);
+            }
         }
 
         void mergeInto(Heuristics target) {
@@ -3123,6 +3216,14 @@ public class AI {
                 int from = idx >>> 6;
                 int to = idx & 0x3F;
                 target.counter[from][to] = counterUpdates[idx];
+                target.counterStrength[from][to] = counterStrength[from][to];
+            }
+            for (int i = 0; i < pieceHistoryDirtyCount; i++) {
+                int idx = pieceHistoryDirtyList[i];
+                int piece = idx >>> 12;
+                int from = (idx >>> 6) & 0x3F;
+                int to = idx & 0x3F;
+                target.pieceHistory[piece][from][to] += pieceHistoryDelta[idx];
             }
         }
 
@@ -3147,6 +3248,14 @@ public class AI {
             for (int f = 0; f < BOARD_SQUARES; f++) {
                 for (int t = 0; t < BOARD_SQUARES; t++) {
                     history[f][t] >>= 1;
+                    counterStrength[f][t] -= (counterStrength[f][t] >> 2);
+                }
+            }
+            for (int p = 0; p < PIECE_TYPE_COUNT; p++) {
+                for (int f = 0; f < BOARD_SQUARES; f++) {
+                    for (int t = 0; t < BOARD_SQUARES; t++) {
+                        pieceHistory[p][f][t] >>= 1;
+                    }
                 }
             }
         }
@@ -3155,12 +3264,18 @@ public class AI {
             for (int f = 0; f < BOARD_SQUARES; f++) {
                 Arrays.fill(history[f], 0);
             }
+            for (int p = 0; p < PIECE_TYPE_COUNT; p++) {
+                for (int f = 0; f < BOARD_SQUARES; f++) {
+                    Arrays.fill(pieceHistory[p][f], 0);
+                }
+            }
             resetUpdates();
         }
 
         void clearCounter() {
             for (int f = 0; f < BOARD_SQUARES; f++) {
                 Arrays.fill(counter[f], -1);
+                Arrays.fill(counterStrength[f], 0);
             }
             for (int i = 0; i < counterDirtyCount; i++) {
                 int idx = counterDirtyList[i];
