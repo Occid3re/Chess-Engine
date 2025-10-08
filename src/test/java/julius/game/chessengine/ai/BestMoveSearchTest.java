@@ -436,10 +436,12 @@ public class BestMoveSearchTest {
 
         // Rank is based on static ordering; if desired, you could recompute rank from search ordering
         int rank = -1;
-        if (searchResult == null && chosenEvaluation != null) {
-            // Only meaningful when chosenEvaluation came from the static list
-            rank = evaluations.indexOf(evaluationMap.get(chosenMove)) + 1;
-            if (rank == 0) rank = -1;
+        MoveEvaluation staticChosen = evaluationMap.get(chosenMove);
+        if (staticChosen != null) {
+            int index = evaluations.indexOf(staticChosen);
+            if (index >= 0) {
+                rank = index + 1;
+            }
         }
 
         String pvString = renderPrincipalVariation(whiteToMove, ai.principalVariation());
