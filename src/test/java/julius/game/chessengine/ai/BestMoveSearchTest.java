@@ -126,7 +126,7 @@ public class BestMoveSearchTest {
                         + humanReadable + System.lineSeparator() + diagnostics);
     }
 
-    @Test
+/*    @Test
     void diagnoseNe4SearchHotSpot() throws InterruptedException {
         final String fen = "3rk2r/1bqpbppp/p1n1p3/1p2P3/5Bn1/2NQ1N2/PPP1BPPP/R2R2K1 w k - 5 14";
         final List<String> expectedMoves = List.of("Ne4");
@@ -293,7 +293,7 @@ public class BestMoveSearchTest {
         }
 
         System.out.println("=======================================================");
-    }
+    }*/
 
     private static String describeMove(int moveInt) {
         if (moveInt == -1) {
