@@ -26,7 +26,10 @@ public final class MoveOrderingParameters {
                 Tuning.moveOrderingCaptureMvvMultiplier(),
                 Tuning.moveOrderingCaptureSeeMultiplier(),
                 Tuning.moveOrderingPromotionSeeMultiplier(),
-                Tuning.moveOrderingCastlingBonus()
+                Tuning.moveOrderingCastlingBonus(),
+                Tuning.moveOrderingCaptureSeeClamp(),
+                Tuning.moveOrderingPromotionSeeClamp(),
+                Tuning.moveOrderingMaxScore()
         );
     }
 
@@ -45,6 +48,9 @@ public final class MoveOrderingParameters {
         defaults.put(ParamId.MOVE_ORDERING_CAPTURE_SEE_MULTIPLIER.key(), ParamId.MOVE_ORDERING_CAPTURE_SEE_MULTIPLIER.defaultValue());
         defaults.put(ParamId.MOVE_ORDERING_PROMOTION_SEE_MULTIPLIER.key(), ParamId.MOVE_ORDERING_PROMOTION_SEE_MULTIPLIER.defaultValue());
         defaults.put(ParamId.MOVE_ORDERING_CASTLING_BONUS.key(), ParamId.MOVE_ORDERING_CASTLING_BONUS.defaultValue());
+        defaults.put(ParamId.MOVE_ORDERING_CAPTURE_SEE_CLAMP.key(), ParamId.MOVE_ORDERING_CAPTURE_SEE_CLAMP.defaultValue());
+        defaults.put(ParamId.MOVE_ORDERING_PROMOTION_SEE_CLAMP.key(), ParamId.MOVE_ORDERING_PROMOTION_SEE_CLAMP.defaultValue());
+        defaults.put(ParamId.MOVE_ORDERING_MAX_SCORE.key(), ParamId.MOVE_ORDERING_MAX_SCORE.defaultValue());
         return Collections.unmodifiableMap(defaults);
     }
 
@@ -57,7 +63,10 @@ public final class MoveOrderingParameters {
             int captureMvvMultiplier,
             int captureSeeMultiplier,
             int promotionSeeMultiplier,
-            int castlingBonus
+            int castlingBonus,
+            int captureSeeClamp,
+            int promotionSeeClamp,
+            int maxScore
     ) {
         public Map<String, Integer> asMap() {
             Map<String, Integer> values = new LinkedHashMap<>();
@@ -70,6 +79,9 @@ public final class MoveOrderingParameters {
             values.put("moveOrdering.captureSeeMultiplier", captureSeeMultiplier);
             values.put("moveOrdering.promotionSeeMultiplier", promotionSeeMultiplier);
             values.put("moveOrdering.castlingBonus", castlingBonus);
+            values.put("moveOrdering.captureSeeClamp", captureSeeClamp);
+            values.put("moveOrdering.promotionSeeClamp", promotionSeeClamp);
+            values.put("moveOrdering.maxScore", maxScore);
             return Collections.unmodifiableMap(values);
         }
     }

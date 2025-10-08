@@ -10,8 +10,12 @@ import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.tuning.AiTuning;
+import julius.game.chessengine.tuning.AspirationParameters;
+import julius.game.chessengine.tuning.LmrParameters;
 import julius.game.chessengine.tuning.MoveOrderingParameters;
+import julius.game.chessengine.tuning.NullMoveParameters;
 import julius.game.chessengine.tuning.SearchPruningParameters;
+import julius.game.chessengine.tuning.Tuning;
 import julius.game.chessengine.utils.Score;
 import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
@@ -57,10 +61,6 @@ public class AI {
 
     private static final int ABS_PLY_LIMIT_MARGIN = 32;
 
-    //Quiescence search parameters
-    private static final double MAX_DELTA_PAWN = 9.0;
-
-
     private final AtomicReference<SearchTask> activeSearch = new AtomicReference<>();
     private final ThreadLocal<SearchTask> threadSearchTask = new ThreadLocal<>();
     private final AtomicLong searchIdGenerator = new AtomicLong();
@@ -93,9 +93,6 @@ public class AI {
     private static final int MAX_MAIN_TT_ENTRIES = 1 << 26;      // 67,108,864 entries
     private static final int MIN_CAPTURE_TT_ENTRIES = 1 << 11;   // 2k entries ≈ 64 KB
     private static final int MAX_CAPTURE_TT_ENTRIES = 1 << 25;   // 33,554,432 entries
-
-    private static final double MAIN_TT_WEIGHT = 2.0;
-    private static final double CAPTURE_TT_WEIGHT = 1.0;
 
     public static final int MIN_HASH_SIZE_MB = 1;
     public static final int MAX_HASH_SIZE_MB = 4096;
@@ -141,6 +138,18 @@ public class AI {
 
     private final MoveOrderingParameters.Snapshot moveOrderingParameters;
     private final SearchPruningParameters.Snapshot searchPruningParameters;
+    private final AspirationParameters.Snapshot aspirationParameters;
+    private final NullMoveParameters.Snapshot nullMoveParameters;
+    private final int[][][] lmrReductionTable;
+    private final int lmrBucketCount;
+    private final int futilityMaxDepth;
+    private final int lmpMaxDepth;
+    private final double nullSwingGuardMinCp;
+    private final double nullSwingGuardDivisor;
+    private final double quiescenceMaxDeltaPawn;
+    private final double drawBias;
+    private final double ttMainWeight;
+    private final double ttCaptureWeight;
 
     /**
      * Per-thread heuristic state used during move ordering. The tables are
@@ -178,39 +187,6 @@ public class AI {
 
     private static final int LMR_MAX_DEPTH = 64;
     private static final int LMR_MAX_MOVES = MAX_MOVE_LIST_SIZE;
-    private static final int HISTORY_BUCKETS = 5;
-    private static final double[] HISTORY_BUCKET_NORMALIZED = new double[HISTORY_BUCKETS];
-    private static final int[][][] LMR_REDUCTION_TABLE =
-            new int[LMR_MAX_DEPTH + 1][LMR_MAX_MOVES][HISTORY_BUCKETS];
-
-    static {
-        if (HISTORY_BUCKETS < 1) {
-            throw new IllegalStateException("History bucket count must be positive");
-        }
-        for (int bucket = 0; bucket < HISTORY_BUCKETS; bucket++) {
-            HISTORY_BUCKET_NORMALIZED[bucket] = HISTORY_BUCKETS == 1
-                    ? 0.0
-                    : bucket / (double) (HISTORY_BUCKETS - 1);
-        }
-        for (int depth = 0; depth <= LMR_MAX_DEPTH; depth++) {
-            for (int moveIndex = 0; moveIndex < LMR_MAX_MOVES; moveIndex++) {
-                for (int bucket = 0; bucket < HISTORY_BUCKETS; bucket++) {
-                    double base = Math.log(1 + depth) * Math.log(2 + moveIndex);
-                    double historyWeight = 1.0 - 0.5 * HISTORY_BUCKET_NORMALIZED[bucket];
-                    double scaled = base * historyWeight / 1.5;
-                    int reduction = (int) Math.floor(scaled);
-                    int maxReduction = Math.max(0, depth - 1);
-                    if (reduction < 0) {
-                        reduction = 0;
-                    }
-                    if (reduction > maxReduction) {
-                        reduction = maxReduction;
-                    }
-                    LMR_REDUCTION_TABLE[depth][moveIndex][bucket] = reduction;
-                }
-            }
-        }
-    }
 
     private ScheduledExecutorService scheduler;
 
@@ -299,6 +275,21 @@ public class AI {
 
         this.moveOrderingParameters = MoveOrderingParameters.snapshot();
         this.searchPruningParameters = SearchPruningParameters.snapshot();
+        this.aspirationParameters = AspirationParameters.snapshot();
+        this.nullMoveParameters = NullMoveParameters.snapshot();
+        LmrParameters.Snapshot lmrSnapshot = LmrParameters.snapshot();
+        this.lmrReductionTable = lmrSnapshot.buildReductionTable(LMR_MAX_DEPTH, LMR_MAX_MOVES);
+        this.lmrBucketCount = lmrReductionTable.length > 0 && lmrReductionTable[0].length > 0
+                ? Math.max(1, lmrReductionTable[0][0].length)
+                : 1;
+        this.futilityMaxDepth = Math.max(0, Tuning.searchFpMaxDepth());
+        this.lmpMaxDepth = Math.max(0, Tuning.searchLmpMaxDepth());
+        this.nullSwingGuardMinCp = Tuning.searchNullSwingGuardMinCp();
+        this.nullSwingGuardDivisor = Math.max(1e-9, Tuning.searchNullSwingGuardDivisor());
+        this.quiescenceMaxDeltaPawn = Tuning.searchQsMaxDeltaPawn();
+        this.drawBias = Tuning.searchDrawBias();
+        this.ttMainWeight = Math.max(1e-9, Tuning.searchTtMainWeight());
+        this.ttCaptureWeight = Math.max(1e-9, Tuning.searchTtCaptureWeight());
         this.globalHeuristics = new Heuristics(maxDepth);
         this.threadHeuristics = ThreadLocal.withInitial(() -> new Heuristics(maxDepth));
 
@@ -365,8 +356,11 @@ public class AI {
         boolean concurrent = Math.max(searchThreads, lazySmpThreads) > 1;
         long totalBytes = Math.max(1L, (long) hashSizeMb * 1024L * 1024L);
 
-        double totalWeight = MAIN_TT_WEIGHT + CAPTURE_TT_WEIGHT;
-        long mainBudget = Math.max(1L, (long) (totalBytes * (MAIN_TT_WEIGHT / totalWeight)));
+        double totalWeight = ttMainWeight + ttCaptureWeight;
+        if (totalWeight <= 0.0) {
+            totalWeight = 1.0;
+        }
+        long mainBudget = Math.max(1L, (long) (totalBytes * (ttMainWeight / totalWeight)));
         long captureBudget = Math.max(1L, totalBytes - mainBudget);
         if (captureBudget <= 0) {
             captureBudget = 1L;
@@ -705,7 +699,7 @@ public class AI {
         clearStaticEvalCache();
         Double lastIterScore = null;
         Heuristics heuristics = threadHeuristics.get();
-        AspirationController aspirationController = new AspirationController();
+        AspirationController aspirationController = new AspirationController(aspirationParameters);
 
         for (int currentDepth = 1; currentDepth <= maxDepth; currentDepth++) {
             if (shouldStopCalculating(task)) break;
@@ -1921,7 +1915,7 @@ public class AI {
             if (nullFailHigh) {
                 double mateThreshold = CHECKMATE - (plyFromRoot + 1);
                 double windowEdge = isWhite ? beta : alpha;
-                double swingThreshold = Math.max(600, mateThreshold / 64.0);
+                double swingThreshold = Math.max(nullSwingGuardMinCp, mateThreshold / nullSwingGuardDivisor);
                 double swing = Double.isFinite(windowEdge) ? Math.abs(nullScore - windowEdge) : Math.abs(nullScore);
                 boolean requiresVerification = Math.abs(nullScore) >= mateThreshold
                         || swing >= swingThreshold;
@@ -1998,21 +1992,26 @@ public class AI {
         return Math.min(reduction, maxReduction);
     }
 
-    private static double getReductionEstimate(int depth, int mobility, int nonPawnMaterial) {
-        double depthFactor = Math.min(depth, 10) / 10.0;
-        double materialFactor = Math.min(nonPawnMaterial, 12) / 12.0;
-        double mobilityFactor = Math.min(Math.max(mobility, 0), 30) / 30.0;
+    private double getReductionEstimate(int depth, int mobility, int nonPawnMaterial) {
+        int depthCap = Math.max(1, nullMoveParameters.depthCap());
+        int materialCap = Math.max(1, nullMoveParameters.materialCap());
+        int mobilityCap = Math.max(1, nullMoveParameters.mobilityCap());
 
-        double reductionEstimate = 1.25
-                + (depthFactor * 1.5)
-                + (materialFactor * 0.75)
-                + (mobilityFactor * 0.5);
+        double depthFactor = Math.min(Math.max(depth, 0), depthCap) / (double) depthCap;
+        double materialFactor = Math.min(Math.max(nonPawnMaterial, 0), materialCap) / (double) materialCap;
+        double mobilityFactor = Math.min(Math.max(mobility, 0), mobilityCap) / (double) mobilityCap;
 
-        if (nonPawnMaterial <= 2 || mobility <= 4) {
-            reductionEstimate -= 0.75;
+        double reductionEstimate = nullMoveParameters.baseReduction()
+                + (depthFactor * nullMoveParameters.depthWeight())
+                + (materialFactor * nullMoveParameters.materialWeight())
+                + (mobilityFactor * nullMoveParameters.mobilityWeight());
+
+        if (nonPawnMaterial <= nullMoveParameters.lowMaterialThreshold()
+                || mobility <= nullMoveParameters.lowMobilityThreshold()) {
+            reductionEstimate -= nullMoveParameters.lowMaterialPenalty();
         }
-        if (mobility <= 2) {
-            reductionEstimate -= 0.5;
+        if (mobility <= nullMoveParameters.veryLowMobilityThreshold()) {
+            reductionEstimate -= nullMoveParameters.veryLowMobilityPenalty();
         }
         return reductionEstimate;
     }
@@ -2047,17 +2046,18 @@ public class AI {
         double normalized = historyReductionMax == 0
                 ? 0.0
                 : history / (double) historyReductionMax;
-        double bucketPosition = normalized * (HISTORY_BUCKETS - 1);
-        int lowerBucket = (int) Math.floor(bucketPosition);
-        int upperBucket = Math.min(HISTORY_BUCKETS - 1, lowerBucket + 1);
+        int buckets = Math.max(1, lmrBucketCount);
+        double bucketPosition = buckets == 1 ? 0.0 : normalized * (buckets - 1);
+        int lowerBucket = Math.max(0, (int) Math.floor(bucketPosition));
+        int upperBucket = Math.min(buckets - 1, lowerBucket + 1);
         double fraction = bucketPosition - lowerBucket;
 
-        int lowerValue = LMR_REDUCTION_TABLE[clampedDepth][clampedMoveIndex][lowerBucket];
+        int lowerValue = lmrReductionTable[clampedDepth][clampedMoveIndex][lowerBucket];
         if (upperBucket == lowerBucket) {
             return Math.min(lowerValue, depth - 1);
         }
 
-        int upperValue = LMR_REDUCTION_TABLE[clampedDepth][clampedMoveIndex][upperBucket];
+        int upperValue = lmrReductionTable[clampedDepth][clampedMoveIndex][upperBucket];
         double interpolated = lowerValue + fraction * (upperValue - lowerValue);
         int reduction = (int) Math.floor(interpolated + 1e-9);
         int maxReduction = Math.max(0, depth - 1);
@@ -2110,7 +2110,7 @@ public class AI {
         boolean futilityEligible = !inCheckAtNode
                 && plyFromRoot > 0
                 && depth >= 1
-                && depth <= 3
+                && depth <= futilityMaxDepth
                 && Double.isFinite(alpha);
         boolean futilityPossible = futilityEligible
                 && ((baseRemainingDepth <= 1 && pruning.fpMarginDepth1() > 0)
@@ -2182,7 +2182,7 @@ public class AI {
 
             boolean isTactical = isCapture || isPromotion;
             int lmpThreshold = lmpBase + depth * lmpPerDepth;
-            if (!inCheckAtNode && !isTactical && depth <= 3 && index > lmpThreshold) {
+            if (!inCheckAtNode && !isTactical && depth <= lmpMaxDepth && index > lmpThreshold) {
                 simulatorEngine.performMove(move);
                 boolean givesCheckTmp = isSideInCheck(simulatorEngine, false);
                 boolean attacksQueenTmp = attacksOpponentQueenNow(simulatorEngine, true);
@@ -2380,7 +2380,7 @@ public class AI {
         boolean futilityEligible = !inCheckAtNode
                 && plyFromRoot > 0
                 && depth >= 1
-                && depth <= 3
+                && depth <= futilityMaxDepth
                 && Double.isFinite(beta);
         boolean futilityPossible = futilityEligible
                 && ((baseRemainingDepth <= 1 && pruning.fpMarginDepth1() > 0)
@@ -2444,7 +2444,7 @@ public class AI {
 
             boolean isTactical = isCapture || isPromotion;
             int lmpThreshold = lmpBase + depth * lmpPerDepth;
-            if (!inCheckAtNode && !isTactical && depth <= 3 && index > lmpThreshold) {
+            if (!inCheckAtNode && !isTactical && depth <= lmpMaxDepth && index > lmpThreshold) {
                 simulatorEngine.performMove(move);
                 boolean givesCheckTmp = isSideInCheck(simulatorEngine, true);
                 boolean attacksQueenTmp = attacksOpponentQueenNow(simulatorEngine, false);
@@ -2662,6 +2662,9 @@ public class AI {
         final int captureSeeMultiplier = moveOrderingParameters.captureSeeMultiplier();
         final int promotionSeeMultiplier = moveOrderingParameters.promotionSeeMultiplier();
         final int castlingBonus = moveOrderingParameters.castlingBonus();
+        final int captureSeeClamp = Math.max(0, moveOrderingParameters.captureSeeClamp());
+        final int promotionSeeClamp = Math.max(0, moveOrderingParameters.promotionSeeClamp());
+        final int maxScore = Math.max(1, moveOrderingParameters.maxScore());
 
         // Hash move (TT)
         TranspositionTableEntry ttEntry = transpositionTable.get(boardHash);
@@ -2699,13 +2702,15 @@ public class AI {
 
             if (moveInt == ttMove) {
                 category = CAT_TT;
-                score = 0x00FFFFFF; // max within bucket
+                score = maxScore; // max within bucket
             } else if (isPromotion) {
                 category = CAT_PROMO;
                 int base = calculateMvvLvaScore(moveInt);
                 int seeBonus = 0;
                 if (hasSee) {
-                    int cappedSee = Math.max(-512, Math.min(512, seeValue));
+                    int cappedSee = promotionSeeClamp > 0
+                            ? Math.max(-promotionSeeClamp, Math.min(promotionSeeClamp, seeValue))
+                            : seeValue;
                     seeBonus = cappedSee * promotionSeeMultiplier;
                 }
                 score = base + promotionBonus + seeBonus;
@@ -2718,7 +2723,9 @@ public class AI {
                 } else {
                     category = CAT_CAP_BAD;
                 }
-                int cappedSee = Math.max(-2048, Math.min(2048, seeValue));
+                int cappedSee = captureSeeClamp > 0
+                        ? Math.max(-captureSeeClamp, Math.min(captureSeeClamp, seeValue))
+                        : seeValue;
                 score = (mvvLva * captureMvvMultiplier) + (cappedSee * captureSeeMultiplier);
                 if (score < 0) score = 0;
             } else if (moveInt == k0) {
@@ -2743,7 +2750,7 @@ public class AI {
 
             int s = score;
             if (s < 0) s = 0;
-            else if (s > 0x00FFFFFF) s = 0x00FFFFFF;
+            else if (s > maxScore) s = maxScore;
             sortKeys[i] = (((long) category) << 56) | (((long) s) << 32) | (moveInt & 0xFFFFFFFFL);
         }
 
@@ -2788,11 +2795,10 @@ public class AI {
         // Treat both terminal draws and insufficient-material as draw for evaluation
         if (simulatorEngine.getGameState().isDrawForUIOrEval()) {
             double scoreDiff = resolveScoreDifference(simulatorEngine.getGameState(), boardStateHash);
-            final double DRAW_BIAS = 0.20;
             if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
-                return DRAW - DRAW_BIAS;
+                return DRAW - drawBias;
             } else if ((isWhitesTurn && scoreDiff < 0) || (!isWhitesTurn && scoreDiff > 0)) {
-                return DRAW + DRAW_BIAS;
+                return DRAW + drawBias;
             }
             return DRAW;
         }
@@ -2951,11 +2957,10 @@ public class AI {
         if (gameState.isDrawForUIOrEval()) { // <-- include insufficient material for eval/UI
             if (log.isDebugEnabled()) log.debug("DRAW");
             double scoreDiff = resolveScoreDifference(gameState, boardHash);
-            final double DRAW_BIAS = 0.20;
             if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
-                return DRAW - DRAW_BIAS;
+                return DRAW - drawBias;
             } else if ((isWhitesTurn && scoreDiff < 0) || (!isWhitesTurn && scoreDiff > 0)) {
-                return DRAW + DRAW_BIAS;
+                return DRAW + drawBias;
             }
             return DRAW;
         }
@@ -3005,13 +3010,13 @@ public class AI {
 
             if (swing > bestSwing) {
                 bestSwing = swing;
-                if (bestSwing >= MAX_DELTA_PAWN) {
-                    return MAX_DELTA_PAWN;
+                if (bestSwing >= quiescenceMaxDeltaPawn) {
+                    return quiescenceMaxDeltaPawn;
                 }
             }
         }
 
-        return Math.min(bestSwing, MAX_DELTA_PAWN);
+        return Math.min(bestSwing, quiescenceMaxDeltaPawn);
     }
 
     /**
