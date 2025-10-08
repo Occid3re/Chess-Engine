@@ -2109,7 +2109,7 @@ public class AI {
             // SEE pruning for losing captures/quiets (keep checks/promotions)
             boolean seePruneCandidate = (!inCheckAtNode && isCapture && !isPromotion) || isQuiet;
             if (seePruneCandidate) {
-                seeGain = seeCache.computeIfAbsent(move, simulatorEngine::see);
+                seeGain = simulatorEngine.see(move, 0);
                 seeEvaluated = true;
                 boolean nearRoot = plyFromRoot <= SEE_PRUNE_NEAR_ROOT_PLY;
                 boolean allowSeePrune = seeGain < 0 && !nearRoot;
@@ -2294,7 +2294,7 @@ public class AI {
 
             boolean seePruneCandidate = (!inCheckAtNode && isCapture && !isPromotion) || isQuiet;
             if (seePruneCandidate) {
-                seeGain = seeCache.computeIfAbsent(move, simulatorEngine::see);
+                seeGain = simulatorEngine.see(move, 0);
                 seeEvaluated = true;
                 boolean nearRoot = plyFromRoot <= SEE_PRUNE_NEAR_ROOT_PLY;
                 boolean allowSeePrune = seeGain < 0 && !nearRoot;
@@ -2722,7 +2722,7 @@ public class AI {
             // SEE pruning: drop clearly losing captures (keep promotions).
             // Optionally keep losing captures that give check (aggressive but sometimes good).
             if (!inCheck && isCapture && !isPromotion) {
-                int see = simulatorEngine.see(m);
+                int see = simulatorEngine.see(m, 0);
                 if (see < 0) {
                     // Cheap “gives check?” probe; only spend the make/undo if node didn't turn terminal.
                     if (!simulatorEngine.getGameState().isTerminal()) {

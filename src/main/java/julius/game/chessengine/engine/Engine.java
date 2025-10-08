@@ -100,6 +100,12 @@ public class Engine {
         }
     }
 
+    public int see(int move, int margin) {
+        synchronized (boardLock) {
+            return bitBoard.see(move, margin);
+        }
+    }
+
     public IntArrayList getAllLegalMoves() {
         synchronized (boardLock) {
             long boardHash = getBoardStateHash();

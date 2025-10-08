@@ -64,6 +64,7 @@ public class BitBoard {
 
     // Reuse gain stack in SEE (allocation-free)
     private final int[] seeGain = new int[32];
+    private static final int SEE_MARGIN_DISABLED = Integer.MIN_VALUE;
 
     private static final int MAX_PSEUDO_LEGAL_MOVES = 218;
 
@@ -615,6 +616,10 @@ public class BitBoard {
      * Positive => winning capture; Negative => losing capture.
      */
     public int see(int move) {
+        return see(move, SEE_MARGIN_DISABLED);
+    }
+
+    public int see(int move, int margin) {
         // Only meaningful for captures/promotions (we keep 0 for non-captures).
         boolean isCapture = MoveHelper.isCapture(move);
         int promoBits = MoveHelper.derivePromotionPieceTypeBits(move);
@@ -668,7 +673,12 @@ public class BitBoard {
         if (promoBits != 0) {
             capVal += Score.getPieceValue(promoBits) - Score.getPieceValue(1); // promotion delta (to piece - pawn)
         }
-        gain[0] = capVal;
+        boolean thresholded = margin != SEE_MARGIN_DISABLED;
+        int initialGain = capVal;
+        if (thresholded) {
+            initialGain -= margin;
+        }
+        gain[0] = initialGain;
 
         // Track current occupant of 'to' (side/piece) – initially the mover after first capture
         int victimValue = Score.getPieceValue(placedBits);
@@ -799,13 +809,17 @@ public class BitBoard {
             toPieceBits = attBits;
             toPieceWhite = sideWhite;
             sideWhite = !sideWhite;
+
+            if (thresholded && Math.max(-gain[d - 1], gain[d]) <= 0) {
+                break;
+            }
         }
 
         // Resolve swaps back (fail-soft)
         for (int i = d - 1; i >= 0; i--) {
             gain[i] = -Math.max(-gain[i], gain[i + 1]);
         }
-        return gain[0];
+        return thresholded ? gain[0] + margin : gain[0];
     }
 
     private boolean isKingCaptureLegal(boolean kingIsWhite, int kingFrom, int target,
