@@ -179,6 +179,286 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "soft_min": 0.0,
         "soft_max": 64.0,
     },
+    "pawnstructure.islandpenalty": {
+        "step": 1.0,
+        "soft_min": -40.0,
+        "soft_max": 0.0,
+    },
+    "pawnstructure.doubledpawnpenalty": {
+        "step": 2.0,
+        "soft_min": -80.0,
+        "soft_max": 0.0,
+    },
+    "pawnstructure.isolatedpawnpenalty": {
+        "step": 2.0,
+        "soft_min": -60.0,
+        "soft_max": 0.0,
+    },
+    "pawnstructure.blockedpawnpenalty": {
+        "step": 2.0,
+        "soft_min": -50.0,
+        "soft_max": 0.0,
+    },
+    "pawnstructure.backwardpawnpenalty": {
+        "step": 2.0,
+        "soft_min": -60.0,
+        "soft_max": 0.0,
+    },
+    "pawnstructure.ownkingblockspassedpawnpenalty": {
+        "step": 12.0,
+        "soft_min": -400.0,
+        "soft_max": 0.0,
+    },
+    "activity.midgamemobilityknight": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 12.0,
+    },
+    "activity.midgamemobilitybishop": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 12.0,
+    },
+    "activity.midgamemobilityrook": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 12.0,
+    },
+    "activity.midgamemobilityqueen": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 8.0,
+    },
+    "activity.midgamemobilityking": {
+        "step": 1.0,
+        "soft_min": -4.0,
+        "soft_max": 8.0,
+    },
+    "activity.endgamemobilityknight": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 12.0,
+    },
+    "activity.endgamemobilitybishop": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 12.0,
+    },
+    "activity.endgamemobilityrook": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 12.0,
+    },
+    "activity.endgamemobilityqueen": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 8.0,
+    },
+    "activity.endgamemobilityking": {
+        "step": 1.0,
+        "soft_min": -4.0,
+        "soft_max": 8.0,
+    },
+    "activity.midgamecenterknight": {
+        "step": 1.0,
+        "soft_min": -4.0,
+        "soft_max": 8.0,
+    },
+    "activity.midgamecenterbishop": {
+        "step": 1.0,
+        "soft_min": -4.0,
+        "soft_max": 8.0,
+    },
+    "activity.midgamecenterrook": {
+        "step": 1.0,
+        "soft_min": -4.0,
+        "soft_max": 8.0,
+    },
+    "activity.midgamecenterqueen": {
+        "step": 1.0,
+        "soft_min": -4.0,
+        "soft_max": 8.0,
+    },
+    "activity.midgamecenterking": {
+        "step": 1.0,
+        "soft_min": -4.0,
+        "soft_max": 8.0,
+    },
+    "activity.endgamecenterknight": {
+        "step": 1.0,
+        "soft_min": -4.0,
+        "soft_max": 8.0,
+    },
+    "activity.endgamecenterbishop": {
+        "step": 1.0,
+        "soft_min": -4.0,
+        "soft_max": 8.0,
+    },
+    "activity.endgamecenterrook": {
+        "step": 1.0,
+        "soft_min": -4.0,
+        "soft_max": 8.0,
+    },
+    "activity.endgamecenterqueen": {
+        "step": 1.0,
+        "soft_min": -4.0,
+        "soft_max": 8.0,
+    },
+    "activity.endgamecenterking": {
+        "step": 1.0,
+        "soft_min": -4.0,
+        "soft_max": 8.0,
+    },
+    "kingsafety.missingpawnshieldpenalty": {
+        "step": 2.0,
+        "soft_min": -80.0,
+        "soft_max": 0.0,
+    },
+    "kingsafety.halfopenfilepenalty": {
+        "step": 2.0,
+        "soft_min": -80.0,
+        "soft_max": 0.0,
+    },
+    "kingsafety.openfilepenalty": {
+        "step": 3.0,
+        "soft_min": -120.0,
+        "soft_max": 0.0,
+    },
+    "kingsafety.queenattackedpenalty": {
+        "step": 8.0,
+        "soft_min": -240.0,
+        "soft_max": 0.0,
+    },
+    "kingsafety.backrankweaknessmidgamepenalty": {
+        "step": 10.0,
+        "soft_min": -240.0,
+        "soft_max": 0.0,
+    },
+    "kingsafety.backrankweaknessendgamepenalty": {
+        "step": 8.0,
+        "soft_min": -120.0,
+        "soft_max": 0.0,
+    },
+    "kingsafety.defenderbonus": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 20.0,
+    },
+    "kingsafety.attackweightpawn": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 12.0,
+    },
+    "kingsafety.attackweightknight": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 24.0,
+    },
+    "kingsafety.attackweightbishop": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 24.0,
+    },
+    "kingsafety.attackweightrook": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 36.0,
+    },
+    "kingsafety.attackweightqueen": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 48.0,
+    },
+    "threat.hangingpawnpenalty": {
+        "step": 2.0,
+        "soft_min": -50.0,
+        "soft_max": 0.0,
+    },
+    "threat.hangingknightpenalty": {
+        "step": 3.0,
+        "soft_min": -90.0,
+        "soft_max": 0.0,
+    },
+    "threat.hangingbishoppenalty": {
+        "step": 3.0,
+        "soft_min": -90.0,
+        "soft_max": 0.0,
+    },
+    "threat.hangingrookpenalty": {
+        "step": 4.0,
+        "soft_min": -140.0,
+        "soft_max": 0.0,
+    },
+    "threat.hangingqueenpenalty": {
+        "step": 5.0,
+        "soft_min": -180.0,
+        "soft_max": 0.0,
+    },
+    "threat.pawnthreatknightpenalty": {
+        "step": 2.0,
+        "soft_min": -50.0,
+        "soft_max": 0.0,
+    },
+    "threat.pawnthreatbishoppenalty": {
+        "step": 2.0,
+        "soft_min": -50.0,
+        "soft_max": 0.0,
+    },
+    "threat.pawnthreatrookpenalty": {
+        "step": 3.0,
+        "soft_min": -80.0,
+        "soft_max": 0.0,
+    },
+    "threat.pawnthreatqueenpenalty": {
+        "step": 3.0,
+        "soft_min": -100.0,
+        "soft_max": 0.0,
+    },
+    "moveordering.killermovescore": {
+        "step": 400.0,
+        "soft_min": 2000.0,
+        "soft_max": 20000.0,
+    },
+    "moveordering.promotionbonus": {
+        "step": 80.0,
+        "soft_min": 400.0,
+        "soft_max": 1600.0,
+    },
+    "moveordering.killer0bonus": {
+        "step": 5.0,
+        "soft_min": 0.0,
+        "soft_max": 160.0,
+    },
+    "moveordering.killer1bonus": {
+        "step": 5.0,
+        "soft_min": 0.0,
+        "soft_max": 120.0,
+    },
+    "moveordering.countermovebonus": {
+        "step": 40.0,
+        "soft_min": 0.0,
+        "soft_max": 1200.0,
+    },
+    "moveordering.capturemvvmultiplier": {
+        "step": 2.0,
+        "soft_min": 0.0,
+        "soft_max": 48.0,
+    },
+    "moveordering.captureseemultiplier": {
+        "step": 4.0,
+        "soft_min": 0.0,
+        "soft_max": 96.0,
+    },
+    "moveordering.promotionseemultiplier": {
+        "step": 2.0,
+        "soft_min": 0.0,
+        "soft_max": 48.0,
+    },
+    "moveordering.castlingbonus": {
+        "step": 200.0,
+        "soft_min": 0.0,
+        "soft_max": 5000.0,
+    },
 }
 
 # ----------------------------
