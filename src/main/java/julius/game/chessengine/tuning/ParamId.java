@@ -80,7 +80,18 @@ public enum ParamId {
     MOVE_ORDERING_CAPTURE_MVV_MULTIPLIER("moveOrdering.captureMvvMultiplier", 16),
     MOVE_ORDERING_CAPTURE_SEE_MULTIPLIER("moveOrdering.captureSeeMultiplier", 32),
     MOVE_ORDERING_PROMOTION_SEE_MULTIPLIER("moveOrdering.promotionSeeMultiplier", 16),
-    MOVE_ORDERING_CASTLING_BONUS("moveOrdering.castlingBonus", 2000);
+    MOVE_ORDERING_CASTLING_BONUS("moveOrdering.castlingBonus", 2000),
+
+    SEARCH_FP_MARGIN_DEPTH1("search.fpMarginDepth1", 0, 0.0, 4000.0),
+    SEARCH_FP_MARGIN_DEPTH2("search.fpMarginDepth2", 0, 0.0, 8000.0),
+    SEARCH_LMP_BASE("search.lmpBase", 8, 0.0, 512.0),
+    SEARCH_LMP_PER_DEPTH("search.lmpPerDepth", 2, 0.0, 64.0),
+    SEARCH_HMP_MIN_INDEX("search.hmpMinIndex", -1, -1.0, 512.0),
+    SEARCH_HMP_HISTORY_MAX("search.hmpHistoryMax", -1, -32768.0, 32767.0),
+    SEARCH_IID_REDUCE_DEPTH("search.iidReduceDepth", 0, 0.0, 8.0),
+    SEARCH_LMR_PROTECT_PLY_MAX("search.lmrProtectPlyMax", 1, 0.0, 8.0),
+    SEARCH_LMR_PROTECT_INDEX_MAX("search.lmrProtectIndexMax", 2, 0.0, 64.0),
+    SEARCH_LMR_CAP_GOOD_QUIET("search.lmrCapGoodQuiet", 63, 0.0, 64.0);
 
     private final String key;
     private final double defaultValue;

@@ -11,6 +11,7 @@ import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.tuning.AiTuning;
 import julius.game.chessengine.tuning.MoveOrderingParameters;
+import julius.game.chessengine.tuning.SearchPruningParameters;
 import julius.game.chessengine.utils.Score;
 import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
@@ -141,6 +142,7 @@ public class AI {
     private final Heuristics globalHeuristics;
 
     private final MoveOrderingParameters.Snapshot moveOrderingParameters;
+    private final SearchPruningParameters.Snapshot searchPruningParameters;
 
     /**
      * Per-thread heuristic state used during move ordering. The tables are
@@ -298,6 +300,7 @@ public class AI {
         log.info("### SearchThreads = {}, LazySmpThreads = {}", searchThreads, lazySmpThreads);
 
         this.moveOrderingParameters = MoveOrderingParameters.snapshot();
+        this.searchPruningParameters = SearchPruningParameters.snapshot();
         this.globalHeuristics = new Heuristics(maxDepth);
         this.threadHeuristics = ThreadLocal.withInitial(() -> new Heuristics(maxDepth));
 
@@ -2073,6 +2076,16 @@ public class AI {
         return reduction;
     }
 
+    private int futilityMarginForRemainingDepth(int remainingDepth) {
+        if (remainingDepth <= 1) {
+            return searchPruningParameters.fpMarginDepth1();
+        }
+        if (remainingDepth == 2) {
+            return searchPruningParameters.fpMarginDepth2();
+        }
+        return 0;
+    }
+
     private double maximizer(Engine simulatorEngine, int depth, double alpha, double beta,
                              long boardHash, double alphaOriginal, double betaOriginal,
                              IntArrayList moves, long deadline, int prevMove, int plyFromRoot,
@@ -2087,6 +2100,32 @@ public class AI {
         IntArrayList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
         final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
+        final SearchPruningParameters.Snapshot pruning = searchPruningParameters;
+        final int hmpMinIndex = pruning.hmpMinIndex();
+        final int hmpHistoryMax = pruning.hmpHistoryMax();
+        final int lmpBase = pruning.lmpBase();
+        final int lmpPerDepth = pruning.lmpPerDepth();
+        final int iidReduceDepth = pruning.iidReduceDepth();
+        final int lmrProtectPlyMax = pruning.lmrProtectPlyMax();
+        final int lmrProtectIndexMax = pruning.lmrProtectIndexMax();
+        final int lmrCapGoodQuiet = pruning.lmrCapForGoodQuiet();
+
+        int baseRemainingDepth = Math.max(0, depth - 1);
+        boolean futilityEligible = !inCheckAtNode
+                && plyFromRoot > 0
+                && depth >= 1
+                && depth <= 3
+                && Double.isFinite(alpha);
+        boolean futilityPossible = futilityEligible
+                && ((baseRemainingDepth <= 1 && pruning.fpMarginDepth1() > 0)
+                || (baseRemainingDepth == 2 && pruning.fpMarginDepth2() > 0));
+        double staticEvalWhite = Double.NaN;
+        if (futilityPossible) {
+            staticEvalWhite = resolveScoreDifference(simulatorEngine.getGameState(), boardHash);
+            if (!Double.isFinite(staticEvalWhite)) {
+                futilityPossible = false;
+            }
+        }
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (abortRequested(deadline)) {
                 return EXIT_FLAG;
@@ -2101,6 +2140,15 @@ public class AI {
             boolean isPromotion = MoveHelper.isPawnPromotionMove(move);
             boolean isQuiet = !isCapture && !isPromotion;
             int historyScore = historyTable[from][to];
+
+            if (!inCheckAtNode
+                    && isQuiet
+                    && depth >= 2
+                    && hmpMinIndex >= 0
+                    && index >= hmpMinIndex
+                    && historyScore <= hmpHistoryMax) {
+                continue;
+            }
 
             int seeGain = 0;
             boolean seeEvaluated = false;
@@ -2137,7 +2185,7 @@ public class AI {
             int pawnsOnFileBefore = (enemyKingSquare >= 0 && affectsKingFilePawns) ? countPawnsOnFile(boardBefore, kingFileMask) : 0;
 
             boolean isTactical = isCapture || isPromotion;
-            int lmpThreshold = 8 + depth * 2;
+            int lmpThreshold = lmpBase + depth * lmpPerDepth;
             if (!inCheckAtNode && !isTactical && depth <= 3 && index > lmpThreshold) {
                 simulatorEngine.performMove(move);
                 boolean givesCheckTmp = isSideInCheck(simulatorEngine, false);
@@ -2154,6 +2202,15 @@ public class AI {
             boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, true);
             boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
 
+            if (futilityPossible && isQuiet && !givesCheck && !attacksQueen && !attacksKingZone
+                    && !opensKingFile && !seeWinsMaterial) {
+                int futilityMargin = futilityMarginForRemainingDepth(baseRemainingDepth);
+                if (futilityMargin > 0 && staticEvalWhite + futilityMargin <= alpha) {
+                    simulatorEngine.undoLastMove();
+                    continue;
+                }
+            }
+
             int nextDepth = depth - 1;
             boolean forcing = givesCheck || attacksQueen;
             boolean allowExtend = forcing && extStreak < MAX_CHECK_EXTENSIONS_IN_A_ROW;
@@ -2169,6 +2226,42 @@ public class AI {
             if (ttExactHit) {
                 eval = entry.score;
             } else {
+                if (!inCheckAtNode
+                        && !isTactical
+                        && !givesCheck
+                        && !attacksQueen
+                        && !attacksKingZone
+                        && !opensKingFile
+                        && iidReduceDepth > 0
+                        && nextDepth - iidReduceDepth >= 1) {
+                    double iidScore = alphaBeta(simulatorEngine, nextDepth - iidReduceDepth, alpha, beta,
+                            false, deadline, move, plyFromRoot + 1, 0);
+                    if (iidScore == EXIT_FLAG || positionChanged()) {
+                        simulatorEngine.undoLastMove();
+                        return EXIT_FLAG;
+                    }
+                    entry = transpositionTable.get(newBoardHash);
+                    ttExactHit = entry != null
+                            && entry.nodeType == NodeType.EXACT
+                            && entry.depth >= nextDepth;
+                    if (ttExactHit) {
+                        eval = entry.score;
+                        simulatorEngine.undoLastMove();
+                        if (eval > maxEval) {
+                            maxEval = eval;
+                            bestMoveAtThisNode = move;
+                        }
+                        alpha = Math.max(alpha, eval);
+                        if (beta <= alpha) {
+                            updateKillerMoves(depth, move);
+                            incrementHistory(move, depth);
+                            heuristics.recordCounterMove(prevMove, move);
+                            break;
+                        }
+                        continue;
+                    }
+                }
+
                 boolean canReduce = !inCheckAtNode
                         && !isTactical
                         && !givesCheck
@@ -2177,9 +2270,9 @@ public class AI {
                         && !opensKingFile
                         && !seeWinsMaterial
                         && nextDepth >= 2
-                        && index >= 3;
+                        && index > lmrProtectIndexMax;
 
-                if (plyFromRoot <= 1) {
+                if (plyFromRoot <= lmrProtectPlyMax) {
                     canReduce = false;
                 }
 
@@ -2189,6 +2282,9 @@ public class AI {
                 int reduction = 0;
                 if (canReduce) {
                     reduction = lmrReduction(nextDepth, index, historyScore);
+                    if (reduction > 0 && isQuiet && historyScore > 0 && lmrCapGoodQuiet >= 0) {
+                        reduction = Math.min(reduction, lmrCapGoodQuiet);
+                    }
                     if (reduction <= 0) canReduce = false;
                 }
 
@@ -2272,6 +2368,33 @@ public class AI {
         IntArrayList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
         final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
+        final SearchPruningParameters.Snapshot pruning = searchPruningParameters;
+        final int hmpMinIndex = pruning.hmpMinIndex();
+        final int hmpHistoryMax = pruning.hmpHistoryMax();
+        final int lmpBase = pruning.lmpBase();
+        final int lmpPerDepth = pruning.lmpPerDepth();
+        final int iidReduceDepth = pruning.iidReduceDepth();
+        final int lmrProtectPlyMax = pruning.lmrProtectPlyMax();
+        final int lmrProtectIndexMax = pruning.lmrProtectIndexMax();
+        final int lmrCapGoodQuiet = pruning.lmrCapForGoodQuiet();
+
+        int baseRemainingDepth = Math.max(0, depth - 1);
+        boolean futilityEligible = !inCheckAtNode
+                && plyFromRoot > 0
+                && depth >= 1
+                && depth <= 3
+                && Double.isFinite(beta);
+        boolean futilityPossible = futilityEligible
+                && ((baseRemainingDepth <= 1 && pruning.fpMarginDepth1() > 0)
+                || (baseRemainingDepth == 2 && pruning.fpMarginDepth2() > 0));
+        double staticEvalWhite = Double.NaN;
+        if (futilityPossible) {
+            staticEvalWhite = resolveScoreDifference(simulatorEngine.getGameState(), boardHash);
+            if (!Double.isFinite(staticEvalWhite)) {
+                futilityPossible = false;
+            }
+        }
+
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
                 return EXIT_FLAG;
@@ -2322,6 +2445,14 @@ public class AI {
             int pawnsOnFileBefore = (enemyKingSquare >= 0 && affectsKingFilePawns) ? countPawnsOnFile(boardBefore, kingFileMask) : 0;
 
             boolean isTactical = isCapture || isPromotion;
+            int lmpThreshold = lmpBase + depth * lmpPerDepth;
+            if (!inCheckAtNode && !isTactical && depth <= 3 && index > lmpThreshold) {
+                simulatorEngine.performMove(move);
+                boolean givesCheckTmp = isSideInCheck(simulatorEngine, true);
+                boolean attacksQueenTmp = attacksOpponentQueenNow(simulatorEngine, false);
+                simulatorEngine.undoLastMove();
+                if (!givesCheckTmp && !attacksQueenTmp) continue;
+            }
 
             simulatorEngine.performMove(move);
             long newBoardHash = simulatorEngine.getBoardStateHash();
@@ -2330,6 +2461,15 @@ public class AI {
             boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, false);
             boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, false);
             boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
+
+            if (futilityPossible && isQuiet && !givesCheck && !attacksQueen && !attacksKingZone
+                    && !opensKingFile && !seeWinsMaterial) {
+                int futilityMargin = futilityMarginForRemainingDepth(baseRemainingDepth);
+                if (futilityMargin > 0 && staticEvalWhite - futilityMargin >= beta) {
+                    simulatorEngine.undoLastMove();
+                    continue;
+                }
+            }
 
             int nextDepth = depth - 1;
             boolean forcing = givesCheck || attacksQueen;
@@ -2346,6 +2486,42 @@ public class AI {
             if (ttExactHit) {
                 eval = entry.score;
             } else {
+                if (!inCheckAtNode
+                        && !isTactical
+                        && !givesCheck
+                        && !attacksQueen
+                        && !attacksKingZone
+                        && !opensKingFile
+                        && iidReduceDepth > 0
+                        && nextDepth - iidReduceDepth >= 1) {
+                    double iidScore = alphaBeta(simulatorEngine, nextDepth - iidReduceDepth, alpha, beta,
+                            true, deadline, move, plyFromRoot + 1, 0);
+                    if (iidScore == EXIT_FLAG || positionChanged()) {
+                        simulatorEngine.undoLastMove();
+                        return EXIT_FLAG;
+                    }
+                    entry = transpositionTable.get(newBoardHash);
+                    ttExactHit = entry != null
+                            && entry.nodeType == NodeType.EXACT
+                            && entry.depth >= nextDepth;
+                    if (ttExactHit) {
+                        eval = entry.score;
+                        simulatorEngine.undoLastMove();
+                        if (eval < minEval) {
+                            minEval = eval;
+                            bestMoveAtThisNode = move;
+                        }
+                        beta = Math.min(beta, eval);
+                        if (alpha >= beta) {
+                            updateKillerMoves(depth, move);
+                            incrementHistory(move, depth);
+                            heuristics.recordCounterMove(prevMove, move);
+                            break;
+                        }
+                        continue;
+                    }
+                }
+
                 boolean canReduce = !inCheckAtNode
                         && !isTactical
                         && !givesCheck
@@ -2354,9 +2530,9 @@ public class AI {
                         && !opensKingFile
                         && !seeWinsMaterial
                         && nextDepth >= 2
-                        && index >= 3;
+                        && index > lmrProtectIndexMax;
 
-                if (plyFromRoot <= 1) {
+                if (plyFromRoot <= lmrProtectPlyMax) {
                     canReduce = false;
                 }
 
@@ -2366,6 +2542,9 @@ public class AI {
                 int reduction = 0;
                 if (canReduce) {
                     reduction = lmrReduction(nextDepth, index, historyScore);
+                    if (reduction > 0 && isQuiet && historyScore > 0 && lmrCapGoodQuiet >= 0) {
+                        reduction = Math.min(reduction, lmrCapGoodQuiet);
+                    }
                     if (reduction <= 0) canReduce = false;
                 }
 
