@@ -26,8 +26,6 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.StampedLock;
 
-import static julius.game.chessengine.helper.BitHelper.FileMasks;
-import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
 import static julius.game.chessengine.utils.Score.*;
 
 @Log4j2
@@ -570,11 +568,6 @@ public class AI {
             task.updateBudget(budget);
         }
     }
-
-    public TimeManager.TimeBudget getActiveTimeBudget() {
-        return timeManager.activeBudget();
-    }
-
 
     public Integer getCurrentBestMoveInt() {
         if (!searchResultReady) {
@@ -1317,7 +1310,7 @@ public class AI {
         }
         long now = System.nanoTime();
         if (now >= hardDeadline) return true;
-        if (now >= softDeadline && t != null) {
+        if (now >= softDeadline) {
             t.requestStop();
         }
         if (positionChanged()) return true;
@@ -1512,8 +1505,6 @@ public class AI {
                     MoveAndScore res = future.get();
                     if (res != null) {
                         RootSearchState state = stateRef.get();
-                        alpha = state.alpha();
-                        beta = state.beta();
                         MoveAndScore best = state.best();
                         if (best != null) {
                             bestMove = best.move;
@@ -1966,18 +1957,6 @@ public class AI {
         return (myAttacks & enemyQueen) != 0L;
     }
 
-    private boolean attacksOpponentKingZone(Engine e, boolean moverIsWhite) {
-        BitBoard bb = e.getBitBoard();
-        long enemyKing = moverIsWhite ? bb.getBlackKing() : bb.getWhiteKing();
-        if (enemyKing == 0L) {
-            return false;
-        }
-        int kingIndex = Long.numberOfTrailingZeros(enemyKing);
-        long kingZone = KING_ATTACKS[kingIndex];
-        long myAttacks = bb.getAttackBitboard(moverIsWhite);
-        return (myAttacks & kingZone) != 0L;
-    }
-
     private int computeNullMoveReduction(BitBoard board, int depth, boolean isWhite, int mobility) {
         int maxReduction = depth - 2;
         if (maxReduction <= 0) {
@@ -2014,23 +1993,6 @@ public class AI {
             reductionEstimate -= 0.5;
         }
         return reductionEstimate;
-    }
-
-    private int countPawnsOnFile(BitBoard board, long fileMask) {
-        if (fileMask == 0L) {
-            return 0;
-        }
-        long pawns = (board.getWhitePawns() | board.getBlackPawns()) & fileMask;
-        return Long.bitCount(pawns);
-    }
-
-    private boolean openedFileTowardKing(BitBoard boardAfterMove, long kingFileMask,
-                                         int pawnsBefore, boolean interactsWithKingFile) {
-        if (!interactsWithKingFile || kingFileMask == 0L || pawnsBefore <= 0) {
-            return false;
-        }
-        int pawnsAfter = countPawnsOnFile(boardAfterMove, kingFileMask);
-        return pawnsAfter < pawnsBefore;
     }
 
     /**
@@ -2081,63 +2043,55 @@ public class AI {
         int bestMoveAtThisNode = -1;
 
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, true);
+
+        // --- Internal Iterative Deepening (only when no TT move, decent depth, not in check) ---
+        TranspositionTableEntry probe = transpositionTable.get(boardHash);
+        if (!inCheckAtNode && (probe == null || probe.bestMove == -1) && depth >= 4) {
+            double iid = alphaBeta(simulatorEngine, depth - 2, alpha, beta, true, deadline, prevMove, plyFromRoot, 0);
+            if (iid == EXIT_FLAG) return EXIT_FLAG;
+            // the re-search writes a TT move; ordering improves automatically
+        }
+
         final Heuristics heuristics = threadHeuristics.get();
         final int[][] historyTable = heuristics.history;
 
         IntArrayList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
         final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
+
+        // Cheap static eval once for FP margins (not quiescence!)
+        final double staticEval = evaluateStaticPosition(simulatorEngine.getGameState(), boardHash, true, plyFromRoot);
+        // Futility margins (tuned conservatively)
+        final double FP_M1 = Score.getPieceValue(1) * 1.2;  // ~1.5 pawns
+        final double FP_M2 = Score.getPieceValue(1) * 1.8;
+
         for (int index = 0; index < orderedMoves.size(); index++) {
-            if (abortRequested(deadline)) {
-                return EXIT_FLAG;
-            }
+            if (abortRequested(deadline)) return EXIT_FLAG;
+
             int move = orderedMoves.getInt(index);
 
             int from = MoveHelper.deriveFromIndex(move);
-            int to = MoveHelper.deriveToIndex(move);
-            int movingPieceBits = MoveHelper.derivePieceTypeBits(move);
-            int capturedPieceBits = MoveHelper.deriveCapturedPieceTypeBits(move);
-            boolean isCapture = MoveHelper.isCapture(move);
+            int to   = MoveHelper.deriveToIndex(move);
+            boolean isCapture   = MoveHelper.isCapture(move);
             boolean isPromotion = MoveHelper.isPawnPromotionMove(move);
-            boolean isQuiet = !isCapture && !isPromotion;
-            int historyScore = historyTable[from][to];
+            boolean isQuiet     = !isCapture && !isPromotion;
+            int historyScore    = historyTable[from][to];
 
-            int seeGain = 0;
-            boolean seeEvaluated = false;
-            boolean seeWinsMaterial = false;
-
-            // SEE pruning for losing captures/quiets (keep checks/promotions)
-            boolean seePruneCandidate = (!inCheckAtNode && isCapture && !isPromotion) || isQuiet;
-            if (seePruneCandidate) {
-                seeGain = simulatorEngine.see(move, 0);
-                seeEvaluated = true;
+            // SEE only for captures (+ losing-capture pruning away from root if it doesn't check)
+            if (isCapture) {
+                int see = simulatorEngine.see(move, 0);
                 boolean nearRoot = plyFromRoot <= SEE_PRUNE_NEAR_ROOT_PLY;
-                boolean allowSeePrune = seeGain < 0 && !nearRoot;
-                if (allowSeePrune) {
+                if (!inCheckAtNode && !nearRoot && see < 0 && !isPromotion) {
                     simulatorEngine.performMove(move);
                     boolean givesCheckTmp = isSideInCheck(simulatorEngine, false);
                     simulatorEngine.undoLastMove();
-                    if (!givesCheckTmp) {
-                        continue;
-                    }
+                    if (!givesCheckTmp) continue;
                 }
             }
 
-            if (seeEvaluated) {
-                seeWinsMaterial = seeGain > 0;
-            }
-
-            BitBoard boardBefore = simulatorEngine.getBitBoard();
-            long enemyKingBB = boardBefore.getBlackKing();
-            int enemyKingSquare = enemyKingBB != 0L ? Long.numberOfTrailingZeros(enemyKingBB) : -1;
-            int enemyKingFile = enemyKingSquare >= 0 ? (enemyKingSquare & 7) : -1;
-            long kingFileMask = enemyKingFile >= 0 ? FileMasks[enemyKingFile] : 0L;
-            boolean touchesKingFile = enemyKingSquare >= 0 && (((from & 7) == enemyKingFile) || ((to & 7) == enemyKingFile));
-            boolean affectsKingFilePawns = touchesKingFile && (movingPieceBits == 1 || capturedPieceBits == 1);
-            int pawnsOnFileBefore = (enemyKingSquare >= 0 && affectsKingFilePawns) ? countPawnsOnFile(boardBefore, kingFileMask) : 0;
-
+            // Late Move Pruning: slightly tighter
             boolean isTactical = isCapture || isPromotion;
-            int lmpThreshold = 8 + depth * 2;
+            int lmpThreshold = 6 + depth * 2;
             if (!inCheckAtNode && !isTactical && depth <= 3 && index > lmpThreshold) {
                 simulatorEngine.performMove(move);
                 boolean givesCheckTmp = isSideInCheck(simulatorEngine, false);
@@ -2146,42 +2100,46 @@ public class AI {
                 if (!givesCheckTmp && !attacksQueenTmp) continue;
             }
 
+            // History-based Move-count Pruning (HMP) for very late weak quiets at shallow depth
+            if (!inCheckAtNode && isQuiet && depth <= 2 && index >= 10 && historyScore < 1000) {
+                continue;
+            }
+
             simulatorEngine.performMove(move);
-            long newBoardHash = simulatorEngine.getBoardStateHash();
+            long newHash = simulatorEngine.getBoardStateHash();
 
-            boolean givesCheck = isSideInCheck(simulatorEngine, false);
+            boolean givesCheck   = isSideInCheck(simulatorEngine, false);
             boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, true);
-            boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, true);
-            boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
 
+            // --- Futility pruning (pre-search) for shallow, non-forcing quiets ---
+            if (!inCheckAtNode && isQuiet && !givesCheck && !attacksQueen && depth <= 2) {
+                double margin = (depth == 1) ? FP_M1 : FP_M2;
+                if (staticEval + margin <= alpha) {
+                    simulatorEngine.undoLastMove();
+                    continue;
+                }
+            }
+
+            // King-file opening check (your existing heuristic)
             int nextDepth = depth - 1;
-            boolean forcing = givesCheck || attacksQueen;
-            boolean allowExtend = forcing && extStreak < MAX_CHECK_EXTENSIONS_IN_A_ROW;
+
+            // Light forcing extension
+            boolean allowExtend = (givesCheck || attacksQueen) && extStreak < MAX_CHECK_EXTENSIONS_IN_A_ROW;
             if (allowExtend) nextDepth++;
             int nextExtStreak = allowExtend ? extStreak + 1 : 0;
 
             double eval;
-            TranspositionTableEntry entry = transpositionTable.get(newBoardHash);
-            boolean ttExactHit = entry != null
-                    && entry.nodeType == NodeType.EXACT
-                    && entry.depth >= nextDepth;
+            TranspositionTableEntry entry = transpositionTable.get(newHash);
+            boolean ttExactHit = entry != null && entry.nodeType == NodeType.EXACT && entry.depth >= nextDepth;
 
             if (ttExactHit) {
                 eval = entry.score;
             } else {
                 boolean canReduce = !inCheckAtNode
-                        && !isTactical
-                        && !givesCheck
-                        && !attacksQueen
-                        && !attacksKingZone
-                        && !opensKingFile
-                        && !seeWinsMaterial
-                        && nextDepth >= 2
-                        && index >= 3;
+                        && isQuiet && !givesCheck && !attacksQueen
+                        && nextDepth >= 2 && index >= 3;
 
-                if (plyFromRoot <= 1) {
-                    canReduce = false;
-                }
+                if (plyFromRoot <= 1 && index < 6) canReduce = false; // keep early quiets near root unreduced
 
                 boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
                 double pBeta = usePvs ? (alpha + 1) : beta;
@@ -2189,49 +2147,30 @@ public class AI {
                 int reduction = 0;
                 if (canReduce) {
                     reduction = lmrReduction(nextDepth, index, historyScore);
-                    if (reduction <= 0) canReduce = false;
+                    if (reduction > 1 && (quietCentralizationNudge(to) >= 8000 || historyScore >= 2000)) reduction = 1; // soft cap
                 }
 
-                if (canReduce) {
+                if (canReduce && reduction > 0) {
                     int reduced = Math.max(1, nextDepth - reduction);
                     eval = alphaBeta(simulatorEngine, reduced, alpha, pBeta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
-                    if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
-                    }
-
-                    boolean promising = eval > alpha;
-                    if (promising) {
-                        eval = alphaBeta(simulatorEngine, nextDepth, alpha, usePvs ? beta : pBeta,
-                                false, deadline, move, plyFromRoot + 1, nextExtStreak);
-                        if (eval == EXIT_FLAG || positionChanged()) {
-                            simulatorEngine.undoLastMove();
-                            return EXIT_FLAG;
-                        }
+                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                    if (eval > alpha) {
+                        eval = alphaBeta(simulatorEngine, nextDepth, alpha, usePvs ? beta : pBeta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
+                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
                     }
                 } else {
                     eval = alphaBeta(simulatorEngine, nextDepth, alpha, pBeta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
-                    if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
-                    }
+                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
                     if (usePvs && eval > alpha && eval < beta) {
                         eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
-                        if (eval == EXIT_FLAG || positionChanged()) {
-                            simulatorEngine.undoLastMove();
-                            return EXIT_FLAG;
-                        }
+                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
                     }
                 }
             }
 
             simulatorEngine.undoLastMove();
 
-            if (eval > maxEval) {
-                maxEval = eval;
-                bestMoveAtThisNode = move;
-            }
-
+            if (eval > maxEval) { maxEval = eval; bestMoveAtThisNode = move; }
             alpha = Math.max(alpha, eval);
             if (beta <= alpha) {
                 updateKillerMoves(depth, move);
@@ -2260,18 +2199,30 @@ public class AI {
                              long boardHash, double alphaOriginal, double betaOriginal,
                              IntArrayList moves, long deadline, int prevMove, int plyFromRoot,
                              int extStreak) {
-
         long start = log.isDebugEnabled() ? System.nanoTime() : 0L;
         double minEval = Double.POSITIVE_INFINITY;
         int bestMoveAtThisNode = -1;
 
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, false);
+
+        // --- Internal Iterative Deepening ---
+        TranspositionTableEntry probe = transpositionTable.get(boardHash);
+        if (!inCheckAtNode && (probe == null || probe.bestMove == -1) && depth >= 4) {
+            double iid = alphaBeta(simulatorEngine, depth - 2, alpha, beta, false, deadline, prevMove, plyFromRoot, 0);
+            if (iid == EXIT_FLAG) return EXIT_FLAG;
+        }
+
         final Heuristics heuristics = threadHeuristics.get();
         final int[][] historyTable = heuristics.history;
 
         IntArrayList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
         final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
+
+        final double staticEval = evaluateStaticPosition(simulatorEngine.getGameState(), boardHash, false, plyFromRoot);
+        final double FP_M1 = Score.getPieceValue(1) * 1.5;
+        final double FP_M2 = Score.getPieceValue(1) * 2.5;
+
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
                 return EXIT_FLAG;
@@ -2280,85 +2231,69 @@ public class AI {
             int move = orderedMoves.getInt(index);
 
             int from = MoveHelper.deriveFromIndex(move);
-            int to = MoveHelper.deriveToIndex(move);
-            int movingPieceBits = MoveHelper.derivePieceTypeBits(move);
-            int capturedPieceBits = MoveHelper.deriveCapturedPieceTypeBits(move);
-            boolean isCapture = MoveHelper.isCapture(move);
+            int to   = MoveHelper.deriveToIndex(move);
+            boolean isCapture   = MoveHelper.isCapture(move);
             boolean isPromotion = MoveHelper.isPawnPromotionMove(move);
-            boolean isQuiet = !isCapture && !isPromotion;
-            int historyScore = historyTable[from][to];
+            boolean isQuiet     = !isCapture && !isPromotion;
+            int historyScore    = historyTable[from][to];
 
-            int seeGain = 0;
-            boolean seeEvaluated = false;
-            boolean seeWinsMaterial = false;
-
-            boolean seePruneCandidate = (!inCheckAtNode && isCapture && !isPromotion) || isQuiet;
-            if (seePruneCandidate) {
-                seeGain = simulatorEngine.see(move, 0);
-                seeEvaluated = true;
+            if (isCapture) {
+                int see = simulatorEngine.see(move, 0);
                 boolean nearRoot = plyFromRoot <= SEE_PRUNE_NEAR_ROOT_PLY;
-                boolean allowSeePrune = seeGain < 0 && !nearRoot;
-                if (allowSeePrune) {
+                if (!inCheckAtNode && !nearRoot && see < 0 && !isPromotion) {
                     simulatorEngine.performMove(move);
                     boolean givesCheckTmp = isSideInCheck(simulatorEngine, true);
                     simulatorEngine.undoLastMove();
-                    if (!givesCheckTmp) {
-                        continue;
-                    }
+                    if (!givesCheckTmp) continue;
                 }
             }
 
-            if (seeEvaluated) {
-                seeWinsMaterial = seeGain > 0;
+            boolean isTactical = isCapture || isPromotion;
+            int lmpThreshold = 6 + depth * 2;
+            if (!inCheckAtNode && !isTactical && depth <= 3 && index > lmpThreshold) {
+                simulatorEngine.performMove(move);
+                boolean givesCheckTmp = isSideInCheck(simulatorEngine, true);
+                boolean attacksQueenTmp = attacksOpponentQueenNow(simulatorEngine, false);
+                simulatorEngine.undoLastMove();
+                if (!givesCheckTmp && !attacksQueenTmp) continue;
             }
 
-            BitBoard boardBefore = simulatorEngine.getBitBoard();
-            long enemyKingBB = boardBefore.getWhiteKing();
-            int enemyKingSquare = enemyKingBB != 0L ? Long.numberOfTrailingZeros(enemyKingBB) : -1;
-            int enemyKingFile = enemyKingSquare >= 0 ? (enemyKingSquare & 7) : -1;
-            long kingFileMask = enemyKingFile >= 0 ? FileMasks[enemyKingFile] : 0L;
-            boolean touchesKingFile = enemyKingSquare >= 0 && (((from & 7) == enemyKingFile) || ((to & 7) == enemyKingFile));
-            boolean affectsKingFilePawns = touchesKingFile && (movingPieceBits == 1 || capturedPieceBits == 1);
-            int pawnsOnFileBefore = (enemyKingSquare >= 0 && affectsKingFilePawns) ? countPawnsOnFile(boardBefore, kingFileMask) : 0;
-
-            boolean isTactical = isCapture || isPromotion;
+            if (!inCheckAtNode && isQuiet && depth <= 2 && index >= 10 && historyScore < 1000) {
+                continue;
+            }
 
             simulatorEngine.performMove(move);
-            long newBoardHash = simulatorEngine.getBoardStateHash();
+            long newHash = simulatorEngine.getBoardStateHash();
 
-            boolean givesCheck = isSideInCheck(simulatorEngine, true);
+            boolean givesCheck   = isSideInCheck(simulatorEngine, true);
             boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, false);
-            boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, false);
-            boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
+
+            if (!inCheckAtNode && isQuiet && !givesCheck && !attacksQueen && depth <= 2) {
+                double margin = (depth == 1) ? FP_M1 : FP_M2;
+                // Minimizer node: positions are from black’s perspective; use <= for futility
+                if (staticEval - margin >= beta) {
+                    simulatorEngine.undoLastMove();
+                    continue;
+                }
+            }
 
             int nextDepth = depth - 1;
-            boolean forcing = givesCheck || attacksQueen;
-            boolean allowExtend = forcing && extStreak < MAX_CHECK_EXTENSIONS_IN_A_ROW;
+            boolean allowExtend = (givesCheck || attacksQueen) && extStreak < MAX_CHECK_EXTENSIONS_IN_A_ROW;
             if (allowExtend) nextDepth++;
             int nextExtStreak = allowExtend ? extStreak + 1 : 0;
 
             double eval;
-            TranspositionTableEntry entry = transpositionTable.get(newBoardHash);
-            boolean ttExactHit = entry != null
-                    && entry.nodeType == NodeType.EXACT
-                    && entry.depth >= nextDepth;
+            TranspositionTableEntry entry = transpositionTable.get(newHash);
+            boolean ttExactHit = entry != null && entry.nodeType == NodeType.EXACT && entry.depth >= nextDepth;
 
             if (ttExactHit) {
                 eval = entry.score;
             } else {
                 boolean canReduce = !inCheckAtNode
-                        && !isTactical
-                        && !givesCheck
-                        && !attacksQueen
-                        && !attacksKingZone
-                        && !opensKingFile
-                        && !seeWinsMaterial
-                        && nextDepth >= 2
-                        && index >= 3;
+                        && isQuiet && !givesCheck && !attacksQueen
+                        && nextDepth >= 2 && index >= 3;
 
-                if (plyFromRoot <= 1) {
-                    canReduce = false;
-                }
+                if (plyFromRoot <= 1 && index < 6) canReduce = false;
 
                 boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
                 double pAlpha = usePvs ? (beta - 1) : alpha;
@@ -2366,39 +2301,23 @@ public class AI {
                 int reduction = 0;
                 if (canReduce) {
                     reduction = lmrReduction(nextDepth, index, historyScore);
-                    if (reduction <= 0) canReduce = false;
+                    if (reduction > 1 && (quietCentralizationNudge(to) >= 8000 || historyScore >= 2000)) reduction = 1;
                 }
 
-                if (canReduce) {
+                if (canReduce && reduction > 0) {
                     int reduced = Math.max(1, nextDepth - reduction);
                     eval = alphaBeta(simulatorEngine, reduced, pAlpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
-                    if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
-                    }
-
-                    boolean promising = eval < beta;
-                    if (promising) {
-                        eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, beta,
-                                true, deadline, move, plyFromRoot + 1, nextExtStreak);
-                        if (eval == EXIT_FLAG || positionChanged()) {
-                            simulatorEngine.undoLastMove();
-                            return EXIT_FLAG;
-                        }
+                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
+                    if (eval < beta) {
+                        eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
+                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
                     }
                 } else {
                     eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
-                    if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
-                    }
-
+                    if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
                     if (usePvs && eval > alpha && eval < beta) {
                         eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
-                        if (eval == EXIT_FLAG || positionChanged()) {
-                            simulatorEngine.undoLastMove();
-                            return EXIT_FLAG;
-                        }
+                        if (eval == EXIT_FLAG || positionChanged()) { simulatorEngine.undoLastMove(); return EXIT_FLAG; }
                     }
                 }
             }
@@ -2411,10 +2330,7 @@ public class AI {
 
             simulatorEngine.undoLastMove();
 
-            if (eval < minEval) {
-                minEval = eval;
-                bestMoveAtThisNode = move;
-            }
+            if (eval < minEval) { minEval = eval; bestMoveAtThisNode = move; }
 
             beta = Math.min(beta, eval);
             if (alpha >= beta) {
@@ -2455,151 +2371,131 @@ public class AI {
         final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
 
-        if (size == 0) {
-            return moves;
-        }
+        if (size == 0) return moves;
 
         final SortBuffers buffers = sortBuffers.get();
         final int[] moveBuffer = buffers.moveBuffer;
         final int[] scoreBuffer = buffers.scoreBuffer;
-        final long[] sortKeys = buffers.sortKeyBuffer;
+        final long[] sortKeys   = buffers.sortKeyBuffer;
 
         final Heuristics heuristics = threadHeuristics.get();
         final int[][] killerMoves = heuristics.killers;
         final int[][] historyTable = heuristics.history;
-        final int[][] counterMove = heuristics.counter;
+        final int[][] counterMove  = heuristics.counter;
 
         final int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
 
-        // Category encoding (higher is earlier):
-        // 7: TT move, 6: promotions, 5: good captures, 4: equal captures,
-        // 3: killer[0], 2: killer[1], 1: quiets (history), 0: bad captures
-        final int CAT_TT = 7, CAT_PROMO = 6, CAT_CAP_GOOD = 5, CAT_CAP_EQUAL = 4,
+        // Buckets (higher first)
+        final int CAT_TT = 8, CAT_PREV_ROOT = 7, CAT_PROMO = 6, CAT_CAP_GOOD = 5, CAT_CAP_EQUAL = 4,
                 CAT_KILLER0 = 3, CAT_KILLER1 = 2, CAT_QUIET = 1, CAT_CAP_BAD = 0;
 
-        final int promotionBonus = moveOrderingParameters.promotionBonus();
-        final int killer0Bonus = moveOrderingParameters.killer0Bonus();
-        final int killer1Bonus = moveOrderingParameters.killer1Bonus();
-        final int killerMoveScore = moveOrderingParameters.killerMoveScore();
-        final int captureMvvMultiplier = moveOrderingParameters.captureMvvMultiplier();
-        final int captureSeeMultiplier = moveOrderingParameters.captureSeeMultiplier();
-        final int promotionSeeMultiplier = moveOrderingParameters.promotionSeeMultiplier();
-        final int castlingBonus = moveOrderingParameters.castlingBonus();
+        final int promotionBonus        = moveOrderingParameters.promotionBonus();
+        final int killer0Bonus          = moveOrderingParameters.killer0Bonus();
+        final int killer1Bonus          = moveOrderingParameters.killer1Bonus();
+        final int killerMoveScore       = moveOrderingParameters.killerMoveScore();
+        final int captureMvvMultiplier  = moveOrderingParameters.captureMvvMultiplier();
+        final int captureSeeMultiplier  = moveOrderingParameters.captureSeeMultiplier();
+        final int promotionSeeMultiplier= moveOrderingParameters.promotionSeeMultiplier();
+        final int castlingBonus         = moveOrderingParameters.castlingBonus();
+        final int counterMoveBonus      = moveOrderingParameters.counterMoveBonus();
 
-        // Hash move (TT)
+        // TT + warm start
         TranspositionTableEntry ttEntry = transpositionTable.get(boardHash);
         final int ttMove = ttEntry != null ? ttEntry.bestMove : -1;
+        final boolean isRoot = (prevMove < 0);
+        final int prevRootBest = (isRoot && previousBestMoveHash == boardHash) ? previousBestMove : -1;
 
-        // Pre-fetch killers for this depth
+        // Killers
         final int k0 = killerMoves[depthIndex][0];
         final int k1 = killerMoves[depthIndex][1];
 
         final int prevFrom = (prevMove >= 0) ? (prevMove & 0x3F) : -1;
-        final int prevTo = (prevMove >= 0) ? ((prevMove >>> 6) & 0x3F) : -1;
+        final int prevTo   = (prevMove >= 0) ? ((prevMove >>> 6) & 0x3F) : -1;
         final int cm = (prevFrom >= 0) ? counterMove[prevFrom][prevTo] : -1;
-        final int counterMoveBonus = moveOrderingParameters.counterMoveBonus();
 
         int ttIndex = -1;
 
         for (int i = 0; i < size; i++) {
             final int moveInt = moves.getInt(i);
-            if (moveInt == ttMove) {
-                ttIndex = i;
-            }
+            if (moveInt == ttMove) ttIndex = i;
 
-            final boolean isCapture = MoveHelper.isCapture(moveInt);
+            final boolean isCapture   = MoveHelper.isCapture(moveInt);
             final boolean isPromotion = MoveHelper.isPawnPromotionMove(moveInt);
-
-            int seeValue = 0;
-            boolean hasSee = false;
-            if (isCapture) {
-                seeValue = seeCache.computeIfAbsent(moveInt, simulatorEngine::see);
-                hasSee = true;
-            }
 
             int category;
             int score;
 
             if (moveInt == ttMove) {
-                category = CAT_TT;
-                score = 0x00FFFFFF; // max within bucket
+                category = CAT_TT; score = 0x00FFFFFF;
+            } else if (isRoot && moveInt == prevRootBest) {
+                category = CAT_PREV_ROOT; score = 0x00FFFF00;
             } else if (isPromotion) {
                 category = CAT_PROMO;
                 int base = calculateMvvLvaScore(moveInt);
-                int seeBonus = 0;
-                if (hasSee) {
-                    int cappedSee = Math.max(-512, Math.min(512, seeValue));
-                    seeBonus = cappedSee * promotionSeeMultiplier;
-                }
-                score = base + promotionBonus + seeBonus;
+                int see  = seeCache.computeIfAbsent(moveInt, simulatorEngine::see); // promo capture SEE ok
+                int capped = Math.max(-512, Math.min(512, see));
+                score = base + promotionBonus + capped * promotionSeeMultiplier;
             } else if (isCapture) {
-                final int mvvLva = calculateMvvLvaScore(moveInt);
-                if (seeValue > 0) {
-                    category = CAT_CAP_GOOD;
-                } else if (seeValue == 0) {
-                    category = CAT_CAP_EQUAL;
-                } else {
-                    category = CAT_CAP_BAD;
-                }
-                int cappedSee = Math.max(-2048, Math.min(2048, seeValue));
-                score = (mvvLva * captureMvvMultiplier) + (cappedSee * captureSeeMultiplier);
+                category = CAT_CAP_EQUAL;
+                int mvv = calculateMvvLvaScore(moveInt);
+                int see = seeCache.computeIfAbsent(moveInt, simulatorEngine::see);
+                if (see > 0)      category = CAT_CAP_GOOD;
+                else if (see < 0) category = CAT_CAP_BAD;
+                int capped = Math.max(-2048, Math.min(2048, see));
+                score = (mvv * captureMvvMultiplier) + (capped * captureSeeMultiplier);
                 if (score < 0) score = 0;
             } else if (moveInt == k0) {
-                category = CAT_KILLER0;
-                score = killerMoveScore + killer0Bonus;
+                category = CAT_KILLER0; score = killerMoveScore + killer0Bonus;
             } else if (moveInt == k1) {
-                category = CAT_KILLER1;
-                score = killerMoveScore + killer1Bonus;
+                category = CAT_KILLER1; score = killerMoveScore + killer1Bonus;
             } else {
                 final int from = moveInt & 0x3F;
-                final int to = (moveInt >>> 6) & 0x3F;
+                final int to   = (moveInt >>> 6) & 0x3F;
                 category = CAT_QUIET;
                 score = historyTable[from][to];
                 if (moveInt == cm) score += counterMoveBonus;
-                if (MoveHelper.isCastlingMove(moveInt)) {
-                    score += castlingBonus;
-                }
+                if (MoveHelper.isCastlingMove(moveInt)) score += castlingBonus;
+                score += quietCentralizationNudge(to); // tiny, cheap
             }
 
-            moveBuffer[i] = moveInt;
+            moveBuffer[i]  = moveInt;
             scoreBuffer[i] = score;
-
-            int s = score;
-            if (s < 0) s = 0;
-            else if (s > 0x00FFFFFF) s = 0x00FFFFFF;
+            int s = Math.max(0, Math.min(0x00FFFFFF, score));
             sortKeys[i] = (((long) category) << 56) | (((long) s) << 32) | (moveInt & 0xFFFFFFFFL);
         }
 
-        // *** FIX: always hoist the TT move (if any) to index 0, and sort only the remainder.
+        // Pin TT first, sort remainder
         int sortStart = 0;
         if (ttIndex >= 0) {
             if (ttIndex != 0) {
-                long tmp = sortKeys[0];
-                sortKeys[0] = sortKeys[ttIndex];
-                sortKeys[ttIndex] = tmp;
+                long tmp = sortKeys[0]; sortKeys[0] = sortKeys[ttIndex]; sortKeys[ttIndex] = tmp;
             }
-            sortStart = 1; // never sort the TT slot
+            sortStart = 1;
         }
+        Arrays.sort(sortKeys, sortStart, size);
 
-        Arrays.sort(sortKeys, sortStart, size); // ascending
-
-        // Emit in descending order; if TT exists, ensure it is first
-        int outIndex = 0;
+        int out = 0;
         if (ttIndex >= 0) {
-            moveBuffer[outIndex++] = (int) (sortKeys[0] & 0xFFFFFFFFL); // guaranteed TT move
-            for (int i = size - 1; i >= 1; i--) {
-                moveBuffer[outIndex++] = (int) (sortKeys[i] & 0xFFFFFFFFL);
-            }
+            moveBuffer[out++] = (int)(sortKeys[0] & 0xFFFFFFFFL);
+            for (int i = size - 1; i >= 1; i--) moveBuffer[out++] = (int)(sortKeys[i] & 0xFFFFFFFFL);
         } else {
-            for (int i = size - 1; i >= 0; i--) {
-                moveBuffer[outIndex++] = (int) (sortKeys[i] & 0xFFFFFFFFL);
-            }
+            for (int i = size - 1; i >= 0; i--) moveBuffer[out++] = (int)(sortKeys[i] & 0xFFFFFFFFL);
         }
 
         MoveContainerUtils.overwriteFromBuffer(moves, moveBuffer, size);
         return moves;
     }
 
+
+    // Centralization bonus used only for ordering (not eval). Keeps numbers in same ballpark as your other nudges.
+    private int quietCentralizationNudge(int toSq) {
+        int f = toSq & 7, r = toSq >>> 3;
+        boolean central = (f >= 3 && f <= 4) && (r >= 3 && r <= 4);
+        boolean semi    = (f >= 2 && f <= 5) && (r >= 2 && r <= 5);
+        if (central) return  8000;   // very light + cheap
+        if (semi)   return  3000;
+        return 0;
+    }
 
     public double evaluateBoard(Engine simulatorEngine, boolean isWhitesTurn, long deadline) {
         if (simulatorEngine.getGameState().isInStateCheckMate()) {
