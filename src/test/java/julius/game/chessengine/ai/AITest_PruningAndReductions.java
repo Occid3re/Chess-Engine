@@ -5,6 +5,7 @@ import julius.game.chessengine.board.Move;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameStateEnum;
+import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.tuning.AiTuning;
 import lombok.extern.log4j.Log4j2;
 import org.junit.jupiter.api.DisplayName;
@@ -85,6 +86,44 @@ class AITest_PruningAndReductions {
                             + "0 is ideal; 1 is allowed for a probe. Found: " + sim.losingCapturePerformed
                             + " | moves: " + movesPerformed);
         }
+    }
+
+    @Test
+    @DisplayName("SEE exact evaluation matches material swing on a winning capture")
+    void seeReturnsExactGainForWinningCapture() {
+        Engine engine = new Engine();
+        engine.importBoardFromFen("6k1/3b4/8/8/8/8/8/3QK3 w - - 0 1");
+
+        int from = MoveHelper.convertStringToIndex("d1");
+        int to = MoveHelper.convertStringToIndex("d7");
+        PieceType captured = engine.getBitBoard().getPieceTypeAtIndex(to);
+
+        int move = MoveHelper.createMoveInt(from, to, PieceType.QUEEN, true,
+                true, false, false, null, captured, false, false,
+                engine.getBitBoard().getLastMoveDoubleStepPawnIndex());
+
+        assertEquals(3, engine.see(move), "Winning capture should yield bishop material gain");
+        assertEquals(3, engine.see(move, 0), "Thresholded SEE should report the same winning score when above the margin");
+        assertEquals(3, engine.see(move, 2), "Margin larger than zero must keep the exact gain when the capture wins");
+    }
+
+    @Test
+    @DisplayName("SEE margin pruning flags a clearly losing queen capture")
+    void seeMarginDetectsLosingCapture() {
+        Engine engine = new Engine();
+        engine.importBoardFromFen("3rk3/3b4/8/8/8/8/8/3QK3 w - - 0 1");
+
+        int from = MoveHelper.convertStringToIndex("d1");
+        int to = MoveHelper.convertStringToIndex("d7");
+        PieceType captured = engine.getBitBoard().getPieceTypeAtIndex(to);
+
+        int move = MoveHelper.createMoveInt(from, to, PieceType.QUEEN, true,
+                true, false, false, null, captured, false, false,
+                engine.getBitBoard().getLastMoveDoubleStepPawnIndex());
+
+        assertEquals(-6, engine.see(move), "Full SEE should recognize the losing exchange");
+        assertTrue(engine.see(move, 0) < 0, "Thresholded SEE should report losing capture as negative");
+        assertTrue(engine.see(move, 2) <= 2, "SEE with positive margin must not exceed the threshold when the trade loses");
     }
 
     @Test
@@ -187,6 +226,12 @@ class AITest_PruningAndReductions {
         public int see(int move) {
             if (move == losingCapture) return -200; // clearly losing
             return super.see(move);
+        }
+
+        @Override
+        public int see(int move, int margin) {
+            if (move == losingCapture) return -200;
+            return super.see(move, margin);
         }
 
         @Override
