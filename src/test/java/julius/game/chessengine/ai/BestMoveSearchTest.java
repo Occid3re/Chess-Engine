@@ -35,7 +35,7 @@ import java.util.stream.Collectors;
 public class BestMoveSearchTest {
 
     private static final SearchEnvironment SEARCH_ENVIRONMENT = SearchEnvironment.detect();
-    private static final int SEARCH_DEPTH = 4;
+    private static final int SEARCH_DEPTH = 6;
     private static final long UNBOUNDED_SEARCH_TIME_MILLIS = java.util.concurrent.TimeUnit.DAYS.toMillis(365L * 100L);
 
     private final List<DecisionStatistics> decisionSummaries = new ArrayList<>();
