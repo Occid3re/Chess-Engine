@@ -27,6 +27,7 @@ public final class MoveOrderingParameters {
                 Tuning.moveOrderingCaptureSeeMultiplier(),
                 Tuning.moveOrderingPromotionSeeMultiplier(),
                 Tuning.moveOrderingQuietCentralityMultiplier(),
+                Tuning.moveOrderingQuietActivityMultiplier(),
                 Tuning.moveOrderingQuietHistoryThreshold()
         );
     }
@@ -46,6 +47,7 @@ public final class MoveOrderingParameters {
         defaults.put(ParamId.MOVE_ORDERING_CAPTURE_SEE_MULTIPLIER.key(), ParamId.MOVE_ORDERING_CAPTURE_SEE_MULTIPLIER.defaultValue());
         defaults.put(ParamId.MOVE_ORDERING_PROMOTION_SEE_MULTIPLIER.key(), ParamId.MOVE_ORDERING_PROMOTION_SEE_MULTIPLIER.defaultValue());
         defaults.put(ParamId.MOVE_ORDERING_QUIET_CENTRALITY_MULTIPLIER.key(), ParamId.MOVE_ORDERING_QUIET_CENTRALITY_MULTIPLIER.defaultValue());
+        defaults.put(ParamId.MOVE_ORDERING_QUIET_ACTIVITY_MULTIPLIER.key(), ParamId.MOVE_ORDERING_QUIET_ACTIVITY_MULTIPLIER.defaultValue());
         defaults.put(ParamId.MOVE_ORDERING_QUIET_HISTORY_THRESHOLD.key(), ParamId.MOVE_ORDERING_QUIET_HISTORY_THRESHOLD.defaultValue());
         return Collections.unmodifiableMap(defaults);
     }
@@ -60,6 +62,7 @@ public final class MoveOrderingParameters {
             int captureSeeMultiplier,
             int promotionSeeMultiplier,
             int quietCentralityMultiplier,
+            int quietActivityMultiplier,
             int quietHistoryThreshold
     ) {
         public Map<String, Integer> asMap() {
@@ -73,6 +76,7 @@ public final class MoveOrderingParameters {
             values.put("moveOrdering.captureSeeMultiplier", captureSeeMultiplier);
             values.put("moveOrdering.promotionSeeMultiplier", promotionSeeMultiplier);
             values.put("moveOrdering.quietCentralityMultiplier", quietCentralityMultiplier);
+            values.put("moveOrdering.quietActivityMultiplier", quietActivityMultiplier);
             values.put("moveOrdering.quietHistoryThreshold", quietHistoryThreshold);
             return Collections.unmodifiableMap(values);
         }

@@ -88,4 +88,5 @@ population:
       moveordering.captureseemultiplier: 40
       moveordering.promotionseemultiplier: 20
       moveordering.quietcentralitymultiplier: 32
+      moveordering.quietactivitymultiplier: 16
       moveordering.quiethistorythreshold: 3600

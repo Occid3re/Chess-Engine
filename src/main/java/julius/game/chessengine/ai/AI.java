@@ -183,6 +183,8 @@ public class AI {
     private static final int[][][] LMR_REDUCTION_TABLE =
             new int[LMR_MAX_DEPTH + 1][LMR_MAX_MOVES][HISTORY_BUCKETS];
     private static final int[] QUIET_CENTRALITY_BONUS = new int[64];
+    private static final int[][] QUIET_ACTIVITY_BONUS = new int[2][64];
+    private static final int QUIET_ACTIVITY_RANGE;
 
     static {
         for (int square = 0; square < QUIET_CENTRALITY_BONUS.length; square++) {
@@ -193,6 +195,43 @@ public class AI {
                     + Math.abs(rank - 3) + Math.abs(rank - 4));
             QUIET_CENTRALITY_BONUS[square] = Math.max(0, centrality);
         }
+
+        // Activity heat map provided in user diagnostics (white perspective).
+        double[][] quietActivityWhite = {
+                {0.2, 0.2, 0.3, 0.4, 0.4, 0.3, 0.2, 0.2},
+                {0.2, 0.3, 0.4, 0.5, 0.5, 0.4, 0.3, 0.2},
+                {0.3, 0.4, 0.5, 0.6, 0.6, 0.5, 0.4, 0.3},
+                {0.4, 0.5, 0.6, 0.7, 0.7, 0.6, 0.5, 0.4},
+                {0.5, 0.6, 0.7, 0.7, 0.7, 0.7, 0.6, 0.5},
+                {0.6, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.6},
+                {0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7},
+                {0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8}
+        };
+
+        int[] whiteActivity = new int[64];
+        int minActivity = Integer.MAX_VALUE;
+        int maxActivity = Integer.MIN_VALUE;
+        for (int rank = 0; rank < 8; rank++) {
+            for (int file = 0; file < 8; file++) {
+                double value = quietActivityWhite[rank][file];
+                int scaled = (int) Math.round(value * 100.0);
+                int index = (rank * 8) + file;
+                whiteActivity[index] = scaled;
+                if (scaled < minActivity) minActivity = scaled;
+                if (scaled > maxActivity) maxActivity = scaled;
+            }
+        }
+
+        for (int square = 0; square < 64; square++) {
+            QUIET_ACTIVITY_BONUS[0][square] = whiteActivity[square];
+            int file = square & 7;
+            int rank = square >>> 3;
+            int rotatedIndex = ((7 - rank) * 8) + (7 - file);
+            QUIET_ACTIVITY_BONUS[1][square] = whiteActivity[rotatedIndex];
+        }
+
+        QUIET_ACTIVITY_RANGE = Math.max(0, maxActivity - minActivity);
+
         if (HISTORY_BUCKETS < 1) {
             throw new IllegalStateException("History bucket count must be positive");
         }
@@ -2502,8 +2541,10 @@ public class AI {
         final int captureSeeMultiplier = moveOrderingParameters.captureSeeMultiplier();
         final int promotionSeeMultiplier = moveOrderingParameters.promotionSeeMultiplier();
         final int quietCentralityMultiplier = moveOrderingParameters.quietCentralityMultiplier();
+        final int quietActivityMultiplier = moveOrderingParameters.quietActivityMultiplier();
         final int quietHistoryThreshold = moveOrderingParameters.quietHistoryThreshold();
         final int maxQuietCentralitySwing = Math.abs(quietCentralityMultiplier) * 12;
+        final int maxQuietActivitySwing = Math.abs(quietActivityMultiplier) * QUIET_ACTIVITY_RANGE;
 
         // Hash move (TT)
         TranspositionTableEntry ttEntry = transpositionTable.get(boardHash);
@@ -2569,12 +2610,17 @@ public class AI {
             } else if (moveInt == cm) {
                 final int from = moveInt & 0x3F;
                 final int to = (moveInt >>> 6) & 0x3F;
+                final int colorIndex = MoveHelper.isWhitesMove(moveInt) ? 0 : 1;
                 int historyScore = historyTable[from][to];
                 int centralityDelta = QUIET_CENTRALITY_BONUS[to] - QUIET_CENTRALITY_BONUS[from];
                 int centralityBoost = centralityDelta * quietCentralityMultiplier;
                 if (centralityBoost > maxQuietCentralitySwing) centralityBoost = maxQuietCentralitySwing;
                 if (centralityBoost < -maxQuietCentralitySwing) centralityBoost = -maxQuietCentralitySwing;
-                score = historyScore + centralityBoost + counterMoveBonus;
+                int activityDelta = QUIET_ACTIVITY_BONUS[colorIndex][to] - QUIET_ACTIVITY_BONUS[colorIndex][from];
+                int activityBoost = activityDelta * quietActivityMultiplier;
+                if (activityBoost > maxQuietActivitySwing) activityBoost = maxQuietActivitySwing;
+                if (activityBoost < -maxQuietActivitySwing) activityBoost = -maxQuietActivitySwing;
+                score = historyScore + centralityBoost + activityBoost + counterMoveBonus;
                 if (score < 0) score = 0;
                 category = CAT_COUNTER;
             } else if (moveInt == k1) {
@@ -2583,12 +2629,17 @@ public class AI {
             } else {
                 final int from = moveInt & 0x3F;
                 final int to = (moveInt >>> 6) & 0x3F;
+                final int colorIndex = MoveHelper.isWhitesMove(moveInt) ? 0 : 1;
                 int historyScore = historyTable[from][to];
                 int centralityDelta = QUIET_CENTRALITY_BONUS[to] - QUIET_CENTRALITY_BONUS[from];
                 int centralityBoost = centralityDelta * quietCentralityMultiplier;
                 if (centralityBoost > maxQuietCentralitySwing) centralityBoost = maxQuietCentralitySwing;
                 if (centralityBoost < -maxQuietCentralitySwing) centralityBoost = -maxQuietCentralitySwing;
-                score = historyScore + centralityBoost;
+                int activityDelta = QUIET_ACTIVITY_BONUS[colorIndex][to] - QUIET_ACTIVITY_BONUS[colorIndex][from];
+                int activityBoost = activityDelta * quietActivityMultiplier;
+                if (activityBoost > maxQuietActivitySwing) activityBoost = maxQuietActivitySwing;
+                if (activityBoost < -maxQuietActivitySwing) activityBoost = -maxQuietActivitySwing;
+                score = historyScore + centralityBoost + activityBoost;
                 if (score < 0) score = 0;
                 if (score >= quietHistoryThreshold) {
                     category = CAT_QUIET_STRONG;

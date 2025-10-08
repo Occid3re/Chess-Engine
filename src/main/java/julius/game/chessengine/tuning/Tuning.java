@@ -94,6 +94,7 @@ public final class Tuning {
     private static int moveOrderingCaptureSeeMultiplier;
     private static int moveOrderingPromotionSeeMultiplier;
     private static int moveOrderingQuietCentralityMultiplier;
+    private static int moveOrderingQuietActivityMultiplier;
     private static int moveOrderingQuietHistoryThreshold;
 
     static {
@@ -415,6 +416,10 @@ public final class Tuning {
         return moveOrderingQuietCentralityMultiplier;
     }
 
+    public static int moveOrderingQuietActivityMultiplier() {
+        return moveOrderingQuietActivityMultiplier;
+    }
+
     public static int moveOrderingQuietHistoryThreshold() {
         return moveOrderingQuietHistoryThreshold;
     }
@@ -501,6 +506,7 @@ public final class Tuning {
             moveOrderingCaptureSeeMultiplier = loadInt(ParamId.MOVE_ORDERING_CAPTURE_SEE_MULTIPLIER);
             moveOrderingPromotionSeeMultiplier = loadInt(ParamId.MOVE_ORDERING_PROMOTION_SEE_MULTIPLIER);
             moveOrderingQuietCentralityMultiplier = loadInt(ParamId.MOVE_ORDERING_QUIET_CENTRALITY_MULTIPLIER);
+            moveOrderingQuietActivityMultiplier = loadInt(ParamId.MOVE_ORDERING_QUIET_ACTIVITY_MULTIPLIER);
             moveOrderingQuietHistoryThreshold = loadInt(ParamId.MOVE_ORDERING_QUIET_HISTORY_THRESHOLD);
         }
     }
