@@ -1492,6 +1492,23 @@ def log_jsonl(path: Path, record: dict) -> None:
     with path.open("a", encoding="utf-8") as f:
         f.write(line + "\n")
 
+
+def save_iteration_config(base_dir: Path, iteration: int, result: TestResult, lines: List[str]) -> Path:
+    """Persist the tuning file for a single iteration with a descriptive name."""
+
+    successes = result.successes
+    duration_value = f"{result.duration_s:.2f}"
+    duration_clean = duration_value.rstrip("0").rstrip(".") if "." in duration_value else duration_value
+    filename = f"Iteration-{iteration}-{successes}-{duration_clean}.yaml"
+    path = base_dir / filename
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    content = "\n".join(lines)
+    if not content.endswith("\n"):
+        content += "\n"
+    path.write_text(content, encoding="utf-8")
+    return path
+
 # ----------------------------
 # Main
 # ----------------------------
@@ -1575,6 +1592,13 @@ def main() -> None:
         tuning_path = raw_tuning_path.resolve()
     else:
         tuning_path = (project_root / raw_tuning_path).resolve()
+    if args.log_jsonl.is_absolute():
+        log_jsonl_path = args.log_jsonl
+    else:
+        log_jsonl_path = (project_root / args.log_jsonl).resolve()
+    iteration_config_dir = log_jsonl_path.parent / "iteration-configs"
+    args.log_jsonl = log_jsonl_path
+
     mvn_bin: str       = args.mvn
     extra_args: List[str] = args.extra_maven_args
 
@@ -1736,6 +1760,14 @@ def main() -> None:
                 continue
 
             print("Candidate  :", candidate_result.summary())
+
+            snapshot_path = save_iteration_config(
+                iteration_config_dir,
+                iteration,
+                candidate_result,
+                candidate_lines,
+            )
+            print(f"Saved iteration config: {snapshot_path}")
 
             decision = accept_candidate(
                 best=best_result,
