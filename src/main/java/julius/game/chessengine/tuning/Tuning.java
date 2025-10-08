@@ -95,6 +95,17 @@ public final class Tuning {
     private static int moveOrderingPromotionSeeMultiplier;
     private static int moveOrderingCastlingBonus;
 
+    private static double searchFutilityMarginDepth1;
+    private static double searchFutilityMarginDepth2;
+    private static int searchLmpBase;
+    private static int searchLmpPerDepth;
+    private static int searchHmpMinIndex;
+    private static int searchHmpHistoryMax;
+    private static int searchIidReductionDepth;
+    private static int searchLmrProtectPlyMax;
+    private static int searchLmrProtectIndexMax;
+    private static int searchLmrGoodQuietCap;
+
     static {
         refresh();
     }
@@ -414,6 +425,46 @@ public final class Tuning {
         return moveOrderingCastlingBonus;
     }
 
+    public static double searchFutilityMarginDepth1() {
+        return searchFutilityMarginDepth1;
+    }
+
+    public static double searchFutilityMarginDepth2() {
+        return searchFutilityMarginDepth2;
+    }
+
+    public static int searchLmpBase() {
+        return searchLmpBase;
+    }
+
+    public static int searchLmpPerDepth() {
+        return searchLmpPerDepth;
+    }
+
+    public static int searchHmpMinIndex() {
+        return searchHmpMinIndex;
+    }
+
+    public static int searchHmpHistoryMax() {
+        return searchHmpHistoryMax;
+    }
+
+    public static int searchIidReductionDepth() {
+        return searchIidReductionDepth;
+    }
+
+    public static int searchLmrProtectPlyMax() {
+        return searchLmrProtectPlyMax;
+    }
+
+    public static int searchLmrProtectIndexMax() {
+        return searchLmrProtectIndexMax;
+    }
+
+    public static int searchLmrGoodQuietCap() {
+        return searchLmrGoodQuietCap;
+    }
+
     /**
      * Reloads all cached tuning values from the current {@link ParameterRegistry} snapshot.
      * Callers should invoke this once after applying a new parameter set (e.g. via hot reload).
@@ -496,11 +547,26 @@ public final class Tuning {
             moveOrderingCaptureSeeMultiplier = loadInt(ParamId.MOVE_ORDERING_CAPTURE_SEE_MULTIPLIER);
             moveOrderingPromotionSeeMultiplier = loadInt(ParamId.MOVE_ORDERING_PROMOTION_SEE_MULTIPLIER);
             moveOrderingCastlingBonus = loadInt(ParamId.MOVE_ORDERING_CASTLING_BONUS);
+
+            searchFutilityMarginDepth1 = loadDouble(ParamId.SEARCH_FUTILITY_MARGIN_DEPTH1);
+            searchFutilityMarginDepth2 = loadDouble(ParamId.SEARCH_FUTILITY_MARGIN_DEPTH2);
+            searchLmpBase = loadInt(ParamId.SEARCH_LMP_BASE);
+            searchLmpPerDepth = loadInt(ParamId.SEARCH_LMP_PER_DEPTH);
+            searchHmpMinIndex = loadInt(ParamId.SEARCH_HMP_MIN_INDEX);
+            searchHmpHistoryMax = loadInt(ParamId.SEARCH_HMP_HISTORY_MAX);
+            searchIidReductionDepth = loadInt(ParamId.SEARCH_IID_REDUCTION_DEPTH);
+            searchLmrProtectPlyMax = loadInt(ParamId.SEARCH_LMR_PROTECT_PLY_MAX);
+            searchLmrProtectIndexMax = loadInt(ParamId.SEARCH_LMR_PROTECT_INDEX_MAX);
+            searchLmrGoodQuietCap = loadInt(ParamId.SEARCH_LMR_GOOD_QUIET_CAP);
         }
     }
 
     private static int loadInt(ParamId id) {
         return (int) Math.round(applyBounds(ParameterRegistry.get(id), id));
+    }
+
+    private static double loadDouble(ParamId id) {
+        return applyBounds(ParameterRegistry.get(id), id);
     }
 
     private static double applyBounds(double value, ParamId id) {

@@ -11,6 +11,7 @@ import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.tuning.AiTuning;
 import julius.game.chessengine.tuning.MoveOrderingParameters;
+import julius.game.chessengine.tuning.Tuning;
 import julius.game.chessengine.utils.Score;
 import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
@@ -2044,10 +2045,23 @@ public class AI {
 
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, true);
 
+        final int iidReductionDepth = Math.max(1, Tuning.searchIidReductionDepth());
+        final int minDepthForIid = Math.max(4, iidReductionDepth + 2);
+        final int lmpBase = Tuning.searchLmpBase();
+        final int lmpPerDepth = Tuning.searchLmpPerDepth();
+        final int hmpMinIndex = Tuning.searchHmpMinIndex();
+        final int hmpHistoryMax = Tuning.searchHmpHistoryMax();
+        final int lmrProtectPlyMax = Tuning.searchLmrProtectPlyMax();
+        final int lmrProtectIndexMax = Tuning.searchLmrProtectIndexMax();
+        final int lmrGoodQuietCap = Tuning.searchLmrGoodQuietCap();
+        final double pawnValue = Score.getPieceValue(1);
+        final double futilityMarginDepth1 = pawnValue * Tuning.searchFutilityMarginDepth1();
+        final double futilityMarginDepth2 = pawnValue * Tuning.searchFutilityMarginDepth2();
+
         // --- Internal Iterative Deepening (only when no TT move, decent depth, not in check) ---
         TranspositionTableEntry probe = transpositionTable.get(boardHash);
-        if (!inCheckAtNode && (probe == null || probe.bestMove == -1) && depth >= 4) {
-            double iid = alphaBeta(simulatorEngine, depth - 2, alpha, beta, true, deadline, prevMove, plyFromRoot, 0);
+        if (!inCheckAtNode && (probe == null || probe.bestMove == -1) && depth >= minDepthForIid) {
+            double iid = alphaBeta(simulatorEngine, depth - iidReductionDepth, alpha, beta, true, deadline, prevMove, plyFromRoot, 0);
             if (iid == EXIT_FLAG) return EXIT_FLAG;
             // the re-search writes a TT move; ordering improves automatically
         }
@@ -2061,9 +2075,6 @@ public class AI {
 
         // Cheap static eval once for FP margins (not quiescence!)
         final double staticEval = evaluateStaticPosition(simulatorEngine.getGameState(), boardHash, true, plyFromRoot);
-        // Futility margins (tuned conservatively)
-        final double FP_M1 = Score.getPieceValue(1) * 1.2;  // ~1.5 pawns
-        final double FP_M2 = Score.getPieceValue(1) * 1.8;
 
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (abortRequested(deadline)) return EXIT_FLAG;
@@ -2091,7 +2102,7 @@ public class AI {
 
             // Late Move Pruning: slightly tighter
             boolean isTactical = isCapture || isPromotion;
-            int lmpThreshold = 6 + depth * 2;
+            int lmpThreshold = lmpBase + depth * lmpPerDepth;
             if (!inCheckAtNode && !isTactical && depth <= 3 && index > lmpThreshold) {
                 simulatorEngine.performMove(move);
                 boolean givesCheckTmp = isSideInCheck(simulatorEngine, false);
@@ -2101,7 +2112,7 @@ public class AI {
             }
 
             // History-based Move-count Pruning (HMP) for very late weak quiets at shallow depth
-            if (!inCheckAtNode && isQuiet && depth <= 2 && index >= 10 && historyScore < 1000) {
+            if (!inCheckAtNode && isQuiet && depth <= 2 && index >= hmpMinIndex && historyScore < hmpHistoryMax) {
                 continue;
             }
 
@@ -2113,7 +2124,7 @@ public class AI {
 
             // --- Futility pruning (pre-search) for shallow, non-forcing quiets ---
             if (!inCheckAtNode && isQuiet && !givesCheck && !attacksQueen && depth <= 2) {
-                double margin = (depth == 1) ? FP_M1 : FP_M2;
+                double margin = (depth == 1) ? futilityMarginDepth1 : futilityMarginDepth2;
                 if (staticEval + margin <= alpha) {
                     simulatorEngine.undoLastMove();
                     continue;
@@ -2139,7 +2150,7 @@ public class AI {
                         && isQuiet && !givesCheck && !attacksQueen
                         && nextDepth >= 2 && index >= 3;
 
-                if (plyFromRoot <= 1 && index < 6) canReduce = false; // keep early quiets near root unreduced
+                if (plyFromRoot <= lmrProtectPlyMax && index < lmrProtectIndexMax) canReduce = false; // keep early quiets near root unreduced
 
                 boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
                 double pBeta = usePvs ? (alpha + 1) : beta;
@@ -2147,7 +2158,7 @@ public class AI {
                 int reduction = 0;
                 if (canReduce) {
                     reduction = lmrReduction(nextDepth, index, historyScore);
-                    if (reduction > 1 && (quietCentralizationNudge(to) >= 8000 || historyScore >= 2000)) reduction = 1; // soft cap
+                    if (reduction > lmrGoodQuietCap && (quietCentralizationNudge(to) >= 8000 || historyScore >= 2000)) reduction = lmrGoodQuietCap; // soft cap
                 }
 
                 if (canReduce && reduction > 0) {
@@ -2205,10 +2216,23 @@ public class AI {
 
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, false);
 
+        final int iidReductionDepth = Math.max(1, Tuning.searchIidReductionDepth());
+        final int minDepthForIid = Math.max(4, iidReductionDepth + 2);
+        final int lmpBase = Tuning.searchLmpBase();
+        final int lmpPerDepth = Tuning.searchLmpPerDepth();
+        final int hmpMinIndex = Tuning.searchHmpMinIndex();
+        final int hmpHistoryMax = Tuning.searchHmpHistoryMax();
+        final int lmrProtectPlyMax = Tuning.searchLmrProtectPlyMax();
+        final int lmrProtectIndexMax = Tuning.searchLmrProtectIndexMax();
+        final int lmrGoodQuietCap = Tuning.searchLmrGoodQuietCap();
+        final double pawnValue = Score.getPieceValue(1);
+        final double futilityMarginDepth1 = pawnValue * Tuning.searchFutilityMarginDepth1();
+        final double futilityMarginDepth2 = pawnValue * Tuning.searchFutilityMarginDepth2();
+
         // --- Internal Iterative Deepening ---
         TranspositionTableEntry probe = transpositionTable.get(boardHash);
-        if (!inCheckAtNode && (probe == null || probe.bestMove == -1) && depth >= 4) {
-            double iid = alphaBeta(simulatorEngine, depth - 2, alpha, beta, false, deadline, prevMove, plyFromRoot, 0);
+        if (!inCheckAtNode && (probe == null || probe.bestMove == -1) && depth >= minDepthForIid) {
+            double iid = alphaBeta(simulatorEngine, depth - iidReductionDepth, alpha, beta, false, deadline, prevMove, plyFromRoot, 0);
             if (iid == EXIT_FLAG) return EXIT_FLAG;
         }
 
@@ -2220,8 +2244,6 @@ public class AI {
         seeCache.clear();
 
         final double staticEval = evaluateStaticPosition(simulatorEngine.getGameState(), boardHash, false, plyFromRoot);
-        final double FP_M1 = Score.getPieceValue(1) * 1.5;
-        final double FP_M2 = Score.getPieceValue(1) * 2.5;
 
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
@@ -2249,7 +2271,7 @@ public class AI {
             }
 
             boolean isTactical = isCapture || isPromotion;
-            int lmpThreshold = 6 + depth * 2;
+            int lmpThreshold = lmpBase + depth * lmpPerDepth;
             if (!inCheckAtNode && !isTactical && depth <= 3 && index > lmpThreshold) {
                 simulatorEngine.performMove(move);
                 boolean givesCheckTmp = isSideInCheck(simulatorEngine, true);
@@ -2258,7 +2280,7 @@ public class AI {
                 if (!givesCheckTmp && !attacksQueenTmp) continue;
             }
 
-            if (!inCheckAtNode && isQuiet && depth <= 2 && index >= 10 && historyScore < 1000) {
+            if (!inCheckAtNode && isQuiet && depth <= 2 && index >= hmpMinIndex && historyScore < hmpHistoryMax) {
                 continue;
             }
 
@@ -2269,7 +2291,7 @@ public class AI {
             boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, false);
 
             if (!inCheckAtNode && isQuiet && !givesCheck && !attacksQueen && depth <= 2) {
-                double margin = (depth == 1) ? FP_M1 : FP_M2;
+                double margin = (depth == 1) ? futilityMarginDepth1 : futilityMarginDepth2;
                 // Minimizer node: positions are from black’s perspective; use <= for futility
                 if (staticEval - margin >= beta) {
                     simulatorEngine.undoLastMove();
@@ -2293,7 +2315,7 @@ public class AI {
                         && isQuiet && !givesCheck && !attacksQueen
                         && nextDepth >= 2 && index >= 3;
 
-                if (plyFromRoot <= 1 && index < 6) canReduce = false;
+                if (plyFromRoot <= lmrProtectPlyMax && index < lmrProtectIndexMax) canReduce = false;
 
                 boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
                 double pAlpha = usePvs ? (beta - 1) : alpha;
@@ -2301,7 +2323,7 @@ public class AI {
                 int reduction = 0;
                 if (canReduce) {
                     reduction = lmrReduction(nextDepth, index, historyScore);
-                    if (reduction > 1 && (quietCentralizationNudge(to) >= 8000 || historyScore >= 2000)) reduction = 1;
+                    if (reduction > lmrGoodQuietCap && (quietCentralizationNudge(to) >= 8000 || historyScore >= 2000)) reduction = lmrGoodQuietCap;
                 }
 
                 if (canReduce && reduction > 0) {
