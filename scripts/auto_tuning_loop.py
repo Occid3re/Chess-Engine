@@ -74,6 +74,7 @@ import sys
 import tempfile
 import textwrap
 import time
+import statistics
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
@@ -254,20 +255,46 @@ class TestResult:
         avg_duration = self.metrics.get("avgDurationMs") if self.metrics else None
         if avg_duration is not None:
             extras.append(f"avgDuration: {avg_duration:.1f} ms")
+        p95_duration = self.metrics.get("durationMsP95") if self.metrics else None
+        if p95_duration is not None:
+            extras.append(f"p95Duration: {p95_duration:.1f} ms")
+        max_duration = self.metrics.get("durationMsMax") if self.metrics else None
+        if max_duration is not None:
+            extras.append(f"maxDuration: {max_duration:.1f} ms")
+        miss_rate = self.metrics.get("missRate") if self.metrics else None
+        if miss_rate is not None:
+            extras.append(f"missRate: {miss_rate * 100:.1f}%")
         if extras:
             base += " | " + ", ".join(extras)
         return base
 
-    def score_tuple(self) -> Tuple[float, float, float, float, float, float]:
-        # higher is better for successes/top1Rate; lower better for failures/errors/cpLoss/duration
+    def metric_value(self, key: str) -> Optional[float]:
+        if not self.metrics:
+            return None
+        value = self.metrics.get(key)
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def score_tuple(self, duration_metric: str = "durationMsP95") -> Tuple[float, float, float, float, float, float, float]:
+        # higher is better for successes/top1Rate; lower better for failures/errors/cpLoss/duration metrics
         top1_rate = float(self.metrics.get("top1Rate", 0.0) or 0.0)
         avg_cp_loss = float(self.metrics.get("avgCpLoss", 0.0) or 0.0)
+        duration_priority = self.metric_value(duration_metric)
+        if duration_priority is None or math.isnan(duration_priority):
+            duration_priority = self.metric_value("avgDurationMs")
+        if duration_priority is None or math.isnan(duration_priority):
+            duration_priority = self.duration_s * 1000.0
         return (
             float(self.successes),
             float(-self.failures),
             float(-self.errors),
             top1_rate,
             -avg_cp_loss,
+            -float(duration_priority),
             -self.duration_s,
         )
 
@@ -808,6 +835,46 @@ def _aggregate_test_totals_from_reports(project_root: Path) -> Tuple[int, int, i
     return total, failures, errors, skipped
 
 
+def _safe_float(value: object) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_int(value: object) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _percentile(sorted_values: List[float], quantile: float) -> Optional[float]:
+    if not sorted_values:
+        return None
+    if not 0.0 <= quantile <= 1.0:
+        return None
+    if len(sorted_values) == 1:
+        return sorted_values[0]
+    position = quantile * (len(sorted_values) - 1)
+    lower_index = int(math.floor(position))
+    upper_index = int(math.ceil(position))
+    lower = sorted_values[lower_index]
+    upper = sorted_values[upper_index]
+    if lower_index == upper_index:
+        return lower
+    weight = position - lower_index
+    return lower + (upper - lower) * weight
+
+
 def _parse_best_move_metrics(stdout: str, stderr: str) -> Tuple[List[Dict], Dict]:
     records: List[Dict] = []
     summary: Dict = {}
@@ -828,6 +895,69 @@ def _parse_best_move_metrics(stdout: str, stderr: str) -> Tuple[List[Dict], Dict
                 except json.JSONDecodeError:
                     pass
     summary = {k: v for k, v in summary.items() if v is not None}
+
+    if records:
+        durations = [
+            val for val in (
+                _safe_float(record.get("durationMs")) for record in records
+            )
+            if val is not None
+        ]
+        nodes = [
+            val for val in (
+                _safe_float(record.get("nodes")) for record in records
+            )
+            if val is not None
+        ]
+        ranks = [
+            val for val in (
+                _safe_int(record.get("rank")) for record in records
+            )
+            if val is not None and val > 0
+        ]
+
+        summary.setdefault("positions", len(records))
+
+        if durations:
+            durations.sort()
+            median = statistics.median(durations)
+            p95 = _percentile(durations, 0.95)
+            summary["durationMsMedian"] = median
+            if p95 is not None:
+                summary["durationMsP95"] = p95
+            summary["durationMsMax"] = max(durations)
+            summary["durationMsMin"] = min(durations)
+            slow_threshold = p95 if p95 is not None else median * 1.5
+            if slow_threshold:
+                slow_positions = sum(1 for d in durations if d >= slow_threshold)
+                summary["slowPositionCount"] = slow_positions
+                summary["slowPositionRate"] = slow_positions / len(durations)
+        if nodes:
+            nodes.sort()
+            summary["nodesP95"] = _percentile(nodes, 0.95) or nodes[-1]
+            summary["nodesMax"] = max(nodes)
+            summary["nodesMedian"] = statistics.median(nodes)
+        if ranks:
+            misses = sum(1 for r in ranks if r > 1)
+            summary["missCount"] = misses
+            summary["missRate"] = misses / len(records)
+
+        # Track the slowest FEN for diagnostics
+        slowest_record: Optional[Dict] = None
+        slowest_duration = -1.0
+        for record in records:
+            duration = _safe_float(record.get("durationMs"))
+            if duration is None:
+                continue
+            if duration > slowest_duration:
+                slowest_duration = duration
+                slowest_record = record
+        if slowest_record:
+            if slowest_duration >= 0.0:
+                summary.setdefault("durationMsMax", slowest_duration)
+            summary["slowestFen"] = slowest_record.get("fen")
+            summary["slowestExpected"] = slowest_record.get("expectedCandidates")
+
     return records, summary
 
 
@@ -954,37 +1084,105 @@ def run_best_move_tests(
 # Scoring and acceptance
 # ----------------------------
 
-def score_tuple(res: TestResult) -> Tuple[float, float, float, float, float, float]:
-    return res.score_tuple()
+def score_tuple(res: TestResult, duration_metric: str) -> Tuple[float, float, float, float, float, float, float]:
+    return res.score_tuple(duration_metric)
+
 
 def tuple_better(
-        a: Tuple[float, float, float, float, float, float],
-        b: Tuple[float, float, float, float, float, float],
+        a: Tuple[float, float, float, float, float, float, float],
+        b: Tuple[float, float, float, float, float, float, float],
 ) -> bool:
     return a > b
 
-def scalar_score(res: TestResult) -> float:
+
+def scalar_score(res: TestResult, duration_metric: str, duration_weight: float) -> float:
     avg_cp_loss = float(res.metrics.get("avgCpLoss", 0.0) or 0.0)
     top1_rate = float(res.metrics.get("top1Rate", 0.0) or 0.0)
+    duration_priority = res.metric_value(duration_metric)
+    if duration_priority is None or math.isnan(duration_priority):
+        duration_priority = res.metric_value("avgDurationMs")
+    duration_priority_sec = 0.0
+    if duration_priority is not None and not math.isnan(duration_priority):
+        duration_priority_sec = float(duration_priority) / 1000.0
+    else:
+        duration_priority_sec = res.duration_s
     return (
         (res.successes * 1.0)
         - (res.failures * 0.6)
         - (res.errors * 1.5)
         - (0.02 * res.duration_s)
+        - (duration_weight * duration_priority_sec)
         - (0.005 * avg_cp_loss)
         + (0.5 * top1_rate)
     )
 
-def accept_candidate(best: TestResult, cand: TestResult, temp: float, allow_worse: bool, rng: random.Random) -> bool:
-    bt = score_tuple(best)
-    ct = score_tuple(cand)
+
+@dataclass
+class AcceptanceDecision:
+    keep: bool
+    improved: bool
+    reason: str
+    info: Dict[str, float] = dataclasses.field(default_factory=dict)
+
+
+def _time_improvement(
+        best: TestResult,
+        cand: TestResult,
+        duration_metric: str,
+) -> Tuple[bool, float]:
+    best_metric = best.metric_value(duration_metric)
+    cand_metric = cand.metric_value(duration_metric)
+    if best_metric is None or cand_metric is None:
+        return False, 0.0
+    if math.isnan(best_metric) or math.isnan(cand_metric):
+        return False, 0.0
+    if best_metric <= 0.0:
+        return False, 0.0
+    if cand_metric >= best_metric:
+        return False, 0.0
+    drop = (best_metric - cand_metric) / best_metric
+    return True, drop
+
+
+def accept_candidate(
+        best: TestResult,
+        cand: TestResult,
+        temp: float,
+        allow_worse: bool,
+        rng: random.Random,
+        duration_metric: str,
+        duration_bonus_threshold: float,
+        max_failure_regress: int,
+        max_error_regress: int,
+        duration_weight: float,
+) -> AcceptanceDecision:
+    bt = score_tuple(best, duration_metric)
+    ct = score_tuple(cand, duration_metric)
     if tuple_better(ct, bt):
-        return True
+        return AcceptanceDecision(True, True, "improved")
+
+    time_drop_flag, drop_ratio = _time_improvement(best, cand, duration_metric)
+    if (
+        time_drop_flag
+        and drop_ratio >= max(0.0, duration_bonus_threshold)
+        and cand.failures <= best.failures + max(0, max_failure_regress)
+        and cand.errors <= best.errors + max(0, max_error_regress)
+    ):
+        return AcceptanceDecision(True, True, "time_bonus", {"time_drop": drop_ratio})
+
     if not allow_worse:
-        return False
-    db = scalar_score(cand) - scalar_score(best)  # negative if worse
+        return AcceptanceDecision(False, False, "rejected")
+
+    db = (
+        scalar_score(cand, duration_metric, duration_weight)
+        - scalar_score(best, duration_metric, duration_weight)
+    )
+    if time_drop_flag:
+        db += max(0.0, drop_ratio) * duration_weight
     prob = math.exp(db / max(1e-9, temp))
-    return rng.random() < prob
+    if rng.random() < prob:
+        return AcceptanceDecision(True, False, "annealed", {"prob": prob, "delta": db})
+    return AcceptanceDecision(False, False, "annealed_reject", {"prob": prob, "delta": db})
 
 # ----------------------------
 # Logging
@@ -1025,6 +1223,16 @@ def main() -> None:
     parser.add_argument("--mut-frac",     type=float, default=0.33)
     parser.add_argument("--noimp-reheat", type=int,   default=10)
     parser.add_argument("--reheat-factor",type=float, default=1.7)
+    parser.add_argument("--priority-duration-metric", type=str, default="durationMsP95",
+                        help="Primary duration metric key (e.g., durationMsP95, durationMsMedian, avgDurationMs).")
+    parser.add_argument("--duration-bonus-threshold", type=float, default=0.2,
+                        help="Fractional drop in the priority duration metric that qualifies as a time-based improvement.")
+    parser.add_argument("--max-failure-regress", type=int, default=1,
+                        help="Maximum additional test failures allowed when accepting via time bonus.")
+    parser.add_argument("--max-error-regress", type=int, default=0,
+                        help="Maximum additional test errors allowed when accepting via time bonus.")
+    parser.add_argument("--duration-weight", type=float, default=1.1,
+                        help="Score penalty per second of the priority duration metric for annealing decisions.")
 
     parser.add_argument("--log-jsonl", type=Path, default=Path("logs/auto_tuning_log.jsonl"))
     parser.add_argument("--git-commit", action="store_true")
@@ -1155,6 +1363,7 @@ def main() -> None:
     iteration = 0
     no_improve = 0
     temp_boost = 1.0
+    current_content = list(best_content)
 
     try:
         while True:
@@ -1202,6 +1411,7 @@ def main() -> None:
             except Exception as exc:
                 print(f"Test execution failed: {exc}. Reverting changes.")
                 optimizer.write(best_content)
+                current_content = list(best_content)
                 log_jsonl(
                     args.log_jsonl,
                     {"ts": timestamp(), "iter": iteration, "event": "test_execution_failed", "error": str(exc)},
@@ -1210,44 +1420,72 @@ def main() -> None:
 
             print("Candidate  :", candidate_result.summary())
 
-            keep = accept_candidate(
+            decision = accept_candidate(
                 best=best_result,
                 cand=candidate_result,
                 temp=args.accept_temp,
                 allow_worse=args.accept_worse,
                 rng=rng,
+                duration_metric=args.priority_duration_metric,
+                duration_bonus_threshold=args.duration_bonus_threshold,
+                max_failure_regress=args.max_failure_regress,
+                max_error_regress=args.max_error_regress,
+                duration_weight=args.duration_weight,
             )
 
-            if keep:
-                improved = tuple_better(score_tuple(candidate_result), score_tuple(best_result))
-                print("Improvement detected. Keeping new tuning parameters."
-                      if improved else
-                      "Accepted worse candidate via annealing. Keeping new tuning parameters.")
-                best_content = list(candidate_lines)
-                best_result = candidate_result
-                best_checkpoint = optimizer.checkpoint_best(best_content)
-                print(f"Updated best checkpoint: {best_checkpoint}")
-                no_improve = 0
-
-                if args.git_commit:
-                    try:
-                        msg = (
-                            f"Auto-tune: {best_result.successes} ok, "
-                            f"{best_result.failures} fail, {best_result.errors} err "
-                            f"({args.test}, iter {iteration}, {'improvement' if improved else 'annealed'})"
+            if decision.keep:
+                current_content = list(candidate_lines)
+                if decision.improved:
+                    if decision.reason == "time_bonus":
+                        drop_pct = decision.info.get("time_drop", 0.0) * 100.0
+                        print(
+                            "Accepted via time bonus "
+                            f"({args.priority_duration_metric} ↓ {drop_pct:.1f}%). Updating best parameters."
                         )
-                        subprocess.run(["git", "add", str(tuning_path)], cwd=str(project_root), check=False)
-                        subprocess.run(["git", "commit", "-m", msg], cwd=str(project_root), check=False)
-                    except Exception as git_exc:
-                        print(f"(Non-fatal) Git commit failed: {git_exc}")
+                    else:
+                        print("Improvement detected. Keeping new tuning parameters.")
+                    best_content = list(candidate_lines)
+                    best_result = candidate_result
+                    best_checkpoint = optimizer.checkpoint_best(best_content)
+                    print(f"Updated best checkpoint: {best_checkpoint}")
+                    no_improve = 0
+
+                    if args.git_commit:
+                        try:
+                            msg = (
+                                f"Auto-tune: {best_result.successes} ok, "
+                                f"{best_result.failures} fail, {best_result.errors} err "
+                                f"({args.test}, iter {iteration}, {decision.reason})"
+                            )
+                            subprocess.run(["git", "add", str(tuning_path)], cwd=str(project_root), check=False)
+                            subprocess.run(["git", "commit", "-m", msg], cwd=str(project_root), check=False)
+                        except Exception as git_exc:
+                            print(f"(Non-fatal) Git commit failed: {git_exc}")
+                else:
+                    prob = decision.info.get("prob")
+                    delta = decision.info.get("delta")
+                    detail = ""
+                    if prob is not None and delta is not None:
+                        detail = f" (Δscore={delta:.3f}, p={prob:.3f})"
+                    print("Accepted worse candidate via annealing for exploration." + detail)
+                    no_improve += 1
             else:
-                print("No improvement. Reverting to previous best parameters.")
+                detail = ""
+                if decision.reason.startswith("annealed"):
+                    prob = decision.info.get("prob")
+                    delta = decision.info.get("delta")
+                    if prob is not None and delta is not None:
+                        detail = f" (Δscore={delta:.3f}, p={prob:.3f})"
+                print("No improvement. Reverting to previous best parameters." + detail)
                 optimizer.write(best_content)
+                current_content = list(best_content)
                 no_improve += 1
                 if args.noimp_reheat and (no_improve % args.noimp_reheat == 0):
                     temp_boost *= args.reheat_factor
-                    print(f"(Plateau) Reheating: temp_start ×= {args.reheat_factor:.2f} "
-                          f"-> {args.temp_start * temp_boost:.4f}")
+                    print(
+                        f"(Plateau) Reheating: temp_start ×= {args.reheat_factor:.2f} "
+                        f"-> {args.temp_start * temp_boost:.4f}"
+                    )
 
             log_jsonl(
                 args.log_jsonl,
@@ -1259,7 +1497,13 @@ def main() -> None:
                     "mut_frac": args.mut_frac,
                     "candidate": dataclasses.asdict(candidate_result),
                     "best": dataclasses.asdict(best_result),
-                    "accepted": keep,
+                    "accepted": decision.keep,
+                    "decision": {
+                        "keep": decision.keep,
+                        "improved": decision.improved,
+                        "reason": decision.reason,
+                        "info": decision.info,
+                    },
                     "no_improve": no_improve,
                 },
             )
