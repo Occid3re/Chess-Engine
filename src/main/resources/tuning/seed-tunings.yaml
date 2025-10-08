@@ -3,52 +3,52 @@ population:
     evaluation:
       modules:
         materialmodule:
-          midgame: 1.0
+          midgame: 1.2
           endgame: 0.9
         pawnstructuremodule:
           midgame: 1.0
           endgame: 1.0
         activitymodule:
           midgame: 1.1
-          endgame: 1.0
+          endgame: 1.1
         kingsafetymodule:
           midgame: 1.0
-          endgame: 0.9
+          endgame: 1.0
         threatmodule:
           midgame: 1.0
-          endgame: 1.1
+          endgame: 1.2
     numericParameters:
-      evaluation.blendscale: 374
-      material.pawnvalue: 102
-      material.knightvalue: 305
-      material.bishopvalue: 332
-      material.rookvalue: 548
-      material.queenvalue: 940
-      material.bishoppairbonus: 42
-      pawnstructure.centerpawnbonus: 14
-      pawnstructure.passedpawnbonus: 50
-      pawnstructure.connectedpawnbonus: 5
+      evaluation.blendscale: 389
+      material.pawnvalue: 106
+      material.knightvalue: 377
+      material.bishopvalue: 432
+      material.rookvalue: 566
+      material.queenvalue: 1173
+      material.bishoppairbonus: 37
+      pawnstructure.centerpawnbonus: 13
+      pawnstructure.passedpawnbonus: 51
+      pawnstructure.connectedpawnbonus: 6
       pawnstructure.islandpenalty: -7
       pawnstructure.doubledpawnpenalty: -14
       pawnstructure.isolatedpawnpenalty: -11
       pawnstructure.advancedpawnbonus: 9
-      pawnstructure.blockedpawnpenalty: -8
+      pawnstructure.blockedpawnpenalty: -7
       pawnstructure.backwardpawnpenalty: -14
-      pawnstructure.ownkingblockspassedpawnpenalty: -120
+      pawnstructure.ownkingblockspassedpawnpenalty: -115
       pawnstructure.passedpawnfreepathbonusperrank: 14
       pawnstructure.rookhalfopenfilebonus: 14
       pawnstructure.rookopenfilebonus: 23
       threat.hangingpawnpenalty: -15
-      threat.hangingknightpenalty: -30
-      threat.hangingbishoppenalty: -30
-      threat.hangingrookpenalty: -53
-      threat.hangingqueenpenalty: -79
+      threat.hangingknightpenalty: -32
+      threat.hangingbishoppenalty: -29
+      threat.hangingrookpenalty: -54
+      threat.hangingqueenpenalty: -78
       threat.pawnthreatknightpenalty: -12
-      threat.pawnthreatbishoppenalty: -12
-      threat.pawnthreatrookpenalty: -22
-      threat.pawnthreatqueenpenalty: -30
+      threat.pawnthreatbishoppenalty: -11
+      threat.pawnthreatrookpenalty: -20
+      threat.pawnthreatqueenpenalty: -28
       activity.midgamemobilityknight: 4
-      activity.midgamemobilitybishop: 7
+      activity.midgamemobilitybishop: 5
       activity.midgamemobilityrook: 3
       activity.midgamemobilityqueen: 1
       activity.midgamemobilityking: 0
@@ -68,36 +68,36 @@ population:
       activity.endgamecenterqueen: 3
       activity.endgamecenterking: 3
       kingsafety.missingpawnshieldpenalty: -18
-      kingsafety.halfopenfilepenalty: -18
-      kingsafety.openfilepenalty: -31
+      kingsafety.halfopenfilepenalty: -17
+      kingsafety.openfilepenalty: -30
       kingsafety.defenderbonus: 6
-      kingsafety.queenattackedpenalty: -90
-      kingsafety.backrankweaknessmidgamepenalty: -119
-      kingsafety.backrankweaknessendgamepenalty: -45
+      kingsafety.queenattackedpenalty: -82
+      kingsafety.backrankweaknessmidgamepenalty: -116
+      kingsafety.backrankweaknessendgamepenalty: -47
       kingsafety.attackweightpawn: 6
-      kingsafety.attackweightknight: 12
+      kingsafety.attackweightknight: 11
       kingsafety.attackweightbishop: 11
-      kingsafety.attackweightrook: 16
+      kingsafety.attackweightrook: 14
       kingsafety.attackweightqueen: 23
-      moveordering.killermovescore: 9565
-      moveordering.promotionbonus: 902
-      moveordering.killer0bonus: 59
-      moveordering.killer1bonus: 40
-      moveordering.countermovebonus: 500
+      moveordering.killermovescore: 10456
+      moveordering.promotionbonus: 975
+      moveordering.killer0bonus: 58
+      moveordering.killer1bonus: 33
+      moveordering.countermovebonus: 492
       moveordering.capturemvvmultiplier: 22
-      moveordering.captureseemultiplier: 45
+      moveordering.captureseemultiplier: 50
       moveordering.promotionseemultiplier: 20
-      moveordering.castlingbonus: 2000
-      search.fpMarginDepth1: 150
-      search.fpMarginDepth2: 394
+      moveordering.castlingbonus: 1834
+      search.fpMarginDepth1: 133
+      search.fpMarginDepth2: 0
       search.lmpBase: 4
       search.lmpPerDepth: 1
       search.hmpMinIndex: 6
-      search.hmpHistoryMax: 116
+      search.hmpHistoryMax: 119
       search.iidReduceDepth: 2
       search.lmrProtectPlyMax: 2
       search.lmrProtectIndexMax: 0
-      search.lmrCapGoodQuiet: 11
+      search.lmrCapGoodQuiet: 21
       search.maxCheckExtensionStreak: 2
       search.seePruneNearRootPly: 2
-      search.historyReductionMax: 4000
+      search.historyReductionMax: 4743
