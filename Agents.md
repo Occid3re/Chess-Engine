@@ -109,6 +109,7 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
   Define them in the corresponding evaluation module (where the feature is computed).
   Add the same weights (with sensible defaults) to seed-tunings.yaml.
   Expose and apply them via the tuning module so they are loaded and propagated into the evaluation at runtime.
+* Auto tuning loop: `scripts/auto_tuning_loop.py` now reads the numeric bounds from `ParamId.java` and applies search-specific heuristics (including snapping to sentinel values such as `-1`/`0`). When new numeric search parameters are added, make sure their metadata in `ParamId` is updated so the tuner can scale mutations and clamp values correctly.
 * Full-suite runs currently fail in `BestMoveSearchTest` due to long-horizon move selection mismatches. Use the PGN smoke tests above when focusing on PGN changes, or investigate the AI regressions separately before expecting a green build.
 * `BestMoveSearchTest` now mirrors the diagnostic harness from `AITest_MateThreatDiagnostics`. Each position prints an in-depth iterative-deepening trace, principal variation, and transposition-table probe summary, with aggregated JSON/TXT artifacts in `target/surefire-reports/best-move-search-*`. Expect a long console log and ~28 known assertion failures; the goal is visibility, not a green suite.
 * `BestMoveSearchTest#diagnoseNe4SearchHotSpot` isolates the slow `Ne4` fixture (`3rk2r/1bqpbppp/p1n1p3/1p2P3/5Bn1/2NQ1N2/PPP1BPPP/R2R2K1 w k - 5 14`). Run it with
