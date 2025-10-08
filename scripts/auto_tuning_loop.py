@@ -94,9 +94,103 @@ NUMERIC_VALUE_PATTERN = re.compile(
 BMSTAT_PATTERN = re.compile(r"\[BMSTAT\]\s*(\{.*\})")
 BMSUM_PATTERN  = re.compile(r"\[BMSUM\]\s*(\{.*\})")
 
+
+def normalize_key(key: str) -> str:
+    trimmed = key.strip()
+    lowered = trimmed.lower()
+    return trimmed if trimmed == lowered else lowered
+
+
+PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
+    "search.fpmargindepth1": {
+        "step": 120.0,
+        "soft_min": 0.0,
+        "soft_max": 3200.0,
+        "sentinel_probe": 0.08,
+        "sentinels": [0.0],
+    },
+    "search.fpmargindepth2": {
+        "step": 200.0,
+        "soft_min": 0.0,
+        "soft_max": 6400.0,
+        "sentinel_probe": 0.08,
+        "sentinels": [0.0],
+    },
+    "search.lmpbase": {
+        "step": 2.5,
+        "max_step": 6.0,
+        "soft_min": 0.0,
+        "soft_max": 40.0,
+        "sentinel_probe": 0.06,
+        "sentinels": [0.0],
+    },
+    "search.lmpperdepth": {
+        "step": 1.0,
+        "max_step": 3.0,
+        "soft_min": 0.0,
+        "soft_max": 12.0,
+        "sentinel_probe": 0.06,
+        "sentinels": [0.0],
+    },
+    "search.hmpminindex": {
+        "step": 4.0,
+        "max_step": 10.0,
+        "soft_min": -1.0,
+        "soft_max": 64.0,
+        "sentinel_probe": 0.1,
+        "sentinels": [-1.0],
+    },
+    "search.hmphistorymax": {
+        "step": 240.0,
+        "max_step": 640.0,
+        "soft_min": -1.0,
+        "soft_max": 4000.0,
+        "sentinel_probe": 0.1,
+        "sentinels": [-1.0],
+    },
+    "search.iidreducedepth": {
+        "step": 1.0,
+        "max_step": 2.0,
+        "soft_min": 0.0,
+        "soft_max": 6.0,
+        "sentinel_probe": 0.05,
+        "sentinels": [0.0],
+    },
+    "search.lmrprotectplymax": {
+        "step": 1.0,
+        "max_step": 2.0,
+        "soft_min": 0.0,
+        "soft_max": 6.0,
+        "sentinel_probe": 0.05,
+        "sentinels": [0.0],
+    },
+    "search.lmrprotectindexmax": {
+        "step": 2.0,
+        "max_step": 6.0,
+        "soft_min": 0.0,
+        "soft_max": 48.0,
+        "sentinel_probe": 0.05,
+        "sentinels": [0.0],
+    },
+    "search.lmrcapgoodquiet": {
+        "step": 2.0,
+        "max_step": 6.0,
+        "soft_min": 0.0,
+        "soft_max": 64.0,
+    },
+}
+
 # ----------------------------
 # Data classes
 # ----------------------------
+
+@dataclass
+class ParamSpec:
+    key: str
+    default_value: Optional[float]
+    min_value: Optional[float]
+    max_value: Optional[float]
+
 
 @dataclass
 class NumericParameter:
@@ -105,6 +199,10 @@ class NumericParameter:
     indent: str
     yaml_key: str
     raw_value: str
+    normalized_name: str
+    default_value: Optional[float] = None
+    min_value: Optional[float] = None
+    max_value: Optional[float] = None
 
     @property
     def is_float(self) -> bool:
@@ -310,7 +408,10 @@ class SeedTuningOptimizer:
         self.tuning_path = tuning_path
         if not tuning_path.exists():
             raise FileNotFoundError(f"Cannot find tuning file at {tuning_path}")
+        self.project_root = find_project_root(tuning_path.parent)
+        self._param_specs: Dict[str, ParamSpec] = self._load_param_specs()
         self._initial_magnitudes: Dict[str, float] = {}
+        self._missing_param_keys: List[str] = []
 
     def backup(self, suffix: str) -> Path:
         dst = self.tuning_path.with_suffix(self.tuning_path.suffix + f".{suffix}.{timestamp()}.bak")
@@ -333,7 +434,50 @@ class SeedTuningOptimizer:
                 "No tunable parameters found in seed-tunings.yaml (expected evaluation.modules.* or numericParameters entries)."
             )
 
+        self._report_missing_parameters(combined)
+
         return lines, combined
+
+    @staticmethod
+    def _parse_number(token: str) -> float:
+        cleaned = token.replace("_", "")
+        try:
+            value = float(cleaned)
+        except ValueError:
+            return 0.0
+        return value
+
+    def _load_param_specs(self) -> Dict[str, ParamSpec]:
+        specs: Dict[str, ParamSpec] = {}
+        param_file = self.project_root / "src/main/java/julius/game/chessengine/tuning/ParamId.java"
+        if not param_file.exists():
+            return specs
+
+        pattern = re.compile(
+            r"^[\t ]*[A-Z0-9_]+\(\"([^\"]+)\",\s*([-0-9_.]+)(?:,\s*([-0-9_.]+),\s*([-0-9_.]+))?\)",
+            re.MULTILINE,
+        )
+
+        text = param_file.read_text(encoding="utf-8")
+        for match in pattern.finditer(text):
+            key = match.group(1)
+            default_token = match.group(2)
+            min_token = match.group(3)
+            max_token = match.group(4)
+
+            default_value = self._parse_number(default_token) if default_token else None
+            min_value = self._parse_number(min_token) if min_token else None
+            max_value = self._parse_number(max_token) if max_token else None
+
+            normalized = normalize_key(key)
+            specs[normalized] = ParamSpec(
+                key=key,
+                default_value=default_value,
+                min_value=min_value,
+                max_value=max_value,
+            )
+
+        return specs
 
     def _extract_numeric_parameters(self, lines: List[str]) -> Dict[str, NumericParameter]:
         numeric_parameters: Dict[str, NumericParameter] = {}
@@ -357,12 +501,18 @@ class SeedTuningOptimizer:
             if match:
                 key = match.group("key")
                 value = match.group("value")
+                normalized = normalize_key(key)
+                spec = self._param_specs.get(normalized)
                 numeric_parameters[key] = NumericParameter(
                     name=key,
                     line_index=idx,
                     indent=line[: len(line) - len(line.lstrip())],
                     yaml_key=key,
                     raw_value=value,
+                    normalized_name=normalized,
+                    default_value=spec.default_value if spec else None,
+                    min_value=spec.min_value if spec else None,
+                    max_value=spec.max_value if spec else None,
                 )
 
         return numeric_parameters
@@ -417,15 +567,72 @@ class SeedTuningOptimizer:
                     key = match.group("key")
                     value = match.group("value")
                     full_key = f"evaluation.modules.{current_module}.{key}"
+                    normalized = normalize_key(full_key)
+                    spec = self._param_specs.get(normalized)
                     evaluation_parameters[full_key] = NumericParameter(
                         name=full_key,
                         line_index=idx,
                         indent=line[: len(line) - len(line.lstrip())],
                         yaml_key=key,
                         raw_value=value,
+                        normalized_name=normalized,
+                        default_value=spec.default_value if spec else None,
+                        min_value=spec.min_value if spec else None,
+                        max_value=spec.max_value if spec else None,
                     )
 
         return evaluation_parameters
+
+    def _report_missing_parameters(self, parameters: Dict[str, NumericParameter]) -> None:
+        normalized_present = {normalize_key(name) for name in parameters.keys()}
+        missing = sorted(key for key in self._param_specs.keys() if key not in normalized_present)
+        self._missing_param_keys = missing
+        if missing:
+            print(
+                "[warn] Missing tuning parameters in seed file:",
+                ", ".join(missing),
+            )
+
+    def _derive_initial_scale(self, param: NumericParameter) -> float:
+        value = abs(param.numeric_value)
+        scales: List[float] = []
+        if value > 0:
+            scales.append(value)
+
+        if param.default_value is not None and param.default_value != 0:
+            scales.append(abs(param.default_value))
+
+        span: Optional[float] = None
+        if param.min_value is not None and param.max_value is not None:
+            span = abs(param.max_value - param.min_value)
+            if span > 0:
+                if param.is_float:
+                    scales.append(max(0.05, span / 24.0))
+                else:
+                    coarse = span / 28.0
+                    if span >= 1024:
+                        coarse = min(coarse, 512.0)
+                    scales.append(max(1.0, coarse))
+
+        hint = PARAM_MUTATION_HINTS.get(param.normalized_name)
+        if hint:
+            step_hint = hint.get("step")
+            if isinstance(step_hint, (int, float)):
+                scales.append(max(0.1, float(step_hint)))
+            min_step = hint.get("min_step")
+            if isinstance(min_step, (int, float)):
+                scales.append(max(0.1, float(min_step)))
+
+        if not scales:
+            scales.append(1.0 if not param.is_float else 0.25)
+
+        base = max(scales)
+        if not param.is_float:
+            base = max(base, 1.0)
+        else:
+            base = max(base, 0.1)
+
+        return base
 
     def write(self, lines: List[str]) -> None:
         content = "\n".join(lines)
@@ -472,14 +679,26 @@ class SeedTuningOptimizer:
             value = param.numeric_value
 
             if name not in self._initial_magnitudes:
-                self._initial_magnitudes[name] = max(abs(value), 1.0)
+                self._initial_magnitudes[name] = self._derive_initial_scale(param)
             init_mag = self._initial_magnitudes[name]
 
             if name not in mutate_keys:
                 updated_lines[param.line_index] = f"{param.indent}{param.yaml_key}: {param.raw_value}"
                 continue
 
-            magnitude = max(abs(value), 1.0)
+            magnitude = max(abs(value), init_mag)
+            hint = PARAM_MUTATION_HINTS.get(param.normalized_name)
+            if hint:
+                step_hint = hint.get("step")
+                if isinstance(step_hint, (int, float)):
+                    magnitude = max(magnitude, float(step_hint))
+                max_step = hint.get("max_step")
+                if isinstance(max_step, (int, float)):
+                    magnitude = min(magnitude, max(init_mag, float(max_step)))
+            if not param.is_float:
+                magnitude = max(magnitude, 1.0)
+            else:
+                magnitude = max(magnitude, 0.1)
             phase = self._phase_from_name(name)
 
             spectral_component = math.sin(iteration * spectral_frequency + phase)
@@ -495,9 +714,36 @@ class SeedTuningOptimizer:
             lo = -clamp_mult * init_mag
             hi =  clamp_mult * init_mag
             if candidate < lo:
-                candidate = lo + 0.1 * (rng.random())
+                candidate = lo + 0.1 * rng.random()
             elif candidate > hi:
-                candidate = hi - 0.1 * (rng.random())
+                candidate = hi - 0.1 * rng.random()
+
+            if hint:
+                soft_min = hint.get("soft_min")
+                if isinstance(soft_min, (int, float)):
+                    candidate = max(candidate, float(soft_min))
+                soft_max = hint.get("soft_max")
+                if isinstance(soft_max, (int, float)):
+                    candidate = min(candidate, float(soft_max))
+                sentinels = hint.get("sentinels")
+                snap_window = max(0.5, magnitude * (0.1 if not param.is_float else 0.05))
+                snapped = False
+                if isinstance(sentinels, list) and sentinels:
+                    for sentinel in sentinels:
+                        if isinstance(sentinel, (int, float)) and abs(candidate - float(sentinel)) <= snap_window:
+                            candidate = float(sentinel)
+                            snapped = True
+                            break
+                    probe_prob = hint.get("sentinel_probe")
+                    if not snapped and isinstance(probe_prob, (int, float)) and rng.random() < float(probe_prob):
+                        valid_sentinels = [float(s) for s in sentinels if isinstance(s, (int, float))]
+                        if valid_sentinels:
+                            candidate = float(rng.choice(valid_sentinels))
+
+            if param.min_value is not None:
+                candidate = max(candidate, param.min_value)
+            if param.max_value is not None:
+                candidate = min(candidate, param.max_value)
 
             if param.is_float:
                 formatted = f"{candidate:.{param.decimals}f}"
@@ -506,6 +752,15 @@ class SeedTuningOptimizer:
 
             updated_lines[param.line_index] = f"{param.indent}{param.yaml_key}: {formatted}"
             param.raw_value = formatted
+            try:
+                new_value = float(formatted)
+            except ValueError:
+                new_value = value
+            self._initial_magnitudes[name] = max(
+                self._initial_magnitudes[name],
+                abs(new_value),
+                init_mag,
+            )
 
         return updated_lines
 
