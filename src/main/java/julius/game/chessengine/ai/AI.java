@@ -2484,6 +2484,7 @@ public class AI {
         final int captureMvvMultiplier = moveOrderingParameters.captureMvvMultiplier();
         final int captureSeeMultiplier = moveOrderingParameters.captureSeeMultiplier();
         final int promotionSeeMultiplier = moveOrderingParameters.promotionSeeMultiplier();
+        final int castlingBonus = moveOrderingParameters.castlingBonus();
 
         // Hash move (TT)
         TranspositionTableEntry ttEntry = transpositionTable.get(boardHash);
@@ -2555,6 +2556,9 @@ public class AI {
                 category = CAT_QUIET;
                 score = historyTable[from][to];
                 if (moveInt == cm) score += counterMoveBonus;
+                if (MoveHelper.isCastlingMove(moveInt)) {
+                    score += castlingBonus;
+                }
             }
 
             moveBuffer[i] = moveInt;

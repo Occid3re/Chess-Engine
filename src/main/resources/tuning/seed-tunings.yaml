@@ -87,3 +87,4 @@ population:
       moveordering.capturemvvmultiplier: 20
       moveordering.captureseemultiplier: 40
       moveordering.promotionseemultiplier: 20
+      moveordering.castlingbonus: 2000
