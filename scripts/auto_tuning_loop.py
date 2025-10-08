@@ -1263,8 +1263,20 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    tuning_path: Path  = args.tuning_path
-    project_root: Path = args.project_root or find_project_root(tuning_path.parent)
+    raw_tuning_path: Path = args.tuning_path
+
+    if args.project_root:
+        project_root: Path = args.project_root.resolve()
+    else:
+        probe_path = raw_tuning_path if raw_tuning_path.is_absolute() else (Path.cwd() / raw_tuning_path)
+        project_root = find_project_root(probe_path.parent)
+
+    project_root = project_root.resolve()
+
+    if raw_tuning_path.is_absolute():
+        tuning_path = raw_tuning_path.resolve()
+    else:
+        tuning_path = (project_root / raw_tuning_path).resolve()
     mvn_bin: str       = args.mvn
     extra_args: List[str] = args.extra_maven_args
 
@@ -1329,7 +1341,14 @@ def main() -> None:
         "chessengine.uci.info.maxPvLen": "10",
     }
     if args.tuning_file:
-        engine_sysprops["chessengine.tuning.file"] = args.tuning_file
+        override_path = Path(args.tuning_file)
+        if not override_path.is_absolute():
+            override_path = (project_root / override_path).resolve()
+        else:
+            override_path = override_path.resolve()
+        engine_sysprops["chessengine.tuning.file"] = str(override_path)
+    else:
+        engine_sysprops["chessengine.tuning.file"] = str(tuning_path)
 
     # ---------- Initial backup & load
     optimizer.backup("initial")
