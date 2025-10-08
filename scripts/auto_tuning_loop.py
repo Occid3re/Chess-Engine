@@ -168,6 +168,18 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "sentinel_probe": 0.06,
         "sentinels": [0.0],
     },
+    "search.fpmaxdepth": {
+        "step": 1.0,
+        "max_step": 3.0,
+        "soft_min": 0.0,
+        "soft_max": 10.0,
+    },
+    "search.lmpmaxdepth": {
+        "step": 1.0,
+        "max_step": 3.0,
+        "soft_min": 0.0,
+        "soft_max": 10.0,
+    },
     "search.hmpminindex": {
         "step": 4.0,
         "max_step": 10.0,
@@ -214,13 +226,38 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "soft_min": 0.0,
         "soft_max": 64.0,
     },
+    "search.lmrhistorybuckets": {
+        "step": 1.0,
+        "soft_min": 1.0,
+        "soft_max": 12.0,
+    },
+    "search.lmrhistoryweightslope": {
+        "step": 0.05,
+        "soft_min": 0.0,
+        "soft_max": 1.5,
+    },
+    "search.lmrscaledivisor": {
+        "step": 0.1,
+        "soft_min": 0.5,
+        "soft_max": 4.0,
+    },
+    "search.lmrdepthlogoffset": {
+        "step": 0.1,
+        "soft_min": 0.0,
+        "soft_max": 4.0,
+    },
+    "search.lmrmovelogoffset": {
+        "step": 0.1,
+        "soft_min": 0.0,
+        "soft_max": 4.0,
+    },
     "search.maxcheckextensionstreak": {
         "step": 1.0,
         "max_step": 3.0,
         "soft_min": 0.0,
         "soft_max": 6.0,
     },
-    "search.seeprunenarrootply": {
+    "search.seeprunenearrootply": {
         "step": 1.0,
         "max_step": 2.0,
         "soft_min": 0.0,
@@ -231,6 +268,261 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "max_step": 600.0,
         "soft_min": 0.0,
         "soft_max": 8000.0,
+    },
+    "search.aspminspancp": {
+        "step": 2.0,
+        "soft_min": 4.0,
+        "soft_max": 48.0,
+    },
+    "search.aspmaxspancp": {
+        "step": 16.0,
+        "soft_min": 64.0,
+        "soft_max": 640.0,
+    },
+    "search.aspdefaultspancp": {
+        "step": 4.0,
+        "soft_min": 12.0,
+        "soft_max": 160.0,
+    },
+    "search.asphistoryblend": {
+        "step": 0.05,
+        "soft_min": 0.0,
+        "soft_max": 1.0,
+    },
+    "search.aspmomentumstepcp": {
+        "step": 2.0,
+        "soft_min": 0.0,
+        "soft_max": 64.0,
+    },
+    "search.aspmomentumcap": {
+        "step": 2.0,
+        "soft_min": 0.0,
+        "soft_max": 32.0,
+    },
+    "search.aspfailureratio": {
+        "step": 0.05,
+        "soft_min": 0.0,
+        "soft_max": 1.0,
+    },
+    "search.aspbaseoffsetcp": {
+        "step": 4.0,
+        "soft_min": 0.0,
+        "soft_max": 96.0,
+    },
+    "search.aspswingweight": {
+        "step": 0.05,
+        "soft_min": 0.0,
+        "soft_max": 1.0,
+    },
+    "search.aspvolatilityweight": {
+        "step": 0.05,
+        "soft_min": 0.0,
+        "soft_max": 2.0,
+    },
+    "search.aspdepthscale": {
+        "step": 0.01,
+        "soft_min": 0.0,
+        "soft_max": 0.2,
+    },
+    "search.aspdepthpivot": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 8.0,
+    },
+    "search.aspfloorbasecp": {
+        "step": 2.0,
+        "soft_min": 0.0,
+        "soft_max": 48.0,
+    },
+    "search.aspfloorvolweight": {
+        "step": 0.05,
+        "soft_min": 0.0,
+        "soft_max": 1.5,
+    },
+    "search.aspfloorstreakstepcp": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 32.0,
+    },
+    "search.aspbumpbasecp": {
+        "step": 2.0,
+        "soft_min": 0.0,
+        "soft_max": 64.0,
+    },
+    "search.aspbumpstreakcp": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 32.0,
+    },
+    "search.aspbumpdepthcp": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 16.0,
+    },
+    "search.aspfullwindowscale": {
+        "step": 0.05,
+        "soft_min": 1.0,
+        "soft_max": 2.0,
+    },
+    "search.asplastspanscale": {
+        "step": 0.05,
+        "soft_min": 1.0,
+        "soft_max": 2.0,
+    },
+    "search.aspfullwindowminmultiplier": {
+        "step": 0.2,
+        "soft_min": 1.0,
+        "soft_max": 4.0,
+    },
+    "search.aspblendbaselineweight": {
+        "step": 0.05,
+        "soft_min": 0.0,
+        "soft_max": 1.0,
+    },
+    "search.aspblendcandidateweight": {
+        "step": 0.05,
+        "soft_min": 0.0,
+        "soft_max": 1.0,
+    },
+    "search.aspmaxretriesbase": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 10.0,
+    },
+    "search.aspmaxretriesvolthresholdhigh": {
+        "step": 16.0,
+        "soft_min": 0.0,
+        "soft_max": 512.0,
+    },
+    "search.aspmaxretriesvolbonushigh": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 8.0,
+    },
+    "search.aspmaxretriesvolthresholdmed": {
+        "step": 8.0,
+        "soft_min": 0.0,
+        "soft_max": 256.0,
+    },
+    "search.aspmaxretriesvolbonusmed": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 6.0,
+    },
+    "search.aspmaxretriesdepthoffset": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 16.0,
+    },
+    "search.aspmaxretriesdepthdivisor": {
+        "step": 0.5,
+        "soft_min": 1.0,
+        "soft_max": 8.0,
+    },
+    "search.aspmaxretriesmomentumdivisor": {
+        "step": 0.5,
+        "soft_min": 1.0,
+        "soft_max": 8.0,
+    },
+    "search.aspmaxretriesmin": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 8.0,
+    },
+    "search.aspmaxretriesmax": {
+        "step": 1.0,
+        "soft_min": 2.0,
+        "soft_max": 12.0,
+    },
+    "search.nullbasereduction": {
+        "step": 0.1,
+        "soft_min": 0.5,
+        "soft_max": 3.0,
+    },
+    "search.nulldepthweight": {
+        "step": 0.1,
+        "soft_min": 0.5,
+        "soft_max": 3.0,
+    },
+    "search.nullmaterialweight": {
+        "step": 0.05,
+        "soft_min": 0.2,
+        "soft_max": 2.0,
+    },
+    "search.nullmobilityweight": {
+        "step": 0.05,
+        "soft_min": 0.1,
+        "soft_max": 2.0,
+    },
+    "search.nulldepthcap": {
+        "step": 1.0,
+        "soft_min": 4.0,
+        "soft_max": 24.0,
+    },
+    "search.nullmaterialcap": {
+        "step": 1.0,
+        "soft_min": 4.0,
+        "soft_max": 24.0,
+    },
+    "search.nullmobilitycap": {
+        "step": 2.0,
+        "soft_min": 10.0,
+        "soft_max": 64.0,
+    },
+    "search.nulllowmaterialthreshold": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 8.0,
+    },
+    "search.nulllowmobilitythreshold": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 12.0,
+    },
+    "search.nullverylowmobilitythreshold": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 8.0,
+    },
+    "search.nulllowmaterialpenalty": {
+        "step": 0.05,
+        "soft_min": 0.0,
+        "soft_max": 1.5,
+    },
+    "search.nullverylowmobilitypenalty": {
+        "step": 0.05,
+        "soft_min": 0.0,
+        "soft_max": 1.5,
+    },
+    "search.nullswingguardmincp": {
+        "step": 64.0,
+        "soft_min": 0.0,
+        "soft_max": 2000.0,
+    },
+    "search.nullswingguarddivisor": {
+        "step": 4.0,
+        "soft_min": 8.0,
+        "soft_max": 128.0,
+    },
+    "search.qsmaxdeltapawn": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 20.0,
+    },
+    "search.ttmainweight": {
+        "step": 0.1,
+        "soft_min": 0.5,
+        "soft_max": 6.0,
+    },
+    "search.ttcaptureweight": {
+        "step": 0.1,
+        "soft_min": 0.25,
+        "soft_max": 4.0,
+    },
+    "search.drawbias": {
+        "step": 0.05,
+        "soft_min": 0.0,
+        "soft_max": 1.0,
     },
     "pawnstructure.centerpawnbonus": {
         "step": 1.0,
@@ -537,15 +829,30 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "soft_min": 0.0,
         "soft_max": 96.0,
     },
+    "moveordering.captureseeclamp": {
+        "step": 128.0,
+        "soft_min": 512.0,
+        "soft_max": 4096.0,
+    },
     "moveordering.promotionseemultiplier": {
         "step": 2.0,
         "soft_min": 0.0,
         "soft_max": 48.0,
     },
+    "moveordering.promotionseeclamp": {
+        "step": 64.0,
+        "soft_min": 128.0,
+        "soft_max": 2048.0,
+    },
     "moveordering.castlingbonus": {
         "step": 200.0,
         "soft_min": 0.0,
         "soft_max": 5000.0,
+    },
+    "moveordering.maxscore": {
+        "step": 1048576.0,
+        "soft_min": 1048576.0,
+        "soft_max": 16777215.0,
     },
 }
 
