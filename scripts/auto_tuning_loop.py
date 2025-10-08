@@ -77,7 +77,7 @@ import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 # ----------------------------
 # Patterns
@@ -93,6 +93,10 @@ NUMERIC_VALUE_PATTERN = re.compile(
 
 BMSTAT_PATTERN = re.compile(r"\[BMSTAT\]\s*(\{.*\})")
 BMSUM_PATTERN  = re.compile(r"\[BMSUM\]\s*(\{.*\})")
+
+PARAM_DECL_PATTERN = re.compile(
+    r'"(?P<key>[^"]+)",\s*(?P<default>-?[0-9_\.]+)(?:,\s*(?P<min>-?[0-9_\.]+),\s*(?P<max>-?[0-9_\.]+))?\)'
+)
 
 # ----------------------------
 # Data classes
@@ -173,6 +177,30 @@ class TestResult:
             -self.duration_s,
         )
 
+
+@dataclass(frozen=True)
+class ParameterConstraint:
+    key: str
+    default: float
+    minimum: Optional[float]
+    maximum: Optional[float]
+
+    def contains(self, value: float) -> bool:
+        if value is None:
+            return False
+        if self.minimum is not None and value < self.minimum - 1e-12:
+            return False
+        if self.maximum is not None and value > self.maximum + 1e-12:
+            return False
+        return True
+
+    @property
+    def span(self) -> Optional[float]:
+        if self.minimum is None or self.maximum is None:
+            return None
+        return self.maximum - self.minimum
+
+
 # ----------------------------
 # Utilities
 # ----------------------------
@@ -199,6 +227,26 @@ def atomic_write(path: Path, content: str) -> None:
                 os.remove(tmp_path)
         except Exception:
             pass
+
+
+def _parse_java_number(token: Optional[str]) -> Optional[float]:
+    if token is None:
+        return None
+    cleaned = token.strip().replace("_", "")
+    if not cleaned:
+        return None
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def _normalize_param_key(key: str) -> str:
+    trimmed = key.strip()
+    if not trimmed:
+        return trimmed
+    needs_lower = any(ch.lower() != ch for ch in trimmed)
+    return trimmed.lower() if needs_lower else trimmed
 
 def timestamp() -> str:
     return time.strftime("%Y%m%d-%H%M%S", time.localtime())
@@ -310,7 +358,10 @@ class SeedTuningOptimizer:
         self.tuning_path = tuning_path
         if not tuning_path.exists():
             raise FileNotFoundError(f"Cannot find tuning file at {tuning_path}")
+        self.project_root = find_project_root(tuning_path.parent)
         self._initial_magnitudes: Dict[str, float] = {}
+        self._constraints: Dict[str, ParameterConstraint] = self._load_param_constraints()
+        self._reported_missing = False
 
     def backup(self, suffix: str) -> Path:
         dst = self.tuning_path.with_suffix(self.tuning_path.suffix + f".{suffix}.{timestamp()}.bak")
@@ -333,7 +384,109 @@ class SeedTuningOptimizer:
                 "No tunable parameters found in seed-tunings.yaml (expected evaluation.modules.* or numericParameters entries)."
             )
 
+        self._report_missing_parameters(combined.keys())
+
         return lines, combined
+
+    def _load_param_constraints(self) -> Dict[str, ParameterConstraint]:
+        constraints: Dict[str, ParameterConstraint] = {}
+        param_file = self.project_root / "src" / "main" / "java" / "julius" / "game" / "chessengine" / "tuning" / "ParamId.java"
+        if not param_file.exists():
+            return constraints
+        try:
+            text = param_file.read_text(encoding="utf-8")
+        except OSError:
+            return constraints
+
+        for match in PARAM_DECL_PATTERN.finditer(text):
+            key = match.group("key")
+            default = _parse_java_number(match.group("default"))
+            min_value = _parse_java_number(match.group("min"))
+            max_value = _parse_java_number(match.group("max"))
+            if key is None or default is None:
+                continue
+            normalized = _normalize_param_key(key)
+            constraints[normalized] = ParameterConstraint(
+                key=normalized,
+                default=default,
+                minimum=min_value,
+                maximum=max_value,
+            )
+        return constraints
+
+    def _report_missing_parameters(self, parameter_names: Iterable[str]) -> None:
+        if self._reported_missing or not self._constraints:
+            return
+        normalized_present = {_normalize_param_key(name) for name in parameter_names}
+        missing = sorted(k for k in self._constraints if k not in normalized_present)
+        if missing:
+            print("⚠️  Missing ParamId entries in seed-tunings.yaml:")
+            for key in missing:
+                print(f"   - {key}")
+        self._reported_missing = True
+
+    def _compute_initial_magnitude(
+            self,
+            value: float,
+            constraint: Optional[ParameterConstraint],
+            is_float: bool,
+    ) -> float:
+        base = max(abs(value), 1.0)
+        if is_float:
+            base = max(base, 0.1)
+        if constraint:
+            span = constraint.span
+            if span is not None and span > 0:
+                base = max(base, span * 0.05)
+            else:
+                distances: List[float] = []
+                if constraint.minimum is not None:
+                    distances.append(abs(value - constraint.minimum))
+                if constraint.maximum is not None:
+                    distances.append(abs(constraint.maximum - value))
+                if distances:
+                    base = max(base, max(distances) * 0.5)
+        return base
+
+    def _maybe_choose_special_target(
+            self,
+            current_value: float,
+            constraint: Optional[ParameterConstraint],
+            rng: random.Random,
+            is_float: bool,
+    ) -> Optional[float]:
+        if not constraint:
+            return None
+        sentinels: List[float] = []
+        for sentinel in (-1.0, 0.0):
+            if constraint.contains(sentinel):
+                if is_float:
+                    if not math.isclose(current_value, sentinel, abs_tol=0.05):
+                        sentinels.append(sentinel)
+                else:
+                    if int(round(current_value)) != int(round(sentinel)):
+                        sentinels.append(sentinel)
+        if not sentinels:
+            return None
+        if rng.random() < 0.12:
+            return rng.choice(sentinels)
+        return None
+
+    def _apply_bounds(
+            self,
+            candidate: float,
+            constraint: Optional[ParameterConstraint],
+            is_float: bool,
+    ) -> float:
+        if not constraint:
+            return candidate
+        if constraint.minimum is not None and candidate < constraint.minimum:
+            candidate = constraint.minimum
+        if constraint.maximum is not None and candidate > constraint.maximum:
+            candidate = constraint.maximum
+        if not is_float:
+            candidate = float(int(round(candidate)))
+        return candidate
 
     def _extract_numeric_parameters(self, lines: List[str]) -> Dict[str, NumericParameter]:
         numeric_parameters: Dict[str, NumericParameter] = {}
@@ -471,15 +624,17 @@ class SeedTuningOptimizer:
         for name, param in parameters.items():
             value = param.numeric_value
 
+            constraint = self._constraints.get(_normalize_param_key(name))
+
             if name not in self._initial_magnitudes:
-                self._initial_magnitudes[name] = max(abs(value), 1.0)
+                self._initial_magnitudes[name] = self._compute_initial_magnitude(value, constraint, param.is_float)
             init_mag = self._initial_magnitudes[name]
 
             if name not in mutate_keys:
                 updated_lines[param.line_index] = f"{param.indent}{param.yaml_key}: {param.raw_value}"
                 continue
 
-            magnitude = max(abs(value), 1.0)
+            magnitude = max(abs(value), init_mag)
             phase = self._phase_from_name(name)
 
             spectral_component = math.sin(iteration * spectral_frequency + phase)
@@ -490,14 +645,25 @@ class SeedTuningOptimizer:
             blend = 0.6 * spectral_component + 0.3 * carrier_component + 0.1 * gaussian_component
             delta = temperature * logistic_gain * blend
 
-            candidate = value + delta * magnitude
+            special_target = self._maybe_choose_special_target(value, constraint, rng, param.is_float)
+            if special_target is not None:
+                candidate = special_target
+            else:
+                candidate = value + delta * magnitude
 
             lo = -clamp_mult * init_mag
             hi =  clamp_mult * init_mag
+            if constraint:
+                if constraint.minimum is not None:
+                    lo = min(lo, constraint.minimum)
+                if constraint.maximum is not None:
+                    hi = max(hi, constraint.maximum)
             if candidate < lo:
                 candidate = lo + 0.1 * (rng.random())
             elif candidate > hi:
                 candidate = hi - 0.1 * (rng.random())
+
+            candidate = self._apply_bounds(candidate, constraint, param.is_float)
 
             if param.is_float:
                 formatted = f"{candidate:.{param.decimals}f}"
