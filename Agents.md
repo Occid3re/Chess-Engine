@@ -109,6 +109,7 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
   Define them in the corresponding evaluation module (where the feature is computed).
   Add the same weights (with sensible defaults) to seed-tunings.yaml.
   Expose and apply them via the tuning module so they are loaded and propagated into the evaluation at runtime.
+  Keep `scripts/auto_tuning_loop.py`'s `PARAM_MUTATION_HINTS` in sync with `seed-tunings.yaml`; every numeric entry now has soft bounds and mutation steps (including aspiration window, null-move, TT weighting, and SEE clamp controls).
 * Auto tuning loop: `scripts/auto_tuning_loop.py` now reads the numeric bounds from `ParamId.java` and applies search-specific heuristics (including snapping to sentinel values such as `-1`/`0`). When new numeric search parameters are added, make sure their metadata in `ParamId` is updated so the tuner can scale mutations and clamp values correctly.
 * Search pruning knobs exposed for tuning: `search.maxCheckExtensionStreak`, `search.seePruneNearRootPly`, and `search.historyReductionMax` are now part of the seed tuning set with soft caps in `auto_tuning_loop.py`. Keep their metadata in sync when adjusting forcing-line or LMR heuristics.
 * Full-suite runs currently fail in `BestMoveSearchTest` due to long-horizon move selection mismatches. Use the PGN smoke tests above when focusing on PGN changes, or investigate the AI regressions separately before expecting a green build.
