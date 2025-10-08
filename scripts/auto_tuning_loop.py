@@ -103,6 +103,41 @@ def normalize_key(key: str) -> str:
 
 
 PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
+    "evaluation.blendscale": {
+        "step": 16.0,
+        "soft_min": 128.0,
+        "soft_max": 768.0,
+    },
+    "material.pawnvalue": {
+        "step": 1.0,
+        "soft_min": 60.0,
+        "soft_max": 160.0,
+    },
+    "material.knightvalue": {
+        "step": 4.0,
+        "soft_min": 240.0,
+        "soft_max": 400.0,
+    },
+    "material.bishopvalue": {
+        "step": 4.0,
+        "soft_min": 260.0,
+        "soft_max": 420.0,
+    },
+    "material.rookvalue": {
+        "step": 8.0,
+        "soft_min": 400.0,
+        "soft_max": 640.0,
+    },
+    "material.queenvalue": {
+        "step": 12.0,
+        "soft_min": 720.0,
+        "soft_max": 1120.0,
+    },
+    "material.bishoppairbonus": {
+        "step": 2.0,
+        "soft_min": 0.0,
+        "soft_max": 120.0,
+    },
     "search.fpmargindepth1": {
         "step": 120.0,
         "soft_min": 0.0,
@@ -196,6 +231,41 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "max_step": 600.0,
         "soft_min": 0.0,
         "soft_max": 8000.0,
+    },
+    "pawnstructure.centerpawnbonus": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 40.0,
+    },
+    "pawnstructure.passedpawnbonus": {
+        "step": 4.0,
+        "soft_min": 20.0,
+        "soft_max": 120.0,
+    },
+    "pawnstructure.connectedpawnbonus": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 24.0,
+    },
+    "pawnstructure.advancedpawnbonus": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 24.0,
+    },
+    "pawnstructure.passedpawnfreepathbonusperrank": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 32.0,
+    },
+    "pawnstructure.rookhalfopenfilebonus": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 40.0,
+    },
+    "pawnstructure.rookopenfilebonus": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 60.0,
     },
     "pawnstructure.islandpenalty": {
         "step": 1.0,
