@@ -88,16 +88,77 @@ population:
       moveordering.captureseemultiplier: 50
       moveordering.promotionseemultiplier: 20
       moveordering.castlingbonus: 1834
+      moveordering.captureseeclamp: 2048
+      moveordering.promotionseeclamp: 512
+      moveordering.maxscore: 16777215
       search.fpMarginDepth1: 133
       search.fpMarginDepth2: 0
       search.lmpBase: 4
       search.lmpPerDepth: 1
+      search.fpMaxDepth: 3
+      search.lmpMaxDepth: 3
       search.hmpMinIndex: 6
       search.hmpHistoryMax: 119
       search.iidReduceDepth: 2
       search.lmrProtectPlyMax: 2
       search.lmrProtectIndexMax: 0
       search.lmrCapGoodQuiet: 21
+      search.lmrHistoryBuckets: 5
+      search.lmrHistoryWeightSlope: 0.5
+      search.lmrScaleDivisor: 1.5
+      search.lmrDepthLogOffset: 1.0
+      search.lmrMoveLogOffset: 2.0
       search.maxCheckExtensionStreak: 2
       search.seePruneNearRootPly: 2
       search.historyReductionMax: 4743
+      search.aspMinSpanCp: 12
+      search.aspMaxSpanCp: 256
+      search.aspDefaultSpanCp: 48
+      search.aspHistoryBlend: 0.4
+      search.aspMomentumStepCp: 8
+      search.aspMomentumCap: 8
+      search.aspFailureRatio: 0.6
+      search.aspBaseOffsetCp: 24
+      search.aspSwingWeight: 0.25
+      search.aspVolatilityWeight: 0.6
+      search.aspDepthScale: 0.04
+      search.aspDepthPivot: 3
+      search.aspFloorBaseCp: 8
+      search.aspFloorVolWeight: 0.5
+      search.aspFloorStreakStepCp: 4
+      search.aspBumpBaseCp: 12
+      search.aspBumpStreakCp: 6
+      search.aspBumpDepthCp: 2
+      search.aspFullWindowScale: 1.15
+      search.aspLastSpanScale: 1.1
+      search.aspFullWindowMinMultiplier: 2.0
+      search.aspBlendBaselineWeight: 0.6
+      search.aspBlendCandidateWeight: 0.4
+      search.aspMaxRetriesBase: 3
+      search.aspMaxRetriesVolThresholdHigh: 120
+      search.aspMaxRetriesVolBonusHigh: 2
+      search.aspMaxRetriesVolThresholdMed: 60
+      search.aspMaxRetriesVolBonusMed: 1
+      search.aspMaxRetriesDepthOffset: 4
+      search.aspMaxRetriesDepthDivisor: 2
+      search.aspMaxRetriesMomentumDivisor: 3
+      search.aspMaxRetriesMin: 3
+      search.aspMaxRetriesMax: 6
+      search.nullBaseReduction: 1.25
+      search.nullDepthWeight: 1.5
+      search.nullMaterialWeight: 0.75
+      search.nullMobilityWeight: 0.5
+      search.nullDepthCap: 10
+      search.nullMaterialCap: 12
+      search.nullMobilityCap: 30
+      search.nullLowMaterialThreshold: 2
+      search.nullLowMobilityThreshold: 4
+      search.nullVeryLowMobilityThreshold: 2
+      search.nullLowMaterialPenalty: 0.75
+      search.nullVeryLowMobilityPenalty: 0.5
+      search.nullSwingGuardMinCp: 600
+      search.nullSwingGuardDivisor: 64
+      search.ttMainWeight: 2.0
+      search.ttCaptureWeight: 1.0
+      search.qsMaxDeltaPawn: 9.0
+      search.drawBias: 0.2

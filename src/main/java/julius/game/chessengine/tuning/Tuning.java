@@ -94,20 +94,81 @@ public final class Tuning {
     private static int moveOrderingCaptureSeeMultiplier;
     private static int moveOrderingPromotionSeeMultiplier;
     private static int moveOrderingCastlingBonus;
+    private static int moveOrderingCaptureSeeClamp;
+    private static int moveOrderingPromotionSeeClamp;
+    private static int moveOrderingMaxScore;
 
     private static int searchFpMarginDepth1;
     private static int searchFpMarginDepth2;
     private static int searchLmpBase;
     private static int searchLmpPerDepth;
+    private static int searchFpMaxDepth;
+    private static int searchLmpMaxDepth;
     private static int searchHmpMinIndex;
     private static int searchHmpHistoryMax;
     private static int searchIidReduceDepth;
     private static int searchLmrProtectPlyMax;
     private static int searchLmrProtectIndexMax;
     private static int searchLmrCapGoodQuiet;
+    private static int searchLmrHistoryBuckets;
+    private static double searchLmrHistoryWeightSlope;
+    private static double searchLmrScaleDivisor;
+    private static double searchLmrDepthLogOffset;
+    private static double searchLmrMoveLogOffset;
     private static int searchMaxCheckExtensionStreak;
     private static int searchSeePruneNearRootPly;
     private static int searchHistoryReductionMax;
+    private static int searchAspMinSpanCp;
+    private static int searchAspMaxSpanCp;
+    private static int searchAspDefaultSpanCp;
+    private static double searchAspHistoryBlend;
+    private static int searchAspMomentumStepCp;
+    private static int searchAspMomentumCap;
+    private static double searchAspFailureRatio;
+    private static int searchAspBaseOffsetCp;
+    private static double searchAspSwingWeight;
+    private static double searchAspVolatilityWeight;
+    private static double searchAspDepthScale;
+    private static int searchAspDepthPivot;
+    private static int searchAspFloorBaseCp;
+    private static double searchAspFloorVolWeight;
+    private static int searchAspFloorStreakStepCp;
+    private static int searchAspBumpBaseCp;
+    private static int searchAspBumpStreakCp;
+    private static int searchAspBumpDepthCp;
+    private static double searchAspFullWindowScale;
+    private static double searchAspLastSpanScale;
+    private static double searchAspFullWindowMinMultiplier;
+    private static double searchAspBlendBaselineWeight;
+    private static double searchAspBlendCandidateWeight;
+    private static int searchAspMaxRetriesBase;
+    private static int searchAspMaxRetriesVolThresholdHigh;
+    private static int searchAspMaxRetriesVolBonusHigh;
+    private static int searchAspMaxRetriesVolThresholdMed;
+    private static int searchAspMaxRetriesVolBonusMed;
+    private static int searchAspMaxRetriesDepthOffset;
+    private static int searchAspMaxRetriesDepthDivisor;
+    private static int searchAspMaxRetriesMomentumDivisor;
+    private static int searchAspMaxRetriesMin;
+    private static int searchAspMaxRetriesMax;
+    private static double searchNullBaseReduction;
+    private static double searchNullDepthWeight;
+    private static double searchNullMaterialWeight;
+    private static double searchNullMobilityWeight;
+    private static int searchNullDepthCap;
+    private static int searchNullMaterialCap;
+    private static int searchNullMobilityCap;
+    private static int searchNullLowMaterialThreshold;
+    private static int searchNullLowMobilityThreshold;
+    private static int searchNullVeryLowMobilityThreshold;
+    private static double searchNullLowMaterialPenalty;
+    private static double searchNullVeryLowMobilityPenalty;
+    private static double searchNullSwingGuardMinCp;
+    private static double searchNullSwingGuardDivisor;
+    private static double searchTtMainWeight;
+    private static double searchTtCaptureWeight;
+    private static double searchQsMaxDeltaPawn;
+    private static double searchDrawBias;
 
     static {
         refresh();
@@ -428,6 +489,18 @@ public final class Tuning {
         return moveOrderingCastlingBonus;
     }
 
+    public static int moveOrderingCaptureSeeClamp() {
+        return moveOrderingCaptureSeeClamp;
+    }
+
+    public static int moveOrderingPromotionSeeClamp() {
+        return moveOrderingPromotionSeeClamp;
+    }
+
+    public static int moveOrderingMaxScore() {
+        return moveOrderingMaxScore;
+    }
+
     public static int searchFpMarginDepth1() {
         return searchFpMarginDepth1;
     }
@@ -442,6 +515,14 @@ public final class Tuning {
 
     public static int searchLmpPerDepth() {
         return searchLmpPerDepth;
+    }
+
+    public static int searchFpMaxDepth() {
+        return searchFpMaxDepth;
+    }
+
+    public static int searchLmpMaxDepth() {
+        return searchLmpMaxDepth;
     }
 
     public static int searchHmpMinIndex() {
@@ -468,6 +549,26 @@ public final class Tuning {
         return searchLmrCapGoodQuiet;
     }
 
+    public static int searchLmrHistoryBuckets() {
+        return searchLmrHistoryBuckets;
+    }
+
+    public static double searchLmrHistoryWeightSlope() {
+        return searchLmrHistoryWeightSlope;
+    }
+
+    public static double searchLmrScaleDivisor() {
+        return searchLmrScaleDivisor;
+    }
+
+    public static double searchLmrDepthLogOffset() {
+        return searchLmrDepthLogOffset;
+    }
+
+    public static double searchLmrMoveLogOffset() {
+        return searchLmrMoveLogOffset;
+    }
+
     public static int searchMaxCheckExtensionStreak() {
         return searchMaxCheckExtensionStreak;
     }
@@ -478,6 +579,210 @@ public final class Tuning {
 
     public static int searchHistoryReductionMax() {
         return searchHistoryReductionMax;
+    }
+
+    public static int searchAspMinSpanCp() {
+        return searchAspMinSpanCp;
+    }
+
+    public static int searchAspMaxSpanCp() {
+        return searchAspMaxSpanCp;
+    }
+
+    public static int searchAspDefaultSpanCp() {
+        return searchAspDefaultSpanCp;
+    }
+
+    public static double searchAspHistoryBlend() {
+        return searchAspHistoryBlend;
+    }
+
+    public static int searchAspMomentumStepCp() {
+        return searchAspMomentumStepCp;
+    }
+
+    public static int searchAspMomentumCap() {
+        return searchAspMomentumCap;
+    }
+
+    public static double searchAspFailureRatio() {
+        return searchAspFailureRatio;
+    }
+
+    public static int searchAspBaseOffsetCp() {
+        return searchAspBaseOffsetCp;
+    }
+
+    public static double searchAspSwingWeight() {
+        return searchAspSwingWeight;
+    }
+
+    public static double searchAspVolatilityWeight() {
+        return searchAspVolatilityWeight;
+    }
+
+    public static double searchAspDepthScale() {
+        return searchAspDepthScale;
+    }
+
+    public static int searchAspDepthPivot() {
+        return searchAspDepthPivot;
+    }
+
+    public static int searchAspFloorBaseCp() {
+        return searchAspFloorBaseCp;
+    }
+
+    public static double searchAspFloorVolWeight() {
+        return searchAspFloorVolWeight;
+    }
+
+    public static int searchAspFloorStreakStepCp() {
+        return searchAspFloorStreakStepCp;
+    }
+
+    public static int searchAspBumpBaseCp() {
+        return searchAspBumpBaseCp;
+    }
+
+    public static int searchAspBumpStreakCp() {
+        return searchAspBumpStreakCp;
+    }
+
+    public static int searchAspBumpDepthCp() {
+        return searchAspBumpDepthCp;
+    }
+
+    public static double searchAspFullWindowScale() {
+        return searchAspFullWindowScale;
+    }
+
+    public static double searchAspLastSpanScale() {
+        return searchAspLastSpanScale;
+    }
+
+    public static double searchAspFullWindowMinMultiplier() {
+        return searchAspFullWindowMinMultiplier;
+    }
+
+    public static double searchAspBlendBaselineWeight() {
+        return searchAspBlendBaselineWeight;
+    }
+
+    public static double searchAspBlendCandidateWeight() {
+        return searchAspBlendCandidateWeight;
+    }
+
+    public static int searchAspMaxRetriesBase() {
+        return searchAspMaxRetriesBase;
+    }
+
+    public static int searchAspMaxRetriesVolThresholdHigh() {
+        return searchAspMaxRetriesVolThresholdHigh;
+    }
+
+    public static int searchAspMaxRetriesVolBonusHigh() {
+        return searchAspMaxRetriesVolBonusHigh;
+    }
+
+    public static int searchAspMaxRetriesVolThresholdMed() {
+        return searchAspMaxRetriesVolThresholdMed;
+    }
+
+    public static int searchAspMaxRetriesVolBonusMed() {
+        return searchAspMaxRetriesVolBonusMed;
+    }
+
+    public static int searchAspMaxRetriesDepthOffset() {
+        return searchAspMaxRetriesDepthOffset;
+    }
+
+    public static int searchAspMaxRetriesDepthDivisor() {
+        return searchAspMaxRetriesDepthDivisor;
+    }
+
+    public static int searchAspMaxRetriesMomentumDivisor() {
+        return searchAspMaxRetriesMomentumDivisor;
+    }
+
+    public static int searchAspMaxRetriesMin() {
+        return searchAspMaxRetriesMin;
+    }
+
+    public static int searchAspMaxRetriesMax() {
+        return searchAspMaxRetriesMax;
+    }
+
+    public static double searchNullBaseReduction() {
+        return searchNullBaseReduction;
+    }
+
+    public static double searchNullDepthWeight() {
+        return searchNullDepthWeight;
+    }
+
+    public static double searchNullMaterialWeight() {
+        return searchNullMaterialWeight;
+    }
+
+    public static double searchNullMobilityWeight() {
+        return searchNullMobilityWeight;
+    }
+
+    public static int searchNullDepthCap() {
+        return searchNullDepthCap;
+    }
+
+    public static int searchNullMaterialCap() {
+        return searchNullMaterialCap;
+    }
+
+    public static int searchNullMobilityCap() {
+        return searchNullMobilityCap;
+    }
+
+    public static int searchNullLowMaterialThreshold() {
+        return searchNullLowMaterialThreshold;
+    }
+
+    public static int searchNullLowMobilityThreshold() {
+        return searchNullLowMobilityThreshold;
+    }
+
+    public static int searchNullVeryLowMobilityThreshold() {
+        return searchNullVeryLowMobilityThreshold;
+    }
+
+    public static double searchNullLowMaterialPenalty() {
+        return searchNullLowMaterialPenalty;
+    }
+
+    public static double searchNullVeryLowMobilityPenalty() {
+        return searchNullVeryLowMobilityPenalty;
+    }
+
+    public static double searchNullSwingGuardMinCp() {
+        return searchNullSwingGuardMinCp;
+    }
+
+    public static double searchNullSwingGuardDivisor() {
+        return searchNullSwingGuardDivisor;
+    }
+
+    public static double searchTtMainWeight() {
+        return searchTtMainWeight;
+    }
+
+    public static double searchTtCaptureWeight() {
+        return searchTtCaptureWeight;
+    }
+
+    public static double searchQsMaxDeltaPawn() {
+        return searchQsMaxDeltaPawn;
+    }
+
+    public static double searchDrawBias() {
+        return searchDrawBias;
     }
 
     /**
@@ -562,25 +867,90 @@ public final class Tuning {
             moveOrderingCaptureSeeMultiplier = loadInt(ParamId.MOVE_ORDERING_CAPTURE_SEE_MULTIPLIER);
             moveOrderingPromotionSeeMultiplier = loadInt(ParamId.MOVE_ORDERING_PROMOTION_SEE_MULTIPLIER);
             moveOrderingCastlingBonus = loadInt(ParamId.MOVE_ORDERING_CASTLING_BONUS);
+            moveOrderingCaptureSeeClamp = loadInt(ParamId.MOVE_ORDERING_CAPTURE_SEE_CLAMP);
+            moveOrderingPromotionSeeClamp = loadInt(ParamId.MOVE_ORDERING_PROMOTION_SEE_CLAMP);
+            moveOrderingMaxScore = loadInt(ParamId.MOVE_ORDERING_MAX_SCORE);
 
             searchFpMarginDepth1 = loadInt(ParamId.SEARCH_FP_MARGIN_DEPTH1);
             searchFpMarginDepth2 = loadInt(ParamId.SEARCH_FP_MARGIN_DEPTH2);
             searchLmpBase = loadInt(ParamId.SEARCH_LMP_BASE);
             searchLmpPerDepth = loadInt(ParamId.SEARCH_LMP_PER_DEPTH);
+            searchFpMaxDepth = loadInt(ParamId.SEARCH_FP_MAX_DEPTH);
+            searchLmpMaxDepth = loadInt(ParamId.SEARCH_LMP_MAX_DEPTH);
             searchHmpMinIndex = loadInt(ParamId.SEARCH_HMP_MIN_INDEX);
             searchHmpHistoryMax = loadInt(ParamId.SEARCH_HMP_HISTORY_MAX);
             searchIidReduceDepth = loadInt(ParamId.SEARCH_IID_REDUCE_DEPTH);
             searchLmrProtectPlyMax = loadInt(ParamId.SEARCH_LMR_PROTECT_PLY_MAX);
             searchLmrProtectIndexMax = loadInt(ParamId.SEARCH_LMR_PROTECT_INDEX_MAX);
             searchLmrCapGoodQuiet = loadInt(ParamId.SEARCH_LMR_CAP_GOOD_QUIET);
+            searchLmrHistoryBuckets = loadInt(ParamId.SEARCH_LMR_HISTORY_BUCKETS);
+            searchLmrHistoryWeightSlope = loadDouble(ParamId.SEARCH_LMR_HISTORY_WEIGHT_SLOPE);
+            searchLmrScaleDivisor = loadDouble(ParamId.SEARCH_LMR_SCALE_DIVISOR);
+            searchLmrDepthLogOffset = loadDouble(ParamId.SEARCH_LMR_DEPTH_LOG_OFFSET);
+            searchLmrMoveLogOffset = loadDouble(ParamId.SEARCH_LMR_MOVE_LOG_OFFSET);
             searchMaxCheckExtensionStreak = loadInt(ParamId.SEARCH_MAX_CHECK_EXTENSION_STREAK);
             searchSeePruneNearRootPly = loadInt(ParamId.SEARCH_SEE_PRUNE_NEAR_ROOT_PLY);
             searchHistoryReductionMax = loadInt(ParamId.SEARCH_HISTORY_REDUCTION_MAX);
+            searchAspMinSpanCp = loadInt(ParamId.SEARCH_ASP_MIN_SPAN_CP);
+            searchAspMaxSpanCp = loadInt(ParamId.SEARCH_ASP_MAX_SPAN_CP);
+            searchAspDefaultSpanCp = loadInt(ParamId.SEARCH_ASP_DEFAULT_SPAN_CP);
+            searchAspHistoryBlend = loadDouble(ParamId.SEARCH_ASP_HISTORY_BLEND);
+            searchAspMomentumStepCp = loadInt(ParamId.SEARCH_ASP_MOMENTUM_STEP_CP);
+            searchAspMomentumCap = loadInt(ParamId.SEARCH_ASP_MOMENTUM_CAP);
+            searchAspFailureRatio = loadDouble(ParamId.SEARCH_ASP_FAILURE_RATIO);
+            searchAspBaseOffsetCp = loadInt(ParamId.SEARCH_ASP_BASE_OFFSET_CP);
+            searchAspSwingWeight = loadDouble(ParamId.SEARCH_ASP_SWING_WEIGHT);
+            searchAspVolatilityWeight = loadDouble(ParamId.SEARCH_ASP_VOLATILITY_WEIGHT);
+            searchAspDepthScale = loadDouble(ParamId.SEARCH_ASP_DEPTH_SCALE);
+            searchAspDepthPivot = loadInt(ParamId.SEARCH_ASP_DEPTH_PIVOT);
+            searchAspFloorBaseCp = loadInt(ParamId.SEARCH_ASP_FLOOR_BASE_CP);
+            searchAspFloorVolWeight = loadDouble(ParamId.SEARCH_ASP_FLOOR_VOL_WEIGHT);
+            searchAspFloorStreakStepCp = loadInt(ParamId.SEARCH_ASP_FLOOR_STREAK_STEP_CP);
+            searchAspBumpBaseCp = loadInt(ParamId.SEARCH_ASP_BUMP_BASE_CP);
+            searchAspBumpStreakCp = loadInt(ParamId.SEARCH_ASP_BUMP_STREAK_CP);
+            searchAspBumpDepthCp = loadInt(ParamId.SEARCH_ASP_BUMP_DEPTH_CP);
+            searchAspFullWindowScale = loadDouble(ParamId.SEARCH_ASP_FULL_WINDOW_SCALE);
+            searchAspLastSpanScale = loadDouble(ParamId.SEARCH_ASP_LAST_SPAN_SCALE);
+            searchAspFullWindowMinMultiplier = loadDouble(ParamId.SEARCH_ASP_FULL_WINDOW_MIN_MULTIPLIER);
+            searchAspBlendBaselineWeight = loadDouble(ParamId.SEARCH_ASP_BLEND_BASELINE_WEIGHT);
+            searchAspBlendCandidateWeight = loadDouble(ParamId.SEARCH_ASP_BLEND_CANDIDATE_WEIGHT);
+            searchAspMaxRetriesBase = loadInt(ParamId.SEARCH_ASP_MAX_RETRIES_BASE);
+            searchAspMaxRetriesVolThresholdHigh = loadInt(ParamId.SEARCH_ASP_MAX_RETRIES_VOL_THRESHOLD_HIGH);
+            searchAspMaxRetriesVolBonusHigh = loadInt(ParamId.SEARCH_ASP_MAX_RETRIES_VOL_BONUS_HIGH);
+            searchAspMaxRetriesVolThresholdMed = loadInt(ParamId.SEARCH_ASP_MAX_RETRIES_VOL_THRESHOLD_MED);
+            searchAspMaxRetriesVolBonusMed = loadInt(ParamId.SEARCH_ASP_MAX_RETRIES_VOL_BONUS_MED);
+            searchAspMaxRetriesDepthOffset = loadInt(ParamId.SEARCH_ASP_MAX_RETRIES_DEPTH_OFFSET);
+            searchAspMaxRetriesDepthDivisor = loadInt(ParamId.SEARCH_ASP_MAX_RETRIES_DEPTH_DIVISOR);
+            searchAspMaxRetriesMomentumDivisor = loadInt(ParamId.SEARCH_ASP_MAX_RETRIES_MOMENTUM_DIVISOR);
+            searchAspMaxRetriesMin = loadInt(ParamId.SEARCH_ASP_MAX_RETRIES_MIN);
+            searchAspMaxRetriesMax = loadInt(ParamId.SEARCH_ASP_MAX_RETRIES_MAX);
+            searchNullBaseReduction = loadDouble(ParamId.SEARCH_NULL_BASE_REDUCTION);
+            searchNullDepthWeight = loadDouble(ParamId.SEARCH_NULL_DEPTH_WEIGHT);
+            searchNullMaterialWeight = loadDouble(ParamId.SEARCH_NULL_MATERIAL_WEIGHT);
+            searchNullMobilityWeight = loadDouble(ParamId.SEARCH_NULL_MOBILITY_WEIGHT);
+            searchNullDepthCap = loadInt(ParamId.SEARCH_NULL_DEPTH_CAP);
+            searchNullMaterialCap = loadInt(ParamId.SEARCH_NULL_MATERIAL_CAP);
+            searchNullMobilityCap = loadInt(ParamId.SEARCH_NULL_MOBILITY_CAP);
+            searchNullLowMaterialThreshold = loadInt(ParamId.SEARCH_NULL_LOW_MATERIAL_THRESHOLD);
+            searchNullLowMobilityThreshold = loadInt(ParamId.SEARCH_NULL_LOW_MOBILITY_THRESHOLD);
+            searchNullVeryLowMobilityThreshold = loadInt(ParamId.SEARCH_NULL_VERY_LOW_MOBILITY_THRESHOLD);
+            searchNullLowMaterialPenalty = loadDouble(ParamId.SEARCH_NULL_LOW_MATERIAL_PENALTY);
+            searchNullVeryLowMobilityPenalty = loadDouble(ParamId.SEARCH_NULL_VERY_LOW_MOBILITY_PENALTY);
+            searchNullSwingGuardMinCp = loadDouble(ParamId.SEARCH_NULL_SWING_GUARD_MIN_CP);
+            searchNullSwingGuardDivisor = loadDouble(ParamId.SEARCH_NULL_SWING_GUARD_DIVISOR);
+            searchTtMainWeight = loadDouble(ParamId.SEARCH_TT_MAIN_WEIGHT);
+            searchTtCaptureWeight = loadDouble(ParamId.SEARCH_TT_CAPTURE_WEIGHT);
+            searchQsMaxDeltaPawn = loadDouble(ParamId.SEARCH_QS_MAX_DELTA_PAWN);
+            searchDrawBias = loadDouble(ParamId.SEARCH_DRAW_BIAS);
         }
     }
 
     private static int loadInt(ParamId id) {
         return (int) Math.round(applyBounds(ParameterRegistry.get(id), id));
+    }
+
+    private static double loadDouble(ParamId id) {
+        return applyBounds(ParameterRegistry.get(id), id);
     }
 
     private static double applyBounds(double value, ParamId id) {

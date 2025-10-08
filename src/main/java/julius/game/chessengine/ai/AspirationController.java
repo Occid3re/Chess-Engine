@@ -4,45 +4,45 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Iterator;
 
+import julius.game.chessengine.tuning.AspirationParameters;
+
 /**
  * Aspiration controller in *centipawns* (ints).
- * - Tight spans: 12..256 cp (default 48 cp)
+ * - Tight spans driven by tunable parameters
  * - Additive growth on fail-high/low (no explosive multipliers)
  * - Gentle EMA blending across iterations
- * - Momentum nudges are small (8 cp steps)
+ * - Momentum nudges are small and tunable
  */
 final class AspirationController {
 
     private static final int MAX_HISTORY = 12;
 
-    // All spans are in CENTIPAWNS.
-    private static final int MIN_SPAN_CP = 12;     // 0.12 pawns
-    private static final int MAX_SPAN_CP = 256;    // 2.56 pawns
-    private static final int DEFAULT_SPAN_CP = 48; // 0.48 pawns
-
-    private static final double HISTORY_BLEND = 0.40; // EMA weight toward last span
-    private static final int MOMENTUM_STEP_CP = 8;    // each momentum point adds ~0.08 pawns
-    private static final double FAILURE_RATIO = 0.60; // keep other side at least 60% of grown side
-
+    private final AspirationParameters.Snapshot params;
     private final Deque<Integer> recentScoresCp = new ArrayDeque<>(MAX_HISTORY);
 
-    private int lastWindowSpanCp = DEFAULT_SPAN_CP;
-    private int failLowMomentum;   // 0..8
-    private int failHighMomentum;  // 0..8
+    private int lastWindowSpanCp;
+    private int failLowMomentum;
+    private int failHighMomentum;
     private State currentState;
 
-    AspirationController() {}
+    AspirationController() {
+        this(AspirationParameters.snapshot());
+    }
+
+    AspirationController(AspirationParameters.Snapshot params) {
+        this.params = params;
+        this.lastWindowSpanCp = clampSpanCp(params.defaultSpanCp());
+    }
 
     State beginDepth(int depth, double lastScore /*in cp*/, java.util.SplittableRandom ignored) {
-        final int lastCp = (int)Math.round(lastScore); // enforce cp
+        final int lastCp = (int) Math.round(lastScore); // enforce cp
         final int volatilityCp = estimateVolatilityCp();
         final int swingCp = estimateAverageSwingCp();
 
         int baseSpan = computeBaseSpanCp(depth, volatilityCp, swingCp);
 
-        // Momentum widens one side slightly
-        final int lower = clampSpanCp(baseSpan + failLowMomentum * MOMENTUM_STEP_CP);
-        final int upper = clampSpanCp(baseSpan + failHighMomentum * MOMENTUM_STEP_CP);
+        final int lower = clampSpanCp(baseSpan + failLowMomentum * params.momentumStepCp());
+        final int upper = clampSpanCp(baseSpan + failHighMomentum * params.momentumStepCp());
 
         final int maxRetries = computeMaxRetries(depth, volatilityCp);
         currentState = new State(depth, lastCp, lower, upper, maxRetries);
@@ -55,25 +55,27 @@ final class AspirationController {
         currentState.retries++;
         currentState.failLowStreak++;
         currentState.failHighStreak = 0;
-        failLowMomentum = Math.min(8, failLowMomentum + 1);
+        failLowMomentum = Math.min(params.momentumCap(), failLowMomentum + 1);
         failHighMomentum = Math.max(0, failHighMomentum - 1);
 
-        final int cand = (int)Math.round(candidateScore);
+        final int cand = (int) Math.round(candidateScore);
         final int vol = estimateVolatilityCp();
 
-        // Floor grows slowly with volatility and streak
-        final int floor = clampSpanCp(8 + (vol / 2) + 4 * currentState.failLowStreak);
+        final int floor = clampSpanCp((int) Math.round(
+                params.floorBaseCp()
+                        + params.floorVolWeight() * vol
+                        + params.floorStreakStepCp() * currentState.failLowStreak));
 
-        // Additive growth (no explosive multipliers)
-        final int bump = 12 + 6 * currentState.failLowStreak + Math.max(0, currentState.depth - 3) * 2;
+        final int bump = (int) Math.round(
+                params.bumpBaseCp()
+                        + params.bumpStreakCp() * currentState.failLowStreak
+                        + Math.max(0, currentState.depth - params.depthPivot()) * params.bumpDepthCp());
         currentState.lowerSpan = clampSpanCp(Math.max(currentState.lowerSpan + bump, floor));
 
-        // Keep center on fail-low
         currentState.center = Math.min(currentState.center, cand);
 
-        // Keep the opposite side at least FAILURE_RATIO of the grown side
         currentState.upperSpan = Math.max(currentState.upperSpan,
-                (int)Math.round(currentState.lowerSpan * FAILURE_RATIO));
+                (int) Math.round(currentState.lowerSpan * params.failureRatio()));
 
         if (currentState.retries >= currentState.maxRetries) {
             return Adjustment.fullWindow();
@@ -87,20 +89,26 @@ final class AspirationController {
         currentState.retries++;
         currentState.failHighStreak++;
         currentState.failLowStreak = 0;
-        failHighMomentum = Math.min(8, failHighMomentum + 1);
+        failHighMomentum = Math.min(params.momentumCap(), failHighMomentum + 1);
         failLowMomentum = Math.max(0, failLowMomentum - 1);
 
-        final int cand = (int)Math.round(candidateScore);
+        final int cand = (int) Math.round(candidateScore);
         final int vol = estimateVolatilityCp();
 
-        final int floor = clampSpanCp(8 + (vol / 2) + 4 * currentState.failHighStreak);
-        final int bump = 12 + 6 * currentState.failHighStreak + Math.max(0, currentState.depth - 3) * 2;
+        final int floor = clampSpanCp((int) Math.round(
+                params.floorBaseCp()
+                        + params.floorVolWeight() * vol
+                        + params.floorStreakStepCp() * currentState.failHighStreak));
+        final int bump = (int) Math.round(
+                params.bumpBaseCp()
+                        + params.bumpStreakCp() * currentState.failHighStreak
+                        + Math.max(0, currentState.depth - params.depthPivot()) * params.bumpDepthCp());
         currentState.upperSpan = clampSpanCp(Math.max(currentState.upperSpan + bump, floor));
 
         currentState.center = Math.max(currentState.center, cand);
 
         currentState.lowerSpan = Math.max(currentState.lowerSpan,
-                (int)Math.round(currentState.upperSpan * FAILURE_RATIO));
+                (int) Math.round(currentState.upperSpan * params.failureRatio()));
 
         if (currentState.retries >= currentState.maxRetries) {
             return Adjustment.fullWindow();
@@ -110,7 +118,7 @@ final class AspirationController {
 
     void onSuccess(double bestScore /*in cp*/) {
         if (currentState == null) return;
-        currentState.center = (int)Math.round(bestScore);
+        currentState.center = (int) Math.round(bestScore);
         currentState.success = true;
         currentState.failHighStreak = 0;
         currentState.failLowStreak = 0;
@@ -119,7 +127,7 @@ final class AspirationController {
     }
 
     void finishIteration(double score /*in cp*/, boolean attemptedAspiration, boolean usedFullWindow) {
-        final int cp = (int)Math.round(score);
+        final int cp = (int) Math.round(score);
 
         if (attemptedAspiration) {
             int candidateSpan = lastWindowSpanCp;
@@ -127,17 +135,13 @@ final class AspirationController {
                 candidateSpan = (currentState.lowerSpan + currentState.upperSpan) >>> 1;
                 if (usedFullWindow) {
                     lastWindowSpanCp = adjustAfterFullWindowCp(candidateSpan);
-                } else if (currentState.success) {
-                    lastWindowSpanCp = blendSpanCp(lastWindowSpanCp, candidateSpan);
                 } else {
-                    // failed but not full window: nudge toward what we tried
                     lastWindowSpanCp = blendSpanCp(lastWindowSpanCp, candidateSpan);
                 }
             } else if (usedFullWindow) {
                 lastWindowSpanCp = adjustAfterFullWindowCp(lastWindowSpanCp);
             }
         } else {
-            // no aspiration: very small decay toward itself (no change effectively)
             lastWindowSpanCp = blendSpanCp(lastWindowSpanCp, lastWindowSpanCp);
         }
 
@@ -148,24 +152,30 @@ final class AspirationController {
     // ---- internals ----------------------------------------------------------
 
     private int computeBaseSpanCp(int depth, int volatilityCp, int swingCp) {
-        // Baseline: small + respond to recent noise
-        int baseline = 24 + (int)(0.25 * swingCp) + (int)(0.6 * volatilityCp);
+        double baseline = params.baseOffsetCp()
+                + params.swingWeight() * swingCp
+                + params.volatilityWeight() * volatilityCp;
 
-        // Mix with last achieved span (EMA)
-        baseline = (int)Math.round(baseline * (1.0 - HISTORY_BLEND) + lastWindowSpanCp * HISTORY_BLEND);
+        double emaBlend = Math.max(0.0, 1.0 - params.historyBlend());
+        double ema = baseline * emaBlend + lastWindowSpanCp * params.historyBlend();
 
-        // Slightly wider with depth
-        final int depthFactorCp = (int)Math.round(baseline * (1.0 + 0.04 * Math.max(0, depth - 3)));
-        return clampSpanCp(Math.max(baseline, depthFactorCp));
+        double depthMultiplier = 1.0 + params.depthScale() * Math.max(0, depth - params.depthPivot());
+        double candidate = Math.max(ema, ema * depthMultiplier);
+        return clampSpanCp((int) Math.round(candidate));
     }
 
     private int computeMaxRetries(int depth, int volatilityCp) {
-        int base = 3;
-        if (volatilityCp > 120) base += 2;
-        else if (volatilityCp > 60) base += 1;
-        base += Math.max(0, depth - 4) / 2;
-        base += Math.max(failLowMomentum, failHighMomentum) / 3;
-        return Math.min(6, Math.max(3, base));
+        int base = params.maxRetriesBase();
+        if (volatilityCp > params.maxRetriesVolThresholdHigh()) {
+            base += params.maxRetriesVolBonusHigh();
+        } else if (volatilityCp > params.maxRetriesVolThresholdMed()) {
+            base += params.maxRetriesVolBonusMed();
+        }
+        int depthDivisor = Math.max(1, params.maxRetriesDepthDivisor());
+        base += Math.max(0, depth - params.maxRetriesDepthOffset()) / depthDivisor;
+        int momentumDivisor = Math.max(1, params.maxRetriesMomentumDivisor());
+        base += Math.max(failLowMomentum, failHighMomentum) / momentumDivisor;
+        return Math.min(params.maxRetriesMax(), Math.max(params.maxRetriesMin(), base));
     }
 
     private void pushScoreCp(int cp) {
@@ -185,7 +195,7 @@ final class AspirationController {
             var += d * d;
         }
         var /= (recentScoresCp.size() - 1);
-        return (int)Math.round(Math.sqrt(Math.max(var, 0.0)));
+        return (int) Math.round(Math.sqrt(Math.max(var, 0.0)));
     }
 
     private int estimateAverageSwingCp() {
@@ -200,27 +210,35 @@ final class AspirationController {
             prev = cur;
             count++;
         }
-        return count == 0 ? 0 : (int)(total / count);
+        return count == 0 ? 0 : (int) (total / count);
     }
 
-    private static int clampSpanCp(int span) {
-        if (span <= 0) return DEFAULT_SPAN_CP;
-        return Math.max(MIN_SPAN_CP, Math.min(MAX_SPAN_CP, span));
+    private int clampSpanCp(int span) {
+        if (span <= 0) return params.defaultSpanCp();
+        return Math.max(params.minSpanCp(), Math.min(params.maxSpanCp(), span));
     }
 
     private int blendSpanCp(int baselineCp, int candidateCp) {
         if (candidateCp <= 0) return baselineCp;
         if (baselineCp <= 0) return clampSpanCp(candidateCp);
-        final int mixed = (int)Math.round(baselineCp * 0.60 + candidateCp * 0.40);
+        double baselineWeight = Math.max(0.0, params.blendBaselineWeight());
+        double candidateWeight = Math.max(0.0, params.blendCandidateWeight());
+        double sum = baselineWeight + candidateWeight;
+        if (sum == 0.0) {
+            baselineWeight = 0.5;
+            candidateWeight = 0.5;
+            sum = 1.0;
+        }
+        final int mixed = (int) Math.round((baselineCp * baselineWeight + candidateCp * candidateWeight) / sum);
         return clampSpanCp(mixed);
     }
 
     private int adjustAfterFullWindowCp(int candidateCp) {
-        int base = candidateCp > 0 ? candidateCp : Math.max(lastWindowSpanCp, MIN_SPAN_CP * 2);
-        // modest +15% then clamp
-        int scaled = clampSpanCp((int)Math.round(base * 1.15));
+        int minScaled = (int) Math.round(params.minSpanCp() * params.fullWindowMinMultiplier());
+        int base = candidateCp > 0 ? candidateCp : Math.max(lastWindowSpanCp, minScaled);
+        int scaled = clampSpanCp((int) Math.round(base * params.fullWindowScale()));
         if (lastWindowSpanCp <= 0) return scaled;
-        return Math.max(clampSpanCp((int)Math.round(lastWindowSpanCp * 1.10)), scaled);
+        return Math.max(clampSpanCp((int) Math.round(lastWindowSpanCp * params.lastSpanScale())), scaled);
     }
 
     static final class Adjustment {
