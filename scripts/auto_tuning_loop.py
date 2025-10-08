@@ -179,6 +179,24 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "soft_min": 0.0,
         "soft_max": 64.0,
     },
+    "search.maxcheckextensionstreak": {
+        "step": 1.0,
+        "max_step": 3.0,
+        "soft_min": 0.0,
+        "soft_max": 6.0,
+    },
+    "search.seeprunenarrootply": {
+        "step": 1.0,
+        "max_step": 2.0,
+        "soft_min": 0.0,
+        "soft_max": 6.0,
+    },
+    "search.historyreductionmax": {
+        "step": 200.0,
+        "max_step": 600.0,
+        "soft_min": 0.0,
+        "soft_max": 8000.0,
+    },
     "pawnstructure.islandpenalty": {
         "step": 1.0,
         "soft_min": -40.0,

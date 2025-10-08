@@ -55,8 +55,6 @@ public class AI {
     private Thread calculationCoordinator;
     private Thread[] calculationThreads;
 
-    private static final int MAX_CHECK_EXTENSIONS_IN_A_ROW = 2;
-    private static final int SEE_PRUNE_NEAR_ROOT_PLY = 2;
     private static final int ABS_PLY_LIMIT_MARGIN = 32;
 
     //Quiescence search parameters
@@ -2036,11 +2034,6 @@ public class AI {
         return pawnsAfter < pawnsBefore;
     }
 
-    /**
-     * LMR reduction: larger for deeper plies and later moves; tuned to be safe.
-     */
-    private static final int HISTORY_REDUCTION_MAX = 4000;
-
     private int lmrReduction(int depth, int moveIndex, int historyScore) {
         if (depth <= 1) {
             return 0;
@@ -2049,10 +2042,11 @@ public class AI {
         int clampedDepth = Math.max(1, Math.min(depth, LMR_MAX_DEPTH));
         int clampedMoveIndex = Math.max(0, Math.min(moveIndex, LMR_MAX_MOVES - 1));
 
-        int history = Math.max(0, Math.min(historyScore, HISTORY_REDUCTION_MAX));
-        double normalized = HISTORY_REDUCTION_MAX == 0
+        int historyReductionMax = Math.max(0, searchPruningParameters.historyReductionMax());
+        int history = Math.max(0, Math.min(historyScore, historyReductionMax));
+        double normalized = historyReductionMax == 0
                 ? 0.0
-                : history / (double) HISTORY_REDUCTION_MAX;
+                : history / (double) historyReductionMax;
         double bucketPosition = normalized * (HISTORY_BUCKETS - 1);
         int lowerBucket = (int) Math.floor(bucketPosition);
         int upperBucket = Math.min(HISTORY_BUCKETS - 1, lowerBucket + 1);
@@ -2109,6 +2103,8 @@ public class AI {
         final int lmrProtectPlyMax = pruning.lmrProtectPlyMax();
         final int lmrProtectIndexMax = pruning.lmrProtectIndexMax();
         final int lmrCapGoodQuiet = pruning.lmrCapForGoodQuiet();
+        final int maxCheckExtensionStreak = Math.max(0, pruning.maxCheckExtensionStreak());
+        final int seePruneNearRootPly = Math.max(0, pruning.seePruneNearRootPly());
 
         int baseRemainingDepth = Math.max(0, depth - 1);
         boolean futilityEligible = !inCheckAtNode
@@ -2159,7 +2155,7 @@ public class AI {
             if (seePruneCandidate) {
                 seeGain = simulatorEngine.see(move, 0);
                 seeEvaluated = true;
-                boolean nearRoot = plyFromRoot <= SEE_PRUNE_NEAR_ROOT_PLY;
+                boolean nearRoot = plyFromRoot <= seePruneNearRootPly;
                 boolean allowSeePrune = seeGain < 0 && !nearRoot;
                 if (allowSeePrune) {
                     simulatorEngine.performMove(move);
@@ -2213,7 +2209,7 @@ public class AI {
 
             int nextDepth = depth - 1;
             boolean forcing = givesCheck || attacksQueen;
-            boolean allowExtend = forcing && extStreak < MAX_CHECK_EXTENSIONS_IN_A_ROW;
+            boolean allowExtend = forcing && extStreak < maxCheckExtensionStreak;
             if (allowExtend) nextDepth++;
             int nextExtStreak = allowExtend ? extStreak + 1 : 0;
 
@@ -2377,6 +2373,8 @@ public class AI {
         final int lmrProtectPlyMax = pruning.lmrProtectPlyMax();
         final int lmrProtectIndexMax = pruning.lmrProtectIndexMax();
         final int lmrCapGoodQuiet = pruning.lmrCapForGoodQuiet();
+        final int maxCheckExtensionStreak = Math.max(0, pruning.maxCheckExtensionStreak());
+        final int seePruneNearRootPly = Math.max(0, pruning.seePruneNearRootPly());
 
         int baseRemainingDepth = Math.max(0, depth - 1);
         boolean futilityEligible = !inCheckAtNode
@@ -2419,7 +2417,7 @@ public class AI {
             if (seePruneCandidate) {
                 seeGain = simulatorEngine.see(move, 0);
                 seeEvaluated = true;
-                boolean nearRoot = plyFromRoot <= SEE_PRUNE_NEAR_ROOT_PLY;
+                boolean nearRoot = plyFromRoot <= seePruneNearRootPly;
                 boolean allowSeePrune = seeGain < 0 && !nearRoot;
                 if (allowSeePrune) {
                     simulatorEngine.performMove(move);
@@ -2473,7 +2471,7 @@ public class AI {
 
             int nextDepth = depth - 1;
             boolean forcing = givesCheck || attacksQueen;
-            boolean allowExtend = forcing && extStreak < MAX_CHECK_EXTENSIONS_IN_A_ROW;
+            boolean allowExtend = forcing && extStreak < maxCheckExtensionStreak;
             if (allowExtend) nextDepth++;
             int nextExtStreak = allowExtend ? extStreak + 1 : 0;
 

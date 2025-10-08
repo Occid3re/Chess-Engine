@@ -91,7 +91,10 @@ public enum ParamId {
     SEARCH_IID_REDUCE_DEPTH("search.iidReduceDepth", 0, 0.0, 8.0),
     SEARCH_LMR_PROTECT_PLY_MAX("search.lmrProtectPlyMax", 1, 0.0, 8.0),
     SEARCH_LMR_PROTECT_INDEX_MAX("search.lmrProtectIndexMax", 2, 0.0, 64.0),
-    SEARCH_LMR_CAP_GOOD_QUIET("search.lmrCapGoodQuiet", 63, 0.0, 64.0);
+    SEARCH_LMR_CAP_GOOD_QUIET("search.lmrCapGoodQuiet", 63, 0.0, 64.0),
+    SEARCH_MAX_CHECK_EXTENSION_STREAK("search.maxCheckExtensionStreak", 2, 0.0, 16.0),
+    SEARCH_SEE_PRUNE_NEAR_ROOT_PLY("search.seePruneNearRootPly", 2, 0.0, 16.0),
+    SEARCH_HISTORY_REDUCTION_MAX("search.historyReductionMax", 4000, 0.0, 65536.0);
 
     private final String key;
     private final double defaultValue;

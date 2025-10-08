@@ -98,3 +98,6 @@ population:
       search.lmrProtectPlyMax: 2
       search.lmrProtectIndexMax: 0
       search.lmrCapGoodQuiet: 11
+      search.maxCheckExtensionStreak: 2
+      search.seePruneNearRootPly: 2
+      search.historyReductionMax: 4000

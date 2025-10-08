@@ -25,7 +25,10 @@ public final class SearchPruningParameters {
                 Tuning.searchIidReduceDepth(),
                 Tuning.searchLmrProtectPlyMax(),
                 Tuning.searchLmrProtectIndexMax(),
-                Tuning.searchLmrCapGoodQuiet()
+                Tuning.searchLmrCapGoodQuiet(),
+                Tuning.searchMaxCheckExtensionStreak(),
+                Tuning.searchSeePruneNearRootPly(),
+                Tuning.searchHistoryReductionMax()
         );
     }
 
@@ -41,6 +44,9 @@ public final class SearchPruningParameters {
         defaults.put(ParamId.SEARCH_LMR_PROTECT_PLY_MAX.key(), ParamId.SEARCH_LMR_PROTECT_PLY_MAX.defaultValue());
         defaults.put(ParamId.SEARCH_LMR_PROTECT_INDEX_MAX.key(), ParamId.SEARCH_LMR_PROTECT_INDEX_MAX.defaultValue());
         defaults.put(ParamId.SEARCH_LMR_CAP_GOOD_QUIET.key(), ParamId.SEARCH_LMR_CAP_GOOD_QUIET.defaultValue());
+        defaults.put(ParamId.SEARCH_MAX_CHECK_EXTENSION_STREAK.key(), ParamId.SEARCH_MAX_CHECK_EXTENSION_STREAK.defaultValue());
+        defaults.put(ParamId.SEARCH_SEE_PRUNE_NEAR_ROOT_PLY.key(), ParamId.SEARCH_SEE_PRUNE_NEAR_ROOT_PLY.defaultValue());
+        defaults.put(ParamId.SEARCH_HISTORY_REDUCTION_MAX.key(), ParamId.SEARCH_HISTORY_REDUCTION_MAX.defaultValue());
         return Collections.unmodifiableMap(defaults);
     }
 
@@ -54,7 +60,10 @@ public final class SearchPruningParameters {
             int iidReduceDepth,
             int lmrProtectPlyMax,
             int lmrProtectIndexMax,
-            int lmrCapForGoodQuiet
+            int lmrCapForGoodQuiet,
+            int maxCheckExtensionStreak,
+            int seePruneNearRootPly,
+            int historyReductionMax
     ) {
     }
 }
