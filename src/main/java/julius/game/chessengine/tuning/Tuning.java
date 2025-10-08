@@ -93,6 +93,8 @@ public final class Tuning {
     private static int moveOrderingCaptureMvvMultiplier;
     private static int moveOrderingCaptureSeeMultiplier;
     private static int moveOrderingPromotionSeeMultiplier;
+    private static int moveOrderingQuietCentralityMultiplier;
+    private static int moveOrderingQuietHistoryThreshold;
 
     static {
         refresh();
@@ -409,6 +411,14 @@ public final class Tuning {
         return moveOrderingPromotionSeeMultiplier;
     }
 
+    public static int moveOrderingQuietCentralityMultiplier() {
+        return moveOrderingQuietCentralityMultiplier;
+    }
+
+    public static int moveOrderingQuietHistoryThreshold() {
+        return moveOrderingQuietHistoryThreshold;
+    }
+
     /**
      * Reloads all cached tuning values from the current {@link ParameterRegistry} snapshot.
      * Callers should invoke this once after applying a new parameter set (e.g. via hot reload).
@@ -490,6 +500,8 @@ public final class Tuning {
             moveOrderingCaptureMvvMultiplier = loadInt(ParamId.MOVE_ORDERING_CAPTURE_MVV_MULTIPLIER);
             moveOrderingCaptureSeeMultiplier = loadInt(ParamId.MOVE_ORDERING_CAPTURE_SEE_MULTIPLIER);
             moveOrderingPromotionSeeMultiplier = loadInt(ParamId.MOVE_ORDERING_PROMOTION_SEE_MULTIPLIER);
+            moveOrderingQuietCentralityMultiplier = loadInt(ParamId.MOVE_ORDERING_QUIET_CENTRALITY_MULTIPLIER);
+            moveOrderingQuietHistoryThreshold = loadInt(ParamId.MOVE_ORDERING_QUIET_HISTORY_THRESHOLD);
         }
     }
 

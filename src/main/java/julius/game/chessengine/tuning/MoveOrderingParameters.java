@@ -25,7 +25,9 @@ public final class MoveOrderingParameters {
                 Tuning.moveOrderingCounterMoveBonus(),
                 Tuning.moveOrderingCaptureMvvMultiplier(),
                 Tuning.moveOrderingCaptureSeeMultiplier(),
-                Tuning.moveOrderingPromotionSeeMultiplier()
+                Tuning.moveOrderingPromotionSeeMultiplier(),
+                Tuning.moveOrderingQuietCentralityMultiplier(),
+                Tuning.moveOrderingQuietHistoryThreshold()
         );
     }
 
@@ -43,6 +45,8 @@ public final class MoveOrderingParameters {
         defaults.put(ParamId.MOVE_ORDERING_CAPTURE_MVV_MULTIPLIER.key(), ParamId.MOVE_ORDERING_CAPTURE_MVV_MULTIPLIER.defaultValue());
         defaults.put(ParamId.MOVE_ORDERING_CAPTURE_SEE_MULTIPLIER.key(), ParamId.MOVE_ORDERING_CAPTURE_SEE_MULTIPLIER.defaultValue());
         defaults.put(ParamId.MOVE_ORDERING_PROMOTION_SEE_MULTIPLIER.key(), ParamId.MOVE_ORDERING_PROMOTION_SEE_MULTIPLIER.defaultValue());
+        defaults.put(ParamId.MOVE_ORDERING_QUIET_CENTRALITY_MULTIPLIER.key(), ParamId.MOVE_ORDERING_QUIET_CENTRALITY_MULTIPLIER.defaultValue());
+        defaults.put(ParamId.MOVE_ORDERING_QUIET_HISTORY_THRESHOLD.key(), ParamId.MOVE_ORDERING_QUIET_HISTORY_THRESHOLD.defaultValue());
         return Collections.unmodifiableMap(defaults);
     }
 
@@ -54,7 +58,9 @@ public final class MoveOrderingParameters {
             int counterMoveBonus,
             int captureMvvMultiplier,
             int captureSeeMultiplier,
-            int promotionSeeMultiplier
+            int promotionSeeMultiplier,
+            int quietCentralityMultiplier,
+            int quietHistoryThreshold
     ) {
         public Map<String, Integer> asMap() {
             Map<String, Integer> values = new LinkedHashMap<>();
@@ -66,6 +72,8 @@ public final class MoveOrderingParameters {
             values.put("moveOrdering.captureMvvMultiplier", captureMvvMultiplier);
             values.put("moveOrdering.captureSeeMultiplier", captureSeeMultiplier);
             values.put("moveOrdering.promotionSeeMultiplier", promotionSeeMultiplier);
+            values.put("moveOrdering.quietCentralityMultiplier", quietCentralityMultiplier);
+            values.put("moveOrdering.quietHistoryThreshold", quietHistoryThreshold);
             return Collections.unmodifiableMap(values);
         }
     }

@@ -79,7 +79,9 @@ public enum ParamId {
     MOVE_ORDERING_COUNTER_MOVE_BONUS("moveOrdering.counterMoveBonus", 400),
     MOVE_ORDERING_CAPTURE_MVV_MULTIPLIER("moveOrdering.captureMvvMultiplier", 16),
     MOVE_ORDERING_CAPTURE_SEE_MULTIPLIER("moveOrdering.captureSeeMultiplier", 32),
-    MOVE_ORDERING_PROMOTION_SEE_MULTIPLIER("moveOrdering.promotionSeeMultiplier", 16);
+    MOVE_ORDERING_PROMOTION_SEE_MULTIPLIER("moveOrdering.promotionSeeMultiplier", 16),
+    MOVE_ORDERING_QUIET_CENTRALITY_MULTIPLIER("moveOrdering.quietCentralityMultiplier", 24),
+    MOVE_ORDERING_QUIET_HISTORY_THRESHOLD("moveOrdering.quietHistoryThreshold", 3200);
 
     private final String key;
     private final double defaultValue;

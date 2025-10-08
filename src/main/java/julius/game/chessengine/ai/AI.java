@@ -182,8 +182,17 @@ public class AI {
     private static final double[] HISTORY_BUCKET_NORMALIZED = new double[HISTORY_BUCKETS];
     private static final int[][][] LMR_REDUCTION_TABLE =
             new int[LMR_MAX_DEPTH + 1][LMR_MAX_MOVES][HISTORY_BUCKETS];
+    private static final int[] QUIET_CENTRALITY_BONUS = new int[64];
 
     static {
+        for (int square = 0; square < QUIET_CENTRALITY_BONUS.length; square++) {
+            int file = square & 7;
+            int rank = square >>> 3;
+            int centrality = 14
+                    - (Math.abs(file - 3) + Math.abs(file - 4)
+                    + Math.abs(rank - 3) + Math.abs(rank - 4));
+            QUIET_CENTRALITY_BONUS[square] = Math.max(0, centrality);
+        }
         if (HISTORY_BUCKETS < 1) {
             throw new IllegalStateException("History bucket count must be positive");
         }
@@ -2471,11 +2480,19 @@ public class AI {
 
         final int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
 
-        // Category encoding (higher is earlier):
-        // 7: TT move, 6: promotions, 5: good captures, 4: equal captures,
-        // 3: killer[0], 2: killer[1], 1: quiets (history), 0: bad captures
-        final int CAT_TT = 7, CAT_PROMO = 6, CAT_CAP_GOOD = 5, CAT_CAP_EQUAL = 4,
-                CAT_KILLER0 = 3, CAT_KILLER1 = 2, CAT_QUIET = 1, CAT_CAP_BAD = 0;
+        // Category encoding (higher is earlier). Additional buckets allow quiet moves
+        // with strong history/centrality support and refutation (counter) moves to be
+        // surfaced ahead of generic quiet play without sacrificing killer heuristics.
+        final int CAT_TT = 9;
+        final int CAT_PROMO = 8;
+        final int CAT_CAP_GOOD = 7;
+        final int CAT_CAP_EQUAL = 6;
+        final int CAT_KILLER0 = 5;
+        final int CAT_COUNTER = 4;
+        final int CAT_KILLER1 = 3;
+        final int CAT_QUIET_STRONG = 2;
+        final int CAT_QUIET = 1;
+        final int CAT_CAP_BAD = 0;
 
         final int promotionBonus = moveOrderingParameters.promotionBonus();
         final int killer0Bonus = moveOrderingParameters.killer0Bonus();
@@ -2484,6 +2501,9 @@ public class AI {
         final int captureMvvMultiplier = moveOrderingParameters.captureMvvMultiplier();
         final int captureSeeMultiplier = moveOrderingParameters.captureSeeMultiplier();
         final int promotionSeeMultiplier = moveOrderingParameters.promotionSeeMultiplier();
+        final int quietCentralityMultiplier = moveOrderingParameters.quietCentralityMultiplier();
+        final int quietHistoryThreshold = moveOrderingParameters.quietHistoryThreshold();
+        final int maxQuietCentralitySwing = Math.abs(quietCentralityMultiplier) * 12;
 
         // Hash move (TT)
         TranspositionTableEntry ttEntry = transpositionTable.get(boardHash);
@@ -2546,15 +2566,35 @@ public class AI {
             } else if (moveInt == k0) {
                 category = CAT_KILLER0;
                 score = killerMoveScore + killer0Bonus;
+            } else if (moveInt == cm) {
+                final int from = moveInt & 0x3F;
+                final int to = (moveInt >>> 6) & 0x3F;
+                int historyScore = historyTable[from][to];
+                int centralityDelta = QUIET_CENTRALITY_BONUS[to] - QUIET_CENTRALITY_BONUS[from];
+                int centralityBoost = centralityDelta * quietCentralityMultiplier;
+                if (centralityBoost > maxQuietCentralitySwing) centralityBoost = maxQuietCentralitySwing;
+                if (centralityBoost < -maxQuietCentralitySwing) centralityBoost = -maxQuietCentralitySwing;
+                score = historyScore + centralityBoost + counterMoveBonus;
+                if (score < 0) score = 0;
+                category = CAT_COUNTER;
             } else if (moveInt == k1) {
                 category = CAT_KILLER1;
                 score = killerMoveScore + killer1Bonus;
             } else {
                 final int from = moveInt & 0x3F;
                 final int to = (moveInt >>> 6) & 0x3F;
-                category = CAT_QUIET;
-                score = historyTable[from][to];
-                if (moveInt == cm) score += counterMoveBonus;
+                int historyScore = historyTable[from][to];
+                int centralityDelta = QUIET_CENTRALITY_BONUS[to] - QUIET_CENTRALITY_BONUS[from];
+                int centralityBoost = centralityDelta * quietCentralityMultiplier;
+                if (centralityBoost > maxQuietCentralitySwing) centralityBoost = maxQuietCentralitySwing;
+                if (centralityBoost < -maxQuietCentralitySwing) centralityBoost = -maxQuietCentralitySwing;
+                score = historyScore + centralityBoost;
+                if (score < 0) score = 0;
+                if (score >= quietHistoryThreshold) {
+                    category = CAT_QUIET_STRONG;
+                } else {
+                    category = CAT_QUIET;
+                }
             }
 
             moveBuffer[i] = moveInt;
