@@ -105,6 +105,9 @@ public final class Tuning {
     private static int searchLmrProtectPlyMax;
     private static int searchLmrProtectIndexMax;
     private static int searchLmrCapGoodQuiet;
+    private static int searchMaxCheckExtensionStreak;
+    private static int searchSeePruneNearRootPly;
+    private static int searchHistoryReductionMax;
 
     static {
         refresh();
@@ -465,6 +468,18 @@ public final class Tuning {
         return searchLmrCapGoodQuiet;
     }
 
+    public static int searchMaxCheckExtensionStreak() {
+        return searchMaxCheckExtensionStreak;
+    }
+
+    public static int searchSeePruneNearRootPly() {
+        return searchSeePruneNearRootPly;
+    }
+
+    public static int searchHistoryReductionMax() {
+        return searchHistoryReductionMax;
+    }
+
     /**
      * Reloads all cached tuning values from the current {@link ParameterRegistry} snapshot.
      * Callers should invoke this once after applying a new parameter set (e.g. via hot reload).
@@ -558,6 +573,9 @@ public final class Tuning {
             searchLmrProtectPlyMax = loadInt(ParamId.SEARCH_LMR_PROTECT_PLY_MAX);
             searchLmrProtectIndexMax = loadInt(ParamId.SEARCH_LMR_PROTECT_INDEX_MAX);
             searchLmrCapGoodQuiet = loadInt(ParamId.SEARCH_LMR_CAP_GOOD_QUIET);
+            searchMaxCheckExtensionStreak = loadInt(ParamId.SEARCH_MAX_CHECK_EXTENSION_STREAK);
+            searchSeePruneNearRootPly = loadInt(ParamId.SEARCH_SEE_PRUNE_NEAR_ROOT_PLY);
+            searchHistoryReductionMax = loadInt(ParamId.SEARCH_HISTORY_REDUCTION_MAX);
         }
     }
 
