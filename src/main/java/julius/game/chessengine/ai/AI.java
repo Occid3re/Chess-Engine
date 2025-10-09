@@ -2652,11 +2652,16 @@ public class AI {
 
         final int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
 
-        // Category encoding (higher is earlier):
-        // 7: TT move, 6: promotions, 5: good captures, 4: equal captures,
-        // 3: killer[0], 2: killer[1], 1: quiets (history), 0: bad captures
-        final int CAT_TT = 7, CAT_PROMO = 6, CAT_CAP_GOOD = 5, CAT_CAP_EQUAL = 4,
-                CAT_KILLER0 = 3, CAT_KILLER1 = 2, CAT_QUIET = 1, CAT_CAP_BAD = 0;
+        // Category encoding (higher is earlier). Ties are resolved via the score field in
+        // the packed sort key so categories remain a stable first-level bucket.
+        final int categoryTt = moveOrderingParameters.categoryTt();
+        final int categoryPromotion = moveOrderingParameters.categoryPromotion();
+        final int categoryCaptureGood = moveOrderingParameters.categoryCaptureGood();
+        final int categoryCaptureEqual = moveOrderingParameters.categoryCaptureEqual();
+        final int categoryKiller0 = moveOrderingParameters.categoryKiller0();
+        final int categoryKiller1 = moveOrderingParameters.categoryKiller1();
+        final int categoryQuiet = moveOrderingParameters.categoryQuiet();
+        final int categoryCaptureBad = moveOrderingParameters.categoryCaptureBad();
 
         final int promotionBonus = moveOrderingParameters.promotionBonus();
         final int killer0Bonus = moveOrderingParameters.killer0Bonus();
@@ -2705,10 +2710,10 @@ public class AI {
             int score;
 
             if (moveInt == ttMove) {
-                category = CAT_TT;
+                category = categoryTt;
                 score = maxScore; // max within bucket
             } else if (isPromotion) {
-                category = CAT_PROMO;
+                category = categoryPromotion;
                 int base = calculateMvvLvaScore(moveInt);
                 int seeBonus = 0;
                 if (hasSee) {
@@ -2721,11 +2726,11 @@ public class AI {
             } else if (isCapture) {
                 final int mvvLva = calculateMvvLvaScore(moveInt);
                 if (seeValue > 0) {
-                    category = CAT_CAP_GOOD;
+                    category = categoryCaptureGood;
                 } else if (seeValue == 0) {
-                    category = CAT_CAP_EQUAL;
+                    category = categoryCaptureEqual;
                 } else {
-                    category = CAT_CAP_BAD;
+                    category = categoryCaptureBad;
                 }
                 int cappedSee = captureSeeClamp > 0
                         ? Math.max(-captureSeeClamp, Math.min(captureSeeClamp, seeValue))
@@ -2733,15 +2738,15 @@ public class AI {
                 score = (mvvLva * captureMvvMultiplier) + (cappedSee * captureSeeMultiplier);
                 if (score < 0) score = 0;
             } else if (moveInt == k0) {
-                category = CAT_KILLER0;
+                category = categoryKiller0;
                 score = killerMoveScore + killer0Bonus;
             } else if (moveInt == k1) {
-                category = CAT_KILLER1;
+                category = categoryKiller1;
                 score = killerMoveScore + killer1Bonus;
             } else {
                 final int from = moveInt & 0x3F;
                 final int to = (moveInt >>> 6) & 0x3F;
-                category = CAT_QUIET;
+                category = categoryQuiet;
                 score = historyTable[from][to];
                 if (moveInt == cm) score += counterMoveBonus;
                 if (MoveHelper.isCastlingMove(moveInt)) {

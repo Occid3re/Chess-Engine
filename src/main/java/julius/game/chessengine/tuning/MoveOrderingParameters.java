@@ -18,6 +18,14 @@ public final class MoveOrderingParameters {
 
     public static Snapshot snapshot() {
         return new Snapshot(
+                Tuning.moveOrderingCategoryTt(),
+                Tuning.moveOrderingCategoryPromotion(),
+                Tuning.moveOrderingCategoryCaptureGood(),
+                Tuning.moveOrderingCategoryCaptureEqual(),
+                Tuning.moveOrderingCategoryKiller0(),
+                Tuning.moveOrderingCategoryKiller1(),
+                Tuning.moveOrderingCategoryQuiet(),
+                Tuning.moveOrderingCategoryCaptureBad(),
                 Tuning.moveOrderingKillerMoveScore(),
                 Tuning.moveOrderingPromotionBonus(),
                 Tuning.moveOrderingKiller0Bonus(),
@@ -49,6 +57,14 @@ public final class MoveOrderingParameters {
 
     public static Map<String, Double> defaults() {
         Map<String, Double> defaults = new LinkedHashMap<>();
+        defaults.put(ParamId.MOVE_ORDERING_CATEGORY_TT.key(), ParamId.MOVE_ORDERING_CATEGORY_TT.defaultValue());
+        defaults.put(ParamId.MOVE_ORDERING_CATEGORY_PROMOTION.key(), ParamId.MOVE_ORDERING_CATEGORY_PROMOTION.defaultValue());
+        defaults.put(ParamId.MOVE_ORDERING_CATEGORY_CAPTURE_GOOD.key(), ParamId.MOVE_ORDERING_CATEGORY_CAPTURE_GOOD.defaultValue());
+        defaults.put(ParamId.MOVE_ORDERING_CATEGORY_CAPTURE_EQUAL.key(), ParamId.MOVE_ORDERING_CATEGORY_CAPTURE_EQUAL.defaultValue());
+        defaults.put(ParamId.MOVE_ORDERING_CATEGORY_KILLER0.key(), ParamId.MOVE_ORDERING_CATEGORY_KILLER0.defaultValue());
+        defaults.put(ParamId.MOVE_ORDERING_CATEGORY_KILLER1.key(), ParamId.MOVE_ORDERING_CATEGORY_KILLER1.defaultValue());
+        defaults.put(ParamId.MOVE_ORDERING_CATEGORY_QUIET.key(), ParamId.MOVE_ORDERING_CATEGORY_QUIET.defaultValue());
+        defaults.put(ParamId.MOVE_ORDERING_CATEGORY_CAPTURE_BAD.key(), ParamId.MOVE_ORDERING_CATEGORY_CAPTURE_BAD.defaultValue());
         defaults.put(ParamId.MOVE_ORDERING_KILLER_MOVE_SCORE.key(), ParamId.MOVE_ORDERING_KILLER_MOVE_SCORE.defaultValue());
         defaults.put(ParamId.MOVE_ORDERING_PROMOTION_BONUS.key(), ParamId.MOVE_ORDERING_PROMOTION_BONUS.defaultValue());
         defaults.put(ParamId.MOVE_ORDERING_KILLER0_BONUS.key(), ParamId.MOVE_ORDERING_KILLER0_BONUS.defaultValue());
@@ -67,6 +83,14 @@ public final class MoveOrderingParameters {
     }
 
     public record Snapshot(
+            int categoryTt,
+            int categoryPromotion,
+            int categoryCaptureGood,
+            int categoryCaptureEqual,
+            int categoryKiller0,
+            int categoryKiller1,
+            int categoryQuiet,
+            int categoryCaptureBad,
             int killerMoveScore,
             int promotionBonus,
             int killer0Bonus,
@@ -84,6 +108,14 @@ public final class MoveOrderingParameters {
     ) {
         public Map<String, Number> asMap() {
             Map<String, Number> values = new LinkedHashMap<>();
+            values.put("moveOrdering.category.tt", categoryTt);
+            values.put("moveOrdering.category.promotion", categoryPromotion);
+            values.put("moveOrdering.category.captureGood", categoryCaptureGood);
+            values.put("moveOrdering.category.captureEqual", categoryCaptureEqual);
+            values.put("moveOrdering.category.killer0", categoryKiller0);
+            values.put("moveOrdering.category.killer1", categoryKiller1);
+            values.put("moveOrdering.category.quiet", categoryQuiet);
+            values.put("moveOrdering.category.captureBad", categoryCaptureBad);
             values.put("moveOrdering.killerMoveScore", killerMoveScore);
             values.put("moveOrdering.promotionBonus", promotionBonus);
             values.put("moveOrdering.killer0Bonus", killer0Bonus);
