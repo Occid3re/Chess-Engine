@@ -854,6 +854,16 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "soft_min": 1048576.0,
         "soft_max": 16777215.0,
     },
+    "moveordering.historyscale": {
+        "step": 0.1,
+        "soft_min": 0.0,
+        "soft_max": 4.0,
+    },
+    "moveordering.historydecaydivisor": {
+        "step": 1.0,
+        "soft_min": 1.0,
+        "soft_max": 16.0,
+    },
 }
 
 # ----------------------------

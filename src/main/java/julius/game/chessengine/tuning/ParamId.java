@@ -84,6 +84,8 @@ public enum ParamId {
     MOVE_ORDERING_CAPTURE_SEE_CLAMP("moveOrdering.captureSeeClamp", 2048, 0.0, 32768.0),
     MOVE_ORDERING_PROMOTION_SEE_CLAMP("moveOrdering.promotionSeeClamp", 512, 0.0, 32768.0),
     MOVE_ORDERING_MAX_SCORE("moveOrdering.maxScore", 0x00FFFFFF, 1024.0, 16777215.0),
+    MOVE_ORDERING_HISTORY_SCALE("moveOrdering.historyScale", 1.0, 0.0, null),
+    MOVE_ORDERING_HISTORY_DECAY_DIVISOR("moveOrdering.historyDecayDivisor", 2, 1.0, null),
 
     SEARCH_FP_MARGIN_DEPTH1("search.fpMarginDepth1", 0, 0.0, 4000.0),
     SEARCH_FP_MARGIN_DEPTH2("search.fpMarginDepth2", 0, 0.0, 8000.0),

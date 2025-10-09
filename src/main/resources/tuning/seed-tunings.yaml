@@ -91,6 +91,8 @@ population:
       moveordering.captureseeclamp: 2317
       moveordering.promotionseeclamp: 556
       moveordering.maxscore: 16305521
+      moveordering.historyscale: 1.0
+      moveordering.historydecaydivisor: 2
       search.fpMarginDepth1: 123
       search.fpMarginDepth2: 0
       search.lmpBase: 4

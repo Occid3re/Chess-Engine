@@ -87,3 +87,5 @@ population:
       moveordering.capturemvvmultiplier: 20
       moveordering.captureseemultiplier: 40
       moveordering.promotionseemultiplier: 20
+      moveordering.historyscale: 1.0
+      moveordering.historydecaydivisor: 2
