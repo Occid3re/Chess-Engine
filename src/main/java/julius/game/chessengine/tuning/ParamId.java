@@ -72,6 +72,15 @@ public enum ParamId {
 
     EVALUATION_BLEND_SCALE("evaluation.blendScale", 256, 1.0, 1024.0),
 
+    MOVE_ORDERING_CATEGORY_TT("moveOrdering.category.tt", 7, 6.0, 8.0),
+    MOVE_ORDERING_CATEGORY_PROMOTION("moveOrdering.category.promotion", 6, 5.0, 7.0),
+    MOVE_ORDERING_CATEGORY_CAPTURE_GOOD("moveOrdering.category.captureGood", 5, 4.0, 6.0),
+    MOVE_ORDERING_CATEGORY_CAPTURE_EQUAL("moveOrdering.category.captureEqual", 4, 3.0, 5.0),
+    MOVE_ORDERING_CATEGORY_KILLER0("moveOrdering.category.killer0", 3, 2.0, 4.0),
+    MOVE_ORDERING_CATEGORY_KILLER1("moveOrdering.category.killer1", 2, 1.0, 3.0),
+    MOVE_ORDERING_CATEGORY_QUIET("moveOrdering.category.quiet", 1, 0.0, 2.0),
+    MOVE_ORDERING_CATEGORY_CAPTURE_BAD("moveOrdering.category.captureBad", 0, -1.0, 1.0),
+
     MOVE_ORDERING_KILLER_MOVE_SCORE("moveOrdering.killerMoveScore", 10_000),
     MOVE_ORDERING_PROMOTION_BONUS("moveOrdering.promotionBonus", 900),
     MOVE_ORDERING_KILLER0_BONUS("moveOrdering.killer0Bonus", 50),

@@ -85,6 +85,14 @@ public final class Tuning {
 
     private static int evaluationBlendScale;
 
+    private static int moveOrderingCategoryTt;
+    private static int moveOrderingCategoryPromotion;
+    private static int moveOrderingCategoryCaptureGood;
+    private static int moveOrderingCategoryCaptureEqual;
+    private static int moveOrderingCategoryKiller0;
+    private static int moveOrderingCategoryKiller1;
+    private static int moveOrderingCategoryQuiet;
+    private static int moveOrderingCategoryCaptureBad;
     private static int moveOrderingKillerMoveScore;
     private static int moveOrderingPromotionBonus;
     private static int moveOrderingKiller0Bonus;
@@ -453,6 +461,38 @@ public final class Tuning {
 
     public static int evaluationBlendScale() {
         return evaluationBlendScale;
+    }
+
+    public static int moveOrderingCategoryTt() {
+        return moveOrderingCategoryTt;
+    }
+
+    public static int moveOrderingCategoryPromotion() {
+        return moveOrderingCategoryPromotion;
+    }
+
+    public static int moveOrderingCategoryCaptureGood() {
+        return moveOrderingCategoryCaptureGood;
+    }
+
+    public static int moveOrderingCategoryCaptureEqual() {
+        return moveOrderingCategoryCaptureEqual;
+    }
+
+    public static int moveOrderingCategoryKiller0() {
+        return moveOrderingCategoryKiller0;
+    }
+
+    public static int moveOrderingCategoryKiller1() {
+        return moveOrderingCategoryKiller1;
+    }
+
+    public static int moveOrderingCategoryQuiet() {
+        return moveOrderingCategoryQuiet;
+    }
+
+    public static int moveOrderingCategoryCaptureBad() {
+        return moveOrderingCategoryCaptureBad;
     }
 
     public static int moveOrderingKillerMoveScore() {
@@ -868,6 +908,14 @@ public final class Tuning {
 
             evaluationBlendScale = loadInt(ParamId.EVALUATION_BLEND_SCALE);
 
+            moveOrderingCategoryTt = loadInt(ParamId.MOVE_ORDERING_CATEGORY_TT);
+            moveOrderingCategoryPromotion = loadInt(ParamId.MOVE_ORDERING_CATEGORY_PROMOTION);
+            moveOrderingCategoryCaptureGood = loadInt(ParamId.MOVE_ORDERING_CATEGORY_CAPTURE_GOOD);
+            moveOrderingCategoryCaptureEqual = loadInt(ParamId.MOVE_ORDERING_CATEGORY_CAPTURE_EQUAL);
+            moveOrderingCategoryKiller0 = loadInt(ParamId.MOVE_ORDERING_CATEGORY_KILLER0);
+            moveOrderingCategoryKiller1 = loadInt(ParamId.MOVE_ORDERING_CATEGORY_KILLER1);
+            moveOrderingCategoryQuiet = loadInt(ParamId.MOVE_ORDERING_CATEGORY_QUIET);
+            moveOrderingCategoryCaptureBad = loadInt(ParamId.MOVE_ORDERING_CATEGORY_CAPTURE_BAD);
             moveOrderingKillerMoveScore = loadInt(ParamId.MOVE_ORDERING_KILLER_MOVE_SCORE);
             moveOrderingPromotionBonus = loadInt(ParamId.MOVE_ORDERING_PROMOTION_BONUS);
             moveOrderingKiller0Bonus = loadInt(ParamId.MOVE_ORDERING_KILLER0_BONUS);

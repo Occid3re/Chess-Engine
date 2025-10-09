@@ -794,6 +794,46 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "soft_min": -100.0,
         "soft_max": 0.0,
     },
+    "moveordering.category.tt": {
+        "step": 1.0,
+        "soft_min": 6.0,
+        "soft_max": 8.0,
+    },
+    "moveordering.category.promotion": {
+        "step": 1.0,
+        "soft_min": 5.0,
+        "soft_max": 7.0,
+    },
+    "moveordering.category.capturegood": {
+        "step": 1.0,
+        "soft_min": 4.0,
+        "soft_max": 6.0,
+    },
+    "moveordering.category.captureequal": {
+        "step": 1.0,
+        "soft_min": 3.0,
+        "soft_max": 5.0,
+    },
+    "moveordering.category.killer0": {
+        "step": 1.0,
+        "soft_min": 2.0,
+        "soft_max": 4.0,
+    },
+    "moveordering.category.killer1": {
+        "step": 1.0,
+        "soft_min": 1.0,
+        "soft_max": 3.0,
+    },
+    "moveordering.category.quiet": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 2.0,
+    },
+    "moveordering.category.capturebad": {
+        "step": 1.0,
+        "soft_min": -1.0,
+        "soft_max": 1.0,
+    },
     "moveordering.killermovescore": {
         "step": 400.0,
         "soft_min": 2000.0,
