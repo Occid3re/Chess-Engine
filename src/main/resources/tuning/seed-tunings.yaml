@@ -17,6 +17,9 @@ population:
         threatmodule:
           midgame: 1.1
           endgame: 1.2
+        alienscoremodule:
+          midgame: 1.0
+          endgame: 1.0
     numericParameters:
       evaluation.blendscale: 345
       material.pawnvalue: 107
@@ -47,6 +50,17 @@ population:
       threat.pawnthreatbishoppenalty: -11
       threat.pawnthreatrookpenalty: -21
       threat.pawnthreatqueenpenalty: -28
+      alien.baseoffset: 192
+      alien.fluxdivisor: 1048576
+      alien.midgamefluxweight: 3
+      alien.endgamefluxweight: 2
+      alien.midgametensionweight: 12
+      alien.endgametensionweight: 8
+      alien.midgamesupportweight: 6
+      alien.endgamesupportweight: 8
+      alien.midgamekingpressureweight: 18
+      alien.endgamekingpressureweight: 22
+      alien.tempobonus: 4
       activity.midgamemobilityknight: 4
       activity.midgamemobilitybishop: 5
       activity.midgamemobilityrook: 3

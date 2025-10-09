@@ -74,6 +74,18 @@ public final class Tuning {
     private static int pawnThreatRookPenalty;
     private static int pawnThreatQueenPenalty;
 
+    private static int alienBaseOffset;
+    private static int alienFluxDivisor;
+    private static int alienMidgameFluxWeight;
+    private static int alienEndgameFluxWeight;
+    private static int alienMidgameTensionWeight;
+    private static int alienEndgameTensionWeight;
+    private static int alienMidgameSupportWeight;
+    private static int alienEndgameSupportWeight;
+    private static int alienMidgameKingPressureWeight;
+    private static int alienEndgameKingPressureWeight;
+    private static int alienTempoBonus;
+
     private static int developmentPhaseThreshold;
     private static int queenDevelopmentPhaseThreshold;
     private static int undevelopedMinorPenalty;
@@ -425,6 +437,50 @@ public final class Tuning {
 
     public static int pawnThreatQueenPenalty() {
         return pawnThreatQueenPenalty;
+    }
+
+    public static int alienBaseOffset() {
+        return alienBaseOffset;
+    }
+
+    public static int alienFluxDivisor() {
+        return alienFluxDivisor;
+    }
+
+    public static int alienMidgameFluxWeight() {
+        return alienMidgameFluxWeight;
+    }
+
+    public static int alienEndgameFluxWeight() {
+        return alienEndgameFluxWeight;
+    }
+
+    public static int alienMidgameTensionWeight() {
+        return alienMidgameTensionWeight;
+    }
+
+    public static int alienEndgameTensionWeight() {
+        return alienEndgameTensionWeight;
+    }
+
+    public static int alienMidgameSupportWeight() {
+        return alienMidgameSupportWeight;
+    }
+
+    public static int alienEndgameSupportWeight() {
+        return alienEndgameSupportWeight;
+    }
+
+    public static int alienMidgameKingPressureWeight() {
+        return alienMidgameKingPressureWeight;
+    }
+
+    public static int alienEndgameKingPressureWeight() {
+        return alienEndgameKingPressureWeight;
+    }
+
+    public static int alienTempoBonus() {
+        return alienTempoBonus;
     }
 
     public static int developmentPhaseThreshold() {
@@ -905,6 +961,18 @@ public final class Tuning {
             pawnThreatBishopPenalty = loadInt(ParamId.THREAT_PAWN_THREAT_BISHOP_PENALTY);
             pawnThreatRookPenalty = loadInt(ParamId.THREAT_PAWN_THREAT_ROOK_PENALTY);
             pawnThreatQueenPenalty = loadInt(ParamId.THREAT_PAWN_THREAT_QUEEN_PENALTY);
+
+            alienBaseOffset = loadInt(ParamId.ALIEN_BASE_OFFSET);
+            alienFluxDivisor = loadInt(ParamId.ALIEN_FLUX_DIVISOR);
+            alienMidgameFluxWeight = loadInt(ParamId.ALIEN_MIDGAME_FLUX_WEIGHT);
+            alienEndgameFluxWeight = loadInt(ParamId.ALIEN_ENDGAME_FLUX_WEIGHT);
+            alienMidgameTensionWeight = loadInt(ParamId.ALIEN_MIDGAME_TENSION_WEIGHT);
+            alienEndgameTensionWeight = loadInt(ParamId.ALIEN_ENDGAME_TENSION_WEIGHT);
+            alienMidgameSupportWeight = loadInt(ParamId.ALIEN_MIDGAME_SUPPORT_WEIGHT);
+            alienEndgameSupportWeight = loadInt(ParamId.ALIEN_ENDGAME_SUPPORT_WEIGHT);
+            alienMidgameKingPressureWeight = loadInt(ParamId.ALIEN_MIDGAME_KING_PRESSURE_WEIGHT);
+            alienEndgameKingPressureWeight = loadInt(ParamId.ALIEN_ENDGAME_KING_PRESSURE_WEIGHT);
+            alienTempoBonus = loadInt(ParamId.ALIEN_TEMPO_BONUS);
 
             evaluationBlendScale = loadInt(ParamId.EVALUATION_BLEND_SCALE);
 

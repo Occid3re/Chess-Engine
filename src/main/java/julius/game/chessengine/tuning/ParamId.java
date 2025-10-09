@@ -70,6 +70,18 @@ public enum ParamId {
     THREAT_PAWN_THREAT_ROOK_PENALTY("threat.pawnThreatRookPenalty", -18),
     THREAT_PAWN_THREAT_QUEEN_PENALTY("threat.pawnThreatQueenPenalty", -25),
 
+    ALIEN_BASE_OFFSET("alien.baseOffset", 192, -16384.0, 16384.0),
+    ALIEN_FLUX_DIVISOR("alien.fluxDivisor", 1_048_576, 128.0, 16_777_216.0),
+    ALIEN_MIDGAME_FLUX_WEIGHT("alien.midgameFluxWeight", 3, -128.0, 128.0),
+    ALIEN_ENDGAME_FLUX_WEIGHT("alien.endgameFluxWeight", 2, -128.0, 128.0),
+    ALIEN_MIDGAME_TENSION_WEIGHT("alien.midgameTensionWeight", 12, -128.0, 128.0),
+    ALIEN_ENDGAME_TENSION_WEIGHT("alien.endgameTensionWeight", 8, -128.0, 128.0),
+    ALIEN_MIDGAME_SUPPORT_WEIGHT("alien.midgameSupportWeight", 6, -128.0, 128.0),
+    ALIEN_ENDGAME_SUPPORT_WEIGHT("alien.endgameSupportWeight", 8, -128.0, 128.0),
+    ALIEN_MIDGAME_KING_PRESSURE_WEIGHT("alien.midgameKingPressureWeight", 18, -128.0, 128.0),
+    ALIEN_ENDGAME_KING_PRESSURE_WEIGHT("alien.endgameKingPressureWeight", 22, -128.0, 128.0),
+    ALIEN_TEMPO_BONUS("alien.tempoBonus", 4, -64.0, 64.0),
+
     EVALUATION_BLEND_SCALE("evaluation.blendScale", 256, 1.0, 1024.0),
 
     MOVE_ORDERING_CATEGORY_TT("moveOrdering.category.tt", 7, 6.0, 8.0),

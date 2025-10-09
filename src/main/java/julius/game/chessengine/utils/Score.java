@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.evaluation.ActivityModule;
+import julius.game.chessengine.evaluation.AlienScoreModule;
 import julius.game.chessengine.evaluation.EvaluationContext;
 import julius.game.chessengine.evaluation.EvaluationPipeline;
 import julius.game.chessengine.evaluation.EvaluationWeights;
@@ -59,6 +60,7 @@ public class Score {
         ActivityModule activityModule = new ActivityModule();
         KingSafetyModule kingSafetyModule = new KingSafetyModule();
         ThreatModule threatModule = new ThreatModule();
+        AlienScoreModule alienScoreModule = new AlienScoreModule();
 
         materialModule.setPawnChangeListener(pawnStructureModule);
         this.evaluationPipeline = new EvaluationPipeline(List.of(
@@ -66,7 +68,8 @@ public class Score {
                 pawnStructureModule,
                 activityModule,
                 kingSafetyModule,
-                threatModule
+                threatModule,
+                alienScoreModule
         ), this.weights);
     }
 

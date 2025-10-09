@@ -81,7 +81,13 @@ class EvaluationModuleTuningAlignmentTest {
                 Map.entry("activity.midgamemobilityknight", Tuning::activityMidgameKnightMobility),
                 Map.entry("kingsafety.missingpawnshieldpenalty", Tuning::missingPawnShieldPenalty),
                 Map.entry("kingsafety.attackweightqueen", Tuning::kingSafetyQueenAttackWeight),
-                Map.entry("evaluation.blendscale", Tuning::evaluationBlendScale)
+                Map.entry("evaluation.blendscale", Tuning::evaluationBlendScale),
+                Map.entry("alien.baseoffset", Tuning::alienBaseOffset),
+                Map.entry("alien.fluxdivisor", Tuning::alienFluxDivisor),
+                Map.entry("alien.midgamefluxweight", Tuning::alienMidgameFluxWeight),
+                Map.entry("alien.midgametensionweight", Tuning::alienMidgameTensionWeight),
+                Map.entry("alien.midgamekingpressureweight", Tuning::alienMidgameKingPressureWeight),
+                Map.entry("alien.tempobonus", Tuning::alienTempoBonus)
         );
 
         trackedParameters.forEach((key, supplier) -> {
@@ -264,7 +270,8 @@ class EvaluationModuleTuningAlignmentTest {
                 pawnStructure,
                 new ActivityModule(),
                 new KingSafetyModule(),
-                new ThreatModule()
+                new ThreatModule(),
+                new AlienScoreModule()
         );
     }
 

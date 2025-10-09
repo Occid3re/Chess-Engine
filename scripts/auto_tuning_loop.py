@@ -108,6 +108,61 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "soft_min": 128.0,
         "soft_max": 768.0,
     },
+    "alien.baseoffset": {
+        "step": 32.0,
+        "soft_min": -4096.0,
+        "soft_max": 4096.0,
+    },
+    "alien.fluxdivisor": {
+        "step": 65536.0,
+        "soft_min": 256.0,
+        "soft_max": 8388608.0,
+    },
+    "alien.midgamefluxweight": {
+        "step": 1.0,
+        "soft_min": -64.0,
+        "soft_max": 64.0,
+    },
+    "alien.endgamefluxweight": {
+        "step": 1.0,
+        "soft_min": -64.0,
+        "soft_max": 64.0,
+    },
+    "alien.midgametensionweight": {
+        "step": 1.0,
+        "soft_min": -64.0,
+        "soft_max": 64.0,
+    },
+    "alien.endgametensionweight": {
+        "step": 1.0,
+        "soft_min": -64.0,
+        "soft_max": 64.0,
+    },
+    "alien.midgamesupportweight": {
+        "step": 1.0,
+        "soft_min": -64.0,
+        "soft_max": 64.0,
+    },
+    "alien.endgamesupportweight": {
+        "step": 1.0,
+        "soft_min": -64.0,
+        "soft_max": 64.0,
+    },
+    "alien.midgamekingpressureweight": {
+        "step": 1.0,
+        "soft_min": -64.0,
+        "soft_max": 64.0,
+    },
+    "alien.endgamekingpressureweight": {
+        "step": 1.0,
+        "soft_min": -64.0,
+        "soft_max": 64.0,
+    },
+    "alien.tempobonus": {
+        "step": 1.0,
+        "soft_min": -32.0,
+        "soft_max": 32.0,
+    },
     "material.pawnvalue": {
         "step": 1.0,
         "soft_min": 60.0,
