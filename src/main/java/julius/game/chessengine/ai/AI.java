@@ -137,6 +137,8 @@ public class AI {
     private final Heuristics globalHeuristics;
 
     private final MoveOrderingParameters.Snapshot moveOrderingParameters;
+    private final double moveOrderingHistoryScale;
+    private final int moveOrderingHistoryDecayDivisor;
     private final SearchPruningParameters.Snapshot searchPruningParameters;
     private final AspirationParameters.Snapshot aspirationParameters;
     private final NullMoveParameters.Snapshot nullMoveParameters;
@@ -274,6 +276,8 @@ public class AI {
         log.info("### SearchThreads = {}, LazySmpThreads = {}", searchThreads, lazySmpThreads);
 
         this.moveOrderingParameters = MoveOrderingParameters.snapshot();
+        this.moveOrderingHistoryScale = Math.max(0.0, moveOrderingParameters.historyScale());
+        this.moveOrderingHistoryDecayDivisor = Math.max(1, moveOrderingParameters.historyDecayDivisor());
         this.searchPruningParameters = SearchPruningParameters.snapshot();
         this.aspirationParameters = AspirationParameters.snapshot();
         this.nullMoveParameters = NullMoveParameters.snapshot();
@@ -804,7 +808,7 @@ public class AI {
                 if (captureTranspositionTable != null) {
                     captureTranspositionTable.advanceAge();
                 }
-                globalHeuristics.decayHistory();
+                globalHeuristics.decayHistory(moveOrderingHistoryDecayDivisor);
             } finally {
                 releaseWriteLock(stamp);
             }
@@ -3048,7 +3052,14 @@ public class AI {
     }
 
     private void incrementHistory(int move, int depth) {
-        threadHeuristics.get().addHistory(move, depth);
+        if (depth <= 0) {
+            return;
+        }
+        long base = (long) depth * (long) depth;
+        double scaled = moveOrderingHistoryScale * base;
+        long deltaLong = Math.max(1L, Math.round(scaled));
+        int delta = deltaLong > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) deltaLong;
+        threadHeuristics.get().addHistory(move, delta);
     }
 
     private void clearHistoryTable() {
@@ -3256,13 +3267,12 @@ public class AI {
             }
         }
 
-        void addHistory(int move, int depth) {
-            if (move == -1 || MoveHelper.isCapture(move)) {
+        void addHistory(int move, int delta) {
+            if (move == -1 || MoveHelper.isCapture(move) || delta <= 0) {
                 return;
             }
             int from = move & 0x3F;
             int to = (move >>> 6) & 0x3F;
-            int delta = depth * depth;
             history[from][to] += delta;
             int idx = (from << 6) | to;
             if (!historyDirty[idx]) {
@@ -3329,10 +3339,13 @@ public class AI {
             row[0] = move;
         }
 
-        void decayHistory() {
+        void decayHistory(int divisor) {
+            if (divisor <= 1) {
+                return;
+            }
             for (int f = 0; f < BOARD_SQUARES; f++) {
                 for (int t = 0; t < BOARD_SQUARES; t++) {
-                    history[f][t] >>= 1;
+                    history[f][t] /= divisor;
                 }
             }
         }
