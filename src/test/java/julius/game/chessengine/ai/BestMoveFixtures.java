@@ -294,12 +294,21 @@ public final class BestMoveFixtures {
     }
 
     public static Stream<Arguments> arguments() {
-        return CASES.stream().map(testCase -> Arguments.of(testCase.fen(), testCase.expectedMoves()));
+        return CASES.stream()
+                .map(testCase -> Arguments.of(testCase.fen(), testCase.expectedMoves(), testCase.depth()));
     }
 
-    public record BestMoveTestCase(String fen, List<String> expectedMoves) {
+    public record BestMoveTestCase(String fen, List<String> expectedMoves, Integer depth) {
+
+        public BestMoveTestCase(String fen, List<String> expectedMoves) {
+            this(fen, expectedMoves, null);
+        }
+
         public BestMoveTestCase {
             expectedMoves = List.copyOf(expectedMoves);
+            if (depth != null && depth < 1) {
+                throw new IllegalArgumentException("depth must be positive when provided");
+            }
         }
     }
 }
