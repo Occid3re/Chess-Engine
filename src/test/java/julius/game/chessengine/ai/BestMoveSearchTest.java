@@ -35,7 +35,7 @@ import java.util.stream.Collectors;
 public class BestMoveSearchTest {
 
     private static final SearchEnvironment SEARCH_ENVIRONMENT = SearchEnvironment.detect();
-    private static final int SEARCH_DEPTH = 6;
+    private static final int DEFAULT_SEARCH_DEPTH = 6;
     private static final long UNBOUNDED_SEARCH_TIME_MILLIS = java.util.concurrent.TimeUnit.DAYS.toMillis(365L * 100L);
 
     private final List<DecisionStatistics> decisionSummaries = new ArrayList<>();
@@ -53,12 +53,14 @@ public class BestMoveSearchTest {
      */
     @ParameterizedTest(name = "Best move {1} for FEN {0}")
     @MethodSource("julius.game.chessengine.ai.BestMoveFixtures#arguments")
-    void testBestMove(String fen, List<String> expectedMoves) throws InterruptedException {
+    void testBestMove(String fen, List<String> expectedMoves, Integer depthOverride) throws InterruptedException {
         Engine engine = new Engine();
         engine.importBoardFromFen(fen);
 
+        int searchDepth = depthOverride != null ? depthOverride : DEFAULT_SEARCH_DEPTH;
+
         AiTuning tuning = SEARCH_ENVIRONMENT.applyTo(AiTuning.builder())
-                .maxDepth(SEARCH_DEPTH)
+                .maxDepth(searchDepth)
                 .timeLimitMillis(UNBOUNDED_SEARCH_TIME_MILLIS)
                 .nullMovePruning(true)
                 .build();
@@ -69,7 +71,7 @@ public class BestMoveSearchTest {
         long nullMovesBefore = ai.getNullMoveCount();
         long startNanos = System.nanoTime();
 
-        MoveAndScore result = ai.searchToDepthBlocking(SEARCH_DEPTH);
+        MoveAndScore result = ai.searchToDepthBlocking(searchDepth);
         Duration wallClock = Duration.ofNanos(System.nanoTime() - startNanos);
 
         int deepestCompletedDepth = ai.deepestCompletedDepth();
@@ -90,7 +92,8 @@ public class BestMoveSearchTest {
                 durationMillis,
                 nodesVisited,
                 nullMoves,
-                deepestCompletedDepth
+                deepestCompletedDepth,
+                searchDepth
         );
         decisionSummaries.add(statistics);
 
@@ -103,9 +106,9 @@ public class BestMoveSearchTest {
         decisionJsonLines.add(statistics.toJsonLine());
         decisionTextBlocks.add(humanReadable + diagnostics);
 
-        Assertions.assertTrue(deepestCompletedDepth <= SEARCH_DEPTH,
+        Assertions.assertTrue(deepestCompletedDepth <= searchDepth,
                 () -> "Search reached depth " + deepestCompletedDepth + " before stopping; target depth was "
-                        + SEARCH_DEPTH + System.lineSeparator()
+                        + searchDepth + System.lineSeparator()
                         + ai.depthCoverageSummary() + System.lineSeparator()
                         + humanReadable + System.lineSeparator() + diagnostics);
 
@@ -122,8 +125,10 @@ public class BestMoveSearchTest {
         Engine engine = new Engine();
         engine.importBoardFromFen(fen);
 
+        int searchDepth = DEFAULT_SEARCH_DEPTH;
+
         AiTuning tuning = SEARCH_ENVIRONMENT.applyTo(AiTuning.builder())
-                .maxDepth(SEARCH_DEPTH)
+                .maxDepth(searchDepth)
                 .timeLimitMillis(UNBOUNDED_SEARCH_TIME_MILLIS)
                 .nullMovePruning(true)
                 .build();
@@ -134,7 +139,7 @@ public class BestMoveSearchTest {
         long nullBefore = ai.getNullMoveCount();
         long startNanos = System.nanoTime();
 
-        MoveAndScore result = ai.searchToDepthBlocking(SEARCH_DEPTH);
+        MoveAndScore result = ai.searchToDepthBlocking(searchDepth);
 
         long elapsedNanos = System.nanoTime() - startNanos;
         long nodesVisited = Math.max(0, ai.getNodesVisited() - nodesBefore);
@@ -342,7 +347,8 @@ public class BestMoveSearchTest {
                                                          long durationMillis,
                                                          long nodesVisited,
                                                          long nullMoves,
-                                                         int deepestDepth) {
+                                                         int deepestDepth,
+                                                         int targetDepth) {
         Engine analysisEngine = new Engine();
         analysisEngine.importBoardFromFen(fen);
 
@@ -450,7 +456,8 @@ public class BestMoveSearchTest {
                 pvString,
                 topCandidates,
                 expectedEvaluationDetails,
-                deepestDepth
+                deepestDepth,
+                targetDepth
         );
     }
 
@@ -496,6 +503,7 @@ public class BestMoveSearchTest {
         private final Field calculatedLineField;
         private final Map<Integer, AtomicInteger> depthAttemptCounter = new ConcurrentHashMap<>();
         private final List<DepthTrace> depthTraces = Collections.synchronizedList(new ArrayList<>());
+        private volatile int targetDepth;
 
         DiagnosticAI(Engine engine, AiTuning tuning) {
             super(engine, tuning);
@@ -566,6 +574,7 @@ public class BestMoveSearchTest {
             if (targetDepth <= 0) {
                 throw new IllegalArgumentException("targetDepth must be positive");
             }
+            this.targetDepth = targetDepth;
             resetDepthDiagnostics();
             return super.searchBestMoveBlocking(UNBOUNDED_SEARCH_TIME_MILLIS);
         }
@@ -586,9 +595,10 @@ public class BestMoveSearchTest {
             int totalIterations = depthAttemptCounter.values().stream()
                     .mapToInt(AtomicInteger::get)
                     .sum();
+            int target = targetDepth;
             return String.format(Locale.ROOT,
                     "Depth coverage: target=%d, deepestCompleted=%d, iterations=%d",
-                    SEARCH_DEPTH, deepest, totalIterations);
+                    target, deepest, totalIterations);
         }
 
         @Override
@@ -806,7 +816,8 @@ public class BestMoveSearchTest {
                     .append(String.join(", ", expectedMoves)).append(System.lineSeparator());
 
             sb.append(depthCoverageSummary()).append(System.lineSeparator());
-            if (deepestCompletedDepth() < SEARCH_DEPTH) {
+            int target = targetDepth;
+            if (target > 0 && deepestCompletedDepth() < target) {
                 sb.append("WARNING: target depth not reached before abort").append(System.lineSeparator());
             }
 
@@ -1244,7 +1255,8 @@ public class BestMoveSearchTest {
             String principalVariation,
             List<MoveEvaluation> topCandidates,
             List<MoveEvaluation> expectedEvaluations,
-            int deepestCompletedDepth
+            int deepestCompletedDepth,
+            int targetDepth
     ) {
 
         DecisionStatistics {
@@ -1264,7 +1276,7 @@ public class BestMoveSearchTest {
                     .append(System.lineSeparator());
             sb.append("Search configuration: ").append(SEARCH_ENVIRONMENT.inlineSummary())
                     .append(System.lineSeparator());
-            sb.append("Depth target: ").append(SEARCH_DEPTH)
+            sb.append("Depth target: ").append(targetDepth)
                     .append(", deepest completed iteration: ").append(deepestCompletedDepth)
                     .append(System.lineSeparator());
 
@@ -1365,7 +1377,7 @@ public class BestMoveSearchTest {
             first = appendJsonLong(sb, "durationMs", durationMillis, first);
             first = appendJsonEvaluations(sb, "topCandidates", topCandidates, first);
             first = appendJsonEvaluations(sb, "expectedCandidates", expectedEvaluations, first);
-            first = appendJsonInt(sb, "depthTarget", SEARCH_DEPTH, first);
+            first = appendJsonInt(sb, "depthTarget", targetDepth, first);
             first = appendJsonInt(sb, "depthReached", deepestCompletedDepth, first);
             first = appendJsonString(sb, "pv", principalVariation, first);
             sb.append('}');
@@ -1384,7 +1396,10 @@ public class BestMoveSearchTest {
             double avgNodes,
             double avgNullMoves,
             double avgDurationMs,
-            double avgDepthReached
+            double avgDepthReached,
+            double avgTargetDepth,
+            int minTargetDepth,
+            int maxTargetDepth
     ) {
 
         static AggregateStatistics from(List<DecisionStatistics> stats, SearchEnvironment environment) {
@@ -1400,6 +1415,9 @@ public class BestMoveSearchTest {
             long totalDuration = 0L;
             int top1 = 0;
             long totalDepth = 0L;
+            long totalTargetDepth = 0L;
+            int minTargetDepth = Integer.MAX_VALUE;
+            int maxTargetDepth = Integer.MIN_VALUE;
 
             for (DecisionStatistics stat : stats) {
                 if (Double.isFinite(stat.cpLoss())) {
@@ -1424,6 +1442,9 @@ public class BestMoveSearchTest {
                 totalNullMoves += stat.nullMoves();
                 totalDuration += stat.durationMillis();
                 totalDepth += stat.deepestCompletedDepth();
+                totalTargetDepth += stat.targetDepth();
+                minTargetDepth = Math.min(minTargetDepth, stat.targetDepth());
+                maxTargetDepth = Math.max(maxTargetDepth, stat.targetDepth());
             }
 
             double avgCpLoss = cpLossCount > 0 ? totalCpLoss / cpLossCount : Double.NaN;
@@ -1435,6 +1456,11 @@ public class BestMoveSearchTest {
             double avgNullMoves = stats.isEmpty() ? Double.NaN : (double) totalNullMoves / stats.size();
             double avgDurationMs = stats.isEmpty() ? Double.NaN : (double) totalDuration / stats.size();
             double avgDepthReached = stats.isEmpty() ? Double.NaN : (double) totalDepth / stats.size();
+            double avgTargetDepth = stats.isEmpty() ? Double.NaN : (double) totalTargetDepth / stats.size();
+            if (stats.isEmpty()) {
+                minTargetDepth = 0;
+                maxTargetDepth = 0;
+            }
 
             return new AggregateStatistics(
                     environment,
@@ -1447,7 +1473,10 @@ public class BestMoveSearchTest {
                     avgNodes,
                     avgNullMoves,
                     avgDurationMs,
-                    avgDepthReached
+                    avgDepthReached,
+                    avgTargetDepth,
+                    minTargetDepth,
+                    maxTargetDepth
             );
         }
 
@@ -1457,7 +1486,20 @@ public class BestMoveSearchTest {
             sb.append("=== Aggregate best-move metrics ===").append(System.lineSeparator());
             sb.append(environment.describe());
             sb.append("Positions tested: ").append(positions).append(System.lineSeparator());
-            sb.append("Target depth: ").append(SEARCH_DEPTH).append(System.lineSeparator());
+            if (positions == 0 || !Double.isFinite(avgTargetDepth)) {
+                sb.append("Target depth: n/a").append(System.lineSeparator());
+            } else if (minTargetDepth == maxTargetDepth) {
+                sb.append("Target depth: ").append(minTargetDepth).append(System.lineSeparator());
+            } else {
+                sb.append("Target depth range: ")
+                        .append(minTargetDepth)
+                        .append('–')
+                        .append(maxTargetDepth)
+                        .append(" (avg ")
+                        .append(String.format(Locale.US, "%.2f", avgTargetDepth))
+                        .append(')')
+                        .append(System.lineSeparator());
+            }
             if (Double.isFinite(avgCpLoss)) {
                 sb.append("Average evaluation loss: ").append(formatScore(avgCpLoss)).append(" pawns")
                         .append(System.lineSeparator());
@@ -1510,7 +1552,9 @@ public class BestMoveSearchTest {
             boolean first = true;
             first = appendJsonEnvironment(sb, "environment", environment, first);
             first = appendJsonInt(sb, "positions", positions, first);
-            first = appendJsonInt(sb, "depthTarget", SEARCH_DEPTH, first);
+            first = appendJsonNumber(sb, "depthTargetAvg", avgTargetDepth, 2, first);
+            first = appendJsonInt(sb, "depthTargetMin", positions > 0 ? minTargetDepth : null, first);
+            first = appendJsonInt(sb, "depthTargetMax", positions > 0 ? maxTargetDepth : null, first);
             first = appendJsonNumber(sb, "avgCpLoss", avgCpLoss, 2, first);
             first = appendJsonNumber(sb, "maxCpLoss", maxCpLoss, 2, first);
             first = appendJsonNumber(sb, "avgCpGain", avgCpGain, 2, first);
