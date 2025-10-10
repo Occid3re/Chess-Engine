@@ -388,9 +388,11 @@ public class BestMoveSearchTest {
         evaluations.sort(comparator);
 
         // Chosen move:
-        // start with static score if present, but if we have a search result,
-        // override it so the displayed score matches the diagnostics/search.
-        MoveEvaluation chosenEvaluation = evaluationMap.get(chosenMove);
+        // keep a reference to the static evaluation (if available) and, when a
+        // search result exists, override the displayed score with the searched
+        // value so the diagnostics reflect the engine output.
+        MoveEvaluation staticChosenEvaluation = evaluationMap.get(chosenMove);
+        MoveEvaluation chosenEvaluation = staticChosenEvaluation;
         if (searchResult != null) {
             double oriented = orientScoreForMover(whiteToMove, searchResult.getScore());
             chosenEvaluation = new MoveEvaluation(chosenMove, oriented);
@@ -413,19 +415,17 @@ public class BestMoveSearchTest {
 
         // Scalars
         double bestScore = bestEvaluation != null ? bestEvaluation.score() : Double.NaN;
-        double chosenScore = chosenEvaluation != null ? chosenEvaluation.score() : Double.NaN;
+        double chosenStaticScore = staticChosenEvaluation != null ? staticChosenEvaluation.score() : Double.NaN;
 
-        // If chosenEvaluation is from search (our override above), don't compute cpLoss
-        // against the static "best" because that mixes metrics. Leave it NaN so it won't print.
-        Double cpLoss;
-        if (searchResult == null && Double.isFinite(bestScore) && Double.isFinite(chosenScore)) {
-            cpLoss = bestScore - chosenScore; // both static
-        } else {
-            cpLoss = Double.NaN;
-        }
+        // Compute cpLoss from the static evaluations of the best and chosen moves.
+        // Skip only when either value is unavailable or non-finite.
+        double cpLoss = Double.isFinite(bestScore) && Double.isFinite(chosenStaticScore)
+                ? bestScore - chosenStaticScore
+                : Double.NaN;
 
-        double cpGain = Double.isFinite(chosenScore) && Double.isFinite(baselineForMover)
-                ? chosenScore - baselineForMover
+        double chosenDisplayedScore = chosenEvaluation != null ? chosenEvaluation.score() : Double.NaN;
+        double cpGain = Double.isFinite(chosenDisplayedScore) && Double.isFinite(baselineForMover)
+                ? chosenDisplayedScore - baselineForMover
                 : Double.NaN;
 
         // Rank is based on static ordering; if desired, you could recompute rank from search ordering
@@ -1552,18 +1552,18 @@ public class BestMoveSearchTest {
             boolean first = true;
             first = appendJsonEnvironment(sb, "environment", environment, first);
             first = appendJsonInt(sb, "positions", positions, first);
-            first = appendJsonNumber(sb, "depthTargetAvg", avgTargetDepth, 2, first);
+            first = appendJsonNumber(sb, "depthTargetAvg", finiteOrNull(avgTargetDepth), 2, first);
             first = appendJsonInt(sb, "depthTargetMin", positions > 0 ? minTargetDepth : null, first);
             first = appendJsonInt(sb, "depthTargetMax", positions > 0 ? maxTargetDepth : null, first);
-            first = appendJsonNumber(sb, "avgCpLoss", avgCpLoss, 2, first);
-            first = appendJsonNumber(sb, "maxCpLoss", maxCpLoss, 2, first);
-            first = appendJsonNumber(sb, "avgCpGain", avgCpGain, 2, first);
-            first = appendJsonNumber(sb, "avgRank", avgRank, 2, first);
-            first = appendJsonNumber(sb, "top1Rate", top1Rate, 4, first);
-            first = appendJsonNumber(sb, "avgNodes", avgNodes, 2, first);
-            first = appendJsonNumber(sb, "avgNullMoves", avgNullMoves, 2, first);
-            first = appendJsonNumber(sb, "avgDurationMs", avgDurationMs, 2, first);
-            first = appendJsonNumber(sb, "avgDepthReached", avgDepthReached, 2, first);
+            first = appendJsonNumber(sb, "avgCpLoss", finiteOrNull(avgCpLoss), 2, first);
+            first = appendJsonNumber(sb, "maxCpLoss", finiteOrNull(maxCpLoss), 2, first);
+            first = appendJsonNumber(sb, "avgCpGain", finiteOrNull(avgCpGain), 2, first);
+            first = appendJsonNumber(sb, "avgRank", finiteOrNull(avgRank), 2, first);
+            first = appendJsonNumber(sb, "top1Rate", finiteOrNull(top1Rate), 4, first);
+            first = appendJsonNumber(sb, "avgNodes", finiteOrNull(avgNodes), 2, first);
+            first = appendJsonNumber(sb, "avgNullMoves", finiteOrNull(avgNullMoves), 2, first);
+            first = appendJsonNumber(sb, "avgDurationMs", finiteOrNull(avgDurationMs), 2, first);
+            first = appendJsonNumber(sb, "avgDepthReached", finiteOrNull(avgDepthReached), 2, first);
             sb.append('}');
             return sb.toString();
         }
@@ -1726,6 +1726,10 @@ public class BestMoveSearchTest {
         }
         String format = "%." + decimals + "f";
         return String.format(Locale.US, format, value);
+    }
+
+    private static Double finiteOrNull(double value) {
+        return Double.isFinite(value) ? value : null;
     }
 
 
