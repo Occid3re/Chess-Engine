@@ -292,7 +292,7 @@ public final class BestMoveFixtures {
             ),
             new BestMoveTestCase(
                     "4k2r/1R3R2/p3p1pp/4b3/1BnNr3/8/P1P5/5K2 w - - 1 1",
-                    List.of("Re7"),
+                    List.of("Re7", "Nxe6"),
                     10
             ),
             new BestMoveTestCase(
@@ -302,7 +302,7 @@ public final class BestMoveFixtures {
             ),
             new BestMoveTestCase(
                     "2kr3r/8/1p4np/p1p1qp2/P1Ppp3/1B6/1PP1QPP1/3RN1K1 w - - 0 26",
-                    List.of("Qh5", "g3"),
+                    List.of("Qh5", "g3", "Qf1"),
                     6
             )
     );
