@@ -1917,6 +1917,62 @@ class AcceptanceDecision:
     info: Dict[str, float] = dataclasses.field(default_factory=dict)
 
 
+def _clamp(value: float, lower: float, upper: float) -> float:
+    if lower > upper:
+        lower, upper = upper, lower
+    return max(lower, min(upper, value))
+
+
+def _effective_mut_frac(base: float, floor: float, ceiling: float, no_improve: int) -> float:
+    """Return the mutation fraction applied for this iteration."""
+
+    if no_improve <= 0:
+        return _clamp(base, floor, ceiling)
+
+    plateau_pull = min(0.65, 0.1 * no_improve)
+    adjusted = base - (base - floor) * plateau_pull
+    return _clamp(adjusted, floor, ceiling)
+
+
+def _mut_frac_next(
+    previous_used: float,
+    decision: AcceptanceDecision,
+    candidate: TestResult,
+    prior_best: TestResult,
+    no_improve: int,
+    floor: float,
+    ceiling: float,
+) -> float:
+    value = _clamp(previous_used, floor, ceiling)
+
+    if candidate.successes < prior_best.successes:
+        value -= (value - floor) * 0.6
+    elif candidate.failures > prior_best.failures or candidate.errors > prior_best.errors:
+        value -= (value - floor) * 0.4
+
+    if decision.keep and decision.improved:
+        value += (ceiling - value) * 0.5
+    elif decision.keep and decision.reason == "annealed":
+        delta = decision.info.get("delta")
+        regress = abs(delta) if isinstance(delta, (int, float)) else 0.0
+        if (
+            regress >= 0.5
+            or candidate.failures > prior_best.failures
+            or candidate.errors > prior_best.errors
+        ):
+            value += (ceiling - value) * 0.35
+        else:
+            value -= (value - floor) * 0.2
+    elif not decision.keep:
+        plateau_pull = min(0.5, no_improve / 8.0)
+        value -= (value - floor) * (0.2 + 0.5 * plateau_pull)
+    else:
+        plateau_pull = min(0.4, no_improve / 10.0)
+        value -= (value - floor) * (0.1 + 0.4 * plateau_pull)
+
+    return _clamp(value, floor, ceiling)
+
+
 def _time_improvement(
         best: TestResult,
         cand: TestResult,
@@ -2029,7 +2085,33 @@ def main() -> None:
 
     parser.add_argument("--accept-worse", action="store_true")
     parser.add_argument("--accept-temp",  type=float, default=0.08)
-    parser.add_argument("--mut-frac",     type=float, default=0.33)
+    parser.add_argument(
+        "--mut-frac",
+        type=float,
+        default=0.33,
+        help=(
+            "Initial mutation fraction before adaptive scaling toward the configured bounds. "
+            "Defaults mirror the previous fixed value so widening the range is opt-in."
+        ),
+    )
+    parser.add_argument(
+        "--mut-frac-min",
+        type=float,
+        default=0.33,
+        help=(
+            "Lower bound for the adaptive mutation fraction. The loop drifts toward this when iterations stall, "
+            "lose successes, or revert to the best checkpoint (defaults to the fixed 0.33 behaviour)."
+        ),
+    )
+    parser.add_argument(
+        "--mut-frac-max",
+        type=float,
+        default=0.33,
+        help=(
+            "Upper bound for the adaptive mutation fraction. Improvements and high-cost annealing pushes nudge toward "
+            "this ceiling (defaults to 0.33 for backwards compatibility)."
+        ),
+    )
     parser.add_argument("--noimp-reheat", type=int,   default=10)
     parser.add_argument("--reheat-factor",type=float, default=1.7)
     parser.add_argument("--priority-duration-metric", type=str, default="durationMsP95",
@@ -2072,6 +2154,13 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    if args.mut_frac_min <= 0.0 or args.mut_frac_max <= 0.0:
+        parser.error("--mut-frac-min and --mut-frac-max must be positive.")
+    if args.mut_frac_min > args.mut_frac_max:
+        parser.error("--mut-frac-min must be less than or equal to --mut-frac-max.")
+    if args.mut_frac <= 0.0:
+        parser.error("--mut-frac must be positive.")
+
     raw_tuning_path: Path = args.tuning_path
 
     if args.project_root:
@@ -2106,6 +2195,10 @@ def main() -> None:
         args.seed = time.time_ns() & 0xFFFFFFFF
     rng.seed(args.seed)
     print(f"RNG seed    : {args.seed}")
+
+    mut_frac_floor = args.mut_frac_min
+    mut_frac_ceiling = args.mut_frac_max
+    mut_frac_state = _clamp(args.mut_frac, mut_frac_floor, mut_frac_ceiling)
 
     # ---------- Plan parallelism (parity with lichess_bot)
     plan = _auto_thread_plan(max_concurrent_games=max(1, args.plan_concurrent))
@@ -2209,8 +2302,16 @@ def main() -> None:
 
             print(f"\n=== Iteration {iteration} ===")
 
+            previous_best_result = best_result
             current_lines, current_parameters = optimizer.load()
             eff_temp_start = args.temp_start * temp_boost
+            effective_mut_frac = _effective_mut_frac(
+                mut_frac_state,
+                mut_frac_floor,
+                mut_frac_ceiling,
+                no_improve,
+            )
+            print(f"[mut] Effective mutation fraction: {effective_mut_frac:.4f}")
 
             candidate_lines = optimizer.perturb(
                 current_lines,
@@ -2221,7 +2322,7 @@ def main() -> None:
                 temp_min=args.temp_min,
                 temp_decay=args.temp_decay,
                 spectral_base=args.spectral_base,
-                mut_frac=args.mut_frac,
+                mut_frac=effective_mut_frac,
                 clamp_mult=5.0,
             )
             optimizer.write(candidate_lines)
@@ -2339,6 +2440,16 @@ def main() -> None:
                         f"-> {args.temp_start * temp_boost:.4f}"
                     )
 
+            mut_frac_state = _mut_frac_next(
+                effective_mut_frac,
+                decision,
+                candidate_result,
+                previous_best_result,
+                no_improve,
+                mut_frac_floor,
+                mut_frac_ceiling,
+            )
+
             log_jsonl(
                 args.log_jsonl,
                 {
@@ -2347,6 +2458,9 @@ def main() -> None:
                     "seed": args.seed,
                     "temp_start_effective": eff_temp_start,
                     "mut_frac": args.mut_frac,
+                    "mut_frac_used": effective_mut_frac,
+                    "mut_frac_next": mut_frac_state,
+                    "mut_frac_bounds": [mut_frac_floor, mut_frac_ceiling],
                     "candidate": dataclasses.asdict(candidate_result),
                     "best": dataclasses.asdict(best_result),
                     "accepted": decision.keep,
