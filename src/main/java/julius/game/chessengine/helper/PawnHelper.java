@@ -71,11 +71,11 @@ public class PawnHelper {
             0, 0, 0, 0, 0, 0, 0, 0  // R8
     };
 
-    // Method to count pawns in the center (e4, d4, e0, d0 squares)
+    // Method to count pawns in the center (d4, e4, d5, e5 squares)
     public static int countCenterPawns(long pawnsBitboard) {
-        // Bit positions for e4, d4, e0, d0
-        long centerSquares = (1L << bitIndex('e', 4)) | (1L << bitIndex('d', 4))
-                | (1L << bitIndex('e', 0)) | (1L << bitIndex('d', 0));
+        // Bit positions for d4, e4, d5, e5
+        long centerSquares = (1L << bitIndex('d', 4)) | (1L << bitIndex('e', 4))
+                | (1L << bitIndex('d', 5)) | (1L << bitIndex('e', 5));
         return Long.bitCount(pawnsBitboard & centerSquares);
     }
 
