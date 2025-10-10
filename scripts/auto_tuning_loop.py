@@ -1196,6 +1196,12 @@ class SeedTuningOptimizer:
     @staticmethod
     def _parse_number(token: str) -> float:
         cleaned = token.replace("_", "")
+        lowered = cleaned.lower()
+        if lowered.startswith("0x") or lowered.startswith("-0x"):
+            try:
+                return float(int(cleaned, 16))
+            except ValueError:
+                return 0.0
         try:
             value = float(cleaned)
         except ValueError:
@@ -1209,7 +1215,7 @@ class SeedTuningOptimizer:
             return specs
 
         pattern = re.compile(
-            r"^[\t ]*[A-Z0-9_]+\(\"([^\"]+)\",\s*([-0-9_.]+)(?:,\s*([-0-9_.]+),\s*([-0-9_.]+))?\)",
+            r"^[\t ]*[A-Z0-9_]+\(\"([^\"]+)\",\s*([-0-9A-Fa-f_xX]+)(?:,\s*([-0-9A-Fa-f_xX]+),\s*([-0-9A-Fa-f_xX]+))?\)",
             re.MULTILINE,
         )
 
