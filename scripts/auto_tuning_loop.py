@@ -76,9 +76,10 @@ import textwrap
 import time
 import statistics
 import xml.etree.ElementTree as ET
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import DefaultDict, Dict, List, Optional, Set, Tuple
 
 # ----------------------------
 # Patterns
@@ -1164,6 +1165,8 @@ class SeedTuningOptimizer:
         self._param_specs: Dict[str, ParamSpec] = self._load_param_specs()
         self._initial_magnitudes: Dict[str, float] = {}
         self._missing_param_keys: List[str] = []
+        self._step_scale: DefaultDict[str, float] = defaultdict(lambda: 1.0)
+        self._last_mutated: Set[str] = set()
 
     def backup(self, suffix: str) -> Path:
         dst = self.tuning_path.with_suffix(self.tuning_path.suffix + f".{suffix}.{timestamp()}.bak")
@@ -1426,6 +1429,7 @@ class SeedTuningOptimizer:
 
         k = max(1, int(round(len(keys) * max(0.0, min(1.0, mut_frac)))))
         mutate_keys = set(rng.sample(keys, k))
+        self._last_mutated = set(mutate_keys)
 
         for name, param in parameters.items():
             value = param.numeric_value
@@ -1447,6 +1451,7 @@ class SeedTuningOptimizer:
                 max_step = hint.get("max_step")
                 if isinstance(max_step, (int, float)):
                     magnitude = min(magnitude, max(init_mag, float(max_step)))
+            magnitude *= self._step_scale[name]
             if not param.is_float:
                 magnitude = max(magnitude, 1.0)
             else:
@@ -1470,13 +1475,17 @@ class SeedTuningOptimizer:
             elif candidate > hi:
                 candidate = hi - 0.1 * rng.random()
 
+            soft_min_val: Optional[float] = None
+            soft_max_val: Optional[float] = None
             if hint:
                 soft_min = hint.get("soft_min")
                 if isinstance(soft_min, (int, float)):
-                    candidate = max(candidate, float(soft_min))
+                    soft_min_val = float(soft_min)
+                    candidate = max(candidate, soft_min_val)
                 soft_max = hint.get("soft_max")
                 if isinstance(soft_max, (int, float)):
-                    candidate = min(candidate, float(soft_max))
+                    soft_max_val = float(soft_max)
+                    candidate = min(candidate, soft_max_val)
                 sentinels = hint.get("sentinels")
                 snap_window = max(0.5, magnitude * (0.1 if not param.is_float else 0.05))
                 snapped = False
@@ -1496,6 +1505,10 @@ class SeedTuningOptimizer:
                 candidate = max(candidate, param.min_value)
             if param.max_value is not None:
                 candidate = min(candidate, param.max_value)
+            if soft_min_val is not None:
+                candidate = max(candidate, soft_min_val)
+            if soft_max_val is not None:
+                candidate = min(candidate, soft_max_val)
 
             if param.is_float:
                 formatted = f"{candidate:.{param.decimals}f}"
@@ -1515,6 +1528,60 @@ class SeedTuningOptimizer:
             )
 
         return updated_lines
+
+    def update_step_scales(
+        self,
+        decision: AcceptanceDecision,
+        best: TestResult,
+        candidate: TestResult,
+    ) -> Dict[str, object]:
+        """Adjust per-parameter step scaling based on the last decision outcome."""
+
+        mutated = list(self._last_mutated)
+        if not mutated:
+            summary: Dict[str, object] = {
+                "mutated": 0,
+                "grow": {"count": 0, "avg": 1.0},
+                "shrink": {"count": 0, "avg": 1.0},
+            }
+            return summary
+
+        shrink_factors: List[float] = []
+        grow_factors: List[float] = []
+
+        degrade = candidate.failures > best.failures or candidate.errors > best.errors
+        shrink_multiplier = 0.7
+        grow_multiplier = 1.25
+
+        if not decision.keep or degrade:
+            for key in mutated:
+                prev = self._step_scale[key]
+                updated = max(0.25, prev * shrink_multiplier)
+                self._step_scale[key] = updated
+                factor = updated / prev if prev > 0 else shrink_multiplier
+                shrink_factors.append(factor)
+        elif decision.keep and decision.improved:
+            for key in mutated:
+                prev = self._step_scale[key]
+                updated = min(3.0, prev * grow_multiplier)
+                self._step_scale[key] = updated
+                factor = updated / prev if prev > 0 else grow_multiplier
+                grow_factors.append(factor)
+
+        summary = {
+            "mutated": len(mutated),
+            "grow": {
+                "count": len(grow_factors),
+                "avg": (sum(grow_factors) / len(grow_factors)) if grow_factors else 1.0,
+            },
+            "shrink": {
+                "count": len(shrink_factors),
+                "avg": (sum(shrink_factors) / len(shrink_factors)) if shrink_factors else 1.0,
+            },
+        }
+
+        self._last_mutated.clear()
+        return summary
 
 # ----------------------------
 # Maven test runner (with JVM/system props parity)
@@ -2208,6 +2275,15 @@ def main() -> None:
                 max_error_regress=args.max_error_regress,
                 duration_weight=args.duration_weight,
             )
+            scale_summary = optimizer.update_step_scales(decision, best_result, candidate_result)
+            if (
+                isinstance(scale_summary.get("grow"), dict)
+                and scale_summary["grow"].get("count", 0)
+            ) or (
+                isinstance(scale_summary.get("shrink"), dict)
+                and scale_summary["shrink"].get("count", 0)
+            ):
+                print("[step-scale]", json.dumps(scale_summary))
 
             if decision.keep:
                 current_content = list(candidate_lines)
@@ -2280,6 +2356,7 @@ def main() -> None:
                         "reason": decision.reason,
                         "info": decision.info,
                     },
+                    "step_scale": scale_summary,
                     "no_improve": no_improve,
                 },
             )
