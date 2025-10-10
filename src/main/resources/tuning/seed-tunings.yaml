@@ -102,7 +102,7 @@ population:
       moveordering.historyscale: 1.0
       moveordering.historydecaydivisor: 2
       search.fpMarginDepth1: 123
-      search.fpMarginDepth2: 0
+      search.fpMarginDepth2: 123
       search.lmpBase: 4
       search.lmpPerDepth: 1
       search.fpMaxDepth: 3
