@@ -3,51 +3,51 @@ population:
     evaluation:
       modules:
         materialmodule:
-          midgame: 1.2
+          midgame: 1.4
           endgame: 0.9
         pawnstructuremodule:
           midgame: 1.0
-          endgame: 1.0
+          endgame: 0.9
         activitymodule:
-          midgame: 1.1
-          endgame: 1.1
+          midgame: 1.2
+          endgame: 1.0
         kingsafetymodule:
           midgame: 1.0
           endgame: 1.0
         threatmodule:
-          midgame: 1.1
+          midgame: 1.2
           endgame: 1.2
     numericParameters:
-      evaluation.blendscale: 345
+      evaluation.blendscale: 440
       material.pawnvalue: 107
       material.knightvalue: 375
       material.bishopvalue: 394
-      material.rookvalue: 522
+      material.rookvalue: 529
       material.queenvalue: 1120
       material.bishoppairbonus: 50
       pawnstructure.centerpawnbonus: 13
-      pawnstructure.passedpawnbonus: 52
-      pawnstructure.connectedpawnbonus: 6
+      pawnstructure.passedpawnbonus: 65
+      pawnstructure.connectedpawnbonus: 7
       pawnstructure.islandpenalty: -7
       pawnstructure.doubledpawnpenalty: -9
-      pawnstructure.isolatedpawnpenalty: -11
+      pawnstructure.isolatedpawnpenalty: -12
       pawnstructure.advancedpawnbonus: 10
       pawnstructure.blockedpawnpenalty: -5
-      pawnstructure.backwardpawnpenalty: -14
-      pawnstructure.ownkingblockspassedpawnpenalty: -117
+      pawnstructure.backwardpawnpenalty: -15
+      pawnstructure.ownkingblockspassedpawnpenalty: -101
       pawnstructure.passedpawnfreepathbonusperrank: 14
-      pawnstructure.rookhalfopenfilebonus: 14
-      pawnstructure.rookopenfilebonus: 29
+      pawnstructure.rookhalfopenfilebonus: 15
+      pawnstructure.rookopenfilebonus: 28
       threat.hangingpawnpenalty: -15
-      threat.hangingknightpenalty: -31
+      threat.hangingknightpenalty: -28
       threat.hangingbishoppenalty: -29
-      threat.hangingrookpenalty: -51
-      threat.hangingqueenpenalty: -76
+      threat.hangingrookpenalty: -48
+      threat.hangingqueenpenalty: -73
       threat.pawnthreatknightpenalty: -12
       threat.pawnthreatbishoppenalty: -12
-      threat.pawnthreatrookpenalty: -21
+      threat.pawnthreatrookpenalty: -18
       threat.pawnthreatqueenpenalty: -30
-      activity.midgamemobilityknight: 4
+      activity.midgamemobilityknight: 5
       activity.midgamemobilitybishop: 5
       activity.midgamemobilityrook: 3
       activity.midgamemobilityqueen: 2
@@ -67,19 +67,19 @@ population:
       activity.endgamecenterrook: 3
       activity.endgamecenterqueen: 3
       activity.endgamecenterking: 4
-      kingsafety.missingpawnshieldpenalty: -18
+      kingsafety.missingpawnshieldpenalty: -19
       kingsafety.halfopenfilepenalty: -17
       kingsafety.openfilepenalty: -25
-      kingsafety.defenderbonus: 7
-      kingsafety.queenattackedpenalty: -84
-      kingsafety.backrankweaknessmidgamepenalty: -116
-      kingsafety.backrankweaknessendgamepenalty: -46
+      kingsafety.defenderbonus: 8
+      kingsafety.queenattackedpenalty: -80
+      kingsafety.backrankweaknessmidgamepenalty: -106
+      kingsafety.backrankweaknessendgamepenalty: -45
       kingsafety.attackweightpawn: 6
       kingsafety.attackweightknight: 13
       kingsafety.attackweightbishop: 12
       kingsafety.attackweightrook: 19
       kingsafety.attackweightqueen: 26
-      moveordering.category.tt: 6
+      moveordering.category.tt: 7
       moveordering.category.promotion: 6
       moveordering.category.capturegood: 5
       moveordering.category.captureequal: 5
@@ -90,85 +90,85 @@ population:
       moveordering.killermovescore: 9634
       moveordering.promotionbonus: 1077
       moveordering.killer0bonus: 57
-      moveordering.killer1bonus: 37
-      moveordering.countermovebonus: 478
+      moveordering.killer1bonus: 42
+      moveordering.countermovebonus: 555
       moveordering.capturemvvmultiplier: 15
-      moveordering.captureseemultiplier: 52
-      moveordering.promotionseemultiplier: 22
-      moveordering.castlingbonus: 2065
-      moveordering.captureseeclamp: 2317
-      moveordering.promotionseeclamp: 556
-      moveordering.maxscore: 14006120
+      moveordering.captureseemultiplier: 53
+      moveordering.promotionseemultiplier: 31
+      moveordering.castlingbonus: 1895
+      moveordering.captureseeclamp: 2764
+      moveordering.promotionseeclamp: 694
+      moveordering.maxscore: 16286745
       moveordering.historyscale: 1.0
       moveordering.historydecaydivisor: 2
-      search.fpMarginDepth1: 123
+      search.fpMarginDepth1: 0
       search.fpMarginDepth2: 0
       search.lmpBase: 3
       search.lmpPerDepth: 1
       search.fpMaxDepth: 3
       search.lmpMaxDepth: 3
-      search.hmpMinIndex: 6
-      search.hmpHistoryMax: 103
+      search.hmpMinIndex: 8
+      search.hmpHistoryMax: 152
       search.iidReduceDepth: 2
-      search.lmrProtectPlyMax: 2
+      search.lmrProtectPlyMax: 0
       search.lmrProtectIndexMax: 1
-      search.lmrCapGoodQuiet: 23
-      search.lmrHistoryBuckets: 6
-      search.lmrHistoryWeightSlope: 0.5
-      search.lmrScaleDivisor: 1.5
-      search.lmrDepthLogOffset: 1.0
-      search.lmrMoveLogOffset: 1.8
+      search.lmrCapGoodQuiet: 22
+      search.lmrHistoryBuckets: 7
+      search.lmrHistoryWeightSlope: 0.6
+      search.lmrScaleDivisor: 1.4
+      search.lmrDepthLogOffset: 1.2
+      search.lmrMoveLogOffset: 2.1
       search.maxCheckExtensionStreak: 2
       search.seePruneNearRootPly: 2
-      search.historyReductionMax: 5329
-      search.aspMinSpanCp: 14
+      search.historyReductionMax: 6787
+      search.aspMinSpanCp: 13
       search.aspMaxSpanCp: 273
-      search.aspDefaultSpanCp: 36
+      search.aspDefaultSpanCp: 37
       search.aspHistoryBlend: 0.4
       search.aspMomentumStepCp: 8
       search.aspMomentumCap: 8
-      search.aspFailureRatio: 0.5
-      search.aspBaseOffsetCp: 32
-      search.aspSwingWeight: 0.25
-      search.aspVolatilityWeight: 0.6
+      search.aspFailureRatio: 0.6
+      search.aspBaseOffsetCp: 30
+      search.aspSwingWeight: 0.20
+      search.aspVolatilityWeight: 0.7
       search.aspDepthScale: 0.02
       search.aspDepthPivot: 3
       search.aspFloorBaseCp: 9
-      search.aspFloorVolWeight: 0.5
-      search.aspFloorStreakStepCp: 4
+      search.aspFloorVolWeight: 0.6
+      search.aspFloorStreakStepCp: 5
       search.aspBumpBaseCp: 12
       search.aspBumpStreakCp: 5
       search.aspBumpDepthCp: 2
-      search.aspFullWindowScale: 1.14
+      search.aspFullWindowScale: 1.21
       search.aspLastSpanScale: 1.1
-      search.aspFullWindowMinMultiplier: 1.6
+      search.aspFullWindowMinMultiplier: 1.7
       search.aspBlendBaselineWeight: 0.6
       search.aspBlendCandidateWeight: 0.4
       search.aspMaxRetriesBase: 3
-      search.aspMaxRetriesVolThresholdHigh: 98
+      search.aspMaxRetriesVolThresholdHigh: 106
       search.aspMaxRetriesVolBonusHigh: 2
-      search.aspMaxRetriesVolThresholdMed: 64
+      search.aspMaxRetriesVolThresholdMed: 68
       search.aspMaxRetriesVolBonusMed: 1
       search.aspMaxRetriesDepthOffset: 4
       search.aspMaxRetriesDepthDivisor: 2
       search.aspMaxRetriesMomentumDivisor: 3
       search.aspMaxRetriesMin: 3
       search.aspMaxRetriesMax: 6
-      search.nullBaseReduction: 1.42
+      search.nullBaseReduction: 1.51
       search.nullDepthWeight: 1.6
-      search.nullMaterialWeight: 0.79
+      search.nullMaterialWeight: 0.89
       search.nullMobilityWeight: 0.5
       search.nullDepthCap: 10
-      search.nullMaterialCap: 19
-      search.nullMobilityCap: 34
+      search.nullMaterialCap: 20
+      search.nullMobilityCap: 32
       search.nullLowMaterialThreshold: 2
       search.nullLowMobilityThreshold: 6
       search.nullVeryLowMobilityThreshold: 2
-      search.nullLowMaterialPenalty: 0.76
+      search.nullLowMaterialPenalty: 0.70
       search.nullVeryLowMobilityPenalty: 0.6
-      search.nullSwingGuardMinCp: 606
-      search.nullSwingGuardDivisor: 51
-      search.ttMainWeight: 1.9
+      search.nullSwingGuardMinCp: 562
+      search.nullSwingGuardDivisor: 48
+      search.ttMainWeight: 2.3
       search.ttCaptureWeight: 1.0
       search.qsMaxDeltaPawn: 9.1
       search.drawBias: 0.3
