@@ -9,7 +9,6 @@ import dataclasses
 import math
 import os
 import random
-import re
 import shlex
 import subprocess
 import time
@@ -35,9 +34,13 @@ except ImportError as exc:  # pragma: no cover - defensive guard for manual exec
     ) from exc
 
 
+# Cutechess summary and per-game line patterns (single, canonical definitions)
 SCORE_PATTERN = re.compile(
     r"Score of (?P<first>.+?) vs (?P<second>.+?):\s+"
-    r"(?P<wins>\d+)\s+-\s+(?P<losses>\d+)\s+-\s+(?P<draws>\d+)\s+\[(?P<score>[0-9.]+)\]"
+    r"(?P<wins>\d+)\s*-\s*(?P<losses>\d+)\s*-\s*(?P<draws>\d+)\s*\[(?P<score>[0-9.]+)\]"
+)
+FINISHED_RE = re.compile(
+    r"^Finished game \d+ \((?P<left>.+?) vs (?P<right>.+?)\):\s*(?P<res>1-0|0-1|1/2-1/2)"
 )
 
 
@@ -165,26 +168,21 @@ def detect_latest_jar(project_root: Path) -> Optional[Path]:
 
 
 def maybe_build_jar(project_root: Path, mvn: str, extra_args: Sequence[str]) -> None:
-    cmd = [mvn, "-DskipTests", "-Djava.version=21", "-Dmaven.compiler.release=21", "-Dmaven.compiler.enablePreview=true", "-DargLine=--enable-preview", "package"]
+    cmd = [
+        mvn,
+        "-DskipTests",
+        "-Djava.version=21",
+        "-Dmaven.compiler.release=21",
+        "-Dmaven.compiler.enablePreview=true",
+        "-DargLine=--enable-preview",
+        "package",
+    ]
     cmd.extend(extra_args)
     print("Running build command:", " ".join(shlex.quote(c) for c in cmd))
     proc = subprocess.run(cmd, cwd=str(project_root), check=False)
     if proc.returncode != 0:
         raise RuntimeError("Maven package command failed")
 
-# put this near SCORE_PATTERN
-FINISHED_RE = re.compile(
-    r"^Finished game \d+ \((?P<left>.+?) vs (?P<right>.+?)\):\s*(?P<res>1-0|0-1|1/2-1/2)"
-)
-
-# Cutechess summary and per-game lines
-SCORE_PATTERN = re.compile(
-    r"Score of (?P<first>.+?) vs (?P<second>.+?):\s+"
-    r"(?P<wins>\d+)\s*-\s*(?P<losses>\d+)\s*-\s*(?P<draws>\d+)\s*\[(?P<score>[0-9.]+)\]"
-)
-FINISHED_RE = re.compile(
-    r"^Finished game \d+ \((?P<left>.+?) vs (?P<right>.+?)\):\s*(?P<res>1-0|0-1|1/2-1/2)"
-)
 
 def parse_score(
         stdout: str,
@@ -195,7 +193,7 @@ def parse_score(
         command: Sequence[str],
         stderr: str,
         verbose: bool = True,  # you can disable prints by setting this to False
-):
+) -> MatchResult:
     """
     Tally results from per-game lines (robust to engine order),
     with a fallback to the 'Score of A vs B' summary (also robust to either order).
@@ -220,11 +218,15 @@ def parse_score(
 
         engine_on_left = (left == engine_name)
         if res == "1-0":
-            if engine_on_left: wins += 1
-            else: losses += 1
+            if engine_on_left:
+                wins += 1
+            else:
+                losses += 1
         elif res == "0-1":
-            if engine_on_left: losses += 1
-            else: wins += 1
+            if engine_on_left:
+                losses += 1
+            else:
+                wins += 1
         else:
             draws += 1
 
@@ -235,7 +237,10 @@ def parse_score(
     if total > 0:
         score = (wins + 0.5 * draws) / total
         if verbose:
-            print(f"[parse_score] Counted {total} games: {wins}-{losses}-{draws} ({score*100:.1f}%) from per-game lines.")
+            print(
+                f"[parse_score] Counted {total} games: {wins}-{losses}-{draws} "
+                f"({score*100:.1f}%) from per-game lines."
+            )
         return MatchResult(
             engine_name=engine_name,
             opponent_name=opponent_name,
@@ -305,9 +310,6 @@ def parse_score(
         stderr=stderr,
         command=command,
     )
-
-
-
 
 
 def derive_java_args(args: argparse.Namespace, tuning_path: Path) -> List[str]:
@@ -398,6 +400,23 @@ def run_match(args: argparse.Namespace, tuning_path: Path) -> MatchResult:
     print("Command (joined)  :", " ".join(shlex.quote(c) for c in command))
     print("==============================\n")
 
+    # Dry-run: just show the command and bail before doing anything
+    if getattr(args, "dry_run", False):
+        print("[dry-run] Skipping execution and returning an empty MatchResult.")
+        return MatchResult(
+            engine_name=args.engine_name,
+            opponent_name=args.opponent_name,
+            wins=0,
+            losses=0,
+            draws=0,
+            score=0.0,
+            opponent_elo=args.opponent_elo,
+            duration_s=0.0,
+            stdout="",
+            stderr="",
+            command=command,
+        )
+
     start = time.time()
     try:
         proc = subprocess.run(
@@ -461,12 +480,11 @@ def adapt_opponent_elo(args: argparse.Namespace, result: MatchResult, *, context
 
     if implied_next_elo > current_floor:
         current_floor = implied_next_elo
-        print(
-            f"[adapt-elo] {context}: setting opponent Elo from {args.opponent_elo} to {current_floor}"
-        )
+        print(f"[adapt-elo] {context}: setting opponent Elo from {args.opponent_elo} to {current_floor}")
     elif implied_next_elo < current_floor:
         print(
-            f"[adapt-elo] {context}: implied opponent Elo {implied_next_elo} below floor {current_floor}, keeping {current_floor}"
+            f"[adapt-elo] {context}: implied opponent Elo {implied_next_elo} "
+            f"below floor {current_floor}, keeping {current_floor}"
         )
     else:
         print(f"[adapt-elo] {context}: opponent Elo remains at {current_floor}")
@@ -476,14 +494,14 @@ def adapt_opponent_elo(args: argparse.Namespace, result: MatchResult, *, context
 
 
 def accept_match_candidate(
-    best: MatchResult,
-    candidate: MatchResult,
-    temperature: float,
-    allow_worse: bool,
-    rng: random.Random,
-    min_elo_gain: float,
-    min_score_gain: float,
-    time_bonus_threshold: float,
+        best: MatchResult,
+        candidate: MatchResult,
+        temperature: float,
+        allow_worse: bool,
+        rng: random.Random,
+        min_elo_gain: float,
+        min_score_gain: float,
+        time_bonus_threshold: float,
 ) -> AcceptanceDecision:
     elo_delta = candidate.elo_diff - best.elo_diff
     score_delta = candidate.points_fraction - best.points_fraction
@@ -499,10 +517,10 @@ def accept_match_candidate(
     if score_delta > min_score_gain:
         return AcceptanceDecision(True, True, "score_improved", info)
     if (
-        time_delta > 0.0
-        and abs(elo_delta) <= min_elo_gain
-        and abs(score_delta) <= min_score_gain
-        and time_delta >= time_bonus_threshold * max(best.avg_time_per_game, 1e-9)
+            time_delta > 0.0
+            and abs(elo_delta) <= min_elo_gain
+            and abs(score_delta) <= min_score_gain
+            and time_delta >= time_bonus_threshold * max(best.avg_time_per_game, 1e-9)
     ):
         info["time_ratio"] = time_delta / max(best.avg_time_per_game, 1e-9)
         return AcceptanceDecision(True, True, "time_bonus", info)
@@ -610,6 +628,9 @@ def main() -> None:
     parser.add_argument("--mvn", type=str, default="mvn")
     parser.add_argument("--mvn-extra", nargs=argparse.REMAINDER, default=[])
 
+    # NEW: dry-run (no execution; only print the exact commands/config)
+    parser.add_argument("--dry-run", action="store_true", help="Print commands and exit without running matches")
+
     args = parser.parse_args()
 
     project_root = find_project_root(args.project_root or Path.cwd())
@@ -620,6 +641,16 @@ def main() -> None:
         maybe_build_jar(project_root, args.mvn, args.mvn_extra)
 
     ensure_args(args, project_root)
+
+    # If dry-run, just show one baseline command and exit early.
+    if args.dry_run:
+        print("[dry-run] Building baseline cutechess command only.")
+        cmd = build_cutechess_command(args, args.tuning_path)
+        print("Working directory :", os.getcwd())
+        print("Command (split)   :", cmd)
+        print("Command (joined)  :", " ".join(shlex.quote(c) for c in cmd))
+        print("[dry-run] Done. No matches executed.")
+        return
 
     optimizer = SeedTuningOptimizer(args.tuning_path)
     rng = random.Random(args.seed or int(time.time()))
@@ -637,10 +668,7 @@ def main() -> None:
         adapt_opponent_elo(args, baseline, context="post-baseline")
         if baseline.opponent_elo == args.opponent_elo:
             break
-        print(
-            "[baseline] Opponent Elo increased; rerunning baseline at",
-            args.opponent_elo,
-        )
+        print("[baseline] Opponent Elo increased; rerunning baseline at", args.opponent_elo)
 
     best_result = baseline
     current_lines = list(base_lines)
@@ -663,7 +691,9 @@ def main() -> None:
 
             print(f"\n=== Iteration {iteration} ===")
             temp_start = args.temp_start * temp_boost
-            effective_mut_frac = _effective_mut_frac(mut_frac_state, mut_frac_floor, mut_frac_ceiling, no_improve)
+            effective_mut_frac = _effective_mut_frac(
+                mut_frac_state, mut_frac_floor, mut_frac_ceiling, no_improve
+            )
             print(f"[mut] Effective mutation fraction: {effective_mut_frac:.4f}")
 
             current_lines, current_params = optimizer.load()
@@ -719,8 +749,12 @@ def main() -> None:
                 time_bonus_threshold=args.time_bonus_threshold,
             )
 
-            pseudo_best = PseudoTestResult(best_result.total_games, best_result.losses, 0, best_result.duration_s)
-            pseudo_cand = PseudoTestResult(candidate_result.total_games, candidate_result.losses, 0, candidate_result.duration_s)
+            pseudo_best = PseudoTestResult(
+                best_result.total_games, best_result.losses, 0, best_result.duration_s
+            )
+            pseudo_cand = PseudoTestResult(
+                candidate_result.total_games, candidate_result.losses, 0, candidate_result.duration_s
+            )
             scale_summary = optimizer.update_step_scales(decision, pseudo_best, pseudo_cand)
             if scale_summary.get("grow", {}).get("count", 0) or scale_summary.get("shrink", {}).get("count", 0):
                 print("[step-scale]", json_dumps(scale_summary))
