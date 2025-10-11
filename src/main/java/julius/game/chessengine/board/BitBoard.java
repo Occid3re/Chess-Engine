@@ -13,6 +13,7 @@ import lombok.extern.log4j.Log4j2;
 import java.util.Arrays;
 
 import static julius.game.chessengine.board.MoveHelper.createMoveInt;
+import static julius.game.chessengine.board.MoveHelper.pieceTypeToInt;
 import static julius.game.chessengine.helper.BitHelper.*;
 import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
 
@@ -1584,7 +1585,7 @@ public class BitBoard {
             int to = Long.numberOfTrailingZeros(tmp);
             int from = whitesTurn ? to - 8 : to + 8;
             if (isMoveAllowedByPin(pinState, from, to)) {
-                addPromotionMoves(moves, from, to, whitesTurn, false, null, castlingState);
+                addPromotionMoves(moves, from, to, whitesTurn, false, 0, castlingState);
             }
             tmp &= tmp - 1;
         }
@@ -1632,10 +1633,12 @@ public class BitBoard {
             int from; // simpler below
             from = whitesTurn ? to - 7 : to + 7;
             if (isMoveAllowedByPin(pinState, from, to)) {
-                int capBits = pieceBitsAt(to, !whitesTurn);
-                if (capBits != 6) {
-                    moves.add(createMoveInt(from, to, PieceType.PAWN, whitesTurn,
-                            true, false, false, null, pieceTypeFromBits(capBits), false, false, castlingState));
+                PieceType capturedPiece = pieceBoard[to];
+                if (capturedPiece != null && capturedPiece != PieceType.KING) {
+                    int capturedPieceBits = pieceTypeToInt(capturedPiece);
+                    int moveInt = createMoveInt(from, to, PieceType.PAWN, whitesTurn,
+                            true, false, false, null, null, false, false, castlingState);
+                    moves.add(withCapturedPieceBits(moveInt, capturedPieceBits));
                 }
             }
             tmp &= tmp - 1;
@@ -1647,10 +1650,12 @@ public class BitBoard {
             int to = Long.numberOfTrailingZeros(tmp);
             int from = whitesTurn ? to - 9 : to + 9;
             if (isMoveAllowedByPin(pinState, from, to)) {
-                int capBits = pieceBitsAt(to, !whitesTurn);
-                if (capBits != 6) {
-                    moves.add(createMoveInt(from, to, PieceType.PAWN, whitesTurn,
-                            true, false, false, null, pieceTypeFromBits(capBits), false, false, castlingState));
+                PieceType capturedPiece = pieceBoard[to];
+                if (capturedPiece != null && capturedPiece != PieceType.KING) {
+                    int capturedPieceBits = pieceTypeToInt(capturedPiece);
+                    int moveInt = createMoveInt(from, to, PieceType.PAWN, whitesTurn,
+                            true, false, false, null, null, false, false, castlingState);
+                    moves.add(withCapturedPieceBits(moveInt, capturedPieceBits));
                 }
             }
             tmp &= tmp - 1;
@@ -1662,9 +1667,10 @@ public class BitBoard {
             int to = Long.numberOfTrailingZeros(tmp);
             int from = whitesTurn ? to - 7 : to + 7;
             if (isMoveAllowedByPin(pinState, from, to)) {
-                int capBits = pieceBitsAt(to, !whitesTurn);
-                if (capBits != 6) {
-                    addPromotionMoves(moves, from, to, whitesTurn, true, pieceTypeFromBits(capBits), castlingState);
+                PieceType capturedPiece = pieceBoard[to];
+                if (capturedPiece != null && capturedPiece != PieceType.KING) {
+                    int capturedPieceBits = pieceTypeToInt(capturedPiece);
+                    addPromotionMoves(moves, from, to, whitesTurn, true, capturedPieceBits, castlingState);
                 }
             }
             tmp &= tmp - 1;
@@ -1675,9 +1681,10 @@ public class BitBoard {
             int to = Long.numberOfTrailingZeros(tmp);
             int from = whitesTurn ? to - 9 : to + 9;
             if (isMoveAllowedByPin(pinState, from, to)) {
-                int capBits = pieceBitsAt(to, !whitesTurn);
-                if (capBits != 6) {
-                    addPromotionMoves(moves, from, to, whitesTurn, true, pieceTypeFromBits(capBits), castlingState);
+                PieceType capturedPiece = pieceBoard[to];
+                if (capturedPiece != null && capturedPiece != PieceType.KING) {
+                    int capturedPieceBits = pieceTypeToInt(capturedPiece);
+                    addPromotionMoves(moves, from, to, whitesTurn, true, capturedPieceBits, castlingState);
                 }
             }
             tmp &= tmp - 1;
@@ -1689,11 +1696,19 @@ public class BitBoard {
 
     private void addPromotionMoves(IntArrayList moves, int fromIndex, int toIndex,
                                    boolean whitesTurn, boolean isCapture,
-                                   PieceType capturedType, int cs) {
+                                   int capturedPieceBits, int cs) {
         for (PieceType promotionPiece : PROMOTION_PIECES) {
-            moves.add(createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn,
-                    isCapture, false, false, promotionPiece, capturedType, false, false, cs));
+            int moveInt = createMoveInt(fromIndex, toIndex, PieceType.PAWN, whitesTurn,
+                    isCapture, false, false, promotionPiece, null, false, false, cs);
+            moves.add(withCapturedPieceBits(moveInt, capturedPieceBits));
         }
+    }
+
+    private static int withCapturedPieceBits(int moveInt, int capturedPieceBits) {
+        if (capturedPieceBits == 0) {
+            return moveInt;
+        }
+        return (moveInt & ~(0x07 << 21)) | ((capturedPieceBits & 0x07) << 21);
     }
 
     private void addEnPassantIfAny(boolean whitesTurn, IntArrayList moves, PinState pinState, int cs) {
