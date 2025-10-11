@@ -10,6 +10,7 @@ import julius.game.chessengine.helper.RookHelper;
 import julius.game.chessengine.tuning.Tuning;
 
 import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.Objects;
 
 /**
@@ -17,7 +18,7 @@ import java.util.Objects;
  * components.  The module keeps per-piece caches and incrementally updates only the
  * pieces affected by a move so the evaluation pipeline can reuse the tapered score.
  */
-public final class ActivityModule implements EvaluationModule {
+public final class ActivityModule implements EvaluationModule, ContextAwareEvaluationModule {
 
     private static final int WHITE = 0;
     private static final int BLACK = 1;
@@ -237,6 +238,11 @@ public final class ActivityModule implements EvaluationModule {
     @Override
     public void markDirty() {
         dirty = true;
+    }
+
+    @Override
+    public EnumSet<EvaluationContextAspect> getContextAspects() {
+        return EnumSet.of(EvaluationContextAspect.STRUCTURE);
     }
 
     private boolean ensureInitialized(MoveContext moveContext) {

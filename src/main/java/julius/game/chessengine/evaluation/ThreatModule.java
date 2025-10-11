@@ -5,6 +5,7 @@ import julius.game.chessengine.board.ImmutableBoardView;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.tuning.Tuning;
 
+import java.util.EnumSet;
 import java.util.Objects;
 
 import static julius.game.chessengine.helper.PawnMoveTables.PAWN_ATTACKS;
@@ -14,7 +15,7 @@ import static julius.game.chessengine.helper.PawnMoveTables.PAWN_ATTACKS;
  * pieces. The module recomputes its contribution when marked dirty rather than maintaining
  * incremental state.
  */
-public final class ThreatModule implements EvaluationModule {
+public final class ThreatModule implements EvaluationModule, ContextAwareEvaluationModule {
 
     private static final int WHITE = 0;
     private static final int BLACK = 1;
@@ -104,6 +105,11 @@ public final class ThreatModule implements EvaluationModule {
     @Override
     public void markDirty() {
         dirty = true;
+    }
+
+    @Override
+    public EnumSet<EvaluationContextAspect> getContextAspects() {
+        return EnumSet.of(EvaluationContextAspect.STRUCTURE, EvaluationContextAspect.ATTACK_MAPS);
     }
 
     private int evaluateSide(ImmutableBoardView board, boolean isWhite, long friendlyAttacks, long enemyAttacks) {

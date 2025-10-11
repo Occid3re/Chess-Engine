@@ -4,6 +4,7 @@ import julius.game.chessengine.board.ImmutableBoardView;
 import julius.game.chessengine.helper.PawnHelper;
 import julius.game.chessengine.tuning.Tuning;
 
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -18,7 +19,7 @@ import static julius.game.chessengine.helper.PawnMoveTables.PAWN_PUSHES;
  * components so the evaluation pipeline and {@link julius.game.chessengine.utils.Score}
  * can blend them consistently.
  */
-public final class PawnStructureModule implements EvaluationModule, MaterialModule.PawnChangeListener {
+public final class PawnStructureModule implements EvaluationModule, MaterialModule.PawnChangeListener, ContextAwareEvaluationModule {
     private static final int WHITE = 0;
     private static final int BLACK = 1;
     private static final long WHITE_ADVANCED_RANKS = RankMasks[3] | RankMasks[4] | RankMasks[5] | RankMasks[6];
@@ -251,6 +252,11 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
     @Override
     public void markDirty() {
         dirty = true;
+    }
+
+    @Override
+    public EnumSet<EvaluationContextAspect> getContextAspects() {
+        return EnumSet.of(EvaluationContextAspect.STRUCTURE, EvaluationContextAspect.ATTACK_MAPS);
     }
 
     @Override

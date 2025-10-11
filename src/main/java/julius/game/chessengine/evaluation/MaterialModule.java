@@ -1,6 +1,7 @@
 package julius.game.chessengine.evaluation;
 
 import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.Objects;
 
 import julius.game.chessengine.board.MoveHelper;
@@ -10,7 +11,7 @@ import julius.game.chessengine.tuning.Tuning;
  * Tracks per-side material using incremental updates so the evaluation pipeline can
  * access midgame and endgame material totals without rescanning the board.
  */
-public final class MaterialModule implements EvaluationModule {
+public final class MaterialModule implements EvaluationModule, ContextAwareEvaluationModule {
 
     public static final int DEFAULT_PAWN_VALUE = 100;
     public static final int DEFAULT_KNIGHT_VALUE = 320;
@@ -134,6 +135,11 @@ public final class MaterialModule implements EvaluationModule {
     @Override
     public void markDirty() {
         dirty = true;
+    }
+
+    @Override
+    public EnumSet<EvaluationContextAspect> getContextAspects() {
+        return EnumSet.of(EvaluationContextAspect.STRUCTURE);
     }
 
     private boolean isForwardMove(MoveContext moveContext) {

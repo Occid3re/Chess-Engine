@@ -9,6 +9,7 @@ import julius.game.chessengine.helper.RookHelper;
 import julius.game.chessengine.tuning.Tuning;
 
 import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.Objects;
 
 import static julius.game.chessengine.helper.BitHelper.FileMasks;
@@ -21,7 +22,7 @@ import static julius.game.chessengine.helper.PawnMoveTables.PAWN_ATTACKS;
  * map from king-zone squares to aggregated attacker weights together with pawn-shield metadata so
  * the evaluation pipeline can refresh the score incrementally.
  */
-public final class KingSafetyModule implements EvaluationModule {
+public final class KingSafetyModule implements EvaluationModule, ContextAwareEvaluationModule {
 
     private static final int WHITE = 0;
     private static final int BLACK = 1;
@@ -137,6 +138,11 @@ public final class KingSafetyModule implements EvaluationModule {
     @Override
     public void markDirty() {
         dirty = true;
+    }
+
+    @Override
+    public EnumSet<EvaluationContextAspect> getContextAspects() {
+        return EnumSet.of(EvaluationContextAspect.STRUCTURE, EvaluationContextAspect.ATTACK_MAPS);
     }
 
     public KingSafetyView evaluate(BitBoard board) {
