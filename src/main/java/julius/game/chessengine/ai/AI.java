@@ -2641,9 +2641,25 @@ public class AI {
         }
 
         final SortBuffers buffers = sortBuffers.get();
+        buffers.clearBuckets();
         final int[] moveBuffer = buffers.moveBuffer;
-        final int[] scoreBuffer = buffers.scoreBuffer;
-        final long[] sortKeys = buffers.sortKeyBuffer;
+
+        final IntArrayList ttMoves = buffers.ttMoves;
+        final IntArrayList ttScores = buffers.ttScores;
+        final IntArrayList promotionMoves = buffers.promotionMoves;
+        final IntArrayList promotionScores = buffers.promotionScores;
+        final IntArrayList goodCaptureMoves = buffers.goodCaptureMoves;
+        final IntArrayList goodCaptureScores = buffers.goodCaptureScores;
+        final IntArrayList equalCaptureMoves = buffers.equalCaptureMoves;
+        final IntArrayList equalCaptureScores = buffers.equalCaptureScores;
+        final IntArrayList killer0Moves = buffers.killer0Moves;
+        final IntArrayList killer0Scores = buffers.killer0Scores;
+        final IntArrayList killer1Moves = buffers.killer1Moves;
+        final IntArrayList killer1Scores = buffers.killer1Scores;
+        final IntArrayList quietMoves = buffers.quietMoves;
+        final IntArrayList quietScores = buffers.quietScores;
+        final IntArrayList badCaptureMoves = buffers.badCaptureMoves;
+        final IntArrayList badCaptureScores = buffers.badCaptureScores;
 
         final Heuristics heuristics = threadHeuristics.get();
         final int[][] killerMoves = heuristics.killers;
@@ -2651,17 +2667,6 @@ public class AI {
         final int[][] counterMove = heuristics.counter;
 
         final int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
-
-        // Category encoding (higher is earlier). Ties are resolved via the score field in
-        // the packed sort key so categories remain a stable first-level bucket.
-        final int categoryTt = moveOrderingParameters.categoryTt();
-        final int categoryPromotion = moveOrderingParameters.categoryPromotion();
-        final int categoryCaptureGood = moveOrderingParameters.categoryCaptureGood();
-        final int categoryCaptureEqual = moveOrderingParameters.categoryCaptureEqual();
-        final int categoryKiller0 = moveOrderingParameters.categoryKiller0();
-        final int categoryKiller1 = moveOrderingParameters.categoryKiller1();
-        final int categoryQuiet = moveOrderingParameters.categoryQuiet();
-        final int categoryCaptureBad = moveOrderingParameters.categoryCaptureBad();
 
         final int promotionBonus = moveOrderingParameters.promotionBonus();
         final int killer0Bonus = moveOrderingParameters.killer0Bonus();
@@ -2688,13 +2693,8 @@ public class AI {
         final int cm = (prevFrom >= 0) ? counterMove[prevFrom][prevTo] : -1;
         final int counterMoveBonus = moveOrderingParameters.counterMoveBonus();
 
-        int ttIndex = -1;
-
         for (int i = 0; i < size; i++) {
             final int moveInt = moves.getInt(i);
-            if (moveInt == ttMove) {
-                ttIndex = i;
-            }
 
             final boolean isCapture = MoveHelper.isCapture(moveInt);
             final boolean isPromotion = MoveHelper.isPawnPromotionMove(moveInt);
@@ -2706,14 +2706,14 @@ public class AI {
                 hasSee = true;
             }
 
-            int category;
             int score;
 
             if (moveInt == ttMove) {
-                category = categoryTt;
                 score = maxScore; // max within bucket
+                ttMoves.add(moveInt);
+                ttScores.add(score);
+                continue;
             } else if (isPromotion) {
-                category = categoryPromotion;
                 int base = calculateMvvLvaScore(moveInt);
                 int seeBonus = 0;
                 if (hasSee) {
@@ -2723,74 +2723,118 @@ public class AI {
                     seeBonus = cappedSee * promotionSeeMultiplier;
                 }
                 score = base + promotionBonus + seeBonus;
+                if (score < 0) score = 0;
+                if (score > maxScore) score = maxScore;
+                promotionMoves.add(moveInt);
+                promotionScores.add(score);
+                continue;
             } else if (isCapture) {
                 final int mvvLva = calculateMvvLvaScore(moveInt);
-                if (seeValue > 0) {
-                    category = categoryCaptureGood;
-                } else if (seeValue == 0) {
-                    category = categoryCaptureEqual;
-                } else {
-                    category = categoryCaptureBad;
-                }
                 int cappedSee = captureSeeClamp > 0
                         ? Math.max(-captureSeeClamp, Math.min(captureSeeClamp, seeValue))
                         : seeValue;
                 score = (mvvLva * captureMvvMultiplier) + (cappedSee * captureSeeMultiplier);
                 if (score < 0) score = 0;
+                if (score > maxScore) score = maxScore;
+                if (seeValue > 0) {
+                    goodCaptureMoves.add(moveInt);
+                    goodCaptureScores.add(score);
+                } else if (seeValue == 0) {
+                    equalCaptureMoves.add(moveInt);
+                    equalCaptureScores.add(score);
+                } else {
+                    badCaptureMoves.add(moveInt);
+                    badCaptureScores.add(score);
+                }
+                continue;
             } else if (moveInt == k0) {
-                category = categoryKiller0;
                 score = killerMoveScore + killer0Bonus;
+                if (score < 0) score = 0;
+                if (score > maxScore) score = maxScore;
+                killer0Moves.add(moveInt);
+                killer0Scores.add(score);
+                continue;
             } else if (moveInt == k1) {
-                category = categoryKiller1;
                 score = killerMoveScore + killer1Bonus;
+                if (score < 0) score = 0;
+                if (score > maxScore) score = maxScore;
+                killer1Moves.add(moveInt);
+                killer1Scores.add(score);
+                continue;
             } else {
                 final int from = moveInt & 0x3F;
                 final int to = (moveInt >>> 6) & 0x3F;
-                category = categoryQuiet;
                 score = historyTable[from][to];
                 if (moveInt == cm) score += counterMoveBonus;
                 if (MoveHelper.isCastlingMove(moveInt)) {
                     score += castlingBonus;
                 }
+                if (score < 0) score = 0;
+                if (score > maxScore) score = maxScore;
+                quietMoves.add(moveInt);
+                quietScores.add(score);
+                continue;
             }
-
-            moveBuffer[i] = moveInt;
-            scoreBuffer[i] = score;
-
-            int s = score;
-            if (s < 0) s = 0;
-            else if (s > maxScore) s = maxScore;
-            sortKeys[i] = (((long) category) << 56) | (((long) s) << 32) | (moveInt & 0xFFFFFFFFL);
         }
 
-        // *** FIX: always hoist the TT move (if any) to index 0, and sort only the remainder.
-        int sortStart = 0;
-        if (ttIndex >= 0) {
-            if (ttIndex != 0) {
-                long tmp = sortKeys[0];
-                sortKeys[0] = sortKeys[ttIndex];
-                sortKeys[ttIndex] = tmp;
-            }
-            sortStart = 1; // never sort the TT slot
-        }
-
-        Arrays.sort(sortKeys, sortStart, size); // ascending
-
-        // Emit in descending order; if TT exists, ensure it is first
         int outIndex = 0;
-        if (ttIndex >= 0) {
-            moveBuffer[outIndex++] = (int) (sortKeys[0] & 0xFFFFFFFFL); // guaranteed TT move
-            for (int i = size - 1; i >= 1; i--) {
-                moveBuffer[outIndex++] = (int) (sortKeys[i] & 0xFFFFFFFFL);
-            }
-        } else {
-            for (int i = size - 1; i >= 0; i--) {
-                moveBuffer[outIndex++] = (int) (sortKeys[i] & 0xFFFFFFFFL);
-            }
+
+        if (!ttMoves.isEmpty()) {
+            outIndex = flushBucket(ttMoves, ttScores, moveBuffer, outIndex);
         }
+
+        sortBucketDescending(promotionMoves, promotionScores);
+        outIndex = flushBucket(promotionMoves, promotionScores, moveBuffer, outIndex);
+
+        sortBucketDescending(goodCaptureMoves, goodCaptureScores);
+        outIndex = flushBucket(goodCaptureMoves, goodCaptureScores, moveBuffer, outIndex);
+
+        sortBucketDescending(equalCaptureMoves, equalCaptureScores);
+        outIndex = flushBucket(equalCaptureMoves, equalCaptureScores, moveBuffer, outIndex);
+
+        sortBucketDescending(killer0Moves, killer0Scores);
+        outIndex = flushBucket(killer0Moves, killer0Scores, moveBuffer, outIndex);
+
+        sortBucketDescending(killer1Moves, killer1Scores);
+        outIndex = flushBucket(killer1Moves, killer1Scores, moveBuffer, outIndex);
+
+        sortBucketDescending(quietMoves, quietScores);
+        outIndex = flushBucket(quietMoves, quietScores, moveBuffer, outIndex);
+
+        sortBucketDescending(badCaptureMoves, badCaptureScores);
+        outIndex = flushBucket(badCaptureMoves, badCaptureScores, moveBuffer, outIndex);
 
         MoveContainerUtils.overwriteFromBuffer(moves, moveBuffer, size);
         return moves;
+    }
+
+    private static void sortBucketDescending(IntArrayList moves, IntArrayList scores) {
+        final int size = moves.size();
+        for (int i = 1; i < size; i++) {
+            int move = moves.getInt(i);
+            int score = scores.getInt(i);
+            int j = i - 1;
+            while (j >= 0 && scores.getInt(j) < score) {
+                moves.set(j + 1, moves.getInt(j));
+                scores.set(j + 1, scores.getInt(j));
+                j--;
+            }
+            moves.set(j + 1, move);
+            scores.set(j + 1, score);
+        }
+    }
+
+    private static int flushBucket(IntArrayList moves, IntArrayList scores, int[] dest, int destIndex) {
+        final int size = moves.size();
+        if (size == 0) {
+            scores.clear();
+            return destIndex;
+        }
+        System.arraycopy(moves.elements(), 0, dest, destIndex, size);
+        destIndex += size;
+        moves.clear();
+        scores.clear();
+        return destIndex;
     }
 
 
