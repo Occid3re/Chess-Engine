@@ -73,12 +73,19 @@ class MatchResult:
 
     @property
     def elo_diff(self) -> float:
-        score = min(max(self.points_fraction, 1e-4), 1 - 1e-4)
-        return -400.0 * math.log10((1.0 / score) - 1.0)
+        if self.total_games == 0:
+            return 0.0
+        # Map the points fraction linearly so a perfect loss is -100,
+        # a perfect win is +100, and everything else lies in-between.
+        return (self.points_fraction * 200.0) - 100.0
 
     @property
     def implied_rating(self) -> float:
-        return self.opponent_elo + self.elo_diff
+        return self.elo_diff
+
+    @property
+    def implied_opponent_elo(self) -> float:
+        return self.opponent_elo + self.implied_rating
 
     @property
     def avg_time_per_game(self) -> float:
@@ -89,6 +96,7 @@ class MatchResult:
             f"Score {self.engine_name} vs {self.opponent_name}: "
             f"{self.wins}-{self.losses}-{self.draws} ({self.points_fraction*100:.1f}% points), "
             f"ΔElo={self.elo_diff:+.1f}, implied rating={self.implied_rating:.1f}, "
+            f"opponent estimate={self.implied_opponent_elo:.1f}, "
             f"avg time/game={self.avg_time_per_game:.2f}s over {self.total_games} games"
         )
 
@@ -445,9 +453,9 @@ def run_match(args: argparse.Namespace, tuning_path: Path) -> MatchResult:
 
 
 def adapt_opponent_elo(args: argparse.Namespace, result: MatchResult, *, context: str) -> None:
-    """Update the opponent Elo to the rounded-up implied rating from the last match."""
+    """Update the opponent Elo to the rounded-up implied opponent rating from the last match."""
 
-    implied_next_elo = int(math.ceil(result.implied_rating))
+    implied_next_elo = int(math.ceil(result.implied_opponent_elo))
     floor_attr = "_opponent_elo_floor"
     current_floor = getattr(args, floor_attr, args.opponent_elo)
 
@@ -768,6 +776,7 @@ def main() -> None:
                         "points_fraction": candidate_result.points_fraction,
                         "elo_diff": candidate_result.elo_diff,
                         "implied_rating": candidate_result.implied_rating,
+                        "implied_opponent_elo": candidate_result.implied_opponent_elo,
                         "avg_time_per_game": candidate_result.avg_time_per_game,
                         "duration_s": candidate_result.duration_s,
                     },
@@ -778,6 +787,7 @@ def main() -> None:
                         "points_fraction": best_result.points_fraction,
                         "elo_diff": best_result.elo_diff,
                         "implied_rating": best_result.implied_rating,
+                        "implied_opponent_elo": best_result.implied_opponent_elo,
                         "avg_time_per_game": best_result.avg_time_per_game,
                         "duration_s": best_result.duration_s,
                     },
