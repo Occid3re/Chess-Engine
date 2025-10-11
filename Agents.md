@@ -138,3 +138,6 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
 ### 2025-10-07 Time management + evaluation notes
 * The engine now relies on `TimeManager` (under `ai/time/`) for soft/hard deadlines. Update UCI tests to expect the bullet promotion allocation of **250ms** (the Java planner now mirrors the conservative reserves used in `src/main/resources/py/lichess_bot.py`). Document any future tuning against that Python helper here so the two stay aligned.
 * `ScoreEvaluationTest.backwardPawnIsPenalized` now validates the pawn-structure view directly. The overall blended score remains neutral with current tuning, so assert against `PawnStructureModule.backwardPawnPenalty()` instead of a blended delta.
+
+## Performance checkpoints
+* 2025-10-11 – `BitBoardTest` runtime improved from **~59.6s** to **~43.2s** using `time mvn -Djava.version=21 -Dmaven.compiler.release=21 -Dmaven.compiler.enablePreview=true -DargLine="--enable-preview" -Dtest=BitBoardTest test`.

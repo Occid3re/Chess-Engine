@@ -6,6 +6,7 @@ import julius.game.chessengine.tuning.Tuning;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
 
@@ -16,15 +17,22 @@ import java.util.Objects;
  */
 public final class EvaluationPipeline {
 
+    private enum ContextAspect {
+        BOARD_STRUCTURE,
+        ATTACK_MAPS
+    }
+
     private static final class ModuleState {
         private final EvaluationModule module;
         private final EvaluationWeights.ModuleWeight weight;
+        private final EnumSet<ContextAspect> dependencies;
         private int midgameCache;
         private int endgameCache;
 
         private ModuleState(EvaluationModule module, EvaluationWeights.ModuleWeight weight) {
             this.module = module;
             this.weight = weight;
+            this.dependencies = dependenciesFor(module);
             this.module.markDirty();
         }
     }
@@ -37,6 +45,7 @@ public final class EvaluationPipeline {
     private boolean aggregateDirty = true;
     private int midgameTotal;
     private int endgameTotal;
+    private ContextFingerprint lastFingerprint;
 
     public EvaluationPipeline(List<? extends EvaluationModule> modules) {
         this(modules, EvaluationWeights.identity());
@@ -65,6 +74,7 @@ public final class EvaluationPipeline {
         initialized = true;
         aggregateDirty = true;
         refreshTotals();
+        lastFingerprint = ContextFingerprint.capture(context);
     }
 
     public void updateContext(EvaluationContext context) {
@@ -73,7 +83,7 @@ public final class EvaluationPipeline {
             return;
         }
         this.context = Objects.requireNonNull(context, "context");
-        markAllDirty();
+        handleContextChange(ContextFingerprint.capture(context));
     }
 
     public void applyMove(MoveContext moveContext) {
@@ -161,6 +171,156 @@ public final class EvaluationPipeline {
             state.module.markDirty();
         }
         aggregateDirty = true;
+    }
+
+    private void handleContextChange(ContextFingerprint fingerprint) {
+        if (lastFingerprint == null) {
+            markAllDirty();
+            lastFingerprint = fingerprint;
+            return;
+        }
+
+        ContextChangeSet changeSet = ContextChangeSet.between(lastFingerprint, fingerprint);
+        if (changeSet.isEmpty()) {
+            lastFingerprint = fingerprint;
+            return;
+        }
+
+        boolean modulesMarkedDirty = false;
+        if (changeSet.hasStructuralChanges()) {
+            for (ModuleState state : modules) {
+                if (changeSet.affects(state.dependencies)) {
+                    state.module.markDirty();
+                    modulesMarkedDirty = true;
+                }
+            }
+        }
+
+        if (modulesMarkedDirty || changeSet.isGameStateChanged()) {
+            aggregateDirty = true;
+        }
+
+        lastFingerprint = fingerprint;
+    }
+
+    private static EnumSet<ContextAspect> dependenciesFor(EvaluationModule module) {
+        if (module instanceof MaterialModule || module instanceof ActivityModule) {
+            return EnumSet.of(ContextAspect.BOARD_STRUCTURE);
+        }
+        if (module instanceof PawnStructureModule
+                || module instanceof ThreatModule
+                || module instanceof KingSafetyModule) {
+            return EnumSet.of(ContextAspect.BOARD_STRUCTURE, ContextAspect.ATTACK_MAPS);
+        }
+        return EnumSet.allOf(ContextAspect.class);
+    }
+
+    private static final class ContextFingerprint {
+        private final long boardSignature;
+        private final long attackSignature;
+        private final GameStateEnum gameState;
+
+        private ContextFingerprint(long boardSignature, long attackSignature, GameStateEnum gameState) {
+            this.boardSignature = boardSignature;
+            this.attackSignature = attackSignature;
+            this.gameState = gameState;
+        }
+
+        private static ContextFingerprint capture(EvaluationContext context) {
+            Objects.requireNonNull(context, "context");
+            long boardSignature = 0L;
+
+            boardSignature = mix(boardSignature, context.getWhitePawns());
+            boardSignature = mix(boardSignature, context.getBlackPawns());
+            boardSignature = mix(boardSignature, context.getWhiteKnights());
+            boardSignature = mix(boardSignature, context.getBlackKnights());
+            boardSignature = mix(boardSignature, context.getWhiteBishops());
+            boardSignature = mix(boardSignature, context.getBlackBishops());
+            boardSignature = mix(boardSignature, context.getWhiteRooks());
+            boardSignature = mix(boardSignature, context.getBlackRooks());
+            boardSignature = mix(boardSignature, context.getWhiteQueens());
+            boardSignature = mix(boardSignature, context.getBlackQueens());
+            boardSignature = mix(boardSignature, context.getWhiteKing());
+            boardSignature = mix(boardSignature, context.getBlackKing());
+            boardSignature = mix(boardSignature, context.getWhitePieces());
+            boardSignature = mix(boardSignature, context.getBlackPieces());
+            boardSignature = mix(boardSignature, context.getAllPieces());
+            boardSignature = mix(boardSignature, context.isWhiteToMove() ? 1L : 0L);
+            boardSignature = mix(boardSignature, context.getLastMoveDoubleStepPawnIndex());
+            boardSignature = mix(boardSignature, context.isWhiteKingMoved());
+            boardSignature = mix(boardSignature, context.isBlackKingMoved());
+            boardSignature = mix(boardSignature, context.isWhiteRookA1Moved());
+            boardSignature = mix(boardSignature, context.isWhiteRookH1Moved());
+            boardSignature = mix(boardSignature, context.isBlackRookA8Moved());
+            boardSignature = mix(boardSignature, context.isBlackRookH8Moved());
+            boardSignature = mix(boardSignature, context.isWhiteKingHasCastled());
+            boardSignature = mix(boardSignature, context.isBlackKingHasCastled());
+            boardSignature = mix(boardSignature, context.getHalfmoveClock());
+            boardSignature = mix(boardSignature, context.getFullmoveNumber());
+
+            long attackSignature = 0L;
+            attackSignature = mix(attackSignature, context.getWhiteAttackMap());
+            attackSignature = mix(attackSignature, context.getBlackAttackMap());
+
+            return new ContextFingerprint(boardSignature, attackSignature, context.getGameState());
+        }
+
+        private static long mix(long seed, long value) {
+            long result = seed;
+            result ^= value + 0x9e3779b97f4a7c15L + (result << 6) + (result >>> 2);
+            return result;
+        }
+
+        private static long mix(long seed, int value) {
+            return mix(seed, Integer.toUnsignedLong(value));
+        }
+
+        private static long mix(long seed, boolean value) {
+            return mix(seed, value ? 1L : 0L);
+        }
+    }
+
+    private static final class ContextChangeSet {
+        private final EnumSet<ContextAspect> aspects;
+        private final boolean gameStateChanged;
+
+        private ContextChangeSet(EnumSet<ContextAspect> aspects, boolean gameStateChanged) {
+            this.aspects = aspects;
+            this.gameStateChanged = gameStateChanged;
+        }
+
+        private static ContextChangeSet between(ContextFingerprint previous, ContextFingerprint current) {
+            EnumSet<ContextAspect> aspects = EnumSet.noneOf(ContextAspect.class);
+            if (previous.boardSignature != current.boardSignature) {
+                aspects.add(ContextAspect.BOARD_STRUCTURE);
+            }
+            if (previous.attackSignature != current.attackSignature) {
+                aspects.add(ContextAspect.ATTACK_MAPS);
+            }
+            boolean gameStateChanged = !Objects.equals(previous.gameState, current.gameState);
+            return new ContextChangeSet(aspects, gameStateChanged);
+        }
+
+        private boolean hasStructuralChanges() {
+            return !aspects.isEmpty();
+        }
+
+        private boolean affects(EnumSet<ContextAspect> dependencies) {
+            for (ContextAspect aspect : aspects) {
+                if (dependencies.contains(aspect)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private boolean isGameStateChanged() {
+            return gameStateChanged;
+        }
+
+        private boolean isEmpty() {
+            return aspects.isEmpty() && !gameStateChanged;
+        }
     }
 
     private int clamp(int phase) {
