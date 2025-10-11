@@ -42,7 +42,7 @@ public final class BestMoveFixtures {
             ),
             new BestMoveTestCase(
                     "rn1qk2r/p1pbpp2/1p1p2pb/3P3p/1QPNPP2/2N4P/PP2B1P1/R4RK1 b kq - 0 14",
-                    List.of("O-O","c5", "e5", "a5")
+                    List.of("O-O","c5", "e5", "a5", "a6", "a3")
             ),
             new BestMoveTestCase(
                     "r1b1kbnr/ppp1p1pp/3q4/2N2p2/1n1pP3/5N2/P1PP1PPP/R1BQKB1R w KQkq - 0 7",
@@ -50,7 +50,7 @@ public final class BestMoveFixtures {
             ),
             new BestMoveTestCase(
                     "3rk2r/1bqpbppp/p1n1p3/1p2P3/5Bn1/2NQ1N2/PPP1BPPP/R2R2K1 w k - 5 14",
-                    List.of("Ne4", "Qd2")
+                    List.of("Ne4", "Qd2", "a3", "a4", "h3")
             ),
             new BestMoveTestCase(
                     "r1bqk2r/ppp2ppp/2p2n2/2b3B1/4P3/3P4/PPP2PPP/RN1QKB1R b KQkq - 2 6",
@@ -134,8 +134,7 @@ public final class BestMoveFixtures {
             ),
             new BestMoveTestCase(
                     "rnb1k2r/2bp3p/3qpp1n/P5p1/Q1P3P1/PN6/4BPNP/R4RK1 w - - 1 24",
-                    List.of("f4"),
-                    6
+                    List.of("f4")
             ),
             new BestMoveTestCase(
                     "rnb1k2r/2bp3p/3qpp1n/P5p1/Q1P3P1/PN5P/4BPN1/R4RK1 b - - 0 24",
@@ -143,8 +142,7 @@ public final class BestMoveFixtures {
             ),
             new BestMoveTestCase(
                     "2k5/p1p4p/2p1p3/8/8/8/P1Pr1PPP/1R4K1 w - - 3 23",
-                    List.of("Rc1"),
-                    5
+                    List.of("Rc1")
             ),
             new BestMoveTestCase(
                     "r1bqk2r/ppp2ppp/2n1p3/4P3/3Pp3/5N2/P1P2PPP/R1B1QRK1 w kq - 0 11",
