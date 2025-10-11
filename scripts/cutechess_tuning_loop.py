@@ -16,6 +16,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
+import re
+
 
 try:
     from auto_tuning_loop import (
@@ -162,53 +164,132 @@ def maybe_build_jar(project_root: Path, mvn: str, extra_args: Sequence[str]) -> 
     if proc.returncode != 0:
         raise RuntimeError("Maven package command failed")
 
+# put this near SCORE_PATTERN
+FINISHED_RE = re.compile(
+    r"^Finished game \d+ \((?P<left>.+?) vs (?P<right>.+?)\):\s*(?P<res>1-0|0-1|1/2-1/2)"
+)
+
+# Cutechess summary and per-game lines
+SCORE_PATTERN = re.compile(
+    r"Score of (?P<first>.+?) vs (?P<second>.+?):\s+"
+    r"(?P<wins>\d+)\s*-\s*(?P<losses>\d+)\s*-\s*(?P<draws>\d+)\s*\[(?P<score>[0-9.]+)\]"
+)
+FINISHED_RE = re.compile(
+    r"^Finished game \d+ \((?P<left>.+?) vs (?P<right>.+?)\):\s*(?P<res>1-0|0-1|1/2-1/2)"
+)
 
 def parse_score(
-    stdout: str,
-    engine_name: str,
-    opponent_name: str,
-    opponent_elo: float,
-    duration_s: float,
-    command: Sequence[str],
-    stderr: str,
-) -> MatchResult:
-    engine_first = None
-    opponent_first = None
+        stdout: str,
+        engine_name: str,
+        opponent_name: str,
+        opponent_elo: float,
+        duration_s: float,
+        command: Sequence[str],
+        stderr: str,
+        verbose: bool = True,  # you can disable prints by setting this to False
+):
+    """
+    Tally results from per-game lines (robust to engine order),
+    with a fallback to the 'Score of A vs B' summary (also robust to either order).
+    """
+    wins = losses = draws = 0
 
-    for line in stdout.splitlines():
-        match = SCORE_PATTERN.search(line)
-        if not match:
+    if verbose:
+        print(f"\n[parse_score] Parsing results for {engine_name} vs {opponent_name}...")
+
+    # ---- Pass 1: count from per-game lines ----
+    for raw in stdout.splitlines():
+        line = raw.strip()
+        m = FINISHED_RE.search(line)
+        if not m:
             continue
-        first = match.group("first").strip()
-        second = match.group("second").strip()
+        left = m.group("left").strip()
+        right = m.group("right").strip()
+        res = m.group("res")
 
-        if first == engine_name and second == opponent_name:
-            engine_first = match
-        elif first == opponent_name and second == engine_name:
-            opponent_first = match
+        if {left, right} != {engine_name, opponent_name}:
+            continue
 
-    if engine_first is not None:
-        wins = int(engine_first.group("wins"))
-        losses = int(engine_first.group("losses"))
-        draws = int(engine_first.group("draws"))
-    elif opponent_first is not None:
-        wins = int(opponent_first.group("losses"))
-        losses = int(opponent_first.group("wins"))
-        draws = int(opponent_first.group("draws"))
-    else:
-        raise ValueError(
-            "Unable to locate cutechess score summary for the configured engine "
-            f"({engine_name} vs {opponent_name})."
+        engine_on_left = (left == engine_name)
+        if res == "1-0":
+            if engine_on_left: wins += 1
+            else: losses += 1
+        elif res == "0-1":
+            if engine_on_left: losses += 1
+            else: wins += 1
+        else:
+            draws += 1
+
+        if verbose:
+            print(f"  Finished game: {left} vs {right} -> {res}")
+
+    total = wins + losses + draws
+    if total > 0:
+        score = (wins + 0.5 * draws) / total
+        if verbose:
+            print(f"[parse_score] Counted {total} games: {wins}-{losses}-{draws} ({score*100:.1f}%) from per-game lines.")
+        return MatchResult(
+            engine_name=engine_name,
+            opponent_name=opponent_name,
+            wins=wins,
+            losses=losses,
+            draws=draws,
+            score=score,
+            opponent_elo=opponent_elo,
+            duration_s=duration_s,
+            stdout=stdout,
+            stderr=stderr,
+            command=command,
         )
 
-    total_games = wins + losses + draws
-    score = 0.0 if total_games == 0 else (wins + 0.5 * draws) / total_games
+    # ---- Pass 2: fallback to summary lines ----
+    if verbose:
+        print("[parse_score] No per-game lines found; falling back to summary parsing...")
+
+    engine_first = None
+    opponent_first = None
+    for raw in stdout.splitlines():
+        line = raw.strip()
+        m = SCORE_PATTERN.search(line)
+        if not m:
+            continue
+        first = m.group("first").strip()
+        second = m.group("second").strip()
+        if first == engine_name and second == opponent_name:
+            engine_first = m
+        elif first == opponent_name and second == engine_name:
+            opponent_first = m
+
+    if engine_first is not None:
+        w = int(engine_first.group("wins"))
+        l = int(engine_first.group("losses"))
+        d = int(engine_first.group("draws"))
+    elif opponent_first is not None:
+        w = int(opponent_first.group("losses"))
+        l = int(opponent_first.group("wins"))
+        d = int(opponent_first.group("draws"))
+    else:
+        print("[parse_score] ERROR: No match summary lines found.")
+        print("--- STDOUT ---")
+        print(stdout)
+        print("--- STDERR ---")
+        print(stderr)
+        raise ValueError(
+            f"Could not parse results for ({engine_name} vs {opponent_name}). "
+            "No per-game or summary lines matched."
+        )
+
+    total = w + l + d
+    score = (w + 0.5 * d) / total if total else 0.0
+    if verbose:
+        print(f"[parse_score] Fallback result: {w}-{l}-{d} ({score*100:.1f}%) from summary line(s).")
+
     return MatchResult(
         engine_name=engine_name,
         opponent_name=opponent_name,
-        wins=wins,
-        losses=losses,
-        draws=draws,
+        wins=w,
+        losses=l,
+        draws=d,
         score=score,
         opponent_elo=opponent_elo,
         duration_s=duration_s,
@@ -216,6 +297,9 @@ def parse_score(
         stderr=stderr,
         command=command,
     )
+
+
+
 
 
 def derive_java_args(args: argparse.Namespace, tuning_path: Path) -> List[str]:
@@ -298,18 +382,66 @@ def build_cutechess_command(args: argparse.Namespace, tuning_path: Path) -> List
 
 def run_match(args: argparse.Namespace, tuning_path: Path) -> MatchResult:
     command = build_cutechess_command(args, tuning_path)
-    print("Executing:", " ".join(shlex.quote(c) for c in command))
+
+    # === DEBUG INFO BEFORE EXECUTION ===
+    print("\n=== [DEBUG] Invoking cutechess-cli ===")
+    print("Working directory :", os.getcwd())
+    print("Command (split)   :", command)
+    print("Command (joined)  :", " ".join(shlex.quote(c) for c in command))
+    print("==============================\n")
+
     start = time.time()
-    proc = subprocess.run(command, capture_output=True, text=True, check=False)
+    try:
+        proc = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=3600,  # 1h safeguard
+        )
+    except Exception as e:
+        print(f"[DEBUG] Exception while running cutechess-cli: {e}")
+        raise
+
     duration = time.time() - start
+
     stdout = proc.stdout or ""
     stderr = proc.stderr or ""
+
+    # === DEBUG INFO AFTER EXECUTION ===
+    print("\n=== [DEBUG] cutechess-cli finished ===")
+    print(f"Return code: {proc.returncode}")
+    print(f"Duration   : {duration:.2f} seconds")
+    print("--- STDOUT ---")
+    print(stdout[:2000] + ("\n... [truncated]" if len(stdout) > 2000 else ""))  # prevent flooding
+    print("--- STDERR ---")
+    print(stderr[:2000] + ("\n... [truncated]" if len(stderr) > 2000 else ""))
+    print("==============================\n")
+
+    # Save raw logs for later inspection
+    log_dir = Path("logs/raw_cutechess")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    timestamp_str = time.strftime("%Y%m%d-%H%M%S")
+    log_file = log_dir / f"cutechess_{timestamp_str}.log"
+    with log_file.open("w", encoding="utf-8") as f:
+        f.write(f"# Command:\n{' '.join(shlex.quote(c) for c in command)}\n\n")
+        f.write(f"# Return code: {proc.returncode}\n")
+        f.write(f"# Duration: {duration:.2f}s\n\n")
+        f.write("### STDOUT ###\n")
+        f.write(stdout)
+        f.write("\n\n### STDERR ###\n")
+        f.write(stderr)
+    print(f"[DEBUG] Full cutechess log saved to: {log_file}")
+
     if proc.returncode != 0:
         raise RuntimeError(
-            "cutechess-cli exited with non-zero status "
-            f"{proc.returncode}.\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}"
+            f"cutechess-cli exited with non-zero status {proc.returncode}.\n"
+            f"See log file: {log_file}"
         )
-    return parse_score(stdout, args.engine_name, args.opponent_name, args.opponent_elo, duration, command, stderr)
+
+    return parse_score(
+        stdout, args.engine_name, args.opponent_name, args.opponent_elo, duration, command, stderr
+    )
 
 
 def accept_match_candidate(
@@ -395,11 +527,11 @@ def main() -> None:
     parser.add_argument("--stockfish", type=str, required=True)
     parser.add_argument("--java", type=str, default="java")
     parser.add_argument("--jar", type=str, default=None)
-    parser.add_argument("--engine-name", type=str, default="ChessEngine")
     parser.add_argument("--opponent-name", type=str, default="SF2000")
-    parser.add_argument("--opponent-elo", type=float, default=2000.0)
+    parser.add_argument("--opponent-elo", type=int, default=2000)
     parser.add_argument("--opponent-threads", type=int, default=1)
     parser.add_argument("--opponent-hash", type=int, default=64)
+    parser.add_argument("--engine-name", type=str, default="Alieknek")
     parser.add_argument("--time-control", type=str, default="10+0.1")
     parser.add_argument("--rounds", type=int, default=8)
     parser.add_argument("--games", type=int, default=0, help="Override total games instead of 2*rounds")
