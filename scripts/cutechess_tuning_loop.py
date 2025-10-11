@@ -163,22 +163,46 @@ def maybe_build_jar(project_root: Path, mvn: str, extra_args: Sequence[str]) -> 
         raise RuntimeError("Maven package command failed")
 
 
-def parse_score(stdout: str, engine_name: str, opponent_name: str, opponent_elo: float, duration_s: float, command: Sequence[str], stderr: str) -> MatchResult:
-    last_match = None
+def parse_score(
+    stdout: str,
+    engine_name: str,
+    opponent_name: str,
+    opponent_elo: float,
+    duration_s: float,
+    command: Sequence[str],
+    stderr: str,
+) -> MatchResult:
+    engine_first = None
+    opponent_first = None
+
     for line in stdout.splitlines():
         match = SCORE_PATTERN.search(line)
         if not match:
             continue
         first = match.group("first").strip()
         second = match.group("second").strip()
+
         if first == engine_name and second == opponent_name:
-            last_match = match
-    if last_match is None:
-        raise ValueError("Unable to locate cutechess score summary for the configured engine")
-    wins = int(last_match.group("wins"))
-    losses = int(last_match.group("losses"))
-    draws = int(last_match.group("draws"))
-    score = float(last_match.group("score"))
+            engine_first = match
+        elif first == opponent_name and second == engine_name:
+            opponent_first = match
+
+    if engine_first is not None:
+        wins = int(engine_first.group("wins"))
+        losses = int(engine_first.group("losses"))
+        draws = int(engine_first.group("draws"))
+    elif opponent_first is not None:
+        wins = int(opponent_first.group("losses"))
+        losses = int(opponent_first.group("wins"))
+        draws = int(opponent_first.group("draws"))
+    else:
+        raise ValueError(
+            "Unable to locate cutechess score summary for the configured engine "
+            f"({engine_name} vs {opponent_name})."
+        )
+
+    total_games = wins + losses + draws
+    score = 0.0 if total_games == 0 else (wins + 0.5 * draws) / total_games
     return MatchResult(
         engine_name=engine_name,
         opponent_name=opponent_name,
