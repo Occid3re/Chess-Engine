@@ -24,6 +24,7 @@ public class BitBoard {
 
     BishopHelper bishopHelper = BishopHelper.getInstance();
     RookHelper rookHelper = RookHelper.getInstance();
+    private static final int KING_TYPE_BITS = MoveHelper.pieceTypeToInt(PieceType.KING);
 
     public boolean whitesTurn = true;
     // Add score field to the BitBoard class
@@ -1632,10 +1633,13 @@ public class BitBoard {
             int from; // simpler below
             from = whitesTurn ? to - 7 : to + 7;
             if (isMoveAllowedByPin(pinState, from, to)) {
-                int capBits = pieceBitsAt(to, !whitesTurn);
-                if (capBits != 6) {
-                    moves.add(createMoveInt(from, to, PieceType.PAWN, whitesTurn,
-                            true, false, false, null, pieceTypeFromBits(capBits), false, false, castlingState));
+                PieceType capturedType = pieceBoard[to];
+                if (capturedType != null) {
+                    int capturedBits = MoveHelper.pieceTypeToInt(capturedType);
+                    if (capturedBits != KING_TYPE_BITS) {
+                        moves.add(createMoveInt(from, to, PieceType.PAWN, whitesTurn,
+                                true, false, false, null, capturedType, false, false, castlingState));
+                    }
                 }
             }
             tmp &= tmp - 1;
@@ -1647,10 +1651,13 @@ public class BitBoard {
             int to = Long.numberOfTrailingZeros(tmp);
             int from = whitesTurn ? to - 9 : to + 9;
             if (isMoveAllowedByPin(pinState, from, to)) {
-                int capBits = pieceBitsAt(to, !whitesTurn);
-                if (capBits != 6) {
-                    moves.add(createMoveInt(from, to, PieceType.PAWN, whitesTurn,
-                            true, false, false, null, pieceTypeFromBits(capBits), false, false, castlingState));
+                PieceType capturedType = pieceBoard[to];
+                if (capturedType != null) {
+                    int capturedBits = MoveHelper.pieceTypeToInt(capturedType);
+                    if (capturedBits != KING_TYPE_BITS) {
+                        moves.add(createMoveInt(from, to, PieceType.PAWN, whitesTurn,
+                                true, false, false, null, capturedType, false, false, castlingState));
+                    }
                 }
             }
             tmp &= tmp - 1;
@@ -1662,9 +1669,12 @@ public class BitBoard {
             int to = Long.numberOfTrailingZeros(tmp);
             int from = whitesTurn ? to - 7 : to + 7;
             if (isMoveAllowedByPin(pinState, from, to)) {
-                int capBits = pieceBitsAt(to, !whitesTurn);
-                if (capBits != 6) {
-                    addPromotionMoves(moves, from, to, whitesTurn, true, pieceTypeFromBits(capBits), castlingState);
+                PieceType capturedType = pieceBoard[to];
+                if (capturedType != null) {
+                    int capturedBits = MoveHelper.pieceTypeToInt(capturedType);
+                    if (capturedBits != KING_TYPE_BITS) {
+                        addPromotionMoves(moves, from, to, whitesTurn, true, capturedType, castlingState);
+                    }
                 }
             }
             tmp &= tmp - 1;
@@ -1675,9 +1685,12 @@ public class BitBoard {
             int to = Long.numberOfTrailingZeros(tmp);
             int from = whitesTurn ? to - 9 : to + 9;
             if (isMoveAllowedByPin(pinState, from, to)) {
-                int capBits = pieceBitsAt(to, !whitesTurn);
-                if (capBits != 6) {
-                    addPromotionMoves(moves, from, to, whitesTurn, true, pieceTypeFromBits(capBits), castlingState);
+                PieceType capturedType = pieceBoard[to];
+                if (capturedType != null) {
+                    int capturedBits = MoveHelper.pieceTypeToInt(capturedType);
+                    if (capturedBits != KING_TYPE_BITS) {
+                        addPromotionMoves(moves, from, to, whitesTurn, true, capturedType, castlingState);
+                    }
                 }
             }
             tmp &= tmp - 1;

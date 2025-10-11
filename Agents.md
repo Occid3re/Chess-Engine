@@ -127,6 +127,7 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
   - **Per-depth leaderboards** of the most expensive moves, including alpha/beta windows and evaluation sources.
   Use these logs to spot missing beta cut-offs, ineffective move ordering, or null-move pruning gaps before adjusting pruning heuristics.
 * `BitBoard` now caches per-piece attack contributions incrementally. When touching move application code, call the existing helpers (`markRecalc`, `updateAttackCachesAfterChange`, etc.) so both the caches and the aggregated maps stay in sync without forcing full recomputation.
+* 2025-10-11: `BitBoard.generatePawnMoves` reads capture targets directly from `pieceBoard` to skip redundant bitboard scans. `BitBoardTest` ("BitBoardTwst") runtime on the reference container improved from **50.087 s** to **48.541 s** after the change.
 * `ActivityModule` precomputes bishop/rook watcher tables so slider updates can skip full-board scans. Pass `-Dchessengine.activity.linearScanFallback=true` to restore the legacy scan when debugging or if the watcher tables need to be bypassed.
 * Move ordering now uses per-thread bucketed buffers (TT → promotions → SEE-sorted captures → killers → quiet → bad captures) instead of a global `Arrays.sort`. Buckets reuse IntArrayList storage, tie-break on the move id to remain deterministic, and cut the `BestMoveSearchTest` runtime on the reference container from ~3m36s to ~3m14s.
 
