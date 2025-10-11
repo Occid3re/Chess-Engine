@@ -79,13 +79,13 @@ population:
       kingsafety.attackweightbishop: 0
       kingsafety.attackweightrook: 36
       kingsafety.attackweightqueen: 24
-      moveordering.category.tt: 8
+      moveordering.category.tt: 7
       moveordering.category.promotion: 6
       moveordering.category.capturegood: 5
-      moveordering.category.captureequal: 5
-      moveordering.category.killer0: 4
-      moveordering.category.killer1: 3
-      moveordering.category.quiet: 2
+      moveordering.category.captureequal: 4
+      moveordering.category.killer0: 3
+      moveordering.category.killer1: 2
+      moveordering.category.quiet: 1
       moveordering.category.capturebad: 0
       moveordering.killermovescore: 10119
       moveordering.promotionbonus: 1465
