@@ -26,7 +26,7 @@ def test_adapt_opponent_elo_never_decreases(capsys):
     args = argparse.Namespace(opponent_elo=2000)
     winning_result = make_result(args.opponent_elo, wins=6, losses=0, draws=0)
 
-    expected_floor = int(math.ceil(winning_result.implied_rating))
+    expected_floor = int(math.ceil(winning_result.implied_opponent_elo))
     adapt_opponent_elo(args, winning_result, context="baseline")
     first_capture = capsys.readouterr().out
 
