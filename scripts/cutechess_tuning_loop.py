@@ -467,12 +467,7 @@ def accept_match_candidate(
     min_score_gain: float,
     time_bonus_threshold: float,
 ) -> AcceptanceDecision:
-    # Compare candidates using implied rating so that adjustments to the
-    # opponent's Elo (after each match) do not give the baseline an unfair
-    # advantage. The baseline's `elo_diff` is tied to the opponent rating it
-    # originally faced, so once we raise the opponent strength we must compare
-    # the absolute strength estimates instead of the raw Elo deltas.
-    elo_delta = candidate.implied_rating - best.implied_rating
+    elo_delta = candidate.elo_diff - best.elo_diff
     score_delta = candidate.points_fraction - best.points_fraction
     time_delta = best.avg_time_per_game - candidate.avg_time_per_game
     info: Dict[str, float] = {
