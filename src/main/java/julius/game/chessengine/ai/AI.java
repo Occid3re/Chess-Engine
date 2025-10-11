@@ -168,8 +168,19 @@ public class AI {
     // allocations when ordering moves.
     private static final int MAX_MOVE_LIST_SIZE = 218; // maximum legal moves
 
+    private enum MoveBucket {
+        TT,
+        PROMOTION,
+        CAPTURE_GOOD,
+        CAPTURE_EQUAL,
+        KILLER0,
+        KILLER1,
+        QUIET,
+        CAPTURE_BAD
+    }
+
     private final ThreadLocal<SortBuffers> sortBuffers =
-            ThreadLocal.withInitial(() -> new SortBuffers(MAX_MOVE_LIST_SIZE));
+            ThreadLocal.withInitial(() -> new SortBuffers(MAX_MOVE_LIST_SIZE, MoveBucket.values().length));
     private final ThreadLocal<Map<Integer, Integer>> seeCacheThreadLocal =
             ThreadLocal.withInitial(() -> new HashMap<>(64));
 
@@ -2643,7 +2654,20 @@ public class AI {
         final SortBuffers buffers = sortBuffers.get();
         final int[] moveBuffer = buffers.moveBuffer;
         final int[] scoreBuffer = buffers.scoreBuffer;
-        final long[] sortKeys = buffers.sortKeyBuffer;
+        final int[] orderedBuffer = buffers.orderedBuffer;
+        final IntArrayList[] bucketIndexes = buffers.bucketIndexes;
+        for (IntArrayList bucket : bucketIndexes) {
+            bucket.clear();
+        }
+
+        final IntArrayList ttBucket = bucketIndexes[MoveBucket.TT.ordinal()];
+        final IntArrayList promotionBucket = bucketIndexes[MoveBucket.PROMOTION.ordinal()];
+        final IntArrayList captureGoodBucket = bucketIndexes[MoveBucket.CAPTURE_GOOD.ordinal()];
+        final IntArrayList captureEqualBucket = bucketIndexes[MoveBucket.CAPTURE_EQUAL.ordinal()];
+        final IntArrayList killer0Bucket = bucketIndexes[MoveBucket.KILLER0.ordinal()];
+        final IntArrayList killer1Bucket = bucketIndexes[MoveBucket.KILLER1.ordinal()];
+        final IntArrayList quietBucket = bucketIndexes[MoveBucket.QUIET.ordinal()];
+        final IntArrayList captureBadBucket = bucketIndexes[MoveBucket.CAPTURE_BAD.ordinal()];
 
         final Heuristics heuristics = threadHeuristics.get();
         final int[][] killerMoves = heuristics.killers;
@@ -2651,17 +2675,6 @@ public class AI {
         final int[][] counterMove = heuristics.counter;
 
         final int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
-
-        // Category encoding (higher is earlier). Ties are resolved via the score field in
-        // the packed sort key so categories remain a stable first-level bucket.
-        final int categoryTt = moveOrderingParameters.categoryTt();
-        final int categoryPromotion = moveOrderingParameters.categoryPromotion();
-        final int categoryCaptureGood = moveOrderingParameters.categoryCaptureGood();
-        final int categoryCaptureEqual = moveOrderingParameters.categoryCaptureEqual();
-        final int categoryKiller0 = moveOrderingParameters.categoryKiller0();
-        final int categoryKiller1 = moveOrderingParameters.categoryKiller1();
-        final int categoryQuiet = moveOrderingParameters.categoryQuiet();
-        final int categoryCaptureBad = moveOrderingParameters.categoryCaptureBad();
 
         final int promotionBonus = moveOrderingParameters.promotionBonus();
         final int killer0Bonus = moveOrderingParameters.killer0Bonus();
@@ -2688,13 +2701,8 @@ public class AI {
         final int cm = (prevFrom >= 0) ? counterMove[prevFrom][prevTo] : -1;
         final int counterMoveBonus = moveOrderingParameters.counterMoveBonus();
 
-        int ttIndex = -1;
-
         for (int i = 0; i < size; i++) {
             final int moveInt = moves.getInt(i);
-            if (moveInt == ttMove) {
-                ttIndex = i;
-            }
 
             final boolean isCapture = MoveHelper.isCapture(moveInt);
             final boolean isPromotion = MoveHelper.isPawnPromotionMove(moveInt);
@@ -2706,14 +2714,13 @@ public class AI {
                 hasSee = true;
             }
 
-            int category;
             int score;
+            IntArrayList targetBucket;
 
             if (moveInt == ttMove) {
-                category = categoryTt;
                 score = maxScore; // max within bucket
+                targetBucket = ttBucket;
             } else if (isPromotion) {
-                category = categoryPromotion;
                 int base = calculateMvvLvaScore(moveInt);
                 int seeBonus = 0;
                 if (hasSee) {
@@ -2723,73 +2730,60 @@ public class AI {
                     seeBonus = cappedSee * promotionSeeMultiplier;
                 }
                 score = base + promotionBonus + seeBonus;
+                targetBucket = promotionBucket;
             } else if (isCapture) {
                 final int mvvLva = calculateMvvLvaScore(moveInt);
-                if (seeValue > 0) {
-                    category = categoryCaptureGood;
-                } else if (seeValue == 0) {
-                    category = categoryCaptureEqual;
-                } else {
-                    category = categoryCaptureBad;
-                }
                 int cappedSee = captureSeeClamp > 0
                         ? Math.max(-captureSeeClamp, Math.min(captureSeeClamp, seeValue))
                         : seeValue;
                 score = (mvvLva * captureMvvMultiplier) + (cappedSee * captureSeeMultiplier);
                 if (score < 0) score = 0;
+                if (seeValue > 0) {
+                    targetBucket = captureGoodBucket;
+                } else if (seeValue == 0) {
+                    targetBucket = captureEqualBucket;
+                } else {
+                    targetBucket = captureBadBucket;
+                }
             } else if (moveInt == k0) {
-                category = categoryKiller0;
                 score = killerMoveScore + killer0Bonus;
+                targetBucket = killer0Bucket;
             } else if (moveInt == k1) {
-                category = categoryKiller1;
                 score = killerMoveScore + killer1Bonus;
+                targetBucket = killer1Bucket;
             } else {
                 final int from = moveInt & 0x3F;
                 final int to = (moveInt >>> 6) & 0x3F;
-                category = categoryQuiet;
                 score = historyTable[from][to];
                 if (moveInt == cm) score += counterMoveBonus;
                 if (MoveHelper.isCastlingMove(moveInt)) {
                     score += castlingBonus;
                 }
+                targetBucket = quietBucket;
             }
 
             moveBuffer[i] = moveInt;
-            scoreBuffer[i] = score;
-
             int s = score;
-            if (s < 0) s = 0;
-            else if (s > maxScore) s = maxScore;
-            sortKeys[i] = (((long) category) << 56) | (((long) s) << 32) | (moveInt & 0xFFFFFFFFL);
-        }
-
-        // *** FIX: always hoist the TT move (if any) to index 0, and sort only the remainder.
-        int sortStart = 0;
-        if (ttIndex >= 0) {
-            if (ttIndex != 0) {
-                long tmp = sortKeys[0];
-                sortKeys[0] = sortKeys[ttIndex];
-                sortKeys[ttIndex] = tmp;
+            if (s < 0) {
+                s = 0;
+            } else if (s > maxScore) {
+                s = maxScore;
             }
-            sortStart = 1; // never sort the TT slot
+            scoreBuffer[i] = s;
+            insertByScore(targetBucket, i, scoreBuffer, moveBuffer);
         }
 
-        Arrays.sort(sortKeys, sortStart, size); // ascending
-
-        // Emit in descending order; if TT exists, ensure it is first
         int outIndex = 0;
-        if (ttIndex >= 0) {
-            moveBuffer[outIndex++] = (int) (sortKeys[0] & 0xFFFFFFFFL); // guaranteed TT move
-            for (int i = size - 1; i >= 1; i--) {
-                moveBuffer[outIndex++] = (int) (sortKeys[i] & 0xFFFFFFFFL);
-            }
-        } else {
-            for (int i = size - 1; i >= 0; i--) {
-                moveBuffer[outIndex++] = (int) (sortKeys[i] & 0xFFFFFFFFL);
-            }
-        }
+        outIndex = writeBucket(ttBucket, moveBuffer, orderedBuffer, outIndex);
+        outIndex = writeBucket(promotionBucket, moveBuffer, orderedBuffer, outIndex);
+        outIndex = writeBucket(captureGoodBucket, moveBuffer, orderedBuffer, outIndex);
+        outIndex = writeBucket(captureEqualBucket, moveBuffer, orderedBuffer, outIndex);
+        outIndex = writeBucket(killer0Bucket, moveBuffer, orderedBuffer, outIndex);
+        outIndex = writeBucket(killer1Bucket, moveBuffer, orderedBuffer, outIndex);
+        outIndex = writeBucket(quietBucket, moveBuffer, orderedBuffer, outIndex);
+        outIndex = writeBucket(captureBadBucket, moveBuffer, orderedBuffer, outIndex);
 
-        MoveContainerUtils.overwriteFromBuffer(moves, moveBuffer, size);
+        MoveContainerUtils.overwriteFromBuffer(moves, orderedBuffer, size);
         return moves;
     }
 
@@ -3075,6 +3069,33 @@ public class AI {
         } finally {
             releaseWriteLock(stamp);
         }
+    }
+
+    private static void insertByScore(IntArrayList bucket, int moveIndex, int[] scoreBuffer, int[] moveBuffer) {
+        int score = scoreBuffer[moveIndex];
+        int move = moveBuffer[moveIndex];
+        int insertPosition = bucket.size();
+        while (insertPosition > 0) {
+            int existingIndex = bucket.getInt(insertPosition - 1);
+            int existingScore = scoreBuffer[existingIndex];
+            if (score > existingScore) {
+                insertPosition--;
+                continue;
+            }
+            if (score == existingScore && move > moveBuffer[existingIndex]) {
+                insertPosition--;
+                continue;
+            }
+            break;
+        }
+        bucket.add(insertPosition, moveIndex);
+    }
+
+    private static int writeBucket(IntArrayList bucket, int[] sourceMoves, int[] target, int startIndex) {
+        for (int i = 0, size = bucket.size(); i < size; i++) {
+            target[startIndex++] = sourceMoves[bucket.getInt(i)];
+        }
+        return startIndex;
     }
 
     private int calculateMvvLvaScore(int move) {
