@@ -56,6 +56,9 @@ public class BitBoard {
     private boolean blackAttackDirty = true;
     private PieceType[] pieceBoard = new PieceType[64];
 
+    private final boolean[] whiteRecalcScratch = new boolean[7];
+    private final boolean[] blackRecalcScratch = new boolean[7];
+
     private final MoveSnapshot moveSnapshot = new MoveSnapshot();
     private final PieceBitboards attackScratchWhite = new PieceBitboards();
     private final PieceBitboards attackScratchBlack = new PieceBitboards();
@@ -2162,8 +2165,10 @@ public class BitBoard {
         long fromMask = 1L << fromIndex;
         long toMask = 1L << toIndex;
 
-        boolean[] whiteRecalc = new boolean[7];
-        boolean[] blackRecalc = new boolean[7];
+        Arrays.fill(whiteRecalcScratch, false);
+        Arrays.fill(blackRecalcScratch, false);
+        boolean[] whiteRecalc = whiteRecalcScratch;
+        boolean[] blackRecalc = blackRecalcScratch;
         markRecalc(isWhite, pieceBits, whiteRecalc, blackRecalc);
         if (promoBits != 0) {
             markRecalc(isWhite, promoBits, whiteRecalc, blackRecalc);
@@ -2602,8 +2607,10 @@ public class BitBoard {
         long fromMask = 1L << fromIndex;
         long toMask = 1L << toIndex;
 
-        boolean[] whiteRecalc = new boolean[7];
-        boolean[] blackRecalc = new boolean[7];
+        Arrays.fill(whiteRecalcScratch, false);
+        Arrays.fill(blackRecalcScratch, false);
+        boolean[] whiteRecalc = whiteRecalcScratch;
+        boolean[] blackRecalc = blackRecalcScratch;
         markRecalc(isWhite, pieceTypeBits, whiteRecalc, blackRecalc);
         if (promotionPieceTypeBits != 0) {
             markRecalc(isWhite, promotionPieceTypeBits, whiteRecalc, blackRecalc);
