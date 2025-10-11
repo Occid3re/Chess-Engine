@@ -132,6 +132,11 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
 * Static evaluation adds a lightweight knight placement adjustment (central bonuses) plus a tempo tie-breaker on top of the pipeline score. Future positional tweaks should extend `computePositionalAdjustment` so the orientation logic stays centralised.
 * Aspiration windows now derive their initial span from recent score volatility and decay as searches stabilise. Repeated fail-high/low streaks widen the relevant side of the window more aggressively before conceding to a full-window retry, reducing the number of depth≥3 re-searches that fall back immediately to `(-∞, +∞)`.
 
+### 2025-10-11 BitBoard attack cache notes
+* `BitBoard` now maintains per-piece attack contributions and updates them incrementally after every move (including undo). The attack maps stay hot unless `whiteAttackDirty`/`blackAttackDirty` is force-set for fallback recomputes.
+* Impacted helpers: look for `whiteAttackByPiece`, `blackAttackByPiece`, and the slider watcher masks inside `BitBoard`. Updates must keep these arrays in sync when touching move generation.
+* Benchmarks: run `mvn -Djava.version=21 -Dmaven.compiler.release=21 -Dmaven.compiler.enablePreview=true -DargLine="--enable-preview" -Dtest=BitBoardTest test` twice—the first warms the JVM, the second captures steady-state. Recent changes bring the warmed run to ~35s on the reference container.
+
 ### 2025-10-07 Time management + evaluation notes
 * The engine now relies on `TimeManager` (under `ai/time/`) for soft/hard deadlines. Update UCI tests to expect the bullet promotion allocation of **250ms** (the Java planner now mirrors the conservative reserves used in `src/main/resources/py/lichess_bot.py`). Document any future tuning against that Python helper here so the two stay aligned.
 * `ScoreEvaluationTest.backwardPawnIsPenalized` now validates the pawn-structure view directly. The overall blended score remains neutral with current tuning, so assert against `PawnStructureModule.backwardPawnPenalty()` instead of a blended delta.

@@ -59,6 +59,8 @@ public class BitBoard {
     private final MoveSnapshot moveSnapshot = new MoveSnapshot();
     private final PieceBitboards attackScratchWhite = new PieceBitboards();
     private final PieceBitboards attackScratchBlack = new PieceBitboards();
+    private final long[] whiteAttackByPiece = new long[64];
+    private final long[] blackAttackByPiece = new long[64];
     private final PieceBitboards seeWhiteScratch = new PieceBitboards();
     private final PieceBitboards seeBlackScratch = new PieceBitboards();
 
@@ -80,6 +82,65 @@ public class BitBoard {
 
     public record MoveGenResult(IntArrayList moves, PinState pinState) {
 
+    }
+
+    private static final long[] BISHOP_WATCHERS = new long[64];
+    private static final long[] ROOK_WATCHERS = new long[64];
+    private static final long[][] BETWEEN_MASKS = new long[64][64];
+    private static final int PIECE_MASK_ALL = (1 << 7) - 2; // bits 1..6
+
+    static {
+        final int[] bishopDirs = {-9, -7, 7, 9};
+        final int[] rookDirs = {-8, -1, 1, 8};
+
+        for (int sq = 0; sq < 64; sq++) {
+            for (int dir : bishopDirs) {
+                int cur = sq + dir;
+                while (isOnBoard(cur) && isSameDiagonal(sq, cur, dir)) {
+                    BISHOP_WATCHERS[cur] |= (1L << sq);
+                    cur += dir;
+                }
+            }
+            for (int dir : rookDirs) {
+                int cur = sq + dir;
+                while (isOnBoard(cur) && isSameLine(sq, cur, dir)) {
+                    ROOK_WATCHERS[cur] |= (1L << sq);
+                    cur += dir;
+                }
+            }
+        }
+
+        for (int from = 0; from < 64; from++) {
+            for (int to = 0; to < 64; to++) {
+                BETWEEN_MASKS[from][to] = BitboardHelper.lineBetweenIndices(from, to);
+            }
+        }
+    }
+
+    private static boolean isOnBoard(int sq) {
+        return sq >= 0 && sq < 64;
+    }
+
+    private static boolean isSameDiagonal(int from, int to, int dir) {
+        int fromFile = from & 7;
+        int toFile = to & 7;
+        int fileDiff = Math.abs(fromFile - toFile);
+        int rankDiff = Math.abs((from >>> 3) - (to >>> 3));
+        if (fileDiff != rankDiff) {
+            return false;
+        }
+        // Ensure stepping stays on the same diagonal for incremental moves
+        return (dir == -9 && toFile < fromFile && to / 8 < from / 8)
+                || (dir == -7 && toFile > fromFile && to / 8 < from / 8)
+                || (dir == 7 && toFile < fromFile && to / 8 > from / 8)
+                || (dir == 9 && toFile > fromFile && to / 8 > from / 8);
+    }
+
+    private static boolean isSameLine(int from, int to, int dir) {
+        if (dir == -8 || dir == 8) {
+            return (from & 7) == (to & 7);
+        }
+        return (from >>> 3) == (to >>> 3);
     }
 
     private static final class PieceBitboards {
@@ -304,6 +365,20 @@ public class BitBoard {
         this.blackAttackMap = other.blackAttackMap;
         this.whiteAttackDirty = other.whiteAttackDirty;
         this.blackAttackDirty = other.blackAttackDirty;
+        this.attackScratchWhite.pawns = other.attackScratchWhite.pawns;
+        this.attackScratchWhite.knights = other.attackScratchWhite.knights;
+        this.attackScratchWhite.bishops = other.attackScratchWhite.bishops;
+        this.attackScratchWhite.rooks = other.attackScratchWhite.rooks;
+        this.attackScratchWhite.queens = other.attackScratchWhite.queens;
+        this.attackScratchWhite.king = other.attackScratchWhite.king;
+        this.attackScratchBlack.pawns = other.attackScratchBlack.pawns;
+        this.attackScratchBlack.knights = other.attackScratchBlack.knights;
+        this.attackScratchBlack.bishops = other.attackScratchBlack.bishops;
+        this.attackScratchBlack.rooks = other.attackScratchBlack.rooks;
+        this.attackScratchBlack.queens = other.attackScratchBlack.queens;
+        this.attackScratchBlack.king = other.attackScratchBlack.king;
+        System.arraycopy(other.whiteAttackByPiece, 0, this.whiteAttackByPiece, 0, whiteAttackByPiece.length);
+        System.arraycopy(other.blackAttackByPiece, 0, this.blackAttackByPiece, 0, blackAttackByPiece.length);
         this.zKey = other.zKey;
         this.pieceBoard = Arrays.copyOf(other.pieceBoard, other.pieceBoard.length);
         this.halfmoveClock = other.halfmoveClock;
@@ -551,8 +626,6 @@ public class BitBoard {
         halfmoveHistory.clear();
         fullmoveHistory.clear();
         initPieceBoardFromBitboards();
-        recomputeWhiteAttackMap();
-        recomputeBlackAttackMap();
         recomputeZobristKey();
     }
 
@@ -571,8 +644,8 @@ public class BitBoard {
         setPieces(whiteKing, PieceType.KING);
         setPieces(blackKing, PieceType.KING);
 
-        whiteAttackDirty = true;
-        blackAttackDirty = true;
+        rebuildFullAttackCache(true);
+        rebuildFullAttackCache(false);
     }
 
     /**
@@ -1274,13 +1347,11 @@ public class BitBoard {
     }
 
     private void recomputeWhiteAttackMap() {
-        whiteAttackMap = generateAttackBitboard(true);
-        whiteAttackDirty = false;
+        rebuildFullAttackCache(true);
     }
 
     private void recomputeBlackAttackMap() {
-        blackAttackMap = generateAttackBitboard(false);
-        blackAttackDirty = false;
+        rebuildFullAttackCache(false);
     }
 
     // Returns 0 if empty; otherwise 1..6 (PAWN...KING) for the *given side* at index.
@@ -1302,6 +1373,175 @@ public class BitBoard {
             if ((blackKing & m) != 0)    return 6;
         }
         return 0;
+    }
+
+    private int pieceTypeToBits(PieceType pieceType) {
+        return switch (pieceType) {
+            case PAWN -> 1;
+            case KNIGHT -> 2;
+            case BISHOP -> 3;
+            case ROOK -> 4;
+            case QUEEN -> 5;
+            case KING -> 6;
+        };
+    }
+
+    private long bitboardForPieceBits(boolean whiteSide, int pieceBits) {
+        return switch (pieceBits) {
+            case 1 -> whiteSide ? whitePawns : blackPawns;
+            case 2 -> whiteSide ? whiteKnights : blackKnights;
+            case 3 -> whiteSide ? whiteBishops : blackBishops;
+            case 4 -> whiteSide ? whiteRooks : blackRooks;
+            case 5 -> whiteSide ? whiteQueens : blackQueens;
+            case 6 -> whiteSide ? whiteKing : blackKing;
+            default -> 0L;
+        };
+    }
+
+    private long computePieceAttacks(int square, PieceType pieceType, boolean whiteSide) {
+        return switch (pieceType) {
+            case PAWN -> {
+                long fromMask = 1L << square;
+                if (whiteSide) {
+                    long attacks = 0L;
+                    if ((fromMask & FileMasks[0]) == 0) attacks |= fromMask << 7;
+                    if ((fromMask & FileMasks[7]) == 0) attacks |= fromMask << 9;
+                    yield attacks;
+                } else {
+                    long attacks = 0L;
+                    if ((fromMask & FileMasks[7]) == 0) attacks |= fromMask >>> 7;
+                    if ((fromMask & FileMasks[0]) == 0) attacks |= fromMask >>> 9;
+                    yield attacks;
+                }
+            }
+            case KNIGHT -> KnightHelper.knightMoveTable[square];
+            case BISHOP -> bishopHelper.calculateMovesUsingBishopMagic(square, allPieces);
+            case ROOK -> rookHelper.calculateMovesUsingRookMagic(square, allPieces);
+            case QUEEN -> bishopHelper.calculateMovesUsingBishopMagic(square, allPieces)
+                    | rookHelper.calculateMovesUsingRookMagic(square, allPieces);
+            case KING -> KING_ATTACKS[square];
+        };
+    }
+
+    private void rebuildAttackContributionForType(boolean whiteSide, int pieceBits) {
+        PieceBitboards cache = whiteSide ? attackScratchWhite : attackScratchBlack;
+        long[] perPiece = whiteSide ? whiteAttackByPiece : blackAttackByPiece;
+        long pieces = bitboardForPieceBits(whiteSide, pieceBits);
+        long aggregate = 0L;
+        while (pieces != 0) {
+            int sq = Long.numberOfTrailingZeros(pieces);
+            pieces &= pieces - 1;
+            aggregate |= perPiece[sq];
+        }
+        cache.set(pieceBits, aggregate);
+    }
+
+    private void rebuildAttackTotals(boolean whiteSide) {
+        PieceBitboards cache = whiteSide ? attackScratchWhite : attackScratchBlack;
+        long aggregate = cache.pawns | cache.knights | cache.bishops | cache.rooks | cache.queens | cache.king;
+        if (whiteSide) {
+            whiteAttackMap = aggregate;
+            whiteAttackDirty = false;
+        } else {
+            blackAttackMap = aggregate;
+            blackAttackDirty = false;
+        }
+    }
+
+    private void rebuildFullAttackCache(boolean whiteSide) {
+        long[] perPiece = whiteSide ? whiteAttackByPiece : blackAttackByPiece;
+        Arrays.fill(perPiece, 0L);
+        PieceBitboards cache = whiteSide ? attackScratchWhite : attackScratchBlack;
+        cache.pawns = computeFullTypeAttacks(whiteSide, 1, perPiece);
+        cache.knights = computeFullTypeAttacks(whiteSide, 2, perPiece);
+        cache.bishops = computeFullTypeAttacks(whiteSide, 3, perPiece);
+        cache.rooks = computeFullTypeAttacks(whiteSide, 4, perPiece);
+        cache.queens = computeFullTypeAttacks(whiteSide, 5, perPiece);
+        cache.king = computeFullTypeAttacks(whiteSide, 6, perPiece);
+        rebuildAttackTotals(whiteSide);
+    }
+
+    private long computeFullTypeAttacks(boolean whiteSide, int pieceBits, long[] perPiece) {
+        long pieces = bitboardForPieceBits(whiteSide, pieceBits);
+        if (pieces == 0) {
+            return 0L;
+        }
+        PieceType type = pieceTypeFromBits(pieceBits);
+        long aggregate = 0L;
+        while (pieces != 0) {
+            int sq = Long.numberOfTrailingZeros(pieces);
+            pieces &= pieces - 1;
+            long attacks = computePieceAttacks(sq, type, whiteSide);
+            perPiece[sq] = attacks;
+            aggregate |= attacks;
+        }
+        return aggregate;
+    }
+
+    private void refreshAttackCaches(long changedSquaresMask, int whiteMask, int blackMask) {
+        long recomputeSquares = changedSquaresMask;
+
+        long mask = changedSquaresMask;
+        while (mask != 0) {
+            int changed = Long.numberOfTrailingZeros(mask);
+            mask &= mask - 1;
+            long watchers = (BISHOP_WATCHERS[changed] | ROOK_WATCHERS[changed]) & allPieces;
+            while (watchers != 0) {
+                int sliderSq = Long.numberOfTrailingZeros(watchers);
+                watchers &= watchers - 1;
+                long between = BETWEEN_MASKS[sliderSq][changed];
+                if ((between & allPieces) != 0) {
+                    continue;
+                }
+                recomputeSquares |= (1L << sliderSq);
+            }
+        }
+
+        long processed = 0L;
+        long iterate = recomputeSquares;
+        while (iterate != 0) {
+            int sq = Long.numberOfTrailingZeros(iterate);
+            iterate &= iterate - 1;
+            long bit = 1L << sq;
+            if ((processed & bit) != 0) {
+                continue;
+            }
+            processed |= bit;
+
+            whiteAttackByPiece[sq] = 0L;
+            blackAttackByPiece[sq] = 0L;
+
+            PieceType type = pieceBoard[sq];
+            if (type == null) {
+                continue;
+            }
+
+            boolean whiteSide = (whitePieces & bit) != 0;
+            long attacks = computePieceAttacks(sq, type, whiteSide);
+            if (whiteSide) {
+                whiteAttackByPiece[sq] = attacks;
+                whiteMask |= (1 << pieceTypeToBits(type));
+            } else {
+                blackAttackByPiece[sq] = attacks;
+                blackMask |= (1 << pieceTypeToBits(type));
+            }
+        }
+
+        for (int bits = 1; bits <= 6; bits++) {
+            if ((whiteMask & (1 << bits)) != 0) {
+                rebuildAttackContributionForType(true, bits);
+            }
+            if ((blackMask & (1 << bits)) != 0) {
+                rebuildAttackContributionForType(false, bits);
+            }
+        }
+
+        if ((whiteMask & PIECE_MASK_ALL) != 0) {
+            rebuildAttackTotals(true);
+        }
+        if ((blackMask & PIECE_MASK_ALL) != 0) {
+            rebuildAttackTotals(false);
+        }
     }
 
     private void generatePawnMoves(boolean whitesTurn, IntArrayList moves, PinState pinState, int castlingState) {
@@ -1911,6 +2151,15 @@ public class BitBoard {
         long fromMask = 1L << fromIndex;
         long toMask = 1L << toIndex;
 
+        int whiteMask = 0;
+        int blackMask = 0;
+        long changedSquares = fromMask | toMask;
+        if (isWhite) {
+            whiteMask |= (1 << pieceBits);
+        } else {
+            blackMask |= (1 << pieceBits);
+        }
+
         int oldEp = getEnPassantTargetIndex();
         boolean oldWK = !whiteKingMoved && !whiteRookH1Moved;
         boolean oldWQ = !whiteKingMoved && !whiteRookA1Moved;
@@ -1930,6 +2179,7 @@ public class BitBoard {
             Color capColor = isWhite ? Color.BLACK : Color.WHITE;
             xorPiece(capColor, capType, capIndex);
             long capMask = 1L << capIndex;
+            changedSquares |= capMask;
             switch (capType) {
                 case PAWN -> {
                     if (isWhite) {
@@ -1973,6 +2223,11 @@ public class BitBoard {
                 markRookCaptured(capIndex);
             }
             pieceBoard[capIndex] = null;
+            if (isWhite) {
+                blackMask |= (1 << pieceTypeToBits(capType));
+            } else {
+                whiteMask |= (1 << pieceTypeToBits(capType));
+            }
         }
 
         // ---- 2) Castling (move rook fast)
@@ -1986,6 +2241,13 @@ public class BitBoard {
             xorPiece(moverColor, PieceType.ROOK, rookTo);
             long rfMask = 1L << rookFrom;
             long rtMask = 1L << rookTo;
+
+            changedSquares |= rfMask | rtMask;
+            if (isWhite) {
+                whiteMask |= (1 << 4);
+            } else {
+                blackMask |= (1 << 4);
+            }
 
             if (isWhite) {
                 whiteRooks &= ~rfMask;
@@ -2086,6 +2348,13 @@ public class BitBoard {
             }
         }
 
+        int placedBits = promoBits == 0 ? pieceBits : promoBits;
+        if (isWhite) {
+            whiteMask |= (1 << placedBits);
+        } else {
+            blackMask |= (1 << placedBits);
+        }
+
         // board mirror for 'from'
         pieceBoard[fromIndex] = null;
 
@@ -2123,10 +2392,7 @@ public class BitBoard {
 
         // ---- 5) Finalize once
         updateAggregatedBitboards();
-
-        // Any move changes slider lines, so both sides’ maps become stale.
-        whiteAttackDirty = true;
-        blackAttackDirty = true;
+        refreshAttackCaches(changedSquares, whiteMask, blackMask);
 
         if (isCapture || pieceBits == 1) {
             halfmoveClock = 0;
@@ -2322,11 +2588,50 @@ public class BitBoard {
         int capturedPieceTypeBits = MoveHelper.deriveCapturedPieceTypeBits(move);
         int castlingStateBits = MoveHelper.deriveCastlingState(move);
 
+        int whiteMask = 0;
+        int blackMask = 0;
+        long changedSquares = (1L << fromIndex) | (1L << toIndex);
+        if (isWhite) {
+            whiteMask |= (1 << pieceTypeBits);
+        } else {
+            blackMask |= (1 << pieceTypeBits);
+        }
+
+        if (promotionPieceTypeBits != 0) {
+            if (isWhite) {
+                whiteMask |= (1 << promotionPieceTypeBits);
+            } else {
+                blackMask |= (1 << promotionPieceTypeBits);
+            }
+        }
+
         int oldEp = getEnPassantTargetIndex();
         boolean oldWK = !whiteKingMoved && !whiteRookH1Moved;
         boolean oldWQ = !whiteKingMoved && !whiteRookA1Moved;
         boolean oldBK = !blackKingMoved && !blackRookH8Moved;
         boolean oldBQ = !blackKingMoved && !blackRookA8Moved;
+
+        if (isCapture) {
+            int captureIndex = isEnPassantMove ? (isWhite ? toIndex - 8 : toIndex + 8) : toIndex;
+            changedSquares |= (1L << captureIndex);
+            if (isWhite) {
+                blackMask |= (1 << capturedPieceTypeBits);
+            } else {
+                whiteMask |= (1 << capturedPieceTypeBits);
+            }
+        }
+
+        if (isCastlingMove) {
+            boolean kingside = toIndex > fromIndex;
+            int rookToIndex = isWhite ? (kingside ? 7 : 0) : (kingside ? 63 : 56);
+            int rookFromIndex = kingside ? rookToIndex - 2 : rookToIndex + 3;
+            changedSquares |= (1L << rookFromIndex) | (1L << rookToIndex);
+            if (isWhite) {
+                whiteMask |= (1 << 4);
+            } else {
+                blackMask |= (1 << 4);
+            }
+        }
 
         PieceType movingPiece = pieceTypeFromBits(pieceTypeBits);
         Color moverColor = isWhite ? Color.WHITE : Color.BLACK;
@@ -2387,8 +2692,7 @@ public class BitBoard {
 
         // 8) finalize aggregates once; mark attacks dirty (lazy recompute)
         updateAggregatedBitboards();
-        whiteAttackDirty = true;
-        blackAttackDirty = true;
+        refreshAttackCaches(changedSquares, whiteMask, blackMask);
 
         if (!halfmoveHistory.isEmpty()) {
             halfmoveClock = halfmoveHistory.popInt();
