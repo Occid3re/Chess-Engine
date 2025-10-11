@@ -444,6 +444,19 @@ def run_match(args: argparse.Namespace, tuning_path: Path) -> MatchResult:
     )
 
 
+def adapt_opponent_elo(args: argparse.Namespace, result: MatchResult, *, context: str) -> None:
+    """Update the opponent Elo to the rounded-up implied rating from the last match."""
+
+    next_elo = int(math.ceil(result.implied_rating))
+    if next_elo != args.opponent_elo:
+        print(
+            f"[adapt-elo] {context}: setting opponent Elo from {args.opponent_elo} to {next_elo}"
+        )
+    else:
+        print(f"[adapt-elo] {context}: opponent Elo remains at {next_elo}")
+    args.opponent_elo = next_elo
+
+
 def accept_match_candidate(
     best: MatchResult,
     candidate: MatchResult,
@@ -603,6 +616,8 @@ def main() -> None:
     best_checkpoint = optimizer.checkpoint_best(best_content)
     print(f"Best checkpoint saved to: {best_checkpoint}")
 
+    adapt_opponent_elo(args, baseline, context="post-baseline")
+
     iteration = 0
     no_improve = 0
     temp_boost = 1.0
@@ -750,6 +765,8 @@ def main() -> None:
                     "temp_boost": temp_boost,
                 },
             )
+
+            adapt_opponent_elo(args, candidate_result, context=f"post-iteration-{iteration:03d}")
 
     except KeyboardInterrupt:
         print("\nStopping tuning loop on user request.")
