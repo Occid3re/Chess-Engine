@@ -126,6 +126,7 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
   - **Root move hot spots** showing which root candidates dominate the node budget.
   - **Per-depth leaderboards** of the most expensive moves, including alpha/beta windows and evaluation sources.
   Use these logs to spot missing beta cut-offs, ineffective move ordering, or null-move pruning gaps before adjusting pruning heuristics.
+* `BitBoard` now caches per-piece attack contributions incrementally. When touching move application code, call the existing helpers (`markRecalc`, `updateAttackCachesAfterChange`, etc.) so both the caches and the aggregated maps stay in sync without forcing full recomputation.
 
 ### AI search & evaluation notes
 * Quiescence delta pruning now compares against the alpha window captured before the stand-pat update. Earlier builds raised `alpha` first, which meant `standPat + Δ < alpha` never triggered and the pruning shortcut was effectively disabled.
