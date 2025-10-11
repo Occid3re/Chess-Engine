@@ -41,6 +41,11 @@ public final class ActivityModule implements EvaluationModule {
     private static final int SOUTH_WEST = 7;
 
     private static final long[][] DIRECTION_RAYS = new long[8][64];
+    private static final long[] BISHOP_WATCHERS = new long[64];
+    private static final long[] ROOK_WATCHERS = new long[64];
+    private static final long[] QUEEN_WATCHERS = new long[64];
+
+    private static final boolean USE_WATCHER_TABLES;
 
     private static final BishopHelper BISHOP_HELPER = BishopHelper.getInstance();
     private static final RookHelper ROOK_HELPER = RookHelper.getInstance();
@@ -57,6 +62,9 @@ public final class ActivityModule implements EvaluationModule {
                 | (1L << squareIndex('e', 5));
 
         initializeDirectionRays();
+        boolean watchersReady = initializeWatcherTables();
+        boolean forceFallback = Boolean.getBoolean("chessengine.activity.linearScanFallback");
+        USE_WATCHER_TABLES = watchersReady && !forceFallback;
     }
 
     private static void initializeDirectionRays() {
@@ -69,6 +77,40 @@ public final class ActivityModule implements EvaluationModule {
             DIRECTION_RAYS[NORTH_WEST][square] = buildRay(square, 1, -1);
             DIRECTION_RAYS[SOUTH_EAST][square] = buildRay(square, -1, 1);
             DIRECTION_RAYS[SOUTH_WEST][square] = buildRay(square, -1, -1);
+        }
+    }
+
+    private static boolean initializeWatcherTables() {
+        Arrays.fill(BISHOP_WATCHERS, 0L);
+        Arrays.fill(ROOK_WATCHERS, 0L);
+        Arrays.fill(QUEEN_WATCHERS, 0L);
+
+        try {
+            for (int origin = 0; origin < 64; origin++) {
+                long bishopTargets = bishopLikeRays(origin);
+                while (bishopTargets != 0) {
+                    int target = Long.numberOfTrailingZeros(bishopTargets);
+                    bishopTargets &= bishopTargets - 1;
+                    BISHOP_WATCHERS[target] |= 1L << origin;
+                }
+
+                long rookTargets = rookLikeRays(origin);
+                while (rookTargets != 0) {
+                    int target = Long.numberOfTrailingZeros(rookTargets);
+                    rookTargets &= rookTargets - 1;
+                    ROOK_WATCHERS[target] |= 1L << origin;
+                }
+            }
+
+            for (int square = 0; square < 64; square++) {
+                QUEEN_WATCHERS[square] = BISHOP_WATCHERS[square] | ROOK_WATCHERS[square];
+            }
+            return true;
+        } catch (RuntimeException ex) {
+            Arrays.fill(BISHOP_WATCHERS, 0L);
+            Arrays.fill(ROOK_WATCHERS, 0L);
+            Arrays.fill(QUEEN_WATCHERS, 0L);
+            return false;
         }
     }
 
@@ -88,6 +130,20 @@ public final class ActivityModule implements EvaluationModule {
 
     private static int squareIndex(char file, int rank) {
         return (rank - 1) * 8 + (file - 'a');
+    }
+
+    private static long bishopLikeRays(int square) {
+        return DIRECTION_RAYS[NORTH_EAST][square]
+                | DIRECTION_RAYS[NORTH_WEST][square]
+                | DIRECTION_RAYS[SOUTH_EAST][square]
+                | DIRECTION_RAYS[SOUTH_WEST][square];
+    }
+
+    private static long rookLikeRays(int square) {
+        return DIRECTION_RAYS[NORTH][square]
+                | DIRECTION_RAYS[SOUTH][square]
+                | DIRECTION_RAYS[EAST][square]
+                | DIRECTION_RAYS[WEST][square];
     }
 
     private final PieceActivity[] activities = new PieceActivity[64];
@@ -348,6 +404,30 @@ public final class ActivityModule implements EvaluationModule {
     }
 
     private void recalculateAffectedSliders(long affectedMask, long excludeMask) {
+        if (!USE_WATCHER_TABLES || !initialized) {
+            recalculateAffectedSlidersLinear(affectedMask, excludeMask);
+            return;
+        }
+
+        long candidateSliders = 0L;
+        long targets = affectedMask;
+        while (targets != 0) {
+            int target = Long.numberOfTrailingZeros(targets);
+            targets &= targets - 1;
+            candidateSliders |= QUEEN_WATCHERS[target];
+        }
+
+        candidateSliders &= sliderSquares;
+        candidateSliders &= ~excludeMask;
+
+        while (candidateSliders != 0) {
+            int square = Long.numberOfTrailingZeros(candidateSliders);
+            candidateSliders &= candidateSliders - 1;
+            recalculatePiece(square);
+        }
+    }
+
+    private void recalculateAffectedSlidersLinear(long affectedMask, long excludeMask) {
         long sliders = sliderSquares;
         while (sliders != 0) {
             int square = Long.numberOfTrailingZeros(sliders);
@@ -369,28 +449,15 @@ public final class ActivityModule implements EvaluationModule {
         }
     }
 
-    private long sliderRayMask(int pieceType, int square) {
+    private static long sliderRayMask(int pieceType, int square) {
         if (pieceType <= 0) {
             return 0L;
         }
         PieceType type = MoveHelper.intToPieceType(pieceType);
         return switch (type) {
-            case BISHOP -> DIRECTION_RAYS[NORTH_EAST][square]
-                    | DIRECTION_RAYS[NORTH_WEST][square]
-                    | DIRECTION_RAYS[SOUTH_EAST][square]
-                    | DIRECTION_RAYS[SOUTH_WEST][square];
-            case ROOK -> DIRECTION_RAYS[NORTH][square]
-                    | DIRECTION_RAYS[SOUTH][square]
-                    | DIRECTION_RAYS[EAST][square]
-                    | DIRECTION_RAYS[WEST][square];
-            case QUEEN -> DIRECTION_RAYS[NORTH][square]
-                    | DIRECTION_RAYS[SOUTH][square]
-                    | DIRECTION_RAYS[EAST][square]
-                    | DIRECTION_RAYS[WEST][square]
-                    | DIRECTION_RAYS[NORTH_EAST][square]
-                    | DIRECTION_RAYS[NORTH_WEST][square]
-                    | DIRECTION_RAYS[SOUTH_EAST][square]
-                    | DIRECTION_RAYS[SOUTH_WEST][square];
+            case BISHOP -> bishopLikeRays(square);
+            case ROOK -> rookLikeRays(square);
+            case QUEEN -> bishopLikeRays(square) | rookLikeRays(square);
             default -> 0L;
         };
     }
