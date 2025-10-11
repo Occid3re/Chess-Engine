@@ -447,14 +447,24 @@ def run_match(args: argparse.Namespace, tuning_path: Path) -> MatchResult:
 def adapt_opponent_elo(args: argparse.Namespace, result: MatchResult, *, context: str) -> None:
     """Update the opponent Elo to the rounded-up implied rating from the last match."""
 
-    next_elo = int(math.ceil(result.implied_rating))
-    if next_elo != args.opponent_elo:
+    implied_next_elo = int(math.ceil(result.implied_rating))
+    floor_attr = "_opponent_elo_floor"
+    current_floor = getattr(args, floor_attr, args.opponent_elo)
+
+    if implied_next_elo > current_floor:
+        current_floor = implied_next_elo
         print(
-            f"[adapt-elo] {context}: setting opponent Elo from {args.opponent_elo} to {next_elo}"
+            f"[adapt-elo] {context}: setting opponent Elo from {args.opponent_elo} to {current_floor}"
+        )
+    elif implied_next_elo < current_floor:
+        print(
+            f"[adapt-elo] {context}: implied opponent Elo {implied_next_elo} below floor {current_floor}, keeping {current_floor}"
         )
     else:
-        print(f"[adapt-elo] {context}: opponent Elo remains at {next_elo}")
-    args.opponent_elo = next_elo
+        print(f"[adapt-elo] {context}: opponent Elo remains at {current_floor}")
+
+    setattr(args, floor_attr, current_floor)
+    args.opponent_elo = current_floor
 
 
 def accept_match_candidate(
