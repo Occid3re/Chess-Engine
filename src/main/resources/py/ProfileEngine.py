@@ -240,9 +240,9 @@ def main() -> int:
 
     with log_file.open("w", encoding="utf-8") as writer:
         # Engine params (env overrides supported)
-        chess_threads = os.getenv("CHESSENGINE_THREADS", "8")
-        lazy_threads  = os.getenv("CHESSENGINE_LAZY_THREADS", "2")
-        root_par_lim  = os.getenv("CHESSENGINE_ROOT_PAR_LIMIT", "12")
+        chess_threads = os.getenv("CHESSENGINE_THREADS", "1")
+        lazy_threads  = os.getenv("CHESSENGINE_LAZY_THREADS", "1")
+        root_par_lim  = os.getenv("CHESSENGINE_ROOT_PAR_LIMIT", "48")
 
         cmd = build_java_cmd(jar, jfr_file, args.jfr_duration, chess_threads, lazy_threads, root_par_lim)
 
