@@ -137,6 +137,7 @@ public class AI {
     private final Heuristics globalHeuristics;
 
     private final MoveOrderingParameters.Snapshot moveOrderingParameters;
+    private final MoveBucket[] moveBucketOrder;
     private final double moveOrderingHistoryScale;
     private final int moveOrderingHistoryDecayDivisor;
     private final SearchPruningParameters.Snapshot searchPruningParameters;
@@ -287,6 +288,7 @@ public class AI {
         log.info("### SearchThreads = {}, LazySmpThreads = {}", searchThreads, lazySmpThreads);
 
         this.moveOrderingParameters = MoveOrderingParameters.snapshot();
+        this.moveBucketOrder = buildMoveBucketOrder(this.moveOrderingParameters);
         this.moveOrderingHistoryScale = Math.max(0.0, moveOrderingParameters.historyScale());
         this.moveOrderingHistoryDecayDivisor = Math.max(1, moveOrderingParameters.historyDecayDivisor());
         this.searchPruningParameters = SearchPruningParameters.snapshot();
@@ -2774,14 +2776,9 @@ public class AI {
         }
 
         int outIndex = 0;
-        outIndex = writeBucket(ttBucket, moveBuffer, orderedBuffer, outIndex);
-        outIndex = writeBucket(promotionBucket, moveBuffer, orderedBuffer, outIndex);
-        outIndex = writeBucket(captureGoodBucket, moveBuffer, orderedBuffer, outIndex);
-        outIndex = writeBucket(captureEqualBucket, moveBuffer, orderedBuffer, outIndex);
-        outIndex = writeBucket(killer0Bucket, moveBuffer, orderedBuffer, outIndex);
-        outIndex = writeBucket(killer1Bucket, moveBuffer, orderedBuffer, outIndex);
-        outIndex = writeBucket(quietBucket, moveBuffer, orderedBuffer, outIndex);
-        outIndex = writeBucket(captureBadBucket, moveBuffer, orderedBuffer, outIndex);
+        for (MoveBucket bucket : moveBucketOrder) {
+            outIndex = writeBucket(bucketIndexes[bucket.ordinal()], moveBuffer, orderedBuffer, outIndex);
+        }
 
         MoveContainerUtils.overwriteFromBuffer(moves, orderedBuffer, size);
         return moves;
@@ -3069,6 +3066,28 @@ public class AI {
         } finally {
             releaseWriteLock(stamp);
         }
+    }
+
+    private static MoveBucket[] buildMoveBucketOrder(MoveOrderingParameters.Snapshot parameters) {
+        MoveBucket[] order = MoveBucket.values().clone();
+        Arrays.sort(order, Comparator
+                .comparingInt((MoveBucket bucket) -> resolveCategoryWeight(bucket, parameters))
+                .reversed()
+                .thenComparingInt(MoveBucket::ordinal));
+        return order;
+    }
+
+    private static int resolveCategoryWeight(MoveBucket bucket, MoveOrderingParameters.Snapshot parameters) {
+        return switch (bucket) {
+            case TT -> parameters.categoryTt();
+            case PROMOTION -> parameters.categoryPromotion();
+            case CAPTURE_GOOD -> parameters.categoryCaptureGood();
+            case CAPTURE_EQUAL -> parameters.categoryCaptureEqual();
+            case KILLER0 -> parameters.categoryKiller0();
+            case KILLER1 -> parameters.categoryKiller1();
+            case QUIET -> parameters.categoryQuiet();
+            case CAPTURE_BAD -> parameters.categoryCaptureBad();
+        };
     }
 
     private static void insertByScore(IntArrayList bucket, int moveIndex, int[] scoreBuffer, int[] moveBuffer) {
