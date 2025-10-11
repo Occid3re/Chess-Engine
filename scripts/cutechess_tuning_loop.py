@@ -609,14 +609,25 @@ def main() -> None:
     base_lines, base_params = optimizer.load()
     best_content = list(base_lines)
 
-    baseline = run_match(args, args.tuning_path)
-    print("Baseline:", baseline.summary())
+    # Run the baseline match and adapt the opponent Elo until the implied rating
+    # converges. Without this the first candidate would be compared against a
+    # baseline that was achieved versus a weaker opponent, effectively
+    # overstating the attainable Elo gain.
+    while True:
+        baseline = run_match(args, args.tuning_path)
+        print("Baseline:", baseline.summary())
+        adapt_opponent_elo(args, baseline, context="post-baseline")
+        if baseline.opponent_elo == args.opponent_elo:
+            break
+        print(
+            "[baseline] Opponent Elo increased; rerunning baseline at",
+            args.opponent_elo,
+        )
+
     best_result = baseline
     current_lines = list(base_lines)
     best_checkpoint = optimizer.checkpoint_best(best_content)
     print(f"Best checkpoint saved to: {best_checkpoint}")
-
-    adapt_opponent_elo(args, baseline, context="post-baseline")
 
     iteration = 0
     no_improve = 0
