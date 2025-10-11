@@ -163,8 +163,16 @@ def maybe_build_jar(project_root: Path, mvn: str, extra_args: Sequence[str]) -> 
         raise RuntimeError("Maven package command failed")
 
 
-def parse_score(stdout: str, engine_name: str, opponent_name: str, opponent_elo: float, duration_s: float, command: Sequence[str], stderr: str) -> MatchResult:
-    last_match = None
+def parse_score(
+    stdout: str,
+    engine_name: str,
+    opponent_name: str,
+    opponent_elo: float,
+    duration_s: float,
+    command: Sequence[str],
+    stderr: str,
+) -> MatchResult:
+    last_match: Optional[tuple[re.Match[str], bool]] = None
     for line in stdout.splitlines():
         match = SCORE_PATTERN.search(line)
         if not match:
@@ -172,13 +180,21 @@ def parse_score(stdout: str, engine_name: str, opponent_name: str, opponent_elo:
         first = match.group("first").strip()
         second = match.group("second").strip()
         if first == engine_name and second == opponent_name:
-            last_match = match
+            last_match = (match, True)
+        elif first == opponent_name and second == engine_name:
+            last_match = (match, False)
     if last_match is None:
         raise ValueError("Unable to locate cutechess score summary for the configured engine")
-    wins = int(last_match.group("wins"))
-    losses = int(last_match.group("losses"))
-    draws = int(last_match.group("draws"))
-    score = float(last_match.group("score"))
+    match, is_engine_first = last_match
+    wins = int(match.group("wins"))
+    losses = int(match.group("losses"))
+    draws = int(match.group("draws"))
+    score = float(match.group("score"))
+
+    if not is_engine_first:
+        wins, losses = losses, wins
+        score = 1.0 - score
+
     return MatchResult(
         engine_name=engine_name,
         opponent_name=opponent_name,
