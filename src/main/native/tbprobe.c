@@ -134,12 +134,24 @@ unsigned TB_LARGEST = 0;
 #define board(s)                ((uint64_t)1 << (s))
 #ifdef TB_CUSTOM_LSB
 #define lsb(b) TB_CUSTOM_LSB(b)
+#elif defined(_MSC_VER)
+#include <intrin.h>
+static inline unsigned lsb(uint64_t b)
+{
+    unsigned long idx;
+    _BitScanForward64(&idx, b);
+    return (unsigned)idx;
+}
 #else
 static inline unsigned lsb(uint64_t b)
 {
+#if defined(__GNUC__) || defined(__clang__)
+    return (unsigned)__builtin_ctzll(b);
+#else
     size_t idx;
     __asm__("bsfq %1, %0": "=r"(idx): "rm"(b));
     return idx;
+#endif
 }
 #endif
 #define square(r, f)            (8 * (r) + (f))
