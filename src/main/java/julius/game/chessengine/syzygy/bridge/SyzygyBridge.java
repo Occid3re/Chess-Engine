@@ -32,6 +32,8 @@ public final class SyzygyBridge {
 
     private static final Logger LOG = LogManager.getLogger();
     private static final String LIBRARY_NAME = "JSyzygy";
+    private static final String LIBRARY_OVERRIDE_PROPERTY = "chessengine.syzygy.nativeLibrary";
+    private static final String LIBRARY_OVERRIDE_ENV = "CHESSENGINE_SYZYGY_NATIVE";
     private static boolean libLoaded = false;
     private static int tbLargest = 0;
 
@@ -53,6 +55,19 @@ public final class SyzygyBridge {
         if (libLoaded) {
             return;
         }
+        String override = firstNonEmpty(System.getProperty(LIBRARY_OVERRIDE_PROPERTY),
+                System.getenv(LIBRARY_OVERRIDE_ENV));
+        if (override != null && !override.isBlank()) {
+            Path overridePath = toPath(override.trim());
+            if (overridePath != null && Files.isRegularFile(overridePath)) {
+                System.load(overridePath.toAbsolutePath().toString());
+                libLoaded = true;
+                LOG.info("Loaded {} from override path {}", LIBRARY_NAME, overridePath);
+                return;
+            }
+            LOG.warn("Configured Syzygy native library override '{}' was not found or is not a file.", override);
+        }
+
         Platform platform = detectPlatform();
         if (platform == null) {
             LOG.warn("Unsupported platform. os.name={} os.arch={}",
@@ -83,12 +98,33 @@ public final class SyzygyBridge {
         libLoaded = true;
     }
 
+    private static Path toPath(String candidate) {
+        try {
+            return Paths.get(candidate);
+        } catch (RuntimeException ex) {
+            LOG.warn("Invalid path configured for Syzygy native library: {}", candidate, ex);
+            return null;
+        }
+    }
+
     private static Platform detectPlatform() {
         String osName = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         String arch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
         for (Platform platform : Platform.values()) {
             if (platform.matches(osName, arch)) {
                 return platform;
+            }
+        }
+        return null;
+    }
+
+    private static String firstNonEmpty(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (value != null && !value.trim().isEmpty()) {
+                return value;
             }
         }
         return null;
