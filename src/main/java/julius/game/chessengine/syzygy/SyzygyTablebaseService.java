@@ -24,18 +24,24 @@ public class SyzygyTablebaseService {
     private final ConcurrentMap<SyzygyCacheKey, Optional<SyzygyProbeResult>> cache = new ConcurrentHashMap<>();
     private final ConcurrentLinkedQueue<SyzygyCacheKey> evictionOrder = new ConcurrentLinkedQueue<>();
     private final int maxEntries;
-    private final TablebaseClient client;
+    private volatile TablebaseClient client;
+    private volatile String configuredDirectories;
+    private volatile int configuredMaxPieces;
 
     public SyzygyTablebaseService(
             @Value("${chessengine.syzygy.paths:}") String directories,
             @Value("${chessengine.syzygy.maxPieces:7}") int maxPieces,
             @Value("${chessengine.syzygy.cacheSize:65536}") int cacheSize) {
-        this(resolveClient(directories, maxPieces), cacheSize);
+        this(resolveClient(directories == null ? "" : directories, maxPieces), cacheSize);
+        this.configuredDirectories = directories == null ? "" : directories;
+        this.configuredMaxPieces = Math.max(1, maxPieces);
     }
 
     SyzygyTablebaseService(TablebaseClient client, int cacheSize) {
         this.maxEntries = Math.max(1024, cacheSize);
         this.client = client;
+        this.configuredDirectories = "";
+        this.configuredMaxPieces = 7;
         if (client instanceof NoopClient) {
             log.info("Syzygy tablebase client disabled. Configure 'chessengine.syzygy.paths' to enable probing.");
         } else {
@@ -63,6 +69,38 @@ public class SyzygyTablebaseService {
                 .filter(result -> result.wdl() != SyzygyWdl.UNKNOWN || result.dtz().isPresent() || result.dtm().isPresent());
         cacheAndEvict(key, resolved);
         return resolved;
+    }
+
+    public synchronized void configure(String directories) {
+        configure(directories, this.configuredMaxPieces);
+    }
+
+    public synchronized void configure(String directories, int maxPieces) {
+        String sanitized = (directories == null) ? "" : directories;
+        this.client = resolveClient(sanitized, maxPieces);
+        this.configuredDirectories = sanitized;
+        this.configuredMaxPieces = Math.max(1, maxPieces);
+        cache.clear();
+        evictionOrder.clear();
+        if (client instanceof NoopClient) {
+            log.info("Syzygy tablebase client disabled. Configure 'chessengine.syzygy.paths' to enable probing.");
+        } else {
+            log.info("Syzygy tablebase client initialised with cache size {}", this.maxEntries);
+        }
+    }
+
+    public void ensureReady() {
+        // The current implementation loads tables synchronously when configured, so probing once is
+        // sufficient to confirm readiness. Keeping this hook allows future asynchronous backends to
+        // surface their own readiness semantics.
+    }
+
+    public int getConfiguredMaxPieces() {
+        return configuredMaxPieces;
+    }
+
+    public String getConfiguredDirectories() {
+        return configuredDirectories;
     }
 
     private void cacheAndEvict(SyzygyCacheKey key, Optional<SyzygyProbeResult> result) {
