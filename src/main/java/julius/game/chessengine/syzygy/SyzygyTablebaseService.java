@@ -1,11 +1,8 @@
 package julius.game.chessengine.syzygy;
 
 import julius.game.chessengine.board.BitBoard;
-import julius.game.chessengine.board.MoveHelper;
-import julius.game.chessengine.utils.Color;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
 
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -14,8 +11,8 @@ import java.util.concurrent.ConcurrentMap;
 
 /**
  * Thread-safe Syzygy probe cache. Consumers can feed {@link BitBoard} states and receive
- * cached tablebase answers. The service translates the engine specific representation into
- * the FEN strings expected by standard Syzygy backends.
+ * cached tablebase answers. The service now forwards bitboards directly to the underlying
+ * tablebase client, avoiding intermediate FEN translation overhead.
  */
 @Log4j2
 public class SyzygyTablebaseService {
@@ -57,8 +54,7 @@ public class SyzygyTablebaseService {
         if (cached != null) {
             return cached;
         }
-        String fen = toFen(board);
-        Optional<SyzygyProbeResult> resolved = client.probe(fen)
+        Optional<SyzygyProbeResult> resolved = client.probe(board)
                 .filter(result -> result.wdl() != SyzygyWdl.UNKNOWN || result.dtz().isPresent() || result.dtm().isPresent());
         cacheAndEvict(key, resolved);
         return resolved;
@@ -109,63 +105,6 @@ public class SyzygyTablebaseService {
         }
     }
 
-    private String toFen(BitBoard board) {
-        StringBuilder fen = new StringBuilder();
-        for (int rank = 7; rank >= 0; rank--) {
-            int empty = 0;
-            for (int file = 0; file < 8; file++) {
-                int index = rank * 8 + file;
-                var pieceType = board.getPieceTypeAtIndex(index);
-                if (pieceType == null) {
-                    empty++;
-                    continue;
-                }
-                if (empty > 0) {
-                    fen.append(empty);
-                    empty = 0;
-                }
-                Color color = board.getPieceColorAtIndex(index);
-                char notation = pieceType.getNotation();
-                fen.append(color == Color.WHITE ? notation : Character.toLowerCase(notation));
-            }
-            if (empty > 0) {
-                fen.append(empty);
-            }
-            if (rank > 0) {
-                fen.append('/');
-            }
-        }
-        fen.append(' ');
-        fen.append(board.isWhitesTurn() ? 'w' : 'b');
-        fen.append(' ');
-        fen.append(buildCastlingAvailability(board));
-        fen.append(' ');
-        int enPassant = board.getEnPassantTargetIndex();
-        fen.append(enPassant < 0 ? '-' : MoveHelper.convertIndexToString(enPassant));
-        fen.append(' ');
-        fen.append(Math.max(0, board.getHalfmoveClock()));
-        fen.append(' ');
-        fen.append(Math.max(1, board.getFullmoveNumber()));
-        return fen.toString();
-    }
-
-    private String buildCastlingAvailability(BitBoard board) {
-        StringBuilder castling = new StringBuilder();
-        if (!board.isWhiteKingMoved() && !board.isWhiteRookH1Moved()) {
-            castling.append('K');
-        }
-        if (!board.isWhiteKingMoved() && !board.isWhiteRookA1Moved()) {
-            castling.append('Q');
-        }
-        if (!board.isBlackKingMoved() && !board.isBlackRookH8Moved()) {
-            castling.append('k');
-        }
-        if (!board.isBlackKingMoved() && !board.isBlackRookA8Moved()) {
-            castling.append('q');
-        }
-        return castling.length() == 0 ? "-" : castling.toString();
-    }
-
     private record SyzygyCacheKey(long zobrist, int halfmoveClock, int fullmoveNumber) {
 
         static SyzygyCacheKey from(BitBoard board) {
@@ -175,7 +114,7 @@ public class SyzygyTablebaseService {
 
     private static final class NoopClient implements TablebaseClient {
         @Override
-        public Optional<SyzygyProbeResult> probe(String fen) {
+        public Optional<SyzygyProbeResult> probe(BitBoard board) {
             return Optional.empty();
         }
     }

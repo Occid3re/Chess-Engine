@@ -1,5 +1,9 @@
 package julius.game.chessengine.syzygy;
 
+import julius.game.chessengine.board.BitBoard;
+import julius.game.chessengine.board.FEN;
+import julius.game.chessengine.engine.GameState;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -41,13 +45,19 @@ public final class TestSyzygyTablebaseService extends SyzygyTablebaseService {
         }
 
         @Override
-        public Optional<SyzygyProbeResult> probe(String fen) {
+        public Optional<SyzygyProbeResult> probe(BitBoard board) {
+            String fen = toFen(board);
             probedFens.add(fen);
             return Optional.ofNullable(responses.get(fen));
         }
 
         private List<String> snapshot() {
             return List.copyOf(probedFens);
+        }
+
+        private String toFen(BitBoard board) {
+            GameState state = new GameState(new BitBoard(board));
+            return FEN.translateBoardToFEN(board, state).getRenderBoard();
         }
     }
 }
