@@ -494,7 +494,13 @@
 
         scheduleSearchTimeout() {
             this.clearSearchTimeout();
-            const timeoutMs = Math.max(this.desiredMoveTime + 1000, 1500);
+            const MIN_TIMEOUT_MS = 5000;
+            const MAX_TIMEOUT_MS = 60000;
+            const bufferMs = Math.max((this.desiredMoveTime * 2), 2000);
+            const timeoutMs = Math.min(
+                Math.max(this.desiredMoveTime + bufferMs, MIN_TIMEOUT_MS),
+                MAX_TIMEOUT_MS,
+            );
             this.searchTimeoutId = window.setTimeout(() => {
                 this.searchTimeoutId = null;
                 if (!this.waitingForEngine || !this.uciClient) {
