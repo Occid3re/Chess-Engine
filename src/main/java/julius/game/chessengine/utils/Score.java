@@ -12,6 +12,9 @@ import julius.game.chessengine.evaluation.MaterialModule;
 import julius.game.chessengine.evaluation.MoveContext;
 import julius.game.chessengine.evaluation.PawnStructureModule;
 import julius.game.chessengine.evaluation.ThreatModule;
+import julius.game.chessengine.syzygy.SyzygyProbeResult;
+import julius.game.chessengine.syzygy.SyzygyTablebaseService;
+import julius.game.chessengine.syzygy.TablebaseResult;
 import julius.game.chessengine.tuning.EngineTuningBootstrap;
 import julius.game.chessengine.tuning.MoveOrderingParameters;
 import julius.game.chessengine.tuning.NumericTuningParameters;
@@ -19,6 +22,8 @@ import julius.game.chessengine.tuning.NumericTuningParameters;
 import java.util.List;
 import java.util.Objects;
 import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalInt;
 
 /**
  * Central entry point for the evaluation pipeline.  The legacy score bookkeeping previously
@@ -30,6 +35,9 @@ public class Score {
 
     private static final ThreadLocal<ScoreFactory> THREAD_FACTORY = new ThreadLocal<>();
     private static volatile ScoreFactory GLOBAL_FACTORY = bitBoard -> new Score(bitBoard, EvaluationWeights.identity());
+    private static volatile SyzygyTablebaseService TABLEBASE_SERVICE;
+
+    private static final int TABLEBASE_PIECE_LIMIT = 6;
 
     static {
         EngineTuningBootstrap.ensureDefaultTuning();
@@ -46,6 +54,12 @@ public class Score {
     private EvaluationContext evaluationContext;
     @JsonIgnore
     private EvaluationContext spareEvaluationContext;
+    @JsonIgnore
+    private TablebaseResult tablebaseResult;
+    @JsonIgnore
+    private Integer tablebaseCentipawn;
+    @JsonIgnore
+    private boolean tablebaseBypassesEvaluation;
 
     public Score() {
         this(EvaluationWeights.identity());
@@ -85,6 +99,9 @@ public class Score {
             if (other.evaluationPipeline.isInitialized()) {
                 evaluationPipeline.initialize(this.evaluationContext);
             }
+            this.tablebaseResult = other.tablebaseResult;
+            this.tablebaseCentipawn = other.tablebaseCentipawn;
+            this.tablebaseBypassesEvaluation = other.tablebaseBypassesEvaluation;
         }
     }
 
@@ -140,6 +157,10 @@ public class Score {
         GLOBAL_FACTORY = Objects.requireNonNull(factory, "factory");
     }
 
+    public static void setTablebaseService(SyzygyTablebaseService service) {
+        TABLEBASE_SERVICE = Objects.requireNonNull(service, "service");
+    }
+
     public void refresh(BitBoard bitBoard, GameStateEnum state) {
         Objects.requireNonNull(bitBoard, "bitBoard");
         if (evaluationContext == null) {
@@ -149,6 +170,8 @@ public class Score {
         }
         EvaluationContext updated = evaluationContext;
 
+        boolean bypass = updateTablebaseState(bitBoard, updated);
+
         if (!evaluationPipeline.isInitialized()) {
             evaluationPipeline.initialize(updated);
         } else {
@@ -156,7 +179,9 @@ public class Score {
         }
 
         // Prime the aggregate totals so subsequent lookups observe the refreshed context immediately.
-        evaluationPipeline.getBlendedScore();
+        if (!bypass) {
+            evaluationPipeline.getBlendedScore();
+        }
     }
 
     public void applyMove(BitBoard bitBoard, int move, GameStateEnum state) {
@@ -171,14 +196,21 @@ public class Score {
         this.evaluationContext = next;
         this.spareEvaluationContext = previous;
 
+        boolean bypass = updateTablebaseState(bitBoard, next);
+
         if (next == null || !evaluationPipeline.isInitialized()) {
             evaluationPipeline.initialize(next);
+            if (!bypass) {
+                evaluationPipeline.getBlendedScore();
+            }
             return;
         }
 
         synchronizePipeline(next);
-        MoveContext moveContext = new MoveContext(move, previous, next);
-        evaluationPipeline.applyMove(moveContext);
+        if (!bypass) {
+            MoveContext moveContext = new MoveContext(move, previous, next);
+            evaluationPipeline.applyMove(moveContext);
+        }
     }
 
     public void undoMove(BitBoard bitBoard, int move, GameStateEnum state) {
@@ -193,14 +225,21 @@ public class Score {
         this.evaluationContext = next;
         this.spareEvaluationContext = previous;
 
+        boolean bypass = updateTablebaseState(bitBoard, next);
+
         if (next == null || !evaluationPipeline.isInitialized()) {
             evaluationPipeline.initialize(next);
+            if (!bypass) {
+                evaluationPipeline.getBlendedScore();
+            }
             return;
         }
 
         synchronizePipeline(next);
-        MoveContext moveContext = new MoveContext(move, previous, next);
-        evaluationPipeline.undoMove(moveContext);
+        if (!bypass) {
+            MoveContext moveContext = new MoveContext(move, previous, next);
+            evaluationPipeline.undoMove(moveContext);
+        }
     }
 
     private void synchronizePipeline(EvaluationContext context) {
@@ -212,6 +251,9 @@ public class Score {
     }
 
     public double getScoreDifference() {
+        if (tablebaseBypassesEvaluation && tablebaseCentipawn != null) {
+            return tablebaseCentipawn / 100.0;
+        }
         if (!evaluationPipeline.isInitialized()) {
             return 0.0;
         }
@@ -219,6 +261,9 @@ public class Score {
     }
 
     public int getMidgameScore() {
+        if (tablebaseBypassesEvaluation && tablebaseCentipawn != null) {
+            return tablebaseCentipawn;
+        }
         if (!evaluationPipeline.isInitialized()) {
             return 0;
         }
@@ -226,6 +271,9 @@ public class Score {
     }
 
     public int getEndgameScore() {
+        if (tablebaseBypassesEvaluation && tablebaseCentipawn != null) {
+            return tablebaseCentipawn;
+        }
         if (!evaluationPipeline.isInitialized()) {
             return 0;
         }
@@ -233,6 +281,9 @@ public class Score {
     }
 
     public int getBlendedScore() {
+        if (tablebaseBypassesEvaluation && tablebaseCentipawn != null) {
+            return tablebaseCentipawn;
+        }
         if (!evaluationPipeline.isInitialized()) {
             return 0;
         }
@@ -259,5 +310,55 @@ public class Score {
     @JsonIgnore
     public EvaluationPipeline getEvaluationPipeline() {
         return evaluationPipeline;
+    }
+
+    public Optional<TablebaseResult> getTablebaseResult() {
+        return Optional.ofNullable(tablebaseResult);
+    }
+
+    public OptionalInt getTablebaseCentipawnScore() {
+        return tablebaseCentipawn != null ? OptionalInt.of(tablebaseCentipawn) : OptionalInt.empty();
+    }
+
+    private boolean updateTablebaseState(BitBoard bitBoard, EvaluationContext context) {
+        SyzygyTablebaseService service = TABLEBASE_SERVICE;
+        if (service == null || context == null) {
+            clearTablebaseState();
+            return false;
+        }
+        long occupancy = context.getAllPieces();
+        if (Long.bitCount(occupancy) > TABLEBASE_PIECE_LIMIT) {
+            clearTablebaseState();
+            return false;
+        }
+        Optional<SyzygyProbeResult> probe = service.probe(bitBoard);
+        if (probe.isEmpty()) {
+            clearTablebaseState();
+            return false;
+        }
+        TablebaseResult resolved = TablebaseResult.from(probe.get());
+        this.tablebaseResult = resolved;
+        this.tablebaseCentipawn = computeTablebaseCentipawn(resolved);
+        this.tablebaseBypassesEvaluation = true;
+        return true;
+    }
+
+    private void clearTablebaseState() {
+        this.tablebaseResult = null;
+        this.tablebaseCentipawn = null;
+        this.tablebaseBypassesEvaluation = false;
+    }
+
+    private int computeTablebaseCentipawn(TablebaseResult result) {
+        int wdlScore = result.wdl().score();
+        if (wdlScore == 0) {
+            return DRAW;
+        }
+        int sign = Integer.signum(wdlScore);
+        int distance = result.dtm().isPresent()
+                ? Math.abs(result.dtm().getAsInt())
+                : result.dtz().isPresent() ? Math.abs(result.dtz().getAsInt()) : 0;
+        int scaledPenalty = Math.min(CHECKMATE - 1, distance * 10);
+        return sign * (CHECKMATE - scaledPenalty);
     }
 }
