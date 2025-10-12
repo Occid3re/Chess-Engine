@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <stdbool.h>
 #include "tbprobe.h"
+#include "julius_game_chessengine_syzygy_bridge_SyzygyBridge.h"
 
 static const char *const INIT_EXCEPTION = "java/lang/RuntimeException";
 
@@ -14,7 +15,7 @@ static void throw_if_needed(JNIEnv *env, const char *message) {
     }
 }
 
-JNIEXPORT jboolean JNICALL Java_syzygy_bridge_SyzygyBridge_init(JNIEnv *env, jclass clazz, jstring path) {
+JNIEXPORT jboolean JNICALL Java_julius_game_chessengine_syzygy_bridge_SyzygyBridge_init(JNIEnv *env, jclass clazz, jstring path) {
     (void)clazz;
     if (path == NULL) {
         throw_if_needed(env, "Syzygy path must not be null");
@@ -29,13 +30,13 @@ JNIEXPORT jboolean JNICALL Java_syzygy_bridge_SyzygyBridge_init(JNIEnv *env, jcl
     return ok ? JNI_TRUE : JNI_FALSE;
 }
 
-JNIEXPORT jint JNICALL Java_syzygy_bridge_SyzygyBridge_getTBLargest(JNIEnv *env, jclass clazz) {
+JNIEXPORT jint JNICALL Java_julius_game_chessengine_syzygy_bridge_SyzygyBridge_getTBLargest(JNIEnv *env, jclass clazz) {
     (void)env;
     (void)clazz;
     return (jint)TB_LARGEST;
 }
 
-JNIEXPORT jint JNICALL Java_syzygy_bridge_SyzygyBridge_probeWDL(JNIEnv *env, jclass clazz,
+JNIEXPORT jint JNICALL Java_julius_game_chessengine_syzygy_bridge_SyzygyBridge_probeWDL(JNIEnv *env, jclass clazz,
         jlong white, jlong black, jlong kings, jlong queens, jlong rooks, jlong bishops,
         jlong knights, jlong pawns, jint ep, jboolean turn) {
     (void)env;
@@ -45,7 +46,7 @@ JNIEXPORT jint JNICALL Java_syzygy_bridge_SyzygyBridge_probeWDL(JNIEnv *env, jcl
             0U, 0U, (unsigned)ep, turn == JNI_TRUE);
 }
 
-JNIEXPORT jint JNICALL Java_syzygy_bridge_SyzygyBridge_probeDTZ(JNIEnv *env, jclass clazz,
+JNIEXPORT jint JNICALL Java_julius_game_chessengine_syzygy_bridge_SyzygyBridge_probeDTZ(JNIEnv *env, jclass clazz,
         jlong white, jlong black, jlong kings, jlong queens, jlong rooks, jlong bishops,
         jlong knights, jlong pawns, jint rule50, jint ep, jboolean turn) {
     (void)env;
