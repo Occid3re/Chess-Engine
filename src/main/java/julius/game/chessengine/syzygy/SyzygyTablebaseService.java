@@ -17,7 +17,6 @@ import java.util.concurrent.ConcurrentMap;
  * cached tablebase answers. The service translates the engine specific representation into
  * the FEN strings expected by standard Syzygy backends.
  */
-@Service
 @Log4j2
 public class SyzygyTablebaseService {
 
