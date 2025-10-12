@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 import re
 
+#py .\scripts\cutechess_tuning_loop.py --project-root C:\Development\Chess-Engine --cutechess-cli "C:\Program Files (x86)\Cute Chess\cutechess-cli.exe" --stockfish C:\Development\cutechess\stockfish\stockfish-windows-x86-64-avx2.exe --java java --engine-name Alieknek --opponent-name SF --opponent-elo 1750 --time-control 10+0.1 --concurrency 3 --rounds 10 --pgn-out C:\Development\cutechess\match_tuning.pgn --engine-gc zgc --engine-active-processor-count 24 --engine-tt-mb 1024 --engine-threads 1 --engine-lazy-threads 1 --mut-frac 0.22 --mut-frac-min 0.18 --mut-frac-max 0.28 --temp-start 0.25 --temp-min 0.05 --temp-decay 14 --spectral-base 0.70 --reheat-factor 1.0
 
 try:
     from auto_tuning_loop import (
