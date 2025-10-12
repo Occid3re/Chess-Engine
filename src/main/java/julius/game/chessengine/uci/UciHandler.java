@@ -46,7 +46,7 @@ public class UciHandler {
     }
 
     public UciHandler(Consumer<String> output, Supplier<Boolean> running) {
-        String syzygyPaths = System.getProperty("chessengine.syzygy.paths", "");
+        String syzygyPaths = System.getProperty("chessengine.syzygy.paths", System.getProperty("chessengine.syzygy.path", ""));
         int syzygyMaxPieces = Integer.getInteger("chessengine.syzygy.maxPieces", 7);
         int syzygyCacheSize = Integer.getInteger("chessengine.syzygy.cacheSize", 65536);
         this.tablebaseService = new SyzygyTablebaseService(syzygyPaths, syzygyMaxPieces, syzygyCacheSize);

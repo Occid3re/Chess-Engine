@@ -29,6 +29,11 @@ JVM & Engine parity with lichess_bot
     -Dchessengine.rootParallelLimit, -Dchessengine.tt.mb, -Dchessengine.tuning.file, etc.
 - All of the above are placed into Surefire's forked JVM via -DargLine="...".
 
+Tablebase awareness
+--------------------
+- The loop inherits tablebase settings from `chessengine.syzygy.path`/`paths` and forwards them to the Surefire JVM.
+- When tuning evaluation weights, keep the setting constant (or clear it) so Syzygy probes do not hide score deltas between candidates.
+
 Typical usage (PowerShell)
 --------------------------
 python .\scripts\auto_tuning_loop.py `
