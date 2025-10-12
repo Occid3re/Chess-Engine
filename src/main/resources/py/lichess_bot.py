@@ -22,6 +22,25 @@ import asyncio
 import random
 import contextlib
 
+
+DEFAULT_SYZYGY_NATIVE = r"C:\\Development\\Chess-Engine\\target\\classes\\natives\\win-x86_64\\Release\\JSyzygy.dll"
+DEFAULT_SYZYGY_PATHS = r"E:\\Syzygy"
+
+
+def _resolve_syzygy_config():
+    native = os.environ.get("CHESSENGINE_SYZYGY_NATIVE")
+    if not native:
+        native = DEFAULT_SYZYGY_NATIVE
+
+    paths = (
+        os.environ.get("CHESSENGINE_SYZYGY_PATHS")
+        or os.environ.get("CHESSENGINE_SYZYGY_PATH")
+    )
+    if not paths:
+        paths = DEFAULT_SYZYGY_PATHS
+
+    return native, paths
+
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -222,6 +241,8 @@ def build_engine_cmd() -> List[str]:
 
     TUNING_FILE = os.environ.get("CHESSENGINE_TUNING_FILE", DEFAULT_TUNING_FILE)
 
+    syzygy_native, syzygy_paths = _resolve_syzygy_config()
+
     engine_sysprops = [
         f"-Dchessengine.searchThreads={SEARCH_T}",
         f"-Dchessengine.lazySmpThreads={LAZY_T}",
@@ -233,6 +254,11 @@ def build_engine_cmd() -> List[str]:
         f"-Dchessengine.tuning.file={TUNING_FILE}",
         "-Dlogging.level.root=INFO",
     ]
+
+    if syzygy_native:
+        engine_sysprops.append(f"-Dchessengine.syzygy.nativeLibrary={syzygy_native}")
+    if syzygy_paths:
+        engine_sysprops.append(f"-Dchessengine.syzygy.paths={syzygy_paths}")
 
     return [*java_opts, *engine_sysprops, "-jar", str(jar)]
 

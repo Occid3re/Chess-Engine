@@ -17,6 +17,21 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 import re
 
+# Shared Syzygy configuration defaults (override via env/CLI)
+DEFAULT_SYZYGY_NATIVE = r"C:\\Development\\Chess-Engine\\target\\classes\\natives\\win-x86_64\\Release\\JSyzygy.dll"
+DEFAULT_SYZYGY_PATHS = r"E:\\Syzygy"
+
+
+def resolve_syzygy_from_env(env: Optional[Dict[str, str]] = None) -> (str, str):
+    source = env if env is not None else os.environ
+    native = source.get("CHESSENGINE_SYZYGY_NATIVE") or DEFAULT_SYZYGY_NATIVE
+    paths = (
+        source.get("CHESSENGINE_SYZYGY_PATHS")
+        or source.get("CHESSENGINE_SYZYGY_PATH")
+        or DEFAULT_SYZYGY_PATHS
+    )
+    return native, paths
+
 #py .\scripts\cutechess_tuning_loop.py --project-root C:\Development\Chess-Engine --cutechess-cli "C:\Program Files (x86)\Cute Chess\cutechess-cli.exe" --stockfish C:\Development\cutechess\stockfish\stockfish-windows-x86-64-avx2.exe --java java --engine-name Alieknek --opponent-name SF --opponent-elo 1750 --time-control 10+0.1 --concurrency 3 --rounds 10 --pgn-out C:\Development\cutechess\match_tuning.pgn --engine-gc zgc --engine-active-processor-count 24 --engine-tt-mb 1024 --engine-threads 1 --engine-lazy-threads 1 --mut-frac 0.22 --mut-frac-min 0.18 --mut-frac-max 0.28 --temp-start 0.25 --temp-min 0.05 --temp-decay 14 --spectral-base 0.70 --reheat-factor 1.0
 
 try:
@@ -315,6 +330,7 @@ def parse_score(
 
 def derive_java_args(args: argparse.Namespace, tuning_path: Path) -> List[str]:
     flags: List[str] = []
+    syzygy_native, syzygy_paths = resolve_syzygy_from_env()
     if args.engine_xms:
         flags.append(f"-Xms{args.engine_xms}")
     if args.engine_xmx:
@@ -336,6 +352,10 @@ def derive_java_args(args: argparse.Namespace, tuning_path: Path) -> List[str]:
     sysprops = {
         "chessengine.tuning.file": str(tuning_path),
     }
+    if syzygy_native:
+        sysprops.setdefault("chessengine.syzygy.nativeLibrary", syzygy_native)
+    if syzygy_paths:
+        sysprops.setdefault("chessengine.syzygy.paths", syzygy_paths)
     if args.engine_tt_mb:
         sysprops["chessengine.tt.mb"] = str(args.engine_tt_mb)
     if args.engine_threads:

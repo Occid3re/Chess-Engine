@@ -86,6 +86,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import DefaultDict, Dict, List, Optional, Set, Tuple
 
+
+DEFAULT_SYZYGY_NATIVE = r"C:\\Development\\Chess-Engine\\target\\classes\\natives\\win-x86_64\\Release\\JSyzygy.dll"
+DEFAULT_SYZYGY_PATHS = r"E:\\Syzygy"
+
+
+def resolve_syzygy_from_env(env: Optional[Dict[str, str]] = None) -> Tuple[str, str]:
+    source = env if env is not None else os.environ
+    native = source.get("CHESSENGINE_SYZYGY_NATIVE") or DEFAULT_SYZYGY_NATIVE
+    paths = (
+        source.get("CHESSENGINE_SYZYGY_PATHS")
+        or source.get("CHESSENGINE_SYZYGY_PATH")
+        or DEFAULT_SYZYGY_PATHS
+    )
+    return native, paths
+
 # ----------------------------
 # Patterns
 # ----------------------------
@@ -2260,6 +2275,12 @@ def main() -> None:
         "chessengine.uci.info.minIntervalMs": "200",
         "chessengine.uci.info.maxPvLen": "10",
     }
+
+    syzygy_native, syzygy_paths = resolve_syzygy_from_env()
+    if syzygy_native:
+        engine_sysprops["chessengine.syzygy.nativeLibrary"] = syzygy_native
+    if syzygy_paths:
+        engine_sysprops["chessengine.syzygy.paths"] = syzygy_paths
     if args.tuning_file:
         override_path = Path(args.tuning_file)
         if not override_path.is_absolute():
