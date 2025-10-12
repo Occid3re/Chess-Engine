@@ -12,7 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SyzygyTablebaseServiceTest {
 
     @Test
-    void translatesBitBoardStateToFen() {
+    void forwardsBitBoardStateToClient() {
         BitBoard board = FEN.translateFENtoBitBoard("8/8/8/8/8/8/8/8 w - - 0 1");
         RecordingClient client = new RecordingClient();
         client.response = Optional.of(SyzygyProbeResult.unavailable());
@@ -20,7 +20,7 @@ class SyzygyTablebaseServiceTest {
         SyzygyTablebaseService service = new SyzygyTablebaseService(client, 16);
         service.probe(board);
 
-        assertThat(client.lastFen).isEqualTo("8/8/8/8/8/8/8/8 w - - 0 1");
+        assertThat(client.lastBoard).isSameAs(board);
     }
 
     @Test
@@ -45,13 +45,13 @@ class SyzygyTablebaseServiceTest {
 
     private static final class RecordingClient implements TablebaseClient {
         Optional<SyzygyProbeResult> response = Optional.empty();
-        String lastFen;
+        BitBoard lastBoard;
         int invocations = 0;
 
         @Override
-        public Optional<SyzygyProbeResult> probe(String fen) {
+        public Optional<SyzygyProbeResult> probe(BitBoard board) {
             invocations++;
-            lastFen = fen;
+            lastBoard = board;
             return response;
         }
     }
