@@ -23,7 +23,6 @@ import julius.game.chessengine.tuning.Tuning;
 import julius.game.chessengine.utils.Score;
 import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
-import org.springframework.stereotype.Component;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -40,7 +39,6 @@ import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
 import static julius.game.chessengine.utils.Score.*;
 
 @Log4j2
-@Component
 public class AI {
 
     @Getter
@@ -1883,16 +1881,18 @@ public class AI {
     // AI.java
     private Optional<TablebaseHit> resolveTablebaseHit(Engine simulatorEngine, boolean isWhite) {
         TablebaseResult result = simulatorEngine.getGameState().getLastTablebaseResult().orElse(null);
-        if ((result == null || !isExactWdl(result)) && tablebaseService != null) {
+        if ((!isExactWdl(result)) && tablebaseService != null) {
             Optional<SyzygyProbeResult> probe = tablebaseService.probe(simulatorEngine.getBitBoard());
             if (probe.isPresent()) {
                 result = TablebaseResult.from(probe.get());
+                log.info("Tablebase hit: {}", result);
                 if (isExactWdl(result)) {
                     simulatorEngine.getGameState().setLastTablebaseResult(result);
                 }
             }
         }
-        if (result == null || !isExactWdl(result)) {
+        if (!isExactWdl(result)) {
+            log.info("Tablebase miss");
             return Optional.empty();
         }
         double whitePerspective = Score.tablebaseToEvaluation(result);
