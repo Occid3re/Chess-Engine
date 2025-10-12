@@ -8,6 +8,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Thread-safe Syzygy probe cache. Consumers can feed {@link BitBoard} states and receive
@@ -19,6 +20,7 @@ public class SyzygyTablebaseService {
 
     private final ConcurrentMap<SyzygyCacheKey, Optional<SyzygyProbeResult>> cache = new ConcurrentHashMap<>();
     private final ConcurrentLinkedQueue<SyzygyCacheKey> evictionOrder = new ConcurrentLinkedQueue<>();
+    private final AtomicInteger entryCount = new AtomicInteger();
     private final int maxEntries;
     private volatile TablebaseClient client;
     private volatile String configuredDirectories;
@@ -71,6 +73,7 @@ public class SyzygyTablebaseService {
         this.configuredMaxPieces = Math.max(1, maxPieces);
         cache.clear();
         evictionOrder.clear();
+        entryCount.set(0);
         if (client instanceof NoopClient) {
             log.info("Syzygy tablebase probing disabled (directories='{}').", sanitized);
         } else {
@@ -94,14 +97,27 @@ public class SyzygyTablebaseService {
     }
 
     private void cacheAndEvict(SyzygyCacheKey key, Optional<SyzygyProbeResult> result) {
-        cache.put(key, result);
+        Optional<SyzygyProbeResult> existing = cache.putIfAbsent(key, result);
+        if (existing != null) {
+            cache.replace(key, existing, result);
+            return;
+        }
+
         evictionOrder.add(key);
-        while (evictionOrder.size() > maxEntries) {
+        if (entryCount.incrementAndGet() > maxEntries) {
+            evictOverflowEntries();
+        }
+    }
+
+    private void evictOverflowEntries() {
+        while (entryCount.get() > maxEntries) {
             SyzygyCacheKey eldest = evictionOrder.poll();
             if (eldest == null) {
-                break;
+                return;
             }
-            cache.remove(eldest);
+            if (cache.remove(eldest) != null) {
+                entryCount.decrementAndGet();
+            }
         }
     }
 
