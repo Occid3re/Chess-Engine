@@ -211,7 +211,7 @@ public final class SyzygyBridge {
      * @param turn    true if white is to move, false if black is.
      * @return WDL result (see c code)
      */
-    public static int probeSyzygyWDL(long white, long black, long kings, long queens, long rooks, long bishops, long knights, long pawns, int ep, boolean turn) { //NOSONAR
+    public static synchronized int probeSyzygyWDL(long white, long black, long kings, long queens, long rooks, long bishops, long knights, long pawns, int ep, boolean turn) { //NOSONAR
         return probeWDL(white, black, kings, queens, rooks, bishops, knights, pawns, ep, turn);
     }
 
@@ -231,7 +231,7 @@ public final class SyzygyBridge {
      * @param turn    true if white is to move, false if black is.
      * @return DTZ result (see c code)
      */
-    public static int probeSyzygyDTZ(long white, long black, long kings, long queens, long rooks, long bishops, long knights, long pawns, int rule50, int ep, boolean turn) { //NOSONAR
+    public static synchronized int probeSyzygyDTZ(long white, long black, long kings, long queens, long rooks, long bishops, long knights, long pawns, int rule50, int ep, boolean turn) { //NOSONAR
         return probeDTZ(white, black, kings, queens, rooks, bishops, knights, pawns, rule50, ep, turn);
     }
 
