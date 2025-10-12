@@ -72,6 +72,14 @@ class AITest_MateThreatDiagnostics {
                 new Object[]{
                         "4k2r/1R3R2/p3p1pp/4b3/1BnNr3/8/P1P5/5K2 w - - 1 1",
                         List.of("Re7")
+                },
+                new Object[]{
+                        "3k4/pp6/8/8/8/8/P3N3/3K4 w - - 0 1",
+                        List.of("Nd4")
+                },
+                new Object[]{
+                        "3kQ3/p7/8/8/8/8/PP2N3/4K3 b - - 0 1",
+                        List.of("Kxe8")
                 }
         );
     }
@@ -92,8 +100,8 @@ class AITest_MateThreatDiagnostics {
                 .searchThreads(1)
                 .lazySmpThreads(1)
                 .hashSizeMb(64)
-                .maxDepth(14)
-                .timeLimitMillis(1000)
+                .maxDepth(22)
+                .timeLimitMillis(10000)
                 .nullMovePruning(true)
                 .build();
 

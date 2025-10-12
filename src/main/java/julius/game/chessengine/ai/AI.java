@@ -1885,14 +1885,12 @@ public class AI {
             Optional<SyzygyProbeResult> probe = tablebaseService.probe(simulatorEngine.getBitBoard());
             if (probe.isPresent()) {
                 result = TablebaseResult.from(probe.get());
-                log.info("Tablebase hit: {}", result);
                 if (isExactWdl(result)) {
                     simulatorEngine.getGameState().setLastTablebaseResult(result);
                 }
             }
         }
         if (!isExactWdl(result)) {
-            log.info("Tablebase miss");
             return Optional.empty();
         }
         double whitePerspective = Score.tablebaseToEvaluation(result);
