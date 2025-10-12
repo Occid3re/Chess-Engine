@@ -22,6 +22,8 @@
         <!-- Boot uses this to set the compiler release -->
         <java.version>25</java.version>
         <lombok.version>1.18.42</lombok.version>
+        <!-- Default preview flag for Surefire's argLine; CLI -DargLine overrides when provided -->
+        <argLine>--enable-preview</argLine>
     </properties>
 
     <dependencies>
