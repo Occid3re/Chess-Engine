@@ -1,6 +1,7 @@
 package julius.game.chessengine.tablebase;
 
 import julius.game.chessengine.syzygy.SyzygyTablebaseService;
+import julius.game.chessengine.syzygy.TestSyzygySupport;
 import julius.game.chessengine.utils.Score;
 import org.junit.jupiter.api.Assumptions;
 
@@ -8,29 +9,17 @@ import java.lang.reflect.Field;
 
 final class TablebaseTestSupport {
 
-    private static final String PROPERTY = "chessengine.syzygy.paths";
-    private static final String ALT_PROPERTY = "chessengine.syzygy.path";
-    private static final String ENV = "CHESSENGINE_SYZYGY_PATH";
-    private static final String ALT_ENV = "SYZYGY_PATH";
-
     private TablebaseTestSupport() {
     }
 
     static void assumeSyzygyConfigured() {
-        Assumptions.assumeTrue(isSyzygyConfigured(), () ->
-                "Syzygy directory not configured. Set '" + PROPERTY + "' or '" + ALT_PROPERTY +
-                        "' (or the matching env vars) to run tablebase-backed tests.");
+        Assumptions.assumeTrue(TestSyzygySupport.isSyzygyConfigured(), () ->
+                "Syzygy directory not configured. Set 'chessengine.syzygy.paths' or 'chessengine.syzygy.path' "
+                        + "(or the matching env vars) to run tablebase-backed tests.");
     }
 
     static boolean isSyzygyConfigured() {
-        return isNonEmpty(System.getProperty(PROPERTY))
-                || isNonEmpty(System.getProperty(ALT_PROPERTY))
-                || isNonEmpty(System.getenv(ENV))
-                || isNonEmpty(System.getenv(ALT_ENV));
-    }
-
-    private static boolean isNonEmpty(String value) {
-        return value != null && !value.trim().isEmpty();
+        return TestSyzygySupport.isSyzygyConfigured();
     }
 
     static TablebaseServiceRestorer overrideScoreTablebase(SyzygyTablebaseService service) {
