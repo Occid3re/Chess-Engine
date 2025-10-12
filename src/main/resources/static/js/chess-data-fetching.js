@@ -68,6 +68,8 @@
         desiredMoveTime: 50,
         autoplay: false,
         waitingForEngine: false,
+        activeSearch: null,
+        pendingTimedOutSearch: null,
         playerColor: 'white',
         computerColor: 'black',
         basePosition: { type: 'startpos' },
@@ -201,16 +203,60 @@
 
             this.uciClient.on('bestmove', (payload) => {
                 this.clearSearchTimeout();
-                const shouldApplyMove = this.waitingForEngine && this.engineResponsive;
-                this.waitingForEngine = false;
-                if (!shouldApplyMove) {
-                    return;
-                }
-                if (!payload || !payload.move || payload.move === '(none)') {
+                const hasMove = payload && payload.move && payload.move !== '(none)';
+                const pendingTimeout = this.pendingTimedOutSearch;
+                const timeoutMatchesBoard = pendingTimeout && pendingTimeout.moveCount === this.moveHistory.length;
+
+                if (timeoutMatchesBoard) {
+                    if (this.activeSearch) {
+                        this.uciClient.cancelPendingSearch();
+                        this.clearSearchTimeout();
+                        this.activeSearch = null;
+                        this.waitingForEngine = false;
+                    }
+                    this.pendingTimedOutSearch = null;
+                    this.waitingForEngine = false;
+                    this.engineResponsive = true;
+                    this.updateInfoBar();
+                    if (hasMove) {
+                        const applied = this.applyMoveFromUci(payload.move, { clearRedo: true });
+                        if (!applied) {
+                            this.updateGameStatus();
+                            return;
+                        }
+                        this.updateGameStatus();
+                        if (this.autoplay || this.isComputerTurn()) {
+                            this.requestEngineMove();
+                        }
+                        return;
+                    }
                     this.updateGameStatus();
                     return;
                 }
-                this.applyMoveFromUci(payload.move, { clearRedo: true });
+
+                const shouldApplyMove = this.waitingForEngine && this.engineResponsive && !!this.activeSearch;
+                this.waitingForEngine = false;
+                this.activeSearch = null;
+                this.pendingTimedOutSearch = null;
+
+                if (!shouldApplyMove) {
+                    if (hasMove) {
+                        console.warn('Ignoring unexpected engine move', payload.move);
+                    }
+                    this.updateGameStatus();
+                    return;
+                }
+
+                if (!hasMove) {
+                    this.updateGameStatus();
+                    return;
+                }
+
+                const applied = this.applyMoveFromUci(payload.move, { clearRedo: true });
+                if (!applied) {
+                    this.updateGameStatus();
+                    return;
+                }
                 this.updateGameStatus();
                 if (this.autoplay || this.isComputerTurn()) {
                     this.requestEngineMove();
@@ -439,6 +485,7 @@
             if (clearRedo) {
                 this.redoStack = [];
             }
+            this.pendingTimedOutSearch = null;
             this.syncBoardPosition();
             return move;
         },
@@ -483,6 +530,10 @@
             if (this.waitingForEngine) {
                 this.waitingForEngine = false;
             }
+            this.activeSearch = null;
+            if (!this.pendingTimedOutSearch || !this.pendingTimedOutSearch.timedOut) {
+                this.pendingTimedOutSearch = null;
+            }
             this.clearSearchTimeout();
             if (this.autoplay) {
                 this.setAutoplay(false);
@@ -495,11 +546,17 @@
         scheduleSearchTimeout() {
             this.clearSearchTimeout();
             const timeoutMs = Math.max(this.desiredMoveTime + 1000, 1500);
+            const context = this.activeSearch;
+            if (!context) {
+                return;
+            }
             this.searchTimeoutId = window.setTimeout(() => {
                 this.searchTimeoutId = null;
                 if (!this.waitingForEngine || !this.uciClient) {
                     return;
                 }
+                context.timedOut = true;
+                this.pendingTimedOutSearch = context;
                 console.warn('Engine search exceeded expected time; sending stop command.');
                 this.uciClient.cancelPendingSearch();
                 this.handleEngineUnresponsive('Engine search timed out. Manual play enabled; press "Computer Move" to retry.');
@@ -512,6 +569,10 @@
             }
             this.engineResponsive = true;
             this.waitingForEngine = true;
+            this.activeSearch = {
+                moveCount: this.moveHistory.length,
+                timedOut: false,
+            };
             this.syncEnginePosition({ awaitReady: true });
             const goCommand = `go movetime ${this.desiredMoveTime}`;
             this.uciClient.send(goCommand, { awaitBestmove: true });
@@ -549,6 +610,8 @@
             this.moveHistory = [];
             this.redoStack = [];
             this.waitingForEngine = false;
+            this.activeSearch = null;
+            this.pendingTimedOutSearch = null;
             this.lastScore = null;
             this.syncBoardPosition();
             this.updateEvaluationDisplay();
@@ -579,6 +642,8 @@
             this.moveHistory = [];
             this.redoStack = [];
             this.waitingForEngine = false;
+            this.activeSearch = null;
+            this.pendingTimedOutSearch = null;
             this.syncBoardPosition();
             this.updateGameStatus();
             if (this.uciClient) {
@@ -600,6 +665,8 @@
             this.redoStack.push(last);
             this.game.undo();
             this.waitingForEngine = false;
+            this.activeSearch = null;
+            this.pendingTimedOutSearch = null;
             this.syncBoardPosition();
             this.updateGameStatus();
             if (this.uciClient) {
@@ -623,6 +690,8 @@
                     this.uciClient.cancelPendingSearch();
                     this.clearSearchTimeout();
                 }
+                this.activeSearch = null;
+                this.pendingTimedOutSearch = null;
                 this.syncEnginePosition({ awaitReady: true });
                 this.updateGameStatus();
                 if (this.autoplay || this.isComputerTurn()) {
