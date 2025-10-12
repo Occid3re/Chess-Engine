@@ -32,7 +32,7 @@ public class SyzygyTablebaseService {
             @Value("${chessengine.syzygy.paths:${chessengine.syzygy.path:}}") String directories,
             @Value("${chessengine.syzygy.maxPieces:7}") int maxPieces,
             @Value("${chessengine.syzygy.cacheSize:65536}") int cacheSize) {
-        this(resolveClient(), cacheSize);
+        this(resolveClient(directories, maxPieces), cacheSize);
         this.configuredDirectories = directories == null ? "" : directories;
         this.configuredMaxPieces = Math.max(1, maxPieces);
     }
@@ -42,11 +42,11 @@ public class SyzygyTablebaseService {
         this.client = client;
         this.configuredDirectories = "";
         this.configuredMaxPieces = 7;
-        log.info("Syzygy tablebase probing is temporarily disabled pending the in-house reader implementation. Cache size {} configured for future use.", this.maxEntries);
+        log.info("Syzygy tablebase cache initialised with capacity {} entries", this.maxEntries);
     }
 
-    private static TablebaseClient resolveClient() {
-        return new NoopClient();
+    private static TablebaseClient resolveClient(String directories, int maxPieces) {
+        return FathomTablebaseClient.create(directories, maxPieces).orElseGet(NoopClient::new);
     }
 
     public Optional<SyzygyProbeResult> probe(BitBoard board) {
@@ -71,12 +71,17 @@ public class SyzygyTablebaseService {
 
     public synchronized void configure(String directories, int maxPieces) {
         String sanitized = (directories == null) ? "" : directories;
-        this.client = resolveClient();
+        this.client = resolveClient(sanitized, maxPieces);
         this.configuredDirectories = sanitized;
         this.configuredMaxPieces = Math.max(1, maxPieces);
         cache.clear();
         evictionOrder.clear();
-        log.info("Syzygy tablebase probing is temporarily disabled pending the in-house reader implementation. Configuration values stored for future activation.");
+        if (client instanceof NoopClient) {
+            log.info("Syzygy tablebase probing disabled (directories='{}').", sanitized);
+        } else {
+            log.info("Syzygy tablebase probing configured (directories='{}', maxPieces={}).",
+                    sanitized, this.configuredMaxPieces);
+        }
     }
 
     public void ensureReady() {

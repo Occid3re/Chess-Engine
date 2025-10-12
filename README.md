@@ -178,3 +178,9 @@ whenever six or fewer pieces remain on the board. Follow these steps to get the 
 
 For stress tests you can cap the tablebase usage with `-Dchessengine.syzygy.maxPieces=<n>` and adjust
 `-Dchessengine.syzygy.cacheSize=<entries>` to tune the in-process probe cache.
+
+### Credits
+
+The Syzygy bridge JNI bindings are vendored from [Laurens Winkelhagen's syzygy-bridge project](https://github.com/ljgw/syzygy-bridge)
+and used under the terms of the MIT License. Place the corresponding native libraries from that project in
+`src/main/resources/natives/<platform>/` before packaging the engine.
