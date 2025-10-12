@@ -23,14 +23,36 @@ final class TablebaseTestSupport {
     }
 
     static boolean isSyzygyConfigured() {
-        return isNonEmpty(System.getProperty(PROPERTY))
-                || isNonEmpty(System.getProperty(ALT_PROPERTY))
-                || isNonEmpty(System.getenv(ENV))
-                || isNonEmpty(System.getenv(ALT_ENV));
+        return resolveConfiguredSyzygyDirectories() != null;
+    }
+
+    static String resolveConfiguredSyzygyDirectories() {
+        return firstNonEmpty(
+                System.getProperty(PROPERTY),
+                System.getProperty(ALT_PROPERTY),
+                System.getenv(ENV),
+                System.getenv(ALT_ENV));
+    }
+
+    static String requireConfiguredSyzygyDirectories() {
+        String directories = resolveConfiguredSyzygyDirectories();
+        if (directories == null) {
+            throw new IllegalStateException("Syzygy directory configuration missing despite assumption");
+        }
+        return directories;
     }
 
     private static boolean isNonEmpty(String value) {
         return value != null && !value.trim().isEmpty();
+    }
+
+    private static String firstNonEmpty(String... values) {
+        for (String value : values) {
+            if (isNonEmpty(value)) {
+                return value;
+            }
+        }
+        return null;
     }
 
     static TablebaseServiceRestorer overrideScoreTablebase(SyzygyTablebaseService service) {

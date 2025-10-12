@@ -19,7 +19,7 @@ class SyzygyWinRegressionTest {
     void whiteWinsKnightBishopVsKingPawnAccordingToSyzygy() {
         TablebaseTestSupport.assumeSyzygyConfigured();
 
-        String directories = resolveSyzygyDirectories();
+        String directories = TablebaseTestSupport.requireConfiguredSyzygyDirectories();
         SyzygyTablebaseService service = new SyzygyTablebaseService(directories, 7, 16384);
 
         BitBoard board = FEN.translateFENtoBitBoard(KNIGHT_BISHOP_VS_KING_PAWN_FEN);
@@ -31,24 +31,4 @@ class SyzygyWinRegressionTest {
         assertThat(result.get().wdl()).isEqualTo(SyzygyWdl.WIN);
     }
 
-    private static String resolveSyzygyDirectories() {
-        String directories = firstNonEmpty(
-                System.getProperty("chessengine.syzygy.paths"),
-                System.getProperty("chessengine.syzygy.path"),
-                System.getenv("CHESSENGINE_SYZYGY_PATH"),
-                System.getenv("SYZYGY_PATH"));
-        if (directories == null) {
-            throw new IllegalStateException("Syzygy directory configuration missing despite assumption");
-        }
-        return directories;
-    }
-
-    private static String firstNonEmpty(String... values) {
-        for (String value : values) {
-            if (value != null && !value.trim().isEmpty()) {
-                return value;
-            }
-        }
-        return null;
-    }
 }
