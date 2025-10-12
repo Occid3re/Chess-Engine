@@ -14,6 +14,19 @@ import time
 from pathlib import Path
 from typing import Optional, List, Pattern, Match, TextIO
 
+DEFAULT_SYZYGY_NATIVE = r"C:\\Development\\Chess-Engine\\target\\classes\\natives\\win-x86_64\\Release\\JSyzygy.dll"
+DEFAULT_SYZYGY_PATHS = r"E:\\Syzygy"
+
+
+def resolve_syzygy_from_env():
+    native = os.getenv("CHESSENGINE_SYZYGY_NATIVE") or DEFAULT_SYZYGY_NATIVE
+    paths = (
+        os.getenv("CHESSENGINE_SYZYGY_PATHS")
+        or os.getenv("CHESSENGINE_SYZYGY_PATH")
+        or DEFAULT_SYZYGY_PATHS
+    )
+    return native, paths
+
 # ---------------- Utilities ----------------
 
 def ts() -> str:
@@ -149,6 +162,7 @@ def detect_project_root(script_path: Path) -> Path:
 def build_java_cmd(jar: Path, jfr_file: Path, jfr_duration: str,
                    chess_threads: str, lazy_threads: str, root_par_limit: str) -> List[str]:
     # JVM/env defaults (tuned for lower pauses & less thread thrash)
+    syzygy_native, syzygy_paths = resolve_syzygy_from_env()
     java_xms = os.getenv("JAVA_XMS", "8g")
     java_xmx = os.getenv("JAVA_XMX", "8g")
     java_gc  = os.getenv("JAVA_GC",  "zgc")   # default: low-pause ZGC
@@ -179,8 +193,13 @@ def build_java_cmd(jar: Path, jfr_file: Path, jfr_duration: str,
         "-XX:ActiveProcessorCount={}".format(apc),
     ]
 
-    if extra.strip():
-        cmd += [x for x in extra.split() if x.strip()]
+    extra_flags = [x for x in extra.split() if x.strip()]
+    if syzygy_native:
+        extra_flags.append(f"-Dchessengine.syzygy.nativeLibrary={syzygy_native}")
+    if syzygy_paths:
+        extra_flags.append(f"-Dchessengine.syzygy.paths={syzygy_paths}")
+    if extra_flags:
+        cmd += extra_flags
 
     cmd += [
         "-Dchessengine.searchThreads={}".format(chess_threads),

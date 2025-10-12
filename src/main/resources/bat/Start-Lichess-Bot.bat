@@ -13,6 +13,10 @@ rem (Recommended: store LICHESS_TOKEN in your user env, not here)
 rem Workdir where lichess_bot.py lives
 set "WORKDIR=C:\Development\Chess-Engine\src\main\resources\py"
 
+rem Default Syzygy native + tablebase locations (override via env before launching)
+set "CHESSENGINE_SYZYGY_NATIVE=C:\Development\Chess-Engine\target\classes\natives\win-x86_64\Release\JSyzygy.dll"
+set "CHESSENGINE_SYZYGY_PATHS=E:\Syzygy"
+
 rem =========================
 rem   JVM / ENGINE PRESETS
 rem   (tuned for 24 physical cores)
@@ -75,7 +79,7 @@ rem =========================
 rem - ZGC: no need for MaxGCPauseMillis; AlwaysPreTouch stabilizes latency
 rem - Opening book off during games to avoid random disk stalls; enable only if preloaded
 rem - Trim UCI chatter a bit; shorter PV reduces tiny allocs
-set "JAVA_EXTRA_OPTS=-XX:+AlwaysPreTouch -Dchessengine.tt.mb=%CHESSENGINE_TT_MB% -Dchessengine.openingbook.enabled=false -Dchessengine.uci.info.minIntervalMs=200 -Dchessengine.uci.info.maxPvLen=10"
+set "JAVA_EXTRA_OPTS=-XX:+AlwaysPreTouch -Dchessengine.tt.mb=%CHESSENGINE_TT_MB% -Dchessengine.openingbook.enabled=false -Dchessengine.uci.info.minIntervalMs=200 -Dchessengine.uci.info.maxPvLen=10 -Dchessengine.syzygy.nativeLibrary=%CHESSENGINE_SYZYGY_NATIVE% -Dchessengine.syzygy.paths=%CHESSENGINE_SYZYGY_PATHS%"
 
 rem Ponder off is safest on Lichess; MoveOverhead set in Python (120 bullet / 200 blitz+)
 set "BOT_ENABLE_PONDER=0"
