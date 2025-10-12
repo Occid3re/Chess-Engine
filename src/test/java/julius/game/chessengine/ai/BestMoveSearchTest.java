@@ -5,6 +5,8 @@ import julius.game.chessengine.board.Move;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
+import julius.game.chessengine.syzygy.SyzygyTablebaseService;
+import julius.game.chessengine.syzygy.bridge.SyzygyBridge;
 import julius.game.chessengine.tuning.AiTuning;
 import julius.game.chessengine.utils.Score;
 import org.junit.jupiter.api.AfterAll;
@@ -35,6 +37,54 @@ import java.util.stream.Collectors;
 public class BestMoveSearchTest {
 
     private static final SearchEnvironment SEARCH_ENVIRONMENT = SearchEnvironment.detect();
+    private static final SyzygyTablebaseService TABLEBASE_SERVICE = initializeTablebaseService();
+
+    private static SyzygyTablebaseService initializeTablebaseService() {
+        String directories = firstNonEmpty(
+                System.getProperty("chessengine.syzygy.paths"),
+                System.getProperty("chessengine.syzygy.path"),
+                System.getenv("CHESSENGINE_SYZYGY_PATH"),
+                System.getenv("SYZYGY_PATH")
+        );
+        if (directories == null || directories.isBlank()) {
+            return null;
+        }
+        if (!SyzygyBridge.isLibLoaded()) {
+            System.out.printf(Locale.ROOT,
+                    "BestMoveSearchTest: Syzygy native library is not loaded; skipping tablebase integration for directories=%s.%n",
+                    directories);
+            return null;
+        }
+        int maxPieces = Integer.getInteger("chessengine.syzygy.maxPieces", 7);
+        int cacheSize = Integer.getInteger("chessengine.syzygy.cacheSize", 65536);
+        try {
+            SyzygyTablebaseService service = new SyzygyTablebaseService(directories, maxPieces, cacheSize);
+            service.ensureReady();
+            System.out.printf(Locale.ROOT,
+                    "BestMoveSearchTest: Syzygy tablebase service enabled (directories=%s, maxPieces=%d, cacheSize=%d).%n",
+                    directories,
+                    maxPieces,
+                    cacheSize);
+            return service;
+        } catch (RuntimeException ex) {
+            System.out.printf(Locale.ROOT,
+                    "BestMoveSearchTest: Failed to initialise Syzygy tablebases (%s). Tablebase probes disabled.%n",
+                    ex.getMessage());
+            return null;
+        }
+    }
+
+    private static String firstNonEmpty(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (value != null && !value.trim().isEmpty()) {
+                return value.trim();
+            }
+        }
+        return null;
+    }
     private static final int DEFAULT_SEARCH_DEPTH = 4;
     private static final long UNBOUNDED_SEARCH_TIME_MILLIS = java.util.concurrent.TimeUnit.DAYS.toMillis(365L * 100L);
 
@@ -506,7 +556,7 @@ public class BestMoveSearchTest {
         private volatile int targetDepth;
 
         DiagnosticAI(Engine engine, AiTuning tuning) {
-            super(engine, tuning);
+            super(engine, tuning, TABLEBASE_SERVICE);
             try {
                 sortMovesMethod = AI.class.getDeclaredMethod("sortMovesByEfficiency", IntArrayList.class,
                         int.class, long.class, int.class, Engine.class);
