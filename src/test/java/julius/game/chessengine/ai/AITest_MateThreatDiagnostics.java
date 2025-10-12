@@ -7,6 +7,7 @@ import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.tuning.AiTuning;
 import julius.game.chessengine.utils.Score;
+import julius.game.chessengine.syzygy.TestSyzygySupport;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.TestInstance;
@@ -142,7 +143,8 @@ class AITest_MateThreatDiagnostics {
         private final List<DepthTrace> depthTraces = Collections.synchronizedList(new ArrayList<>());
 
         DiagnosticAI(Engine engine, AiTuning tuning) {
-            super(engine, tuning);
+            super(engine, tuning, TestSyzygySupport.maybeCreateServiceFromConfiguration()
+                    .orElse(null));
             try {
                 sortMovesMethod = AI.class.getDeclaredMethod("sortMovesByEfficiency", IntArrayList.class,
                         int.class, long.class, int.class, Engine.class);

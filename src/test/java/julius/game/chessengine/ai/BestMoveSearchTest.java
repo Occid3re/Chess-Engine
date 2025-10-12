@@ -7,6 +7,7 @@ import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.tuning.AiTuning;
 import julius.game.chessengine.utils.Score;
+import julius.game.chessengine.syzygy.TestSyzygySupport;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -506,7 +507,8 @@ public class BestMoveSearchTest {
         private volatile int targetDepth;
 
         DiagnosticAI(Engine engine, AiTuning tuning) {
-            super(engine, tuning);
+            super(engine, tuning, TestSyzygySupport.maybeCreateServiceFromConfiguration()
+                    .orElse(null));
             try {
                 sortMovesMethod = AI.class.getDeclaredMethod("sortMovesByEfficiency", IntArrayList.class,
                         int.class, long.class, int.class, Engine.class);
