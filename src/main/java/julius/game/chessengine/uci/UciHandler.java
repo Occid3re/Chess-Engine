@@ -46,17 +46,27 @@ public class UciHandler {
     }
 
     public UciHandler(Consumer<String> output, Supplier<Boolean> running) {
-        String syzygyPaths = System.getProperty("chessengine.syzygy.paths", System.getProperty("chessengine.syzygy.path", ""));
-        int syzygyMaxPieces = Integer.getInteger("chessengine.syzygy.maxPieces", 7);
-        int syzygyCacheSize = Integer.getInteger("chessengine.syzygy.cacheSize", 65536);
-        this.tablebaseService = new SyzygyTablebaseService(syzygyPaths, syzygyMaxPieces, syzygyCacheSize);
-        Score.setTablebaseService(tablebaseService);
+        this(createTablebaseService(), new Engine(), null, output, running);
+    }
 
-        this.engine = new Engine();
-        this.ai = new AI(engine, tablebaseService);
+    UciHandler(SyzygyTablebaseService tablebaseService, Engine engine, AI ai,
+            Consumer<String> output, Supplier<Boolean> running) {
+        this.tablebaseService = Objects.requireNonNull(tablebaseService, "tablebaseService");
+        Score.setTablebaseService(this.tablebaseService);
+
+        this.engine = Objects.requireNonNull(engine, "engine");
+        this.ai = ai == null ? new AI(this.engine, this.tablebaseService) : ai;
         this.output = Objects.requireNonNull(output, "output");
         this.running = Objects.requireNonNull(running, "running");
         registerOptions();
+    }
+
+    private static SyzygyTablebaseService createTablebaseService() {
+        String syzygyPaths = System.getProperty("chessengine.syzygy.paths",
+                System.getProperty("chessengine.syzygy.path", ""));
+        int syzygyMaxPieces = Integer.getInteger("chessengine.syzygy.maxPieces", 7);
+        int syzygyCacheSize = Integer.getInteger("chessengine.syzygy.cacheSize", 65536);
+        return new SyzygyTablebaseService(syzygyPaths, syzygyMaxPieces, syzygyCacheSize);
     }
 
     /**
