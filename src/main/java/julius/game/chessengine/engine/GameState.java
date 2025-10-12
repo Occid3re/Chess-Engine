@@ -5,6 +5,7 @@ import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
+import julius.game.chessengine.syzygy.TablebaseResult;
 import julius.game.chessengine.utils.Score;
 import lombok.Data;
 import lombok.Getter;
@@ -25,6 +26,8 @@ public class GameState {
 
     private boolean drawByInsufficientMaterial;
 
+    private TablebaseResult lastTablebaseResult;
+
     @Getter
     private int halfmoveClock = 0;          // resets on pawn move or capture
     @Getter
@@ -39,6 +42,7 @@ public class GameState {
         this.halfmoveClock = bitBoard.getHalfmoveClock();
         this.fullmoveNumber = bitBoard.getFullmoveNumber();
         recordHash(bitBoard.getBoardStateHash());
+        captureTablebaseState();
     }
 
     public GameState(GameState other) {
@@ -52,10 +56,12 @@ public class GameState {
         this.hashHistory.addAll(other.hashHistory);
         this.halfmoveStack.addAll(other.halfmoveStack);
         this.fullmoveStack.addAll(other.fullmoveStack);
+        this.lastTablebaseResult = other.lastTablebaseResult;
     }
 
     public void refreshScore(BitBoard bitBoard) {
         score.refresh(bitBoard, state);
+        captureTablebaseState();
     }
     public void update(BitBoard bitBoard, IntArrayList legalMoves, int move, boolean isOpeningMove) {
         updateState(bitBoard, legalMoves, isOpeningMove);
@@ -77,6 +83,7 @@ public class GameState {
         if (isThreefoldRepetition() || isFiftyMoveRule()) {
             this.state = GameStateEnum.DRAW;
         }
+        captureTablebaseState();
     }
 
     public void updateState(BitBoard bitBoard, IntArrayList legalMoves, boolean isOpeningMove) {
@@ -104,6 +111,7 @@ public class GameState {
                 state = GameStateEnum.PLAY;
             }
         }
+        captureTablebaseState();
     }
 
 
@@ -216,6 +224,16 @@ public class GameState {
         }
         bitBoard.setHalfmoveClock(halfmoveClock);
         bitBoard.setFullmoveNumber(fullmoveNumber);
+    }
+
+    public java.util.Optional<TablebaseResult> getLastTablebaseResult() {
+        return java.util.Optional.ofNullable(lastTablebaseResult);
+    }
+
+    public void captureTablebaseState() {
+        this.lastTablebaseResult = score != null
+                ? score.getTablebaseResult().orElse(null)
+                : null;
     }
 
     @Override

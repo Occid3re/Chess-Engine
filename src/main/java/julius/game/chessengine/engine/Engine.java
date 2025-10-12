@@ -6,6 +6,7 @@ import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.FEN;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.figures.PieceType;
+import julius.game.chessengine.syzygy.TablebaseResult;
 import julius.game.chessengine.utils.Color;
 import julius.game.chessengine.utils.MoveStack;
 import lombok.Getter;
@@ -15,6 +16,7 @@ import org.springframework.stereotype.Service;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.LongConsumer;
 
 import static julius.game.chessengine.board.MoveHelper.convertIndexToString;
@@ -54,6 +56,7 @@ public class Engine {
     private GameState gameState = new GameState(bitBoard);
 
     private volatile LongConsumer onPositionChanged = _ -> {};
+    private volatile TablebaseResult lastTablebaseResult;
 
     public Engine() {
         startNewGame();
@@ -75,6 +78,7 @@ public class Engine {
             // Intentionally DO NOT copy the onPositionChanged observer; clones are silent by default.
             // Users can opt in via setOnPositionChanged on the clone.
         }
+        updateLastTablebaseResult();
     }
 
     public void setOnPositionChanged(LongConsumer cb) {
@@ -83,6 +87,7 @@ public class Engine {
 
     /** Invoke observer outside boardLock. */
     private void notifyPositionChanged(long hash) {
+        updateLastTablebaseResult();
         LongConsumer cb = this.onPositionChanged; // read volatile once
         try {
             cb.accept(hash);
@@ -165,6 +170,7 @@ public class Engine {
             gameState.pushHalfmoveClock();
             gameState.update(bitBoard, legalMoves, move, isOpeningMove);
             gameState.getScore().applyMove(bitBoard, move, gameState.getState());
+            updateLastTablebaseResult();
 
             // 5) Line/history
             line.push(move);
@@ -198,10 +204,12 @@ public class Engine {
                 gameState.setState(GameStateEnum.DRAW);
                 // Still surface the UI/eval hint if material is insufficient.
                 gameState.setDrawByInsufficientMaterial(bitBoard.hasInsufficientMaterial());
+                updateLastTablebaseResult();
             } else {
                 // Otherwise recompute normally; stalemate (terminal) or insufficient (non-terminal) will be detected here.
                 IntArrayList legalMoves = generateLegalMoves();
                 gameState.updateState(bitBoard, legalMoves, false);
+                updateLastTablebaseResult();
             }
 
             notifyHash = getBoardStateHash();
@@ -253,6 +261,7 @@ public class Engine {
             gameState.getHashHistory().clear();
             gameState.getRepetition().clear();
             gameState.recordHash(getBoardStateHash());
+            updateLastTablebaseResult();
 
             notifyHash = getBoardStateHash();
         }
@@ -442,6 +451,7 @@ public class Engine {
             markLegalMovesStale();
 
             gameState.refreshScore(bitBoard);
+            updateLastTablebaseResult();
 
             return previousDoubleStep;
         }
@@ -460,6 +470,7 @@ public class Engine {
             markLegalMovesStale();
 
             gameState.refreshScore(bitBoard);
+            updateLastTablebaseResult();
         }
     }
 
@@ -482,6 +493,7 @@ public class Engine {
             gameState.popHalfmoveClock(bitBoard);
             gameState.updateState(bitBoard, legalMoves, false);
             gameState.getScore().undoMove(bitBoard, undoMove, gameState.getState());
+            updateLastTablebaseResult();
 
             // 3) Bookkeeping
             redoLine.push(undoMove);
@@ -555,6 +567,17 @@ public class Engine {
         synchronized (boardLock) {
             return bitBoard.isEndgame();
         }
+    }
+
+    public Optional<TablebaseResult> getLastTablebaseResult() {
+        return Optional.ofNullable(lastTablebaseResult);
+    }
+
+    private void updateLastTablebaseResult() {
+        GameState currentState = this.gameState;
+        this.lastTablebaseResult = (currentState != null)
+                ? currentState.getLastTablebaseResult().orElse(null)
+                : null;
     }
 }
 

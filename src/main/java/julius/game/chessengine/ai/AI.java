@@ -9,6 +9,10 @@ import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
+import julius.game.chessengine.syzygy.SyzygyProbeResult;
+import julius.game.chessengine.syzygy.SyzygyTablebaseService;
+import julius.game.chessengine.syzygy.SyzygyWdl;
+import julius.game.chessengine.syzygy.TablebaseResult;
 import julius.game.chessengine.tuning.AiTuning;
 import julius.game.chessengine.tuning.AspirationParameters;
 import julius.game.chessengine.tuning.LmrParameters;
@@ -44,6 +48,8 @@ public class AI {
 
     @Getter
     private final AiTuning tuning;
+
+    private final SyzygyTablebaseService tablebaseService;
 
     /**
      * Number of threads used for searching. Defaults to single-threaded search but
@@ -199,6 +205,9 @@ public class AI {
     private final ThreadLocal<Deque<Engine>> workerSimulationPool =
             ThreadLocal.withInitial(ArrayDeque::new);
 
+    private record TablebaseHit(double score, int bestMove, TablebaseResult result) {
+    }
+
     private static final int LMR_MAX_DEPTH = 64;
     private static final int LMR_MAX_MOVES = MAX_MOVE_LIST_SIZE;
 
@@ -272,12 +281,24 @@ public class AI {
     private long nullMoveCount = 0;
 
     public AI(Engine mainEngine) {
-        this(mainEngine, AiTuning.defaults());
+        this(mainEngine, AiTuning.defaults(), null);
+    }
+
+    public AI(Engine mainEngine, SyzygyTablebaseService tablebaseService) {
+        this(mainEngine, AiTuning.defaults(), tablebaseService);
     }
 
     public AI(Engine mainEngine, AiTuning tuning) {
+        this(mainEngine, tuning, null);
+    }
+
+    public AI(Engine mainEngine, AiTuning tuning, SyzygyTablebaseService tablebaseService) {
         this.mainEngine = Objects.requireNonNull(mainEngine, "mainEngine");
         this.tuning = tuning != null ? tuning : AiTuning.defaults();
+        this.tablebaseService = tablebaseService;
+        if (tablebaseService != null) {
+            Score.setTablebaseService(tablebaseService);
+        }
         this.searchThreads = this.tuning.searchThreads();
         this.lazySmpThreads = Math.max(1, this.tuning.lazySmpThreads());
         this.hashSizeMb = this.tuning.hashSizeMb();
@@ -904,6 +925,12 @@ public class AI {
 
     private double resolveScoreDifference(GameState gameState, long boardHash) {
         Long2DoubleOpenHashMap cache = staticEvalCache.get();
+        Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
+        if (tablebase.isPresent() && isExactWdl(tablebase.get())) {
+            double exact = Score.tablebaseToEvaluation(tablebase.get());
+            cache.put(boardHash, exact);
+            return exact;
+        }
         double cached = cache.get(boardHash);
         if (!Double.isNaN(cached)) {
             return cached;
@@ -1854,6 +1881,81 @@ public class AI {
      * *
      */
     // AI.java
+    private Optional<TablebaseHit> resolveTablebaseHit(Engine simulatorEngine, boolean isWhite) {
+        TablebaseResult result = simulatorEngine.getGameState().getLastTablebaseResult().orElse(null);
+        if ((result == null || !isExactWdl(result)) && tablebaseService != null) {
+            Optional<SyzygyProbeResult> probe = tablebaseService.probe(simulatorEngine.getBitBoard());
+            if (probe.isPresent()) {
+                result = TablebaseResult.from(probe.get());
+                if (isExactWdl(result)) {
+                    simulatorEngine.getGameState().setLastTablebaseResult(result);
+                }
+            }
+        }
+        if (result == null || !isExactWdl(result)) {
+            return Optional.empty();
+        }
+        double whitePerspective = Score.tablebaseToEvaluation(result);
+        double searchScore = isWhite ? whitePerspective : -whitePerspective;
+        int bestMove = determineTablebaseBestMove(simulatorEngine, isWhite);
+        return Optional.of(new TablebaseHit(searchScore, bestMove, result));
+    }
+
+    private int determineTablebaseBestMove(Engine simulatorEngine, boolean isWhite) {
+        IntArrayList legal = simulatorEngine.getAllLegalMoves();
+        if (legal.isEmpty()) {
+            return -1;
+        }
+        double bestScore = Double.NEGATIVE_INFINITY;
+        int bestMove = -1;
+        for (int i = 0; i < legal.size(); i++) {
+            int move = legal.getInt(i);
+            simulatorEngine.performMove(move);
+            double candidate;
+            try {
+                candidate = evaluateTablebaseChild(simulatorEngine, isWhite);
+            } finally {
+                simulatorEngine.undoLastMove();
+            }
+            if (Double.isNaN(candidate)) {
+                continue;
+            }
+            if (candidate > bestScore) {
+                bestScore = candidate;
+                bestMove = move;
+            }
+        }
+        return bestMove;
+    }
+
+    private double evaluateTablebaseChild(Engine simulatorEngine, boolean parentIsWhite) {
+        TablebaseResult childResult = simulatorEngine.getGameState().getLastTablebaseResult().orElse(null);
+        if ((childResult == null || !isExactWdl(childResult)) && tablebaseService != null) {
+            Optional<SyzygyProbeResult> probe = tablebaseService.probe(simulatorEngine.getBitBoard());
+            if (probe.isPresent()) {
+                childResult = TablebaseResult.from(probe.get());
+                if (isExactWdl(childResult)) {
+                    simulatorEngine.getGameState().setLastTablebaseResult(childResult);
+                }
+            }
+        }
+        if (childResult == null || !isExactWdl(childResult)) {
+            return Double.NaN;
+        }
+        double whitePerspective = Score.tablebaseToEvaluation(childResult);
+        boolean childIsWhite = !parentIsWhite;
+        double childSearchPerspective = childIsWhite ? whitePerspective : -whitePerspective;
+        return -childSearchPerspective;
+    }
+
+    private boolean isExactWdl(TablebaseResult result) {
+        if (result == null) {
+            return false;
+        }
+        SyzygyWdl wdl = result.wdl();
+        return wdl == SyzygyWdl.WIN || wdl == SyzygyWdl.LOSS || wdl == SyzygyWdl.DRAW;
+    }
+
     private double alphaBeta(Engine simulatorEngine, int depth, double alpha, double beta,
                              boolean isWhite, long deadline, int prevMove, int plyFromRoot,
                              int extStreak) {
@@ -1877,6 +1979,15 @@ public class AI {
         }
         if (simulatorEngine.getGameState().isTerminal()) { // <-- terminal draw only
             return evaluateStaticPosition(simulatorEngine.getGameState(), boardHash, isWhite, plyFromRoot);
+        }
+
+        Optional<TablebaseHit> tablebaseHit = resolveTablebaseHit(simulatorEngine, isWhite);
+        if (tablebaseHit.isPresent()) {
+            TablebaseHit hit = tablebaseHit.get();
+            int bestMove = hit.bestMove() >= 0 ? hit.bestMove() : -1;
+            transpositionTable.put(boardHash,
+                    new TranspositionTableEntry(hit.score(), depth, NodeType.EXACT, bestMove), depth);
+            return hit.score();
         }
 
         if (depth <= 0) {
@@ -2953,6 +3064,11 @@ public class AI {
     private double evaluateStaticPosition(GameState gameState, long boardHash, boolean isWhitesTurn, int depthOrPly) {
         if (gameState.isInStateCheckMate()) {
             return -(CHECKMATE - depthOrPly);
+        }
+        Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
+        if (tablebase.isPresent() && isExactWdl(tablebase.get())) {
+            double whitePerspective = Score.tablebaseToEvaluation(tablebase.get());
+            return isWhitesTurn ? whitePerspective : -whitePerspective;
         }
         if (gameState.isDrawForUIOrEval()) { // <-- include insufficient material for eval/UI
             if (log.isDebugEnabled()) log.debug("DRAW");

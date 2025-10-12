@@ -349,7 +349,11 @@ public class Score {
         this.tablebaseBypassesEvaluation = false;
     }
 
-    private int computeTablebaseCentipawn(TablebaseResult result) {
+    public static double tablebaseToEvaluation(TablebaseResult result) {
+        return tablebaseToCentipawn(result) / 100.0;
+    }
+
+    public static int tablebaseToCentipawn(TablebaseResult result) {
         int wdlScore = result.wdl().score();
         if (wdlScore == 0) {
             return DRAW;
@@ -360,5 +364,9 @@ public class Score {
                 : result.dtz().isPresent() ? Math.abs(result.dtz().getAsInt()) : 0;
         int scaledPenalty = Math.min(CHECKMATE - 1, distance * 10);
         return sign * (CHECKMATE - scaledPenalty);
+    }
+
+    private int computeTablebaseCentipawn(TablebaseResult result) {
+        return tablebaseToCentipawn(result);
     }
 }
