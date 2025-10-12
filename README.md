@@ -167,11 +167,16 @@ whenever six or fewer pieces remain on the board. Follow these steps to get the 
    them to a local directory (e.g. `C:\tb\syzygy`).
 2. Point the engine at the directory via the `chessengine.syzygy.path` system property (use
    `chessengine.syzygy.paths` when you want to provide several locations separated by the platform
-   path separator).
+   path separator). The engine expands directories that merely group tablebases (for example a
+   parent folder containing `3-4-5-wdl/`, `3-4-5-dtz/`, etc.) so you only have to point at the
+   root once.
    * UCI: `setoption name SyzygyPath value C:\tb\syzygy`
    * CLI: `java -Dchessengine.syzygy.path=C:\tb\syzygy -jar target/chess-engine-<version>-uci.jar`
    * Spring Boot: update `application.yaml` (see the example in this repository) or export the
      `CHESSENGINE_SYZYGY_PATH` environment variable.
+   * Native override: when you do not bundle `JSyzygy` inside the application JAR, set the
+     `chessengine.syzygy.nativeLibrary` system property (or `CHESSENGINE_SYZYGY_NATIVE` environment
+     variable) to the full path of the native library (`JSyzygy.dll`, `libJSyzygy.so`, ...).
 3. Restart the engine so the service warms up the table metadata. When a probe succeeds the console
    starts emitting `info string tablebase ...` lines (including `dtz` updates), and the search score
    snaps to the exact WDL converted from the tablebase answer.

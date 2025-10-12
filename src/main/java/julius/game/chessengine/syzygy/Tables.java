@@ -5,11 +5,6 @@ import julius.game.chessengine.syzygy.bridge.SyzygyBridge;
 import julius.game.chessengine.syzygy.bridge.SyzygyConstants;
 import lombok.extern.log4j.Log4j2;
 
-import java.io.File;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 
@@ -35,7 +30,7 @@ final class Tables {
             log.warn("Syzygy native library is not loaded; tablebases will remain disabled.");
             return Optional.empty();
         }
-        Optional<String> sanitized = sanitizeDirectories(directories);
+        Optional<String> sanitized = SyzygyPathResolver.sanitize(directories);
         if (sanitized.isEmpty()) {
             log.warn("No valid Syzygy directories configured. Provided value: '{}'", directories);
             return Optional.empty();
@@ -94,32 +89,6 @@ final class Tables {
 
         return Optional.of(new SyzygyProbeResult(wdl, dtz, OptionalInt.empty()));
     }
-
-    private static Optional<String> sanitizeDirectories(String directories) {
-        if (directories == null) {
-            return Optional.empty();
-        }
-        String separator = File.pathSeparator;
-        String[] raw = directories.split(separator);
-        List<String> valid = new ArrayList<>();
-        for (String candidate : raw) {
-            String trimmed = candidate == null ? "" : candidate.trim();
-            if (trimmed.isEmpty()) {
-                continue;
-            }
-            Path path = Path.of(trimmed);
-            if (Files.isDirectory(path)) {
-                valid.add(path.toAbsolutePath().toString());
-            } else {
-                log.warn("Ignoring non-existent Syzygy directory: {}", trimmed);
-            }
-        }
-        if (valid.isEmpty()) {
-            return Optional.empty();
-        }
-        return Optional.of(String.join(separator, valid));
-    }
-
     private static SyzygyWdl toWdl(int wdlValue) {
         return switch (wdlValue) {
             case SyzygyConstants.TB_LOSS -> SyzygyWdl.LOSS;
