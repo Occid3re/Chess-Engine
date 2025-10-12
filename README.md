@@ -157,3 +157,24 @@ same time when you have spare CPU cores. The tuner defaults to the number of
 available processors so you can fully utilise the machine without additional
 arguments.
 
+## Syzygy Tablebases
+
+The engine understands Syzygy endgame tablebases and uses them to bypass static evaluation
+whenever six or fewer pieces remain on the board. Follow these steps to get the probes running:
+
+1. Download the five- and six-piece archives from a trusted mirror (for example
+   https://tablebase.sesse.net/syzygy/). Keep the `.rtbw` and `.rtbz` files together and extract
+   them to a local directory (e.g. `C:\tb\syzygy`).
+2. Point the engine at the directory via the `chessengine.syzygy.path` system property (use
+   `chessengine.syzygy.paths` when you want to provide several locations separated by the platform
+   path separator).
+   * UCI: `setoption name SyzygyPath value C:\tb\syzygy`
+   * CLI: `java -Dchessengine.syzygy.path=C:\tb\syzygy -jar target/chess-engine-<version>-uci.jar`
+   * Spring Boot: update `application.yaml` (see the example in this repository) or export the
+     `CHESSENGINE_SYZYGY_PATH` environment variable.
+3. Restart the engine so the service warms up the table metadata. When a probe succeeds the console
+   starts emitting `info string tablebase ...` lines (including `dtz` updates), and the search score
+   snaps to the exact WDL converted from the tablebase answer.
+
+For stress tests you can cap the tablebase usage with `-Dchessengine.syzygy.maxPieces=<n>` and adjust
+`-Dchessengine.syzygy.cacheSize=<entries>` to tune the in-process probe cache.

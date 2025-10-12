@@ -29,7 +29,7 @@ public class SyzygyTablebaseService {
     private volatile int configuredMaxPieces;
 
     public SyzygyTablebaseService(
-            @Value("${chessengine.syzygy.paths:}") String directories,
+            @Value("${chessengine.syzygy.paths:${chessengine.syzygy.path:}}") String directories,
             @Value("${chessengine.syzygy.maxPieces:7}") int maxPieces,
             @Value("${chessengine.syzygy.cacheSize:65536}") int cacheSize) {
         this(resolveClient(directories == null ? "" : directories, maxPieces), cacheSize);
@@ -43,7 +43,7 @@ public class SyzygyTablebaseService {
         this.configuredDirectories = "";
         this.configuredMaxPieces = 7;
         if (client instanceof NoopClient) {
-            log.info("Syzygy tablebase client disabled. Configure 'chessengine.syzygy.paths' to enable probing.");
+            log.info("Syzygy tablebase client disabled. Configure 'chessengine.syzygy.paths' or 'chessengine.syzygy.path' to enable probing.");
         } else {
             log.info("Syzygy tablebase client initialised with cache size {}", this.maxEntries);
         }
@@ -83,7 +83,7 @@ public class SyzygyTablebaseService {
         cache.clear();
         evictionOrder.clear();
         if (client instanceof NoopClient) {
-            log.info("Syzygy tablebase client disabled. Configure 'chessengine.syzygy.paths' to enable probing.");
+            log.info("Syzygy tablebase client disabled. Configure 'chessengine.syzygy.paths' or 'chessengine.syzygy.path' to enable probing.");
         } else {
             log.info("Syzygy tablebase client initialised with cache size {}", this.maxEntries);
         }
