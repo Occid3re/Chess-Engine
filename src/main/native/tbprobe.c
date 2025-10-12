@@ -25,6 +25,9 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
 
 #include "tbprobe.h"
 
@@ -137,9 +140,27 @@ unsigned TB_LARGEST = 0;
 #else
 static inline unsigned lsb(uint64_t b)
 {
+#if defined(_MSC_VER)
+    if (!b)
+        return 0;
+#if defined(_M_X64) || defined(_M_AMD64) || defined(_M_IA64)
+    unsigned long idx;
+    _BitScanForward64(&idx, b);
+    return (unsigned)idx;
+#else
+    unsigned long idx;
+    unsigned long lower = (unsigned long)(b & 0xFFFFFFFFULL);
+    if (_BitScanForward(&idx, lower))
+        return (unsigned)idx;
+    unsigned long upper = (unsigned long)(b >> 32);
+    _BitScanForward(&idx, upper);
+    return (unsigned)(idx + 32);
+#endif
+#else
     size_t idx;
     __asm__("bsfq %1, %0": "=r"(idx): "rm"(b));
     return idx;
+#endif
 }
 #endif
 #define square(r, f)            (8 * (r) + (f))

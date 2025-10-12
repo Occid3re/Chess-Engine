@@ -35,6 +35,9 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
 #ifndef _WIN32
 #include <unistd.h>
 #include <sys/mman.h>
@@ -73,12 +76,16 @@ static LOCK_T TB_MUTEX;
 
 #ifdef TB_CUSTOM_BSWAP32
 #define internal_bswap32(x) TB_CUSTOM_BSWAP32(x)
+#elif defined(_MSC_VER)
+#define internal_bswap32(x) _byteswap_ulong(x)
 #else
 #define internal_bswap32(x) __builtin_bswap32(x)
 #endif
 
 #ifdef TB_CUSTOM_BSWAP64
 #define internal_bswap64(x) TB_CUSTOM_BSWAP64(x)
+#elif defined(_MSC_VER)
+#define internal_bswap64(x) _byteswap_uint64(x)
 #else
 #define internal_bswap64(x) __builtin_bswap64(x)
 #endif
@@ -103,36 +110,26 @@ static uint64_t calc_key_from_pcs(int *pcs, int mirror);
 static void free_wdl_entry(struct TBEntry *entry);
 static void free_dtz_entry(struct TBEntry *entry);
 
+#ifdef _WIN32
+#define TB_MAX_PATH_LEN MAX_PATH
+#else
+#define TB_MAX_PATH_LEN 256
+#endif
+
 static FD open_tb(const char *str, const char *suffix)
 {
-  int i;
   FD fd;
-  size_t remain;
-#ifdef _WIN32
-  const int MAX_LEN = MAX_PATH;
-#else
-  // assume 256
-  const int MAX_LEN = 256;
-#endif
-  remain = MAX_LEN-1; // allow room for null
-  char file[MAX_LEN];
+  char file[TB_MAX_PATH_LEN];
 
-  for (i = 0; i < num_paths; i++) {
-    strncpy(file, paths[i], remain);
-    remain -= strlen(paths[i]);
-    if (remain <=0) break;
-    strncat(file, "/", remain);
-    remain--;
-    if (remain <=0) break;
-    strncat(file, str, remain);
-    remain -= strlen(str);
-    if (remain <=0) break;
-    strncat(file, suffix, remain);
+  for (int i = 0; i < num_paths; i++) {
+    int written = snprintf(file, TB_MAX_PATH_LEN, "%s/%s%s", paths[i], str, suffix);
+    if (written < 0 || written >= TB_MAX_PATH_LEN)
+      continue;
 #ifndef _WIN32
     fd = open(file, O_RDONLY);
 #else
     fd = CreateFile(file, GENERIC_READ, FILE_SHARE_READ, NULL,
-			  OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                          OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 #endif
     if (fd != FD_ERR) {
       return fd;
