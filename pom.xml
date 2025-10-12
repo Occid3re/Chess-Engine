@@ -104,6 +104,93 @@
             </plugin>
 
             <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>cmake-configure</id>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>cmake</executable>
+                            <arguments>
+                                <argument>-S</argument>
+                                <argument>${project.basedir}/src/main/native</argument>
+                                <argument>-B</argument>
+                                <argument>${project.build.directory}/native</argument>
+                                <argument>-DCMAKE_BUILD_TYPE=Release</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>cmake-build</id>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>cmake</executable>
+                            <arguments>
+                                <argument>--build</argument>
+                                <argument>${project.build.directory}/native</argument>
+                                <argument>--config</argument>
+                                <argument>Release</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <version>3.3.1</version>
+                <executions>
+                    <execution>
+                        <id>copy-native-linux</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.outputDirectory}/natives/linux-x86_64</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${project.build.directory}/native</directory>
+                                    <includes>
+                                        <include>**/libJSyzygy.so</include>
+                                    </includes>
+                                    <filtering>false</filtering>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>copy-native-windows</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.outputDirectory}/natives/win-x86_64</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${project.build.directory}/native</directory>
+                                    <includes>
+                                        <include>**/JSyzygy.dll</include>
+                                    </includes>
+                                    <filtering>false</filtering>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <configuration>
@@ -142,6 +229,15 @@
                         </configuration>
                     </execution>
                 </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                    <argLine>${argLine} --enable-native-access=ALL-UNNAMED</argLine>
+                </configuration>
             </plugin>
         </plugins>
     </build>
