@@ -113,25 +113,17 @@ class UciSyzygyFlowTest {
         if (service == null) {
             throw new IllegalArgumentException("service");
         }
-        try {
-            java.lang.reflect.Field field = Score.class.getDeclaredField("TABLEBASE_SERVICE");
-            field.setAccessible(true);
-            SyzygyTablebaseService previous = (SyzygyTablebaseService) field.get(null);
-            Score.setTablebaseService(service);
-            return new ScoreTablebaseRestorer(field, previous);
-        } catch (ReflectiveOperationException ex) {
-            throw new IllegalStateException("Unable to override Score tablebase service", ex);
-        }
+        SyzygyTablebaseService previous = Score.getTablebaseService();
+        Score.setTablebaseService(service);
+        return new ScoreTablebaseRestorer(previous);
     }
 
     private static final class ScoreTablebaseRestorer implements AutoCloseable {
 
-        private final java.lang.reflect.Field field;
         private final SyzygyTablebaseService previous;
         private boolean closed;
 
-        private ScoreTablebaseRestorer(java.lang.reflect.Field field, SyzygyTablebaseService previous) {
-            this.field = field;
+        private ScoreTablebaseRestorer(SyzygyTablebaseService previous) {
             this.previous = previous;
         }
 
@@ -140,18 +132,12 @@ class UciSyzygyFlowTest {
             if (closed) {
                 return;
             }
-            try {
-                if (previous == null) {
-                    field.setAccessible(true);
-                    field.set(null, null);
-                } else {
-                    Score.setTablebaseService(previous);
-                }
-            } catch (ReflectiveOperationException ex) {
-                throw new IllegalStateException("Unable to restore Score tablebase service", ex);
-            } finally {
-                closed = true;
+            if (previous == null) {
+                Score.clearTablebaseService();
+            } else {
+                Score.setTablebaseService(previous);
             }
+            closed = true;
         }
     }
 }

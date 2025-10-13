@@ -18,6 +18,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Log4j2
 public class SyzygyTablebaseService {
 
+    private static final int DEFAULT_MAX_PIECES = 6;
+
     private final ConcurrentMap<SyzygyCacheKey, Optional<SyzygyProbeResult>> cache = new ConcurrentHashMap<>();
     private final ConcurrentLinkedQueue<SyzygyCacheKey> evictionOrder = new ConcurrentLinkedQueue<>();
     private final AtomicInteger entryCount = new AtomicInteger();
@@ -25,21 +27,24 @@ public class SyzygyTablebaseService {
     private volatile TablebaseClient client;
     private volatile String configuredDirectories;
     private volatile int configuredMaxPieces;
+    private volatile int effectiveMaxPieces;
 
     public SyzygyTablebaseService(
             @Value("${chessengine.syzygy.paths:${chessengine.syzygy.path:}}") String directories,
-            @Value("${chessengine.syzygy.maxPieces:7}") int maxPieces,
+            @Value("${chessengine.syzygy.maxPieces:6}") int maxPieces,
             @Value("${chessengine.syzygy.cacheSize:65536}") int cacheSize) {
         this(resolveClient(directories, maxPieces), cacheSize);
         this.configuredDirectories = directories == null ? "" : directories;
         this.configuredMaxPieces = Math.max(1, maxPieces);
+        this.effectiveMaxPieces = resolveEffectiveMaxPieces(this.client, this.configuredMaxPieces);
     }
 
     SyzygyTablebaseService(TablebaseClient client, int cacheSize) {
         this.maxEntries = Math.max(1024, cacheSize);
         this.client = client;
         this.configuredDirectories = "";
-        this.configuredMaxPieces = 7;
+        this.configuredMaxPieces = DEFAULT_MAX_PIECES;
+        this.effectiveMaxPieces = resolveEffectiveMaxPieces(client, this.configuredMaxPieces);
         log.info("Syzygy tablebase cache initialised with capacity {} entries", this.maxEntries);
     }
 
@@ -71,14 +76,15 @@ public class SyzygyTablebaseService {
         this.client = resolveClient(sanitized, maxPieces);
         this.configuredDirectories = sanitized;
         this.configuredMaxPieces = Math.max(1, maxPieces);
+        this.effectiveMaxPieces = resolveEffectiveMaxPieces(this.client, this.configuredMaxPieces);
         cache.clear();
         evictionOrder.clear();
         entryCount.set(0);
         if (client instanceof NoopClient) {
             log.info("Syzygy tablebase probing disabled (directories='{}').", sanitized);
         } else {
-            log.info("Syzygy tablebase probing configured (directories='{}', maxPieces={}).",
-                    sanitized, this.configuredMaxPieces);
+            log.info("Syzygy tablebase probing configured (directories='{}', maxPieces={}, effectiveMaxPieces={}).",
+                    sanitized, this.configuredMaxPieces, this.effectiveMaxPieces);
         }
     }
 
@@ -92,8 +98,24 @@ public class SyzygyTablebaseService {
         return configuredMaxPieces;
     }
 
+    public int getEffectiveMaxPieces() {
+        return effectiveMaxPieces;
+    }
+
     public String getConfiguredDirectories() {
         return configuredDirectories;
+    }
+
+    private static int resolveEffectiveMaxPieces(TablebaseClient client, int configuredMaxPieces) {
+        int normalized = Math.max(1, configuredMaxPieces);
+        if (client == null) {
+            return normalized;
+        }
+        int supported = client.supportedMaxPieces();
+        if (supported <= 0) {
+            return normalized;
+        }
+        return Math.min(normalized, supported);
     }
 
     private void cacheAndEvict(SyzygyCacheKey key, Optional<SyzygyProbeResult> result) {
@@ -132,6 +154,11 @@ public class SyzygyTablebaseService {
         @Override
         public Optional<SyzygyProbeResult> probe(BitBoard board) {
             return Optional.empty();
+        }
+
+        @Override
+        public int supportedMaxPieces() {
+            return 0;
         }
     }
 }

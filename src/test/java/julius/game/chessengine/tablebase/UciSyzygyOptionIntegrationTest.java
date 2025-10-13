@@ -18,9 +18,7 @@ class UciSyzygyOptionIntegrationTest {
     void setoptionPropagatesSyzygyPathToService() throws Exception {
         List<String> output = new ArrayList<>();
 
-        Field scoreField = Score.class.getDeclaredField("TABLEBASE_SERVICE");
-        scoreField.setAccessible(true);
-        SyzygyTablebaseService originalScoreService = (SyzygyTablebaseService) scoreField.get(null);
+        SyzygyTablebaseService originalScoreService = Score.getTablebaseService();
 
         UciHandler handler = new UciHandler(output::add, () -> true);
 
@@ -35,7 +33,11 @@ class UciSyzygyOptionIntegrationTest {
             verify(mockService).configure("/var/syzygy");
         } finally {
             serviceField.set(handler, originalHandlerService);
-            scoreField.set(null, originalScoreService);
+            if (originalScoreService == null) {
+                Score.clearTablebaseService();
+            } else {
+                Score.setTablebaseService(originalScoreService);
+            }
         }
     }
 }

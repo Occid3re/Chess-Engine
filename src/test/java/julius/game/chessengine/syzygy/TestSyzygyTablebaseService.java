@@ -28,7 +28,11 @@ public final class TestSyzygyTablebaseService extends SyzygyTablebaseService {
     }
 
     public static TestSyzygyTablebaseService fromResponses(Map<String, SyzygyProbeResult> responses) {
-        return new TestSyzygyTablebaseService(new TestClient(responses), 16);
+        return fromResponses(responses, 6);
+    }
+
+    public static TestSyzygyTablebaseService fromResponses(Map<String, SyzygyProbeResult> responses, int maxPieces) {
+        return new TestSyzygyTablebaseService(new TestClient(responses, maxPieces), 16);
     }
 
     public List<String> getProbedFens() {
@@ -39,9 +43,11 @@ public final class TestSyzygyTablebaseService extends SyzygyTablebaseService {
 
         private final Map<String, SyzygyProbeResult> responses;
         private final CopyOnWriteArrayList<String> probedFens = new CopyOnWriteArrayList<>();
+        private final int maxPieces;
 
-        private TestClient(Map<String, SyzygyProbeResult> responses) {
+        private TestClient(Map<String, SyzygyProbeResult> responses, int maxPieces) {
             this.responses = responses;
+            this.maxPieces = maxPieces;
         }
 
         @Override
@@ -49,6 +55,11 @@ public final class TestSyzygyTablebaseService extends SyzygyTablebaseService {
             String fen = toFen(board);
             probedFens.add(fen);
             return Optional.ofNullable(responses.get(fen));
+        }
+
+        @Override
+        public int supportedMaxPieces() {
+            return maxPieces;
         }
 
         private List<String> snapshot() {

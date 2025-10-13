@@ -7,9 +7,11 @@ import julius.game.chessengine.syzygy.SyzygyProbeResult;
 import julius.game.chessengine.syzygy.SyzygyTablebaseService;
 import julius.game.chessengine.syzygy.SyzygyWdl;
 import julius.game.chessengine.syzygy.TablebaseResult;
+import julius.game.chessengine.syzygy.TestSyzygyTablebaseService;
 import julius.game.chessengine.utils.Score;
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 
@@ -44,5 +46,33 @@ class ScoreTablebaseIntegrationTest {
             assertThat(score.getBlendedScore()).isEqualTo(expectedCentipawn);
             assertThat(score.getScoreDifference()).isEqualTo(expectedCentipawn / 100.0);
         }
+    }
+
+    @Test
+    void scoreSkipsProbeWhenBoardExceedsServiceLimit() {
+        BitBoard board = FEN.translateFENtoBitBoard("6k1/8/8/8/8/8/PPPP4/6K1 w - - 0 1");
+        TestSyzygyTablebaseService service = TestSyzygyTablebaseService.fromResponses(Map.of(), 5);
+
+        try (TablebaseTestSupport.TablebaseServiceRestorer restorer = TablebaseTestSupport.overrideScoreTablebase(service)) {
+            Score score = new Score();
+            score.refresh(board, GameStateEnum.PLAY);
+        }
+
+        assertThat(service.getProbedFens()).isEmpty();
+    }
+
+    @Test
+    void scoreProbesWhenBoardWithinServiceLimit() {
+        String fen = "6k1/8/8/8/8/8/PPP5/6K1 w - - 0 1";
+        BitBoard board = FEN.translateFENtoBitBoard(fen);
+        SyzygyProbeResult probe = new SyzygyProbeResult(SyzygyWdl.DRAW, OptionalInt.of(0), OptionalInt.empty());
+        TestSyzygyTablebaseService service = TestSyzygyTablebaseService.fromResponses(Map.of(fen, probe), 6);
+
+        try (TablebaseTestSupport.TablebaseServiceRestorer restorer = TablebaseTestSupport.overrideScoreTablebase(service)) {
+            Score score = new Score();
+            score.refresh(board, GameStateEnum.PLAY);
+        }
+
+        assertThat(service.getProbedFens()).containsExactly(fen);
     }
 }

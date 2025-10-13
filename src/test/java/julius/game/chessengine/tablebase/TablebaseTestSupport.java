@@ -5,8 +5,6 @@ import julius.game.chessengine.syzygy.TestSyzygySupport;
 import julius.game.chessengine.utils.Score;
 import org.junit.jupiter.api.Assumptions;
 
-import java.lang.reflect.Field;
-
 final class TablebaseTestSupport {
 
     private TablebaseTestSupport() {
@@ -26,25 +24,17 @@ final class TablebaseTestSupport {
         if (service == null) {
             throw new IllegalArgumentException("service");
         }
-        try {
-            Field field = Score.class.getDeclaredField("TABLEBASE_SERVICE");
-            field.setAccessible(true);
-            SyzygyTablebaseService previous = (SyzygyTablebaseService) field.get(null);
-            Score.setTablebaseService(service);
-            return new TablebaseServiceRestorer(field, previous);
-        } catch (ReflectiveOperationException ex) {
-            throw new IllegalStateException("Unable to override Score tablebase service", ex);
-        }
+        SyzygyTablebaseService previous = Score.getTablebaseService();
+        Score.setTablebaseService(service);
+        return new TablebaseServiceRestorer(previous);
     }
 
     static final class TablebaseServiceRestorer implements AutoCloseable {
 
-        private final Field field;
         private final SyzygyTablebaseService previous;
         private boolean closed;
 
-        private TablebaseServiceRestorer(Field field, SyzygyTablebaseService previous) {
-            this.field = field;
+        private TablebaseServiceRestorer(SyzygyTablebaseService previous) {
             this.previous = previous;
         }
 
@@ -53,18 +43,12 @@ final class TablebaseTestSupport {
             if (closed) {
                 return;
             }
-            try {
-                if (previous == null) {
-                    field.setAccessible(true);
-                    field.set(null, null);
-                } else {
-                    Score.setTablebaseService(previous);
-                }
-            } catch (ReflectiveOperationException ex) {
-                throw new IllegalStateException("Unable to restore Score tablebase service", ex);
-            } finally {
-                closed = true;
+            if (previous == null) {
+                Score.clearTablebaseService();
+            } else {
+                Score.setTablebaseService(previous);
             }
+            closed = true;
         }
     }
 }
