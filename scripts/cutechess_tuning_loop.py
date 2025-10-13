@@ -525,21 +525,27 @@ def accept_match_candidate(
         time_bonus_threshold: float,
 ) -> AcceptanceDecision:
     elo_delta = candidate.elo_diff - best.elo_diff
+    rating_delta = candidate.implied_opponent_elo - best.implied_opponent_elo
     score_delta = candidate.points_fraction - best.points_fraction
     time_delta = best.avg_time_per_game - candidate.avg_time_per_game
     info: Dict[str, float] = {
         "elo_delta": elo_delta,
+        "rating_delta": rating_delta,
         "score_delta": score_delta,
         "time_delta": time_delta,
     }
 
-    if elo_delta > min_elo_gain:
+    # When the opponent strength changes, prefer the improvement in the implied
+    # opponent rating so beating a stronger rival is still treated as progress.
+    effective_delta = rating_delta if abs(rating_delta - elo_delta) > 1e-9 else elo_delta
+
+    if effective_delta > min_elo_gain:
         return AcceptanceDecision(True, True, "elo_improved", info)
     if score_delta > min_score_gain:
         return AcceptanceDecision(True, True, "score_improved", info)
     if (
             time_delta > 0.0
-            and abs(elo_delta) <= min_elo_gain
+            and abs(effective_delta) <= min_elo_gain
             and abs(score_delta) <= min_score_gain
             and time_delta >= time_bonus_threshold * max(best.avg_time_per_game, 1e-9)
     ):
@@ -549,7 +555,7 @@ def accept_match_candidate(
     if not allow_worse:
         return AcceptanceDecision(False, False, "rejected", info)
 
-    anneal = math.exp(elo_delta / max(temperature, 1e-9))
+    anneal = math.exp(effective_delta / max(temperature, 1e-9))
     if rng.random() < anneal:
         info["anneal_prob"] = anneal
         return AcceptanceDecision(True, False, "annealed", info)
