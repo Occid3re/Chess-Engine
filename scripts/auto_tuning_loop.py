@@ -88,7 +88,7 @@ from typing import DefaultDict, Dict, List, Optional, Set, Tuple
 
 
 DEFAULT_SYZYGY_NATIVE = r"C:\\Development\\Chess-Engine\\target\\classes\\natives\\win-x86_64\\Release\\JSyzygy.dll"
-DEFAULT_SYZYGY_PATHS = r"E:\\Syzygy"
+DEFAULT_SYZYGY_PATHS = r"C:\\Syzygy"
 
 
 def resolve_syzygy_from_env(env: Optional[Dict[str, str]] = None) -> Tuple[str, str]:

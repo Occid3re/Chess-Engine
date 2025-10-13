@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Optional, List, Pattern, Match, TextIO
 
 DEFAULT_SYZYGY_NATIVE = r"C:\\Development\\Chess-Engine\\target\\classes\\natives\\win-x86_64\\Release\\JSyzygy.dll"
-DEFAULT_SYZYGY_PATHS = r"E:\\Syzygy"
+DEFAULT_SYZYGY_PATHS = r"C:\\Syzygy"
 
 
 def resolve_syzygy_from_env():

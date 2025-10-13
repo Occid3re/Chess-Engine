@@ -5,7 +5,7 @@ REM --- project root ---
 cd /d "C:\Development\Chess-Engine"
 
 set "CHESSENGINE_SYZYGY_NATIVE=C:\Development\Chess-Engine\target\classes\natives\win-x86_64\Release\JSyzygy.dll"
-set "CHESSENGINE_SYZYGY_PATHS=E:\Syzygy"
+set "CHESSENGINE_SYZYGY_PATHS=C:\Syzygy"
 
 REM --- newest chess-engine-*-uci.jar ---
 set "JARFILE="
