@@ -15,7 +15,7 @@ set "WORKDIR=C:\Development\Chess-Engine\src\main\resources\py"
 
 rem Default Syzygy native + tablebase locations (override via env before launching)
 set "CHESSENGINE_SYZYGY_NATIVE=C:\Development\Chess-Engine\target\classes\natives\win-x86_64\Release\JSyzygy.dll"
-set "CHESSENGINE_SYZYGY_PATHS=E:\Syzygy"
+set "CHESSENGINE_SYZYGY_PATHS=C:\Syzygy"
 
 rem =========================
 rem   JVM / ENGINE PRESETS

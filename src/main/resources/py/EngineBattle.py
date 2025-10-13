@@ -10,7 +10,7 @@ import requests
 
 # Shared Syzygy defaults for all engine JVM launches
 DEFAULT_SYZYGY_NATIVE = r"C:\\Development\\Chess-Engine\\target\\classes\\natives\\win-x86_64\\Release\\JSyzygy.dll"
-DEFAULT_SYZYGY_PATHS = r"E:\\Syzygy"
+DEFAULT_SYZYGY_PATHS = r"C:\\Syzygy"
 
 
 def resolve_syzygy_from_env() -> Tuple[str, str]:

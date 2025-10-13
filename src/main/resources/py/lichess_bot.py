@@ -24,7 +24,7 @@ import contextlib
 
 
 DEFAULT_SYZYGY_NATIVE = r"C:\\Development\\Chess-Engine\\target\\classes\\natives\\win-x86_64\\Release\\JSyzygy.dll"
-DEFAULT_SYZYGY_PATHS = r"E:\\Syzygy"
+DEFAULT_SYZYGY_PATHS = r"C:\\Syzygy"
 
 
 def _resolve_syzygy_config():
