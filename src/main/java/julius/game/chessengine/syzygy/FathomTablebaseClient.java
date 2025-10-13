@@ -27,4 +27,9 @@ final class FathomTablebaseClient implements TablebaseClient {
             return Optional.empty();
         }
     }
+
+    @Override
+    public int supportedMaxPieces() {
+        return tables.effectiveMaxPieces();
+    }
 }

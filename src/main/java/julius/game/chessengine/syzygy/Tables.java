@@ -51,7 +51,7 @@ final class Tables {
             return Optional.empty();
         }
         int pieceCount = Long.bitCount(board.getAllPieces());
-        int limit = Math.min(maxPieces, supportedPieces);
+        int limit = effectiveMaxPieces();
         if (pieceCount > limit) {
             log.debug("Skipping Syzygy probe: {} pieces exceeds configured limit {} (paths={})",
                     pieceCount, limit, configuredPaths);
@@ -89,6 +89,18 @@ final class Tables {
 
         return Optional.of(new SyzygyProbeResult(wdl, dtz, OptionalInt.empty()));
     }
+
+    int effectiveMaxPieces() {
+        if (supportedPieces <= 0) {
+            return Math.max(1, maxPieces);
+        }
+        return Math.min(Math.max(1, maxPieces), supportedPieces);
+    }
+
+    int supportedPieces() {
+        return supportedPieces;
+    }
+
     private static SyzygyWdl toWdl(int wdlValue) {
         return switch (wdlValue) {
             case SyzygyConstants.TB_LOSS -> SyzygyWdl.LOSS;

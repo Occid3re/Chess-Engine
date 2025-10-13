@@ -127,6 +127,26 @@ class SyzygyTablebaseServiceTest {
         assertThat(entryCount.get()).isEqualTo(1);
     }
 
+    @Test
+    void exposesEffectiveMaxPiecesFromClient() {
+        TablebaseClient limitedClient = new TablebaseClient() {
+            @Override
+            public Optional<SyzygyProbeResult> probe(BitBoard board) {
+                return Optional.empty();
+            }
+
+            @Override
+            public int supportedMaxPieces() {
+                return 5;
+            }
+        };
+
+        SyzygyTablebaseService service = new SyzygyTablebaseService(limitedClient, 16);
+
+        assertThat(service.getConfiguredMaxPieces()).isEqualTo(6);
+        assertThat(service.getEffectiveMaxPieces()).isEqualTo(5);
+    }
+
     @SuppressWarnings("unchecked")
     private static AtomicInteger extractEntryCount(SyzygyTablebaseService service) throws Exception {
         Field field = SyzygyTablebaseService.class.getDeclaredField("entryCount");

@@ -38,7 +38,7 @@ public final class TestSyzygySupport {
         if (directories.isEmpty()) {
             return Optional.empty();
         }
-        int maxPieces = parsePositiveInt(System.getProperty(MAX_PIECES_PROPERTY), 7);
+        int maxPieces = parsePositiveInt(System.getProperty(MAX_PIECES_PROPERTY), 6);
         int cacheSize = parsePositiveInt(System.getProperty(CACHE_SIZE_PROPERTY), 65_536);
 
         SyzygyTablebaseService service = new SyzygyTablebaseService(directories.get(), maxPieces, cacheSize);

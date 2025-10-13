@@ -37,7 +37,8 @@ public class Score {
     private static volatile ScoreFactory GLOBAL_FACTORY = bitBoard -> new Score(bitBoard, EvaluationWeights.identity());
     private static volatile SyzygyTablebaseService TABLEBASE_SERVICE;
 
-    private static final int TABLEBASE_PIECE_LIMIT = 6;
+    private static final int DEFAULT_TABLEBASE_PIECE_LIMIT = 6;
+    private static volatile int tablebasePieceLimit = DEFAULT_TABLEBASE_PIECE_LIMIT;
 
     static {
         EngineTuningBootstrap.ensureDefaultTuning();
@@ -157,8 +158,23 @@ public class Score {
         GLOBAL_FACTORY = Objects.requireNonNull(factory, "factory");
     }
 
-    public static void setTablebaseService(SyzygyTablebaseService service) {
-        TABLEBASE_SERVICE = Objects.requireNonNull(service, "service");
+    public static synchronized void setTablebaseService(SyzygyTablebaseService service) {
+        Objects.requireNonNull(service, "service");
+        TABLEBASE_SERVICE = service;
+        tablebasePieceLimit = normalizePieceLimit(service.getEffectiveMaxPieces());
+    }
+
+    public static synchronized void clearTablebaseService() {
+        TABLEBASE_SERVICE = null;
+        tablebasePieceLimit = DEFAULT_TABLEBASE_PIECE_LIMIT;
+    }
+
+    public static synchronized SyzygyTablebaseService getTablebaseService() {
+        return TABLEBASE_SERVICE;
+    }
+
+    private static int normalizePieceLimit(int limit) {
+        return limit > 0 ? limit : DEFAULT_TABLEBASE_PIECE_LIMIT;
     }
 
     public void refresh(BitBoard bitBoard, GameStateEnum state) {
@@ -326,8 +342,9 @@ public class Score {
             clearTablebaseState();
             return false;
         }
+        int limit = tablebasePieceLimit;
         long occupancy = context.getAllPieces();
-        if (Long.bitCount(occupancy) > TABLEBASE_PIECE_LIMIT) {
+        if (Long.bitCount(occupancy) > limit) {
             clearTablebaseState();
             return false;
         }
