@@ -1903,13 +1903,12 @@ public class AI {
     // AI.java
     private Optional<TablebaseHit> resolveTablebaseHit(Engine simulatorEngine, boolean isWhite) {
         TablebaseResult result = simulatorEngine.getGameState().getLastTablebaseResult().orElse(null);
-        if ((!isExactWdl(result)) && tablebaseService != null) {
-            Optional<SyzygyProbeResult> probe = tablebaseService.probe(simulatorEngine.getBitBoard());
+        if (tablebaseService != null) {
+            BitBoard snapshot = new BitBoard(simulatorEngine.getBitBoard());
+            Optional<SyzygyProbeResult> probe = tablebaseService.probe(snapshot);
             if (probe.isPresent()) {
                 result = TablebaseResult.from(probe.get());
-                if (isExactWdl(result)) {
-                    simulatorEngine.getGameState().setLastTablebaseResult(result);
-                }
+                simulatorEngine.getGameState().setLastTablebaseResult(result);
             }
         }
         if (!isExactWdl(result)) {
@@ -2011,13 +2010,12 @@ public class AI {
 
     private double evaluateTablebaseChild(Engine simulatorEngine) {
         TablebaseResult childResult = simulatorEngine.getGameState().getLastTablebaseResult().orElse(null);
-        if ((childResult == null || !isExactWdl(childResult)) && tablebaseService != null) {
-            Optional<SyzygyProbeResult> probe = tablebaseService.probe(simulatorEngine.getBitBoard());
+        if (tablebaseService != null) {
+            BitBoard snapshot = new BitBoard(simulatorEngine.getBitBoard());
+            Optional<SyzygyProbeResult> probe = tablebaseService.probe(snapshot);
             if (probe.isPresent()) {
                 childResult = TablebaseResult.from(probe.get());
-                if (isExactWdl(childResult)) {
-                    simulatorEngine.getGameState().setLastTablebaseResult(childResult);
-                }
+                simulatorEngine.getGameState().setLastTablebaseResult(childResult);
             }
         }
         if (childResult == null || !isExactWdl(childResult)) {
@@ -3811,3 +3809,4 @@ public class AI {
 
     }
 }
+

@@ -170,6 +170,7 @@ public class Engine {
             gameState.pushHalfmoveClock();
             gameState.update(bitBoard, legalMoves, move, isOpeningMove);
             gameState.getScore().applyMove(bitBoard, move, gameState.getState());
+            gameState.captureTablebaseState();
             updateLastTablebaseResult();
 
             // 5) Line/history
@@ -204,13 +205,14 @@ public class Engine {
                 gameState.setState(GameStateEnum.DRAW);
                 // Still surface the UI/eval hint if material is insufficient.
                 gameState.setDrawByInsufficientMaterial(bitBoard.hasInsufficientMaterial());
-                updateLastTablebaseResult();
             } else {
                 // Otherwise recompute normally; stalemate (terminal) or insufficient (non-terminal) will be detected here.
                 IntArrayList legalMoves = generateLegalMoves();
                 gameState.updateState(bitBoard, legalMoves, false);
-                updateLastTablebaseResult();
             }
+
+            gameState.captureTablebaseState();
+            updateLastTablebaseResult();
 
             notifyHash = getBoardStateHash();
         }
@@ -493,6 +495,7 @@ public class Engine {
             gameState.popHalfmoveClock(bitBoard);
             gameState.updateState(bitBoard, legalMoves, false);
             gameState.getScore().undoMove(bitBoard, undoMove, gameState.getState());
+            gameState.captureTablebaseState();
             updateLastTablebaseResult();
 
             // 3) Bookkeeping

@@ -83,7 +83,6 @@ public class GameState {
         if (isThreefoldRepetition() || isFiftyMoveRule()) {
             this.state = GameStateEnum.DRAW;
         }
-        captureTablebaseState();
     }
 
     public void updateState(BitBoard bitBoard, IntArrayList legalMoves, boolean isOpeningMove) {
@@ -111,7 +110,6 @@ public class GameState {
                 state = GameStateEnum.PLAY;
             }
         }
-        captureTablebaseState();
     }
 
 
