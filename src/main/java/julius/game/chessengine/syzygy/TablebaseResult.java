@@ -13,9 +13,8 @@ public record TablebaseResult(SyzygyWdl wdl, OptionalInt dtz, OptionalInt dtm, O
 
     public TablebaseResult {
         Objects.requireNonNull(wdl, "wdl");
-        dtz = dtz == null ? OptionalInt.empty() : dtz;
-        dtm = dtm == null ? OptionalInt.empty() : dtm;
-        recommendedMove = recommendedMove == null ? Optional.empty() : recommendedMove;
+        dtz = dtz.isEmpty() ? OptionalInt.empty() : dtz;
+        dtm = dtm.isEmpty() ? OptionalInt.empty() : dtm;
     }
 
     public static TablebaseResult from(SyzygyProbeResult result) {
