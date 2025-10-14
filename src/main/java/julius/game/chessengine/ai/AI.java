@@ -2426,7 +2426,7 @@ public class AI {
             if (allowExtend) nextDepth++;
             int nextExtStreak = allowExtend ? extStreak + 1 : 0;
 
-            double eval;
+            double eval = Double.NEGATIVE_INFINITY;
             TranspositionTableEntry entry = transpositionTable.get(newBoardHash);
             boolean ttExactHit = entry != null
                     && entry.nodeType == NodeType.EXACT
@@ -2693,7 +2693,7 @@ public class AI {
             if (allowExtend) nextDepth++;
             int nextExtStreak = allowExtend ? extStreak + 1 : 0;
 
-            double eval;
+            double eval = Double.POSITIVE_INFINITY;
             TranspositionTableEntry entry = transpositionTable.get(newBoardHash);
             boolean ttExactHit = entry != null
                     && entry.nodeType == NodeType.EXACT
