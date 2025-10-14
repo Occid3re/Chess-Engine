@@ -97,6 +97,71 @@ class AITest_MoveOrderingBuckets {
         }
     }
 
+    @Test
+    @DisplayName("Buckets are sorted by score (desc) with move tie-breaks and feed writeBucket as-is")
+    void bucketsMaintainScoreAndMoveOrdering() throws Exception {
+        Engine engine = new Engine();
+        engine.importBoardFromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+
+        AiTuning tuning = AiTuning.builder()
+                .searchThreads(1)
+                .lazySmpThreads(1)
+                .hashSizeMb(16)
+                .build();
+
+        AI ai = new AI(engine, tuning);
+
+        IntArrayList ordered = engine.getAllLegalMoves();
+        assertFalse(ordered.isEmpty(), "Position should expose moves to order");
+
+        ai.sortMovesByEfficiency(ordered, 0, engine.getBoardStateHash(), -1, engine);
+
+        Field sortBuffersField = AI.class.getDeclaredField("sortBuffers");
+        sortBuffersField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        ThreadLocal<SortBuffers> sortBuffers = (ThreadLocal<SortBuffers>) sortBuffersField.get(ai);
+        SortBuffers buffers = sortBuffers.get();
+
+        Field moveBucketOrderField = AI.class.getDeclaredField("moveBucketOrder");
+        moveBucketOrderField.setAccessible(true);
+        Object[] bucketOrder = (Object[]) moveBucketOrderField.get(ai);
+
+        IntArrayList reconstructed = new IntArrayList(ordered.size());
+        boolean validated = false;
+
+        for (Object bucketObj : bucketOrder) {
+            Enum<?> bucketEnum = (Enum<?>) bucketObj;
+            IntArrayList bucket = buffers.bucketIndexes[bucketEnum.ordinal()];
+            if (bucket.size() > 1) {
+                validated = true;
+                for (int i = 1; i < bucket.size(); i++) {
+                    int previousIndex = bucket.getInt(i - 1);
+                    int currentIndex = bucket.getInt(i);
+                    int previousScore = buffers.scoreBuffer[previousIndex];
+                    int currentScore = buffers.scoreBuffer[currentIndex];
+                    assertTrue(previousScore >= currentScore,
+                            () -> "Scores should be non-increasing within a bucket" +
+                                    " (prev=" + previousScore + ", curr=" + currentScore + ")");
+                    if (previousScore == currentScore) {
+                        int previousMove = buffers.moveBuffer[previousIndex];
+                        int currentMove = buffers.moveBuffer[currentIndex];
+                        assertTrue(previousMove >= currentMove,
+                                () -> "Moves should tie-break by descending id" +
+                                        " (prev=" + Move.convertIntToMove(previousMove) +
+                                        ", curr=" + Move.convertIntToMove(currentMove) + ")");
+                    }
+                }
+            }
+            for (int i = 0; i < bucket.size(); i++) {
+                reconstructed.add(buffers.moveBuffer[bucket.getInt(i)]);
+            }
+        }
+
+        assertTrue(validated, "Expected at least one bucket to contain multiple moves for ordering checks");
+        assertArrayEquals(ordered.toIntArray(), reconstructed.toIntArray(),
+                "writeBucket should consume the pre-sorted buckets without reordering");
+    }
+
     private static int indexOf(IntArrayList moves, int target) {
         for (int i = 0; i < moves.size(); i++) {
             if (moves.getInt(i) == target) {
