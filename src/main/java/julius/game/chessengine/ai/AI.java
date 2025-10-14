@@ -1,5 +1,6 @@
 package julius.game.chessengine.ai;
 
+import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap;
 import julius.game.chessengine.ai.time.TimeManager;
@@ -190,8 +191,13 @@ public class AI {
 
     private final ThreadLocal<SortBuffers> sortBuffers =
             ThreadLocal.withInitial(() -> new SortBuffers(MAX_MOVE_LIST_SIZE, MoveBucket.values().length));
-    private final ThreadLocal<Map<Integer, Integer>> seeCacheThreadLocal =
-            ThreadLocal.withInitial(() -> new HashMap<>(64));
+    private static final int SEE_CACHE_MISS = Integer.MIN_VALUE;
+    private final ThreadLocal<Int2IntOpenHashMap> seeCacheThreadLocal =
+            ThreadLocal.withInitial(() -> {
+                Int2IntOpenHashMap map = new Int2IntOpenHashMap(64);
+                map.defaultReturnValue(SEE_CACHE_MISS);
+                return map;
+            });
 
     private final ThreadLocal<Long2DoubleOpenHashMap> staticEvalCache =
             ThreadLocal.withInitial(() -> {
@@ -2299,7 +2305,7 @@ public class AI {
         final int[][] historyTable = heuristics.history;
 
         IntArrayList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
+        final Int2IntOpenHashMap seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
         final SearchPruningParameters.Snapshot pruning = searchPruningParameters;
         final int hmpMinIndex = pruning.hmpMinIndex();
@@ -2574,7 +2580,7 @@ public class AI {
         final int[][] historyTable = heuristics.history;
 
         IntArrayList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
+        final Int2IntOpenHashMap seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
         final SearchPruningParameters.Snapshot pruning = searchPruningParameters;
         final int hmpMinIndex = pruning.hmpMinIndex();
@@ -2845,7 +2851,7 @@ public class AI {
     IntArrayList sortMovesByEfficiency(IntArrayList moves, int currentDepth, long boardHash, int prevMove,
                                        Engine simulatorEngine) {
         final int size = moves.size();
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
+        final Int2IntOpenHashMap seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
 
         if (size == 0) {
@@ -2908,11 +2914,16 @@ public class AI {
             final boolean isCapture = MoveHelper.isCapture(moveInt);
             final boolean isPromotion = MoveHelper.isPawnPromotionMove(moveInt);
 
-            int seeValue = 0;
+            int seeValue = SEE_CACHE_MISS;
             boolean hasSee = false;
             if (isCapture) {
-                seeValue = seeCache.computeIfAbsent(moveInt, simulatorEngine::see);
-                hasSee = true;
+                seeValue = seeCache.get(moveInt);
+                hasSee = seeValue != SEE_CACHE_MISS;
+                if (!hasSee) {
+                    seeValue = simulatorEngine.see(moveInt);
+                    seeCache.put(moveInt, seeValue);
+                    hasSee = true;
+                }
             }
 
             int score;
