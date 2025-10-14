@@ -4,12 +4,15 @@ package julius.game.chessengine.helper;
  * Precomputed pawn move tables for quick lookup of pawn pushes and attacks.
  * PAWN_ATTACKS[color][square] gives bitboard of attack targets for a pawn of the
  * given color on the given square. PAWN_PUSHES[color][square] gives the square
- * one step forward. These tables are initialised once at class load time.
+ * one step forward. PAWN_ATTACKERS[color][square] gives the bitboard of source
+ * squares of pawns of the given color that attack the square. These tables are
+ * initialised once at class load time.
  */
 public class PawnMoveTables {
 
     public static final long[][] PAWN_ATTACKS = new long[2][64];
     public static final long[][] PAWN_PUSHES = new long[2][64];
+    public static final long[][] PAWN_ATTACKERS = new long[2][64];
 
     static {
         for (int square = 0; square < 64; square++) {
@@ -47,6 +50,20 @@ public class PawnMoveTables {
             PAWN_PUSHES[1][square] = blackPush;
             PAWN_ATTACKS[0][square] = whiteAttacks;
             PAWN_ATTACKS[1][square] = blackAttacks;
+
+            long attacks = whiteAttacks;
+            while (attacks != 0) {
+                int target = Long.numberOfTrailingZeros(attacks);
+                PAWN_ATTACKERS[0][target] |= 1L << square;
+                attacks &= attacks - 1;
+            }
+
+            attacks = blackAttacks;
+            while (attacks != 0) {
+                int target = Long.numberOfTrailingZeros(attacks);
+                PAWN_ATTACKERS[1][target] |= 1L << square;
+                attacks &= attacks - 1;
+            }
         }
     }
 
