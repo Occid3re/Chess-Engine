@@ -39,6 +39,7 @@ public final class SyzygyConstants {
     /*
      * Masks and Shifts that allow us to store more information in the DTZ result
      */
+    public static final int TB_RESULT_FAILED = 0xFFFFFFFF;
     public static final int TB_RESULT_WDL_MASK = 0x0000000F;
     public static final int TB_RESULT_TO_MASK = 0x000003F0;
     public static final int TB_RESULT_FROM_MASK = 0x0000FC00;
@@ -87,7 +88,11 @@ public final class SyzygyConstants {
      * @return the number of moves needed to reach the optimal transition (where the 50 move rule would be reset).
      */
     public static int distanceToZero(int result) {
-        return (result & SyzygyConstants.TB_RESULT_DTZ_MASK) >> SyzygyConstants.TB_RESULT_DTZ_SHIFT;
+        int encoded = (result & SyzygyConstants.TB_RESULT_DTZ_MASK) >>> SyzygyConstants.TB_RESULT_DTZ_SHIFT;
+        if ((encoded & 0x800) != 0) {
+            return encoded - 0x1000;
+        }
+        return encoded;
     }
 
     /**

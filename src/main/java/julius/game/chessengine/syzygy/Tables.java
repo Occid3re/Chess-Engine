@@ -81,18 +81,28 @@ final class Tables {
                 board.getHalfmoveClock(), epSquare, whiteToMove);
         OptionalInt dtz = OptionalInt.empty();
         Optional<SyzygyMove> recommendedMove = Optional.empty();
-        if (SyzygyConstants.winDrawLoss(dtzRaw) == wdlValue) {
+        if (dtzRaw != SyzygyConstants.TB_RESULT_FAILED) {
+            SyzygyWdl dtzWdl = toWdl(SyzygyConstants.winDrawLoss(dtzRaw));
+            if (dtzWdl != SyzygyWdl.UNKNOWN && dtzWdl != wdl) {
+                log.debug("Syzygy DTZ probe adjusted WDL from {} to {} (wdlValue={}, dtzRaw={})", wdl, dtzWdl, wdlValue, dtzRaw);
+                wdl = dtzWdl;
+            }
+
             int distance = SyzygyConstants.distanceToZero(dtzRaw);
             dtz = OptionalInt.of(distance);
             recommendedMove = decodeRecommendedMove(dtzRaw);
         } else {
-            log.debug("Syzygy DTZ probe mismatch (wdlValue={}, dtzRaw={})", wdlValue, dtzRaw);
+            log.debug("Syzygy DTZ probe failed (dtzRaw=TB_RESULT_FAILED) for board {}", board);
         }
 
         return Optional.of(new SyzygyProbeResult(wdl, dtz, OptionalInt.empty(), recommendedMove));
     }
 
     private Optional<SyzygyMove> decodeRecommendedMove(int dtzRaw) {
+        if (dtzRaw == SyzygyConstants.TB_RESULT_FAILED) {
+            return Optional.empty();
+        }
+
         int fromSquare = SyzygyConstants.fromSquare(dtzRaw);
         int toSquare = SyzygyConstants.toSquare(dtzRaw);
         if (fromSquare <= 0 || toSquare <= 0) {
