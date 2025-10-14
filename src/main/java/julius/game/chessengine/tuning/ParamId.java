@@ -170,7 +170,10 @@ public enum ParamId {
     SEARCH_TT_CAPTURE_WEIGHT("search.ttCaptureWeight", 1.0, 0.1, 16.0),
 
     SEARCH_QS_MAX_DELTA_PAWN("search.qsMaxDeltaPawn", 9.0, 0.0, 64.0),
-    SEARCH_DRAW_BIAS("search.drawBias", 0.20, 0.0, 2.0);
+    SEARCH_DRAW_BIAS("search.drawBias", 0.20, 0.0, 2.0),
+    SEARCH_PREFER_FAST_MATE("search.preferFastMate", 1.0, 0.0, 1.0),
+    SEARCH_TB_TIE_BREAK("search.tbTieBreak", 1.0, 0.0, 1.0),
+    SEARCH_TB_DTZ_PENALTY("search.tbDtzPenalty", 12.0, 1.0, 256.0);
 
     private final String key;
     private final double defaultValue;

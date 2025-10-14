@@ -172,3 +172,6 @@ population:
       search.ttCaptureWeight: 3.9
       search.qsMaxDeltaPawn: 9.1
       search.drawBias: 0.3
+      search.preferFastMate: 1
+      search.tbTieBreak: 1
+      search.tbDtzPenalty: 12
