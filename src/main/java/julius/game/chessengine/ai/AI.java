@@ -1369,11 +1369,16 @@ public class AI {
                                                  double alpha,
                                                  double beta,
                                                  SplittableRandom rng) {
+        final boolean isWhitesTurn = task.isWhiteToMove();
         if (searchPool == null || abortRequested(deadline)) {
-            return getBestMove(simulatorEngine, task.isWhiteToMove(), depth, deadline, alpha, beta, rng);
+            return getBestMove(simulatorEngine, isWhitesTurn, depth, deadline, alpha, beta, rng);
         }
 
-        final boolean isWhitesTurn = task.isWhiteToMove();
+        RootSearchResult tablebaseShortcut = shortcutTablebaseAtRoot(simulatorEngine, isWhitesTurn, depth);
+        if (tablebaseShortcut != null) {
+            return tablebaseShortcut;
+        }
+
         IntArrayList legal = simulatorEngine.getAllLegalMoves();
         IntArrayList orderedMoves = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
         if (orderedMoves.isEmpty()) return RootSearchResult.completed(null);
@@ -1819,6 +1824,11 @@ public class AI {
 
     private RootSearchResult getBestMove(Engine simulatorEngine, boolean isWhitesTurn, int depth, long deadline,
                                          double alpha, double beta, SplittableRandom rng) {
+        RootSearchResult tablebaseShortcut = shortcutTablebaseAtRoot(simulatorEngine, isWhitesTurn, depth);
+        if (tablebaseShortcut != null) {
+            return tablebaseShortcut;
+        }
+
         int bestMove = -1;
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
 
@@ -1898,6 +1908,21 @@ public class AI {
         double searchScore = isWhite ? whitePerspective : -whitePerspective;
         int bestMove = determineTablebaseBestMove(simulatorEngine);
         return Optional.of(new TablebaseHit(searchScore, bestMove, result));
+    }
+
+    private RootSearchResult shortcutTablebaseAtRoot(Engine simulatorEngine, boolean isWhite, int depth) {
+        Optional<TablebaseHit> hitOptional = resolveTablebaseHit(simulatorEngine, isWhite);
+        if (hitOptional.isEmpty()) {
+            return null;
+        }
+        TablebaseHit hit = hitOptional.get();
+        int bestMove = hit.bestMove() >= 0 ? hit.bestMove() : -1;
+        if (transpositionTable != null) {
+            transpositionTable.put(simulatorEngine.getBoardStateHash(),
+                    new TranspositionTableEntry(hit.score(), depth, NodeType.EXACT, bestMove), depth);
+        }
+        MoveAndScore candidate = createCandidate(bestMove, hit.score());
+        return RootSearchResult.completed(candidate);
     }
 
     private int determineTablebaseBestMove(Engine simulatorEngine) {
