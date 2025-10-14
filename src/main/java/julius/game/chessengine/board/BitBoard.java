@@ -876,17 +876,9 @@ public class BitBoard {
      * Bitboard of pawns (for the given side) that attack 'sq'.
      */
     private long pawnAttackersToSquare(int sq, boolean whiteSide, long whitePawnsBB, long blackPawnsBB) {
-        int file = sq & 7;
-        long res = 0L;
-        if (whiteSide) {
-            if (file != 7 && sq >= 7) res |= (1L << (sq - 7));  // from ... -> to = +7
-            if (file != 0 && sq >= 9) res |= (1L << (sq - 9));  // from ... -> to = +9
-            return res & whitePawnsBB;
-        } else {
-            if (file != 0 && sq <= 56) res |= (1L << (sq + 7));  // from ... -> to = -7
-            if (file != 7 && sq <= 54) res |= (1L << (sq + 9));  // from ... -> to = -9
-            return res & blackPawnsBB;
-        }
+        int colorIndex = whiteSide ? 0 : 1;
+        long pawnBitboard = whiteSide ? whitePawnsBB : blackPawnsBB;
+        return PawnMoveTables.PAWN_ATTACKERS[colorIndex][sq] & pawnBitboard;
     }
 
     /**
