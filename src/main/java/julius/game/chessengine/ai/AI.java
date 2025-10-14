@@ -229,8 +229,8 @@ public class AI {
                                       boolean zeroing,
                                       boolean exact) {
 
-        boolean preserves(int rootSign) {
-            return exact && sign == rootSign;
+        boolean preserves(int targetChildSign) {
+            return exact && sign == targetChildSign;
         }
 
         boolean hasDtmOrApprox() {
@@ -1955,6 +1955,7 @@ public class AI {
 
         int nodeSign = Integer.signum(engine.whitesTurn() ? result.wdl().score() : -result.wdl().score());
         double eval = tablebaseMateScore(nodeSign, plyFromRoot);
+        int targetChildSign = -nodeSign;
 
         Int2ObjectOpenHashMap<TablebaseChildInfo> children = new Int2ObjectOpenHashMap<>();
         int bestMove = -1;
@@ -1968,7 +1969,7 @@ public class AI {
                     children.put(move, info);
                 }
             }
-            bestMove = selectTablebaseBestMove(moves, result, nodeSign, children);
+            bestMove = selectTablebaseBestMove(moves, result, targetChildSign, children);
         }
 
         return Optional.of(new TablebaseHit(eval, bestMove, result, nodeSign, children));
@@ -1980,8 +1981,8 @@ public class AI {
         if (nodeSign == 0) {
             return 0.0;
         }
-        int mateBase = CHECKMATE - 1;
-        return nodeSign * (mateBase - plyFromRoot) / 100.0;
+        double mateScore = CHECKMATE - plyFromRoot;
+        return nodeSign > 0 ? mateScore : -mateScore;
     }
 
     private TablebaseChildInfo probeChildTablebase(Engine engine, int move) {
@@ -2019,7 +2020,7 @@ public class AI {
 
     private int selectTablebaseBestMove(IntArrayList moves,
                                         TablebaseResult result,
-                                        int nodeSign,
+                                        int targetChildSign,
                                         Int2ObjectOpenHashMap<TablebaseChildInfo> children) {
         if (moves == null || moves.isEmpty()) {
             return -1;
@@ -2029,33 +2030,14 @@ public class AI {
         for (int i = 0; i < moves.size(); i++) {
             int move = moves.getInt(i);
             TablebaseChildInfo info = children.get(move);
-            if (info != null && info.preserves(nodeSign)) {
+            if (info != null && info.preserves(targetChildSign)) {
                 preserving.add(info);
             }
         }
 
         if (!preserving.isEmpty()) {
-            if (nodeSign != 0) {
-                preserving.sort((a, b) -> compareTablebaseChildren(a, b, nodeSign));
-                return preserving.get(0).move();
-            }
-            Optional<SyzygyMove> suggestion = result.recommendedMove();
-            if (suggestion.isPresent()) {
-                int suggested = findSuggestedMove(moves, suggestion.get());
-                if (suggested != -1) {
-                    TablebaseChildInfo info = children.get(suggested);
-                    if (info != null && info.preserves(nodeSign)) {
-                        return suggested;
-                    }
-                }
-            }
-            for (int i = 0; i < moves.size(); i++) {
-                int move = moves.getInt(i);
-                TablebaseChildInfo info = children.get(move);
-                if (info != null && info.preserves(nodeSign)) {
-                    return move;
-                }
-            }
+            preserving.sort((a, b) -> compareTablebaseChildren(a, b, targetChildSign));
+            return preserving.get(0).move();
         }
 
         Optional<SyzygyMove> suggestion = result.recommendedMove();
@@ -2095,11 +2077,13 @@ public class AI {
             return;
         }
 
+        int targetChildSign = -rootSign;
+
         List<TablebaseChildInfo> preserving = new ArrayList<>();
         for (int i = 0; i < moves.size(); i++) {
             int move = moves.getInt(i);
             TablebaseChildInfo info = hit.children().get(move);
-            if (info != null && info.preserves(rootSign)) {
+            if (info != null && info.preserves(targetChildSign)) {
                 preserving.add(info);
             }
         }
@@ -2108,7 +2092,7 @@ public class AI {
             return;
         }
 
-        preserving.sort((a, b) -> compareTablebaseChildren(a, b, rootSign));
+        preserving.sort((a, b) -> compareTablebaseChildren(a, b, targetChildSign));
 
         int insert = 0;
         for (TablebaseChildInfo info : preserving) {
@@ -2127,9 +2111,9 @@ public class AI {
         }
     }
 
-    private int compareTablebaseChildren(TablebaseChildInfo lhs, TablebaseChildInfo rhs, int rootSign) {
-        boolean lhsPreserves = lhs.preserves(rootSign);
-        boolean rhsPreserves = rhs.preserves(rootSign);
+    private int compareTablebaseChildren(TablebaseChildInfo lhs, TablebaseChildInfo rhs, int targetChildSign) {
+        boolean lhsPreserves = lhs.preserves(targetChildSign);
+        boolean rhsPreserves = rhs.preserves(targetChildSign);
 
         if (lhsPreserves && !rhsPreserves) {
             return -1;
@@ -2141,7 +2125,7 @@ public class AI {
             return 0;
         }
 
-        if (rootSign > 0) {
+        if (targetChildSign < 0) {
             int dtm = compareDtmAscending(lhs, rhs);
             if (dtm != 0) {
                 return dtm;
@@ -2156,7 +2140,7 @@ public class AI {
             return 0;
         }
 
-        if (rootSign < 0) {
+        if (targetChildSign > 0) {
             int dtm = compareDtmDescending(lhs, rhs);
             if (dtm != 0) {
                 return dtm;
