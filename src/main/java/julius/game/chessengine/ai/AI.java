@@ -2024,7 +2024,7 @@ public class AI {
         double whitePerspective = Score.tablebaseToEvaluation(childResult, simulatorEngine.whitesTurn());
         boolean childIsWhite = simulatorEngine.whitesTurn();
         double childSearchPerspective = childIsWhite ? whitePerspective : -whitePerspective;
-        return -childSearchPerspective;
+        return childSearchPerspective;
     }
 
     private boolean isExactWdl(TablebaseResult result) {
