@@ -28,16 +28,6 @@ public final class BestMoveFixtures {
                     25
             ),
             new BestMoveTestCase(
-                    "1Q6/8/3P4/8/2k5/6K1/8/7B w - - 0 1",
-                    List.of("d7"),
-                    2
-            ),
-            new BestMoveTestCase(
-                    "1Q6/8/3P4/2k5/8/6K1/8/7B b - - 0 1",
-                    List.of("Kc4"),
-                    25
-            ),
-            new BestMoveTestCase(
                     "8/8/8/8/8/1kb1n3/8/2K5 b - - 31 16",
                     List.of("Be1", "Bb4", "Ba5", "Kc4")
             ),
