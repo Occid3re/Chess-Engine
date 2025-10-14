@@ -2125,7 +2125,7 @@ public class AI {
             return 0;
         }
 
-        if (targetChildSign < 0) {
+        if (targetChildSign > 0) {
             int dtm = compareDtmAscending(lhs, rhs);
             if (dtm != 0) {
                 return dtm;
@@ -2140,7 +2140,7 @@ public class AI {
             return 0;
         }
 
-        if (targetChildSign > 0) {
+        if (targetChildSign < 0) {
             int dtm = compareDtmDescending(lhs, rhs);
             if (dtm != 0) {
                 return dtm;
