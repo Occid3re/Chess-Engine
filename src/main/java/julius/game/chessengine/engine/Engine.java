@@ -330,7 +330,7 @@ public class Engine {
             System.arraycopy(a, 0, legalMoveScratch, 0, w);
             cacheLegalMoves(boardStateHash, w);
 
-            // 4) return a list backed by the cached buffer
+            // 4) return a defensive copy for callers (cache retains reusable buffers)
             return copyCachedLegalMoves();
         }
     }
@@ -372,8 +372,8 @@ public class Engine {
     }
 
     private IntArrayList copyCachedLegalMoves() {
-        // cachedLegalMoves currently points at the active buffer; callers must treat the view as read-only.
-        return IntArrayList.wrap(cachedLegalMoves, cachedLegalMoveCount);
+        int[] snapshot = java.util.Arrays.copyOf(cachedLegalMoves, cachedLegalMoveCount);
+        return new IntArrayList(snapshot);
     }
 
 
