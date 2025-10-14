@@ -1914,8 +1914,7 @@ public class AI {
         if (!isExactWdl(result)) {
             return Optional.empty();
         }
-        double whitePerspective = Score.tablebaseToEvaluation(result, simulatorEngine.whitesTurn());
-        double searchScore = isWhite ? whitePerspective : -whitePerspective;
+        double searchScore = Score.tablebaseToEvaluation(result, simulatorEngine.whitesTurn());
         int bestMove = determineTablebaseBestMove(simulatorEngine, result, isWhite);
         return Optional.of(new TablebaseHit(searchScore, bestMove, result));
     }
