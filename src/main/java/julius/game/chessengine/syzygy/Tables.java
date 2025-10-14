@@ -93,9 +93,9 @@ final class Tables {
     }
 
     private Optional<SyzygyMove> decodeRecommendedMove(int dtzRaw) {
-        int fromSquare = SyzygyConstants.fromSquare(dtzRaw);
-        int toSquare = SyzygyConstants.toSquare(dtzRaw);
-        if (fromSquare <= 0 || toSquare <= 0) {
+        int fromIndex = toEngineIndex(SyzygyConstants.fromSquare(dtzRaw));
+        int toIndex = toEngineIndex(SyzygyConstants.toSquare(dtzRaw));
+        if (fromIndex < 0 || toIndex < 0) {
             return Optional.empty();
         }
 
@@ -108,12 +108,31 @@ final class Tables {
         };
 
         try {
-            return Optional.of(new SyzygyMove(fromSquare - 1, toSquare - 1, promotionBits));
+            return Optional.of(new SyzygyMove(fromIndex, toIndex, promotionBits));
         } catch (IllegalArgumentException ex) {
             log.debug("Ignoring invalid Syzygy move suggestion (dtzRaw={}, from={}, to={}, promo={})",
-                    dtzRaw, fromSquare, toSquare, promotionBits, ex);
+                    dtzRaw, fromIndex, toIndex, promotionBits, ex);
             return Optional.empty();
         }
+    }
+
+    /**
+     * Syzygy squares are encoded with {@code a8 = 1} increasing by file then rank.
+     * The engine however uses {@code a1 = 0}. This helper mirrors the rank so the
+     * returned index matches {@link julius.game.chessengine.board.MoveHelper}'s layout.
+     */
+    static int toEngineIndex(int syzygySquare) {
+        if (syzygySquare <= 0) {
+            return -1;
+        }
+        int zeroBased = syzygySquare - 1;
+        int file = zeroBased & 7; // modulo 8
+        int rankFromTop = zeroBased >>> 3; // divide by 8 with a8 == 0
+        int engineRank = 7 - rankFromTop;
+        if (engineRank < 0 || engineRank >= 8) {
+            return -1;
+        }
+        return engineRank * 8 + file;
     }
 
     int effectiveMaxPieces() {
