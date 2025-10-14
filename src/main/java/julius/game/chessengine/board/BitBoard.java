@@ -161,23 +161,51 @@ public class BitBoard {
     private static final long[] ROOK_WATCHERS = new long[64];
 
     static {
-        BishopHelper bishopHelperRef = BishopHelper.getInstance();
-        RookHelper rookHelperRef = RookHelper.getInstance();
-        for (int square = 0; square < 64; square++) {
-            long squareMask = 1L << square;
-            long bishopWatchers = 0L;
-            long rookWatchers = 0L;
-            for (int origin = 0; origin < 64; origin++) {
-                if ((bishopHelperRef.bishopMasks[origin] & squareMask) != 0) {
-                    bishopWatchers |= 1L << origin;
-                }
-                if ((rookHelperRef.rookMasks[origin] & squareMask) != 0) {
-                    rookWatchers |= 1L << origin;
-                }
+        Arrays.fill(BISHOP_WATCHERS, 0L);
+        Arrays.fill(ROOK_WATCHERS, 0L);
+        for (int origin = 0; origin < 64; origin++) {
+            long bishopTargets = bishopLikeRays(origin);
+            while (bishopTargets != 0) {
+                int target = Long.numberOfTrailingZeros(bishopTargets);
+                bishopTargets &= bishopTargets - 1;
+                BISHOP_WATCHERS[target] |= 1L << origin;
             }
-            BISHOP_WATCHERS[square] = bishopWatchers;
-            ROOK_WATCHERS[square] = rookWatchers;
+
+            long rookTargets = rookLikeRays(origin);
+            while (rookTargets != 0) {
+                int target = Long.numberOfTrailingZeros(rookTargets);
+                rookTargets &= rookTargets - 1;
+                ROOK_WATCHERS[target] |= 1L << origin;
+            }
         }
+    }
+
+    private static long bishopLikeRays(int square) {
+        return buildRay(square, 1, 1)
+                | buildRay(square, 1, -1)
+                | buildRay(square, -1, 1)
+                | buildRay(square, -1, -1);
+    }
+
+    private static long rookLikeRays(int square) {
+        return buildRay(square, 1, 0)
+                | buildRay(square, -1, 0)
+                | buildRay(square, 0, 1)
+                | buildRay(square, 0, -1);
+    }
+
+    private static long buildRay(int square, int rankDelta, int fileDelta) {
+        long mask = 0L;
+        int rank = square / 8;
+        int file = square % 8;
+        int r = rank + rankDelta;
+        int f = file + fileDelta;
+        while (r >= 0 && r < 8 && f >= 0 && f < 8) {
+            mask |= 1L << (r * 8 + f);
+            r += rankDelta;
+            f += fileDelta;
+        }
+        return mask;
     }
 
     private static final class MoveSnapshot {
@@ -2036,22 +2064,35 @@ public class BitBoard {
                                         long whiteRooksBB, long whiteQueensBB, long whiteKingBB,
                                         long blackPawnsBB, long blackKnightsBB, long blackBishopsBB,
                                         long blackRooksBB, long blackQueensBB, long blackKingBB) {
+        long diagonalAttackers = colorWhite ? (blackBishopsBB | blackQueensBB) : (whiteBishopsBB | whiteQueensBB);
+        long orthogonalAttackers = colorWhite ? (blackRooksBB | blackQueensBB) : (whiteRooksBB | whiteQueensBB);
+
         if (colorWhite) {
             if (pawnAttackersToSquare(index, false, whitePawnsBB, blackPawnsBB) != 0) return true;
             if ((KnightHelper.knightMoveTable[index] & blackKnightsBB) != 0) return true;
             if ((KING_ATTACKS[index] & blackKingBB) != 0) return true;
-            long bishopRays = bishopAttacksFromWithOcc(index, occ);
-            if ((bishopRays & (blackBishopsBB | blackQueensBB)) != 0) return true;
-            long rookRays = rookAttacksFromWithOcc(index, occ);
-            return (rookRays & (blackRooksBB | blackQueensBB)) != 0;
+            if ((BISHOP_WATCHERS[index] & diagonalAttackers) != 0) {
+                long bishopRays = bishopAttacksFromWithOcc(index, occ);
+                if ((bishopRays & diagonalAttackers) != 0) return true;
+            }
+            if ((ROOK_WATCHERS[index] & orthogonalAttackers) != 0) {
+                long rookRays = rookAttacksFromWithOcc(index, occ);
+                return (rookRays & orthogonalAttackers) != 0;
+            }
+            return false;
         } else {
             if (pawnAttackersToSquare(index, true, whitePawnsBB, blackPawnsBB) != 0) return true;
             if ((KnightHelper.knightMoveTable[index] & whiteKnightsBB) != 0) return true;
             if ((KING_ATTACKS[index] & whiteKingBB) != 0) return true;
-            long bishopRays = bishopAttacksFromWithOcc(index, occ);
-            if ((bishopRays & (whiteBishopsBB | whiteQueensBB)) != 0) return true;
-            long rookRays = rookAttacksFromWithOcc(index, occ);
-            return (rookRays & (whiteRooksBB | whiteQueensBB)) != 0;
+            if ((BISHOP_WATCHERS[index] & diagonalAttackers) != 0) {
+                long bishopRays = bishopAttacksFromWithOcc(index, occ);
+                if ((bishopRays & diagonalAttackers) != 0) return true;
+            }
+            if ((ROOK_WATCHERS[index] & orthogonalAttackers) != 0) {
+                long rookRays = rookAttacksFromWithOcc(index, occ);
+                return (rookRays & orthogonalAttackers) != 0;
+            }
+            return false;
         }
     }
 
