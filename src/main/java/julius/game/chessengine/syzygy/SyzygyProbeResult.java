@@ -11,9 +11,8 @@ public record SyzygyProbeResult(SyzygyWdl wdl, OptionalInt dtz, OptionalInt dtm,
 
     public SyzygyProbeResult {
         Objects.requireNonNull(wdl, "wdl");
-        dtz = dtz == null ? OptionalInt.empty() : dtz;
-        dtm = dtm == null ? OptionalInt.empty() : dtm;
-        recommendedMove = recommendedMove == null ? Optional.empty() : recommendedMove;
+        dtz = dtz.isEmpty() ? OptionalInt.empty() : dtz;
+        dtm = dtm.isEmpty() ? OptionalInt.empty() : dtm;
     }
 
     public static SyzygyProbeResult unavailable() {

@@ -174,4 +174,3 @@ population:
       search.drawBias: 0.2
       search.preferFastMate: 0.0
       search.tbTieBreak: 0.0
-      search.tbDtzPenalty: 10.0

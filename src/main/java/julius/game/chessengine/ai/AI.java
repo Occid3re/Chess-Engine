@@ -3383,8 +3383,8 @@ public class AI {
         int bestSign = bestInfo != null ? Integer.signum(bestInfo.whiteWdlSign()) : 0;
 
         if (candidateSign > 0 && bestSign > 0) {
-            int candidateDtz = candidateInfo != null && candidateInfo.hasDtz() ? candidateInfo.dtz() : Integer.MAX_VALUE;
-            int bestDtz = bestInfo != null && bestInfo.hasDtz() ? bestInfo.dtz() : Integer.MAX_VALUE;
+            int candidateDtz = candidateInfo.hasDtz() ? candidateInfo.dtz() : Integer.MAX_VALUE;
+            int bestDtz = bestInfo.hasDtz() ? bestInfo.dtz() : Integer.MAX_VALUE;
             if (candidateDtz < bestDtz) {
                 return true;
             }
@@ -3398,8 +3398,8 @@ public class AI {
         }
 
         if (candidateSign < 0 && bestSign < 0) {
-            int candidateDtz = candidateInfo != null && candidateInfo.hasDtz() ? candidateInfo.dtz() : -1;
-            int bestDtz = bestInfo != null && bestInfo.hasDtz() ? bestInfo.dtz() : -1;
+            int candidateDtz = candidateInfo.hasDtz() ? candidateInfo.dtz() : -1;
+            int bestDtz = bestInfo.hasDtz() ? bestInfo.dtz() : -1;
             if (candidateDtz > bestDtz) {
                 return true;
             }
@@ -3427,7 +3427,7 @@ public class AI {
             }
         }
 
-        if (candidateInfo == null && bestInfo != null) {
+        if (candidateInfo == null) {
             if (bestSign > 0 && bestInfo.hasDtz()) {
                 return false;
             }

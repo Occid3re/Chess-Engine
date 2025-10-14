@@ -372,20 +372,25 @@ public class Score {
     }
 
     public static int tablebaseToCentipawn(TablebaseResult result, boolean whiteToMove) {
-        int wdlScore = result.wdl().score();
-        if (wdlScore == 0) {
-            return DRAW;
-        }
-        int sign = Integer.signum(wdlScore);
-        if (!whiteToMove) {
-            sign = -sign;
-        }
-        int distance = result.dtm().isPresent()
-                ? Math.abs(result.dtm().getAsInt())
-                : result.dtz().isPresent() ? Math.abs(result.dtz().getAsInt()) : 0;
-        double dtzPenalty = Math.max(1.0, Tuning.searchTbDtzPenalty());
-        int scaledPenalty = Math.min(CHECKMATE - 1, (int) Math.round(distance * dtzPenalty));
-        return sign * (CHECKMATE - scaledPenalty);
+        // WDL → huge score; DTZ used only as a tiny tie-break if present.
+        final int WIN  = CHECKMATE - 2;   // keep room to prefer faster mates via search
+        final int LOSS = -(CHECKMATE - 2);
+
+        int wdlScore = result.wdl().score();   // +2 win, 0 draw, -2 loss (side to move)
+        if (wdlScore == 0) return DRAW;
+
+        // Map to white's perspective
+        int sign = whiteToMove ? Integer.signum(wdlScore) : -Integer.signum(wdlScore);
+        int base = sign > 0 ? WIN : LOSS;
+
+        // Optional, tiny tie-break (monotone but bounded). DTZ is not DTM!
+        // Smaller DTZ is "better" for winning positions; larger DTZ is "better" for losing ones.
+        // Keep this tiny so it can't overpower search or cause horizon artifacts.
+        int dtz = result.dtz().isPresent() ? Math.abs(result.dtz().getAsInt()) : -1;
+        int tbNibble = (dtz >= 0) ? Math.min(dtz, 10) : 0; // cap small
+        int tweak = (sign > 0 ? -tbNibble : +tbNibble);
+
+        return base + tweak;
     }
 
     private int computeTablebaseCentipawn(TablebaseResult result, boolean whiteToMove) {

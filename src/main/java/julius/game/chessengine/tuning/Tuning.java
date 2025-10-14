@@ -181,7 +181,6 @@ public final class Tuning {
     private static double searchDrawBias;
     private static boolean searchPreferFastMate;
     private static boolean searchTbTieBreak;
-    private static double searchTbDtzPenalty;
 
     static {
         refresh();
@@ -846,10 +845,6 @@ public final class Tuning {
         return searchTbTieBreak;
     }
 
-    public static double searchTbDtzPenalty() {
-        return searchTbDtzPenalty;
-    }
-
     /**
      * Reloads all cached tuning values from the current {@link ParameterRegistry} snapshot.
      * Callers should invoke this once after applying a new parameter set (e.g. via hot reload).
@@ -1019,7 +1014,6 @@ public final class Tuning {
             searchDrawBias = loadDouble(ParamId.SEARCH_DRAW_BIAS);
             searchPreferFastMate = loadBoolean(ParamId.SEARCH_PREFER_FAST_MATE);
             searchTbTieBreak = loadBoolean(ParamId.SEARCH_TB_TIE_BREAK);
-            searchTbDtzPenalty = loadDouble(ParamId.SEARCH_TB_DTZ_PENALTY);
         }
     }
 
