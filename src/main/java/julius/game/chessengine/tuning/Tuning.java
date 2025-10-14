@@ -179,6 +179,9 @@ public final class Tuning {
     private static double searchTtCaptureWeight;
     private static double searchQsMaxDeltaPawn;
     private static double searchDrawBias;
+    private static boolean searchPreferFastMate;
+    private static boolean searchTbTieBreak;
+    private static double searchTbDtzPenalty;
 
     static {
         refresh();
@@ -835,6 +838,18 @@ public final class Tuning {
         return searchDrawBias;
     }
 
+    public static boolean searchPreferFastMate() {
+        return searchPreferFastMate;
+    }
+
+    public static boolean searchTbTieBreak() {
+        return searchTbTieBreak;
+    }
+
+    public static double searchTbDtzPenalty() {
+        return searchTbDtzPenalty;
+    }
+
     /**
      * Reloads all cached tuning values from the current {@link ParameterRegistry} snapshot.
      * Callers should invoke this once after applying a new parameter set (e.g. via hot reload).
@@ -1002,6 +1017,9 @@ public final class Tuning {
             searchTtCaptureWeight = loadDouble(ParamId.SEARCH_TT_CAPTURE_WEIGHT);
             searchQsMaxDeltaPawn = loadDouble(ParamId.SEARCH_QS_MAX_DELTA_PAWN);
             searchDrawBias = loadDouble(ParamId.SEARCH_DRAW_BIAS);
+            searchPreferFastMate = loadBoolean(ParamId.SEARCH_PREFER_FAST_MATE);
+            searchTbTieBreak = loadBoolean(ParamId.SEARCH_TB_TIE_BREAK);
+            searchTbDtzPenalty = loadDouble(ParamId.SEARCH_TB_DTZ_PENALTY);
         }
     }
 
@@ -1011,6 +1029,10 @@ public final class Tuning {
 
     private static double loadDouble(ParamId id) {
         return applyBounds(ParameterRegistry.get(id), id);
+    }
+
+    private static boolean loadBoolean(ParamId id) {
+        return loadDouble(id) != 0.0;
     }
 
     private static double applyBounds(double value, ParamId id) {

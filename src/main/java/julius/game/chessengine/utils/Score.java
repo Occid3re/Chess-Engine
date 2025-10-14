@@ -18,6 +18,7 @@ import julius.game.chessengine.syzygy.TablebaseResult;
 import julius.game.chessengine.tuning.EngineTuningBootstrap;
 import julius.game.chessengine.tuning.MoveOrderingParameters;
 import julius.game.chessengine.tuning.NumericTuningParameters;
+import julius.game.chessengine.tuning.Tuning;
 
 import java.util.List;
 import java.util.Objects;
@@ -382,7 +383,8 @@ public class Score {
         int distance = result.dtm().isPresent()
                 ? Math.abs(result.dtm().getAsInt())
                 : result.dtz().isPresent() ? Math.abs(result.dtz().getAsInt()) : 0;
-        int scaledPenalty = Math.min(CHECKMATE - 1, distance * 10);
+        double dtzPenalty = Math.max(1.0, Tuning.searchTbDtzPenalty());
+        int scaledPenalty = Math.min(CHECKMATE - 1, (int) Math.round(distance * dtzPenalty));
         return sign * (CHECKMATE - scaledPenalty);
     }
 

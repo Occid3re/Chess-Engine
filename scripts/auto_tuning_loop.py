@@ -545,6 +545,23 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "soft_min": 0.0,
         "soft_max": 1.0,
     },
+    "search.preferfastmate": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 1.0,
+        "sentinels": [0.0, 1.0],
+    },
+    "search.tbtiebreak": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 1.0,
+        "sentinels": [0.0, 1.0],
+    },
+    "search.tbdtzpenalty": {
+        "step": 1.0,
+        "soft_min": 4.0,
+        "soft_max": 64.0,
+    },
     "pawnstructure.centerpawnbonus": {
         "step": 1.0,
         "soft_min": 0.0,
