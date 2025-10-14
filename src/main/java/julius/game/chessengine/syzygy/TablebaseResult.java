@@ -1,6 +1,7 @@
 package julius.game.chessengine.syzygy;
 
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalInt;
 
 /**
@@ -8,17 +9,18 @@ import java.util.OptionalInt;
  * The record exposes the WDL and optional DTZ/DTM distances so higher layers
  * can surface them without re-interpreting the raw service payload.
  */
-public record TablebaseResult(SyzygyWdl wdl, OptionalInt dtz, OptionalInt dtm) {
+public record TablebaseResult(SyzygyWdl wdl, OptionalInt dtz, OptionalInt dtm, Optional<SyzygyMove> recommendedMove) {
 
     public TablebaseResult {
         Objects.requireNonNull(wdl, "wdl");
         dtz = dtz == null ? OptionalInt.empty() : dtz;
         dtm = dtm == null ? OptionalInt.empty() : dtm;
+        recommendedMove = recommendedMove == null ? Optional.empty() : recommendedMove;
     }
 
     public static TablebaseResult from(SyzygyProbeResult result) {
         Objects.requireNonNull(result, "result");
-        return new TablebaseResult(result.wdl(), result.dtz(), result.dtm());
+        return new TablebaseResult(result.wdl(), result.dtz(), result.dtm(), result.recommendedMove());
     }
 
     public boolean isWin() {

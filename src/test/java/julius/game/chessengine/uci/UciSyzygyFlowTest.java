@@ -13,6 +13,7 @@ import testsupport.DeterministicAiHelper;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
@@ -25,7 +26,7 @@ class UciSyzygyFlowTest {
     @Test
     void blackSyzygyWinIsBroadcast() throws Exception {
         String fen = "8/8/8/8/8/1kb1n3/8/2K5 b - - 31 16";
-        SyzygyProbeResult probe = new SyzygyProbeResult(SyzygyWdl.WIN, OptionalInt.of(5), OptionalInt.empty());
+        SyzygyProbeResult probe = new SyzygyProbeResult(SyzygyWdl.WIN, OptionalInt.of(5), OptionalInt.empty(), Optional.empty());
 
         ScenarioResult result = runSyzygyScenario(fen, probe);
 
@@ -38,7 +39,7 @@ class UciSyzygyFlowTest {
     @Test
     void whiteSyzygyWinIsBroadcast() throws Exception {
         String fen = "3k4/p6p/8/8/8/4N3/5B2/3K4 w - - 0 1";
-        SyzygyProbeResult probe = new SyzygyProbeResult(SyzygyWdl.WIN, OptionalInt.of(7), OptionalInt.empty());
+        SyzygyProbeResult probe = new SyzygyProbeResult(SyzygyWdl.WIN, OptionalInt.of(7), OptionalInt.empty(), Optional.empty());
 
         ScenarioResult result = runSyzygyScenario(fen, probe);
 

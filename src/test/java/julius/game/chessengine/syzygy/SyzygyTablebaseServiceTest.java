@@ -34,7 +34,7 @@ class SyzygyTablebaseServiceTest {
     void cachesProbesUsingZobristAndClocks() {
         BitBoard board = FEN.translateFENtoBitBoard("8/8/8/8/8/8/8/8 w - - 0 1");
         RecordingClient client = new RecordingClient();
-        client.response = Optional.of(new SyzygyProbeResult(SyzygyWdl.DRAW, OptionalInt.of(0), OptionalInt.empty()));
+        client.response = Optional.of(new SyzygyProbeResult(SyzygyWdl.DRAW, OptionalInt.of(0), OptionalInt.empty(), Optional.empty()));
 
         SyzygyTablebaseService service = new SyzygyTablebaseService(client, 16);
         Optional<SyzygyProbeResult> first = service.probe(board);

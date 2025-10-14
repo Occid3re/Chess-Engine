@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -28,7 +29,7 @@ class AISyzygyIntegrationTest {
         String fen = "6k1/8/8/8/8/8/5Q2/6K1 w - - 0 1";
         engine.importBoardFromFen(fen);
 
-        SyzygyProbeResult probe = new SyzygyProbeResult(SyzygyWdl.WIN, OptionalInt.of(3), OptionalInt.empty());
+        SyzygyProbeResult probe = new SyzygyProbeResult(SyzygyWdl.WIN, OptionalInt.of(3), OptionalInt.empty(), Optional.empty());
         TestSyzygyTablebaseService service = TestSyzygyTablebaseService.fromResponses(Map.of(fen, probe));
 
         try (AutoCloseable restorer = overrideScoreTablebase(service)) {
@@ -58,7 +59,7 @@ class AISyzygyIntegrationTest {
 
         IntArrayList legalMoves = engine.getAllLegalMoves();
         Map<String, SyzygyProbeResult> responses = new HashMap<>();
-        responses.put(fen, new SyzygyProbeResult(SyzygyWdl.WIN, OptionalInt.of(5), OptionalInt.empty()));
+        responses.put(fen, new SyzygyProbeResult(SyzygyWdl.WIN, OptionalInt.of(5), OptionalInt.empty(), Optional.empty()));
 
         for (int i = 0; i < legalMoves.size(); i++) {
             int move = legalMoves.getInt(i);
@@ -66,7 +67,7 @@ class AISyzygyIntegrationTest {
             String childFen = FEN.translateBoardToFEN(engine.getBitBoard(), engine.getGameState()).getRenderBoard();
             boolean forcedWin = childFen.contains("5QK1") || childFen.contains("4Q1K1");
             SyzygyWdl childResult = forcedWin ? SyzygyWdl.LOSS : SyzygyWdl.DRAW;
-            responses.put(childFen, new SyzygyProbeResult(childResult, OptionalInt.of(1), OptionalInt.empty()));
+            responses.put(childFen, new SyzygyProbeResult(childResult, OptionalInt.of(1), OptionalInt.empty(), Optional.empty()));
             engine.undoLastMove();
         }
 
@@ -76,10 +77,11 @@ class AISyzygyIntegrationTest {
             AI ai = new AI(engine, service);
             Engine simulation = engine.createSimulation();
 
-            Method determine = AI.class.getDeclaredMethod("determineTablebaseBestMove", Engine.class);
+            Method determine = AI.class.getDeclaredMethod("determineTablebaseBestMove", Engine.class, TablebaseResult.class);
             determine.setAccessible(true);
 
-            int bestMove = (int) determine.invoke(ai, simulation);
+            TablebaseResult parentResult = TablebaseResult.from(responses.get(fen));
+            int bestMove = (int) determine.invoke(ai, simulation, parentResult);
 
             Set<String> winningChildren = responses.entrySet().stream()
                     .filter(entry -> !entry.getKey().equals(fen))

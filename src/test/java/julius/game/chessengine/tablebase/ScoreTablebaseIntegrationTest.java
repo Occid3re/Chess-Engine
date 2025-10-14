@@ -27,7 +27,7 @@ class ScoreTablebaseIntegrationTest {
     void scoreUsesExactTablebaseProbeWhenAvailable() {
         TablebaseTestSupport.assumeSyzygyConfigured();
 
-        SyzygyProbeResult probe = new SyzygyProbeResult(SyzygyWdl.WIN, OptionalInt.of(3), OptionalInt.of(7));
+        SyzygyProbeResult probe = new SyzygyProbeResult(SyzygyWdl.WIN, OptionalInt.of(3), OptionalInt.of(7), Optional.empty());
         SyzygyTablebaseService service = mock(SyzygyTablebaseService.class);
         when(service.probe(any(BitBoard.class))).thenReturn(Optional.of(probe));
 
@@ -63,8 +63,8 @@ class ScoreTablebaseIntegrationTest {
 
     @Test
     void tablebaseCentipawnRespectsSideToMove() {
-        TablebaseResult win = new TablebaseResult(SyzygyWdl.WIN, OptionalInt.of(1), OptionalInt.empty());
-        TablebaseResult loss = new TablebaseResult(SyzygyWdl.LOSS, OptionalInt.of(1), OptionalInt.empty());
+        TablebaseResult win = new TablebaseResult(SyzygyWdl.WIN, OptionalInt.of(1), OptionalInt.empty(), Optional.empty());
+        TablebaseResult loss = new TablebaseResult(SyzygyWdl.LOSS, OptionalInt.of(1), OptionalInt.empty(), Optional.empty());
 
         assertThat(Score.tablebaseToCentipawn(win, true)).isGreaterThan(0);
         assertThat(Score.tablebaseToCentipawn(win, false)).isLessThan(0);
@@ -77,7 +77,7 @@ class ScoreTablebaseIntegrationTest {
     void scoreProbesWhenBoardWithinServiceLimit() {
         String fen = "6k1/8/8/8/8/8/PPP5/6K1 w - - 0 1";
         BitBoard board = FEN.translateFENtoBitBoard(fen);
-        SyzygyProbeResult probe = new SyzygyProbeResult(SyzygyWdl.DRAW, OptionalInt.of(0), OptionalInt.empty());
+        SyzygyProbeResult probe = new SyzygyProbeResult(SyzygyWdl.DRAW, OptionalInt.of(0), OptionalInt.empty(), Optional.empty());
         TestSyzygyTablebaseService service = TestSyzygyTablebaseService.fromResponses(Map.of(fen, probe), 6);
 
         try (TablebaseTestSupport.TablebaseServiceRestorer restorer = TablebaseTestSupport.overrideScoreTablebase(service)) {

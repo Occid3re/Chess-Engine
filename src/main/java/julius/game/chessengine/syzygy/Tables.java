@@ -80,14 +80,40 @@ final class Tables {
         int dtzRaw = SyzygyBridge.probeSyzygyDTZ(white, black, kings, queens, rooks, bishops, knights, pawns,
                 board.getHalfmoveClock(), epSquare, whiteToMove);
         OptionalInt dtz = OptionalInt.empty();
+        Optional<SyzygyMove> recommendedMove = Optional.empty();
         if (SyzygyConstants.winDrawLoss(dtzRaw) == wdlValue) {
             int distance = SyzygyConstants.distanceToZero(dtzRaw);
             dtz = OptionalInt.of(distance);
+            recommendedMove = decodeRecommendedMove(dtzRaw);
         } else {
             log.debug("Syzygy DTZ probe mismatch (wdlValue={}, dtzRaw={})", wdlValue, dtzRaw);
         }
 
-        return Optional.of(new SyzygyProbeResult(wdl, dtz, OptionalInt.empty()));
+        return Optional.of(new SyzygyProbeResult(wdl, dtz, OptionalInt.empty(), recommendedMove));
+    }
+
+    private Optional<SyzygyMove> decodeRecommendedMove(int dtzRaw) {
+        int fromSquare = SyzygyConstants.fromSquare(dtzRaw);
+        int toSquare = SyzygyConstants.toSquare(dtzRaw);
+        if (fromSquare <= 0 || toSquare <= 0) {
+            return Optional.empty();
+        }
+
+        int promotionBits = switch (SyzygyConstants.promoteInto(dtzRaw)) {
+            case SyzygyConstants.TB_PROMOTES_QUEEN -> 5;
+            case SyzygyConstants.TB_PROMOTES_ROOK -> 4;
+            case SyzygyConstants.TB_PROMOTES_BISHOP -> 3;
+            case SyzygyConstants.TB_PROMOTES_KNIGHT -> 2;
+            default -> 0;
+        };
+
+        try {
+            return Optional.of(new SyzygyMove(fromSquare - 1, toSquare - 1, promotionBits));
+        } catch (IllegalArgumentException ex) {
+            log.debug("Ignoring invalid Syzygy move suggestion (dtzRaw={}, from={}, to={}, promo={})",
+                    dtzRaw, fromSquare, toSquare, promotionBits, ex);
+            return Optional.empty();
+        }
     }
 
     int effectiveMaxPieces() {

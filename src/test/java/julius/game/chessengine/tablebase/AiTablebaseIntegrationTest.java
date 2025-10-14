@@ -27,7 +27,7 @@ class AiTablebaseIntegrationTest {
     void aiEvaluationReflectsTablebaseResult() {
         TablebaseTestSupport.assumeSyzygyConfigured();
 
-        SyzygyProbeResult probe = new SyzygyProbeResult(SyzygyWdl.LOSS, OptionalInt.of(2), OptionalInt.of(6));
+        SyzygyProbeResult probe = new SyzygyProbeResult(SyzygyWdl.LOSS, OptionalInt.of(2), OptionalInt.of(6), Optional.empty());
         SyzygyTablebaseService service = mock(SyzygyTablebaseService.class);
         when(service.probe(any(BitBoard.class))).thenReturn(Optional.of(probe));
 
