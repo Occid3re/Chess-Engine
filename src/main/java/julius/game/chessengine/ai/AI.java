@@ -945,7 +945,8 @@ public class AI {
         Long2DoubleOpenHashMap cache = staticEvalCache.get();
         Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
         if (tablebase.isPresent() && isExactWdl(tablebase.get())) {
-            double exact = Score.tablebaseToEvaluation(tablebase.get(), whiteToMove);
+            double exact = Score.tablebaseToEvaluation(tablebase.get(), whiteToMove,
+                    gameState.getHalfmoveClock());
             cache.put(boardHash, exact);
             return exact;
         }
@@ -1927,7 +1928,8 @@ public class AI {
         }
 
         // Stable evaluation: use pure WDL sign (no DTZ/DTM scaling noise)
-        double eval = Score.tablebaseToEvaluation(result, engine.whitesTurn());
+        double eval = Score.tablebaseToEvaluation(result, engine.whitesTurn(),
+                engine.getGameState().getHalfmoveClock());
 
         // Determine best move via TB guidance (if available)
         int bestMove = determineTablebaseBestMove(engine, result, isWhite);
@@ -2038,7 +2040,8 @@ public class AI {
         if (childResult == null || !isExactWdl(childResult)) {
             return Double.NaN;
         }
-        double whitePerspective = Score.tablebaseToEvaluation(childResult, simulatorEngine.whitesTurn());
+        double whitePerspective = Score.tablebaseToEvaluation(childResult, simulatorEngine.whitesTurn(),
+                simulatorEngine.getGameState().getHalfmoveClock());
         return parentIsWhite ? whitePerspective : -whitePerspective;
     }
 
@@ -3205,7 +3208,8 @@ public class AI {
         boolean whiteToMove = context != null && context.isWhiteToMove();
         Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
         if (tablebase.isPresent() && isExactWdl(tablebase.get())) {
-            double whitePerspective = Score.tablebaseToEvaluation(tablebase.get(), whiteToMove);
+            double whitePerspective = Score.tablebaseToEvaluation(tablebase.get(), whiteToMove,
+                    gameState.getHalfmoveClock());
             return isWhitesTurn ? whitePerspective : -whitePerspective;
         }
         if (gameState.isDrawForUIOrEval()) { // <-- include insufficient material for eval/UI

@@ -74,6 +74,37 @@ class ScoreTablebaseIntegrationTest {
     }
 
     @Test
+    void cursedWinEvaluationShrinksAsFiftyMoveClockExpires() {
+        TablebaseResult earlyReset = new TablebaseResult(
+                SyzygyWdl.CURSED_WIN, OptionalInt.of(4), OptionalInt.empty(), Optional.empty());
+        TablebaseResult desperate = new TablebaseResult(
+                SyzygyWdl.CURSED_WIN, OptionalInt.of(60), OptionalInt.empty(), Optional.empty());
+
+        int generousClockScore = Score.tablebaseToCentipawn(earlyReset, true, 10);
+        int expiringClockScore = Score.tablebaseToCentipawn(desperate, true, 90);
+        int claimedDrawScore = Score.tablebaseToCentipawn(desperate, true, 100);
+
+        assertThat(generousClockScore).isPositive();
+        assertThat(expiringClockScore).isPositive();
+        assertThat(generousClockScore).isGreaterThan(expiringClockScore);
+        assertThat(claimedDrawScore).isZero();
+    }
+
+    @Test
+    void blessedLossMirrorsCursedWinMagnitude() {
+        TablebaseResult cursed = new TablebaseResult(
+                SyzygyWdl.CURSED_WIN, OptionalInt.of(8), OptionalInt.of(40), Optional.empty());
+        TablebaseResult blessed = new TablebaseResult(
+                SyzygyWdl.BLESSED_LOSS, OptionalInt.of(8), OptionalInt.of(40), Optional.empty());
+
+        int whitePerspective = Score.tablebaseToCentipawn(cursed, true, 0);
+        int mirrored = Score.tablebaseToCentipawn(blessed, true, 0);
+
+        assertThat(whitePerspective).isGreaterThan(0);
+        assertThat(mirrored).isEqualTo(-whitePerspective);
+    }
+
+    @Test
     void scoreProbesWhenBoardWithinServiceLimit() {
         String fen = "6k1/8/8/8/8/8/PPP5/6K1 w - - 0 1";
         BitBoard board = FEN.translateFENtoBitBoard(fen);
