@@ -397,15 +397,18 @@ public class AI {
                 heuristicsLockMetrics.recordOptimisticSnapshot();
                 return optimistic;
             }
+            optimistic.close();
         }
 
         long readStamp = acquireReadLock();
+        Heuristics.Snapshot snapshot;
         try {
             heuristicsLockMetrics.recordOptimisticFallback();
-            return globalHeuristics.snapshot(requiredDepth);
+            snapshot = globalHeuristics.snapshot(requiredDepth);
         } finally {
             releaseReadLock(readStamp);
         }
+        return snapshot;
     }
 
     private void rebuildTranspositionTables() {
@@ -865,8 +868,9 @@ public class AI {
                 releaseWriteLock(stamp);
             }
         }
-        Heuristics.Snapshot snapshot = captureHeuristicsSnapshot(maxDepth);
-        heuristics.beginIteration(snapshot, maxDepth);
+        try (Heuristics.Snapshot snapshot = captureHeuristicsSnapshot(maxDepth)) {
+            heuristics.beginIteration(snapshot, maxDepth);
+        }
         heuristics.markPrepared(task.getId(), currentDepth);
     }
 
@@ -889,8 +893,9 @@ public class AI {
             } finally {
                 releaseWriteLock(stamp);
             }
-            Heuristics.Snapshot snapshot = captureHeuristicsSnapshot(maxDepth);
-            heuristics.beginIteration(snapshot, maxDepth);
+            try (Heuristics.Snapshot snapshot = captureHeuristicsSnapshot(maxDepth)) {
+                heuristics.beginIteration(snapshot, maxDepth);
+            }
             heuristics.markPrepared(task.getId(), depth);
         }
         return heuristics;
@@ -3629,35 +3634,23 @@ public class AI {
         void beginIteration(Snapshot snapshot, int requiredDepth) {
             resetUpdates();
             ensureCapacity(requiredDepth);
-            int limit = Math.min(requiredDepth, snapshot.killers.length);
+            int limit = Math.min(requiredDepth, snapshot.killerDepth());
             for (int d = 0; d < limit; d++) {
-                System.arraycopy(snapshot.killers[d], 0, killers[d], 0, NUM_KILLER_MOVES);
+                System.arraycopy(snapshot.killers()[d], 0, killers[d], 0, NUM_KILLER_MOVES);
             }
             for (int d = limit; d < requiredDepth; d++) {
                 Arrays.fill(killers[d], -1);
             }
             for (int f = 0; f < BOARD_SQUARES; f++) {
-                System.arraycopy(snapshot.history[f], 0, history[f], 0, BOARD_SQUARES);
-                System.arraycopy(snapshot.counter[f], 0, counter[f], 0, BOARD_SQUARES);
+                System.arraycopy(snapshot.history()[f], 0, history[f], 0, BOARD_SQUARES);
+                System.arraycopy(snapshot.counter()[f], 0, counter[f], 0, BOARD_SQUARES);
             }
         }
 
         Snapshot snapshot(int requiredDepth) {
-            int killerDepth = Math.min(requiredDepth, killers.length);
-            int[][] killerCopy = new int[killerDepth][];
-            for (int d = 0; d < killerDepth; d++) {
-                killerCopy[d] = Arrays.copyOf(killers[d], NUM_KILLER_MOVES);
-            }
-            int[][] historyCopy = new int[BOARD_SQUARES][];
-            int[][] counterCopy = new int[BOARD_SQUARES][];
-            for (int f = 0; f < BOARD_SQUARES; f++) {
-                historyCopy[f] = Arrays.copyOf(history[f], BOARD_SQUARES);
-                counterCopy[f] = Arrays.copyOf(counter[f], BOARD_SQUARES);
-            }
-            return new Snapshot(killerCopy, historyCopy, counterCopy);
-        }
-
-        record Snapshot(int[][] killers, int[][] history, int[][] counter) {
+            Snapshot snapshot = SnapshotPool.INSTANCE.borrow();
+            snapshot.captureFrom(this, requiredDepth);
+            return snapshot;
         }
 
         boolean isPreparedFor(long taskId, int depth) {
@@ -3817,6 +3810,99 @@ public class AI {
                 counterUpdates[idx] = -1;
             }
             counterDirtyCount = 0;
+        }
+
+        private static final class SnapshotPool {
+            private static final SnapshotPool INSTANCE = new SnapshotPool();
+
+            private final Deque<Snapshot> pool = new ConcurrentLinkedDeque<>();
+
+            Snapshot borrow() {
+                Snapshot snapshot = pool.pollFirst();
+                if (snapshot == null) {
+                    snapshot = new Snapshot(this);
+                }
+                snapshot.prepareForBorrow();
+                return snapshot;
+            }
+
+            void release(Snapshot snapshot) {
+                pool.offerFirst(snapshot);
+            }
+        }
+
+        private static final class Snapshot implements AutoCloseable {
+            private final SnapshotPool owner;
+            private int[][] killers;
+            private int killerDepth;
+            private final int[][] history;
+            private final int[][] counter;
+            private boolean inUse;
+
+            private Snapshot(SnapshotPool owner) {
+                this.owner = owner;
+                this.killers = new int[0][NUM_KILLER_MOVES];
+                this.history = new int[BOARD_SQUARES][BOARD_SQUARES];
+                this.counter = new int[BOARD_SQUARES][BOARD_SQUARES];
+                this.inUse = false;
+            }
+
+            void prepareForBorrow() {
+                if (inUse) {
+                    throw new IllegalStateException("Snapshot already in use");
+                }
+                this.inUse = true;
+            }
+
+            int killerDepth() {
+                return killerDepth;
+            }
+
+            int[][] killers() {
+                return killers;
+            }
+
+            int[][] history() {
+                return history;
+            }
+
+            int[][] counter() {
+                return counter;
+            }
+
+            void captureFrom(Heuristics heuristics, int requiredDepth) {
+                int depth = Math.min(requiredDepth, heuristics.killers.length);
+                ensureKillerCapacity(depth);
+                killerDepth = depth;
+                for (int d = 0; d < killerDepth; d++) {
+                    System.arraycopy(heuristics.killers[d], 0, killers[d], 0, NUM_KILLER_MOVES);
+                }
+                for (int f = 0; f < BOARD_SQUARES; f++) {
+                    System.arraycopy(heuristics.history[f], 0, history[f], 0, BOARD_SQUARES);
+                    System.arraycopy(heuristics.counter[f], 0, counter[f], 0, BOARD_SQUARES);
+                }
+            }
+
+            private void ensureKillerCapacity(int depth) {
+                if (killers.length >= depth) {
+                    return;
+                }
+                int[][] expanded = Arrays.copyOf(killers, depth);
+                for (int i = killers.length; i < depth; i++) {
+                    expanded[i] = new int[NUM_KILLER_MOVES];
+                }
+                killers = expanded;
+            }
+
+            @Override
+            public void close() {
+                if (!inUse) {
+                    return;
+                }
+                inUse = false;
+                killerDepth = 0;
+                owner.release(this);
+            }
         }
 
     }
