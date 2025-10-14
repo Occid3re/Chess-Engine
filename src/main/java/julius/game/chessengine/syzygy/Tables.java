@@ -81,12 +81,31 @@ final class Tables {
                 board.getHalfmoveClock(), epSquare, whiteToMove);
         OptionalInt dtz = OptionalInt.empty();
         Optional<SyzygyMove> recommendedMove = Optional.empty();
-        if (SyzygyConstants.winDrawLoss(dtzRaw) == wdlValue) {
-            int distance = SyzygyConstants.distanceToZero(dtzRaw);
-            dtz = OptionalInt.of(distance);
-            recommendedMove = decodeRecommendedMove(dtzRaw);
+        if (dtzRaw != SyzygyConstants.TB_RESULT_FAILED) {
+            int dtzWdlValue = SyzygyConstants.winDrawLoss(dtzRaw);
+            SyzygyWdl dtzWdl = toWdl(dtzWdlValue);
+            if (dtzWdl == SyzygyWdl.UNKNOWN) {
+                log.debug("Syzygy DTZ probe returned unknown WDL slice (dtzRaw={})", dtzRaw);
+            } else {
+                if (wdl != dtzWdl) {
+                    if (wdl == SyzygyWdl.WIN && dtzWdl == SyzygyWdl.DRAW) {
+                        wdl = SyzygyWdl.CURSED_WIN;
+                    } else if (wdl == SyzygyWdl.LOSS && dtzWdl == SyzygyWdl.DRAW) {
+                        wdl = SyzygyWdl.BLESSED_LOSS;
+                    } else if ((wdl == SyzygyWdl.CURSED_WIN || wdl == SyzygyWdl.BLESSED_LOSS)
+                            && dtzWdl == SyzygyWdl.DRAW) {
+                        // Keep the existing 50-move aware classification.
+                    } else {
+                        log.debug("Syzygy DTZ probe mismatch (wdlValue={}, dtzRaw={})", wdlValue, dtzRaw);
+                        wdl = dtzWdl;
+                    }
+                }
+                int distance = SyzygyConstants.distanceToZero(dtzRaw);
+                dtz = OptionalInt.of(distance);
+                recommendedMove = decodeRecommendedMove(dtzRaw);
+            }
         } else {
-            log.debug("Syzygy DTZ probe mismatch (wdlValue={}, dtzRaw={})", wdlValue, dtzRaw);
+            log.debug("Syzygy DTZ probe failed for board {}", board);
         }
 
         return Optional.of(new SyzygyProbeResult(wdl, dtz, OptionalInt.empty(), recommendedMove));

@@ -50,6 +50,8 @@ public final class SyzygyConstants {
     public static final int TB_RESULT_PROMOTES_SHIFT = 16;
     public static final int TB_RESULT_DTZ_SHIFT = 20;
 
+    public static final int TB_RESULT_FAILED = 0xFFFFFFFF;
+
     /**
      * return the 'from square' part of the move.
      *
@@ -87,7 +89,13 @@ public final class SyzygyConstants {
      * @return the number of moves needed to reach the optimal transition (where the 50 move rule would be reset).
      */
     public static int distanceToZero(int result) {
-        return (result & SyzygyConstants.TB_RESULT_DTZ_MASK) >> SyzygyConstants.TB_RESULT_DTZ_SHIFT;
+        int raw = (result & SyzygyConstants.TB_RESULT_DTZ_MASK) >>> SyzygyConstants.TB_RESULT_DTZ_SHIFT;
+        // DTZ is stored as a signed 12-bit value. Sign-extend to 32 bits so
+        // callers observe negative distances when the tablebase encodes them.
+        if ((raw & 0x800) != 0) {
+            raw -= 0x1000;
+        }
+        return raw;
     }
 
     /**
@@ -97,6 +105,9 @@ public final class SyzygyConstants {
      * @return 1 .. 5 for loss, blessed loss, draw, cursed win and win.
      */
     public static int winDrawLoss(int result) {
+        if (result == TB_RESULT_FAILED) {
+            return TB_RESULT_FAILED;
+        }
         return (result & SyzygyConstants.TB_RESULT_WDL_MASK) >> SyzygyConstants.TB_RESULT_WDL_SHIFT;
     }
 }
