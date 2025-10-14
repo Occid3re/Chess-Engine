@@ -1955,7 +1955,7 @@ public class AI {
 
         int nodeSign = Integer.signum(engine.whitesTurn() ? result.wdl().score() : -result.wdl().score());
         double eval = tablebaseMateScore(nodeSign, plyFromRoot);
-        int targetChildSign = -nodeSign;
+        int targetChildSign = nodeSign;
 
         Int2ObjectOpenHashMap<TablebaseChildInfo> children = new Int2ObjectOpenHashMap<>();
         int bestMove = -1;
@@ -2077,7 +2077,7 @@ public class AI {
             return;
         }
 
-        int targetChildSign = -rootSign;
+        int targetChildSign = rootSign;
 
         List<TablebaseChildInfo> preserving = new ArrayList<>();
         for (int i = 0; i < moves.size(); i++) {
