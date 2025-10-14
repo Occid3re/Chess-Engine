@@ -1916,11 +1916,11 @@ public class AI {
         }
         double whitePerspective = Score.tablebaseToEvaluation(result, simulatorEngine.whitesTurn());
         double searchScore = isWhite ? whitePerspective : -whitePerspective;
-        int bestMove = determineTablebaseBestMove(simulatorEngine, result);
+        int bestMove = determineTablebaseBestMove(simulatorEngine, result, isWhite);
         return Optional.of(new TablebaseHit(searchScore, bestMove, result));
     }
 
-    private int determineTablebaseBestMove(Engine simulatorEngine, TablebaseResult parentResult) {
+    private int determineTablebaseBestMove(Engine simulatorEngine, TablebaseResult parentResult, boolean parentIsWhite) {
         IntArrayList legal = simulatorEngine.getAllLegalMoves();
         if (legal.isEmpty()) {
             return -1;
@@ -1943,7 +1943,7 @@ public class AI {
             simulatorEngine.performMove(move);
             double candidate;
             try {
-                candidate = evaluateTablebaseChild(simulatorEngine);
+                candidate = evaluateTablebaseChild(simulatorEngine, parentIsWhite);
             } finally {
                 simulatorEngine.undoLastMove();
             }
@@ -2008,7 +2008,7 @@ public class AI {
         moves.set(index, first);
     }
 
-    private double evaluateTablebaseChild(Engine simulatorEngine) {
+    private double evaluateTablebaseChild(Engine simulatorEngine, boolean parentIsWhite) {
         TablebaseResult childResult = simulatorEngine.getGameState().getLastTablebaseResult().orElse(null);
         if (tablebaseService != null) {
             BitBoard snapshot = new BitBoard(simulatorEngine.getBitBoard());
@@ -2022,9 +2022,7 @@ public class AI {
             return Double.NaN;
         }
         double whitePerspective = Score.tablebaseToEvaluation(childResult, simulatorEngine.whitesTurn());
-        boolean childIsWhite = simulatorEngine.whitesTurn();
-        double childSearchPerspective = childIsWhite ? whitePerspective : -whitePerspective;
-        return childSearchPerspective;
+        return parentIsWhite ? whitePerspective : -whitePerspective;
     }
 
     private boolean isExactWdl(TablebaseResult result) {
