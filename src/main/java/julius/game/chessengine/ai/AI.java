@@ -207,6 +207,86 @@ public class AI {
     private record TablebaseHit(double score, int bestMove, TablebaseResult result) {
     }
 
+    private static final class TablebaseTieBreak {
+
+        private static final TablebaseTieBreak NONE = new TablebaseTieBreak(false, false, 0);
+
+        private final boolean exact;
+        private final boolean hasDistance;
+        private final int distance;
+
+        private TablebaseTieBreak(boolean exact, boolean hasDistance, int distance) {
+            this.exact = exact;
+            this.hasDistance = hasDistance;
+            this.distance = distance;
+        }
+
+        static TablebaseTieBreak none() {
+            return NONE;
+        }
+
+        static TablebaseTieBreak from(TablebaseResult result) {
+            if (result == null) {
+                return NONE;
+            }
+            SyzygyWdl wdl = result.wdl();
+            boolean exact = wdl == SyzygyWdl.WIN || wdl == SyzygyWdl.LOSS || wdl == SyzygyWdl.DRAW;
+            if (!exact) {
+                return new TablebaseTieBreak(false, false, 0);
+            }
+            boolean hasDistance = result.dtm().isPresent() || result.dtz().isPresent();
+            int distance = 0;
+            if (result.dtm().isPresent()) {
+                distance = Math.abs(result.dtm().getAsInt());
+            } else if (result.dtz().isPresent()) {
+                distance = Math.abs(result.dtz().getAsInt());
+            }
+            return new TablebaseTieBreak(true, hasDistance, distance);
+        }
+
+        static boolean shouldPrefer(TablebaseTieBreak candidate, TablebaseTieBreak current,
+                                    boolean rootIsWhite, double score) {
+            if (candidate == null) {
+                return false;
+            }
+            return candidate.isBetterThan(current, rootIsWhite, score);
+        }
+
+        private boolean isBetterThan(TablebaseTieBreak other, boolean rootIsWhite, double score) {
+            if (!exact) {
+                return false;
+            }
+            boolean rootWinning = rootIsWhite ? score > 0.0 : score < 0.0;
+            boolean rootLosing = rootIsWhite ? score < 0.0 : score > 0.0;
+
+            if (other == null || !other.exact) {
+                return true;
+            }
+
+            if (hasDistance && !other.hasDistance) {
+                return true;
+            }
+            if (!hasDistance && other.hasDistance) {
+                return false;
+            }
+            if (!hasDistance) {
+                return false;
+            }
+
+            if (distance == other.distance) {
+                return false;
+            }
+
+            if (rootWinning) {
+                return distance < other.distance;
+            }
+            if (rootLosing) {
+                return distance > other.distance;
+            }
+            return distance < other.distance;
+        }
+    }
+
     private static final int LMR_MAX_DEPTH = 64;
     private static final int LMR_MAX_MOVES = MAX_MOVE_LIST_SIZE;
 
@@ -1821,6 +1901,7 @@ public class AI {
                                          double alpha, double beta, SplittableRandom rng) {
         int bestMove = -1;
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
+        TablebaseTieBreak bestTieBreak = null;
 
         boolean aborted = false;
 
@@ -1838,13 +1919,16 @@ public class AI {
             simulatorEngine.performMove(moveInt);
             long childHash = simulatorEngine.getBoardStateHash();
             double score;
+            TablebaseTieBreak tieBreak;
             if (simulatorEngine.getGameState().isInStateCheckMate()) {
                 score = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
+                tieBreak = TablebaseTieBreak.none();
             } else if (simulatorEngine.getGameState().isTerminal()) { // <-- terminal only
                 score = evaluateStaticPosition(simulatorEngine.getGameState(), childHash, !isWhitesTurn, depth);
                 if (isWhitesTurn) {
                     score = -score;
                 }
+                tieBreak = TablebaseTieBreak.none();
             } else {
                 // Non-terminal (incl. insufficient material):
                 score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1, 0);
@@ -1853,12 +1937,20 @@ public class AI {
                     aborted = true;
                     break;
                 }
+                tieBreak = TablebaseTieBreak.from(
+                        simulatorEngine.getGameState().getLastTablebaseResult().orElse(null));
             }
             simulatorEngine.undoLastMove();
 
             if (isBetterScore(isWhitesTurn, score, bestScore)) {
                 bestScore = score;
                 bestMove = moveInt;
+                bestTieBreak = tieBreak;
+            } else if (Double.compare(score, bestScore) == 0
+                    && TablebaseTieBreak.shouldPrefer(tieBreak, bestTieBreak, isWhitesTurn, score)) {
+                bestScore = score;
+                bestMove = moveInt;
+                bestTieBreak = tieBreak;
             }
             if (isWhitesTurn) alpha = Math.max(alpha, score);
             else beta = Math.min(beta, score);
