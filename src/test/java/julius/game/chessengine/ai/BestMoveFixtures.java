@@ -17,14 +17,13 @@ public final class BestMoveFixtures {
 
     private static final List<BestMoveTestCase> CASES = List.of(
             new BestMoveTestCase(
-                    "8/8/8/5b2/8/4n3/5k1K/8 b - - 53 103",
-                    List.of("Nf1"),
-                    25
+                    "8/8/8/5b2/8/4n3/5k1K/8 b - - 97 103",
+                    List.of("Nf1")
+
             ),
             new BestMoveTestCase(
-                    "8/8/8/5b2/8/4nk2/8/6K1 b - - 55 104",
-                    List.of("Kg3"),
-                    25
+                    "8/8/8/5b2/8/4nk2/8/6K1 b - - 93 104",
+                    List.of("Kg3")
             ),
             new BestMoveTestCase(
                     "8/7K/8/8/2kP4/8/8/7B w - - 2 61",
