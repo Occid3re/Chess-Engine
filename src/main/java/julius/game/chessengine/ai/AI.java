@@ -9,6 +9,7 @@ import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
+import julius.game.chessengine.evaluation.EvaluationContext;
 import julius.game.chessengine.syzygy.SyzygyProbeResult;
 import julius.game.chessengine.syzygy.SyzygyTablebaseService;
 import julius.game.chessengine.syzygy.SyzygyWdl;
@@ -921,11 +922,11 @@ public class AI {
         staticEvalCache.get().clear();
     }
 
-    private double resolveScoreDifference(GameState gameState, long boardHash) {
+    private double resolveScoreDifference(GameState gameState, long boardHash, boolean whiteToMove) {
         Long2DoubleOpenHashMap cache = staticEvalCache.get();
         Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
         if (tablebase.isPresent() && isExactWdl(tablebase.get())) {
-            double exact = Score.tablebaseToEvaluation(tablebase.get());
+            double exact = Score.tablebaseToEvaluation(tablebase.get(), whiteToMove);
             cache.put(boardHash, exact);
             return exact;
         }
@@ -1893,13 +1894,13 @@ public class AI {
         if (!isExactWdl(result)) {
             return Optional.empty();
         }
-        double whitePerspective = Score.tablebaseToEvaluation(result);
+        double whitePerspective = Score.tablebaseToEvaluation(result, simulatorEngine.whitesTurn());
         double searchScore = isWhite ? whitePerspective : -whitePerspective;
-        int bestMove = determineTablebaseBestMove(simulatorEngine, isWhite);
+        int bestMove = determineTablebaseBestMove(simulatorEngine);
         return Optional.of(new TablebaseHit(searchScore, bestMove, result));
     }
 
-    private int determineTablebaseBestMove(Engine simulatorEngine, boolean isWhite) {
+    private int determineTablebaseBestMove(Engine simulatorEngine) {
         IntArrayList legal = simulatorEngine.getAllLegalMoves();
         if (legal.isEmpty()) {
             return -1;
@@ -1911,7 +1912,7 @@ public class AI {
             simulatorEngine.performMove(move);
             double candidate;
             try {
-                candidate = evaluateTablebaseChild(simulatorEngine, isWhite);
+                candidate = evaluateTablebaseChild(simulatorEngine);
             } finally {
                 simulatorEngine.undoLastMove();
             }
@@ -1926,7 +1927,7 @@ public class AI {
         return bestMove;
     }
 
-    private double evaluateTablebaseChild(Engine simulatorEngine, boolean parentIsWhite) {
+    private double evaluateTablebaseChild(Engine simulatorEngine) {
         TablebaseResult childResult = simulatorEngine.getGameState().getLastTablebaseResult().orElse(null);
         if ((childResult == null || !isExactWdl(childResult)) && tablebaseService != null) {
             Optional<SyzygyProbeResult> probe = tablebaseService.probe(simulatorEngine.getBitBoard());
@@ -1940,8 +1941,8 @@ public class AI {
         if (childResult == null || !isExactWdl(childResult)) {
             return Double.NaN;
         }
-        double whitePerspective = Score.tablebaseToEvaluation(childResult);
-        boolean childIsWhite = !parentIsWhite;
+        double whitePerspective = Score.tablebaseToEvaluation(childResult, simulatorEngine.whitesTurn());
+        boolean childIsWhite = simulatorEngine.whitesTurn();
         double childSearchPerspective = childIsWhite ? whitePerspective : -whitePerspective;
         return -childSearchPerspective;
     }
@@ -2243,7 +2244,8 @@ public class AI {
                 || (baseRemainingDepth == 2 && pruning.fpMarginDepth2() > 0));
         double staticEvalWhite = Double.NaN;
         if (futilityPossible) {
-            staticEvalWhite = resolveScoreDifference(simulatorEngine.getGameState(), boardHash);
+            staticEvalWhite = resolveScoreDifference(simulatorEngine.getGameState(), boardHash,
+                    simulatorEngine.whitesTurn());
             if (!Double.isFinite(staticEvalWhite)) {
                 futilityPossible = false;
             }
@@ -2513,7 +2515,8 @@ public class AI {
                 || (baseRemainingDepth == 2 && pruning.fpMarginDepth2() > 0));
         double staticEvalWhite = Double.NaN;
         if (futilityPossible) {
-            staticEvalWhite = resolveScoreDifference(simulatorEngine.getGameState(), boardHash);
+            staticEvalWhite = resolveScoreDifference(simulatorEngine.getGameState(), boardHash,
+                    simulatorEngine.whitesTurn());
             if (!Double.isFinite(staticEvalWhite)) {
                 futilityPossible = false;
             }
@@ -2903,7 +2906,8 @@ public class AI {
 
         // Treat both terminal draws and insufficient-material as draw for evaluation
         if (simulatorEngine.getGameState().isDrawForUIOrEval()) {
-            double scoreDiff = resolveScoreDifference(simulatorEngine.getGameState(), boardStateHash);
+            double scoreDiff = resolveScoreDifference(simulatorEngine.getGameState(), boardStateHash,
+                    simulatorEngine.whitesTurn());
             if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
                 return DRAW - drawBias;
             } else if ((isWhitesTurn && scoreDiff < 0) || (!isWhitesTurn && scoreDiff > 0)) {
@@ -3063,14 +3067,16 @@ public class AI {
         if (gameState.isInStateCheckMate()) {
             return -(CHECKMATE - depthOrPly);
         }
+        EvaluationContext context = gameState.getScore().getEvaluationContext();
+        boolean whiteToMove = context != null && context.isWhiteToMove();
         Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
         if (tablebase.isPresent() && isExactWdl(tablebase.get())) {
-            double whitePerspective = Score.tablebaseToEvaluation(tablebase.get());
+            double whitePerspective = Score.tablebaseToEvaluation(tablebase.get(), whiteToMove);
             return isWhitesTurn ? whitePerspective : -whitePerspective;
         }
         if (gameState.isDrawForUIOrEval()) { // <-- include insufficient material for eval/UI
             if (log.isDebugEnabled()) log.debug("DRAW");
-            double scoreDiff = resolveScoreDifference(gameState, boardHash);
+            double scoreDiff = resolveScoreDifference(gameState, boardHash, whiteToMove);
             if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
                 return DRAW - drawBias;
             } else if ((isWhitesTurn && scoreDiff < 0) || (!isWhitesTurn && scoreDiff > 0)) {
@@ -3078,7 +3084,7 @@ public class AI {
             }
             return DRAW;
         }
-        double scoreDifference = resolveScoreDifference(gameState, boardHash);
+        double scoreDifference = resolveScoreDifference(gameState, boardHash, whiteToMove);
         return isWhitesTurn ? scoreDifference : -scoreDifference;
     }
 

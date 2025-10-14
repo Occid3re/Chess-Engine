@@ -42,7 +42,7 @@ class AiTablebaseIntegrationTest {
             double evaluation = ai.evaluateBoard(engine, true, deadline);
 
             TablebaseResult expected = TablebaseResult.from(probe);
-            double expectedEval = Score.tablebaseToEvaluation(expected);
+            double expectedEval = Score.tablebaseToEvaluation(expected, true);
 
             assertThat(engine.getGameState().getLastTablebaseResult()).contains(expected);
             assertThat(evaluation).isEqualTo(expectedEval);

@@ -33,7 +33,7 @@ class ScoreTablebaseIntegrationTest {
 
         BitBoard board = FEN.translateFENtoBitBoard("8/8/8/8/8/8/5K2/6k1 w - - 0 1");
         TablebaseResult expected = TablebaseResult.from(probe);
-        int expectedCentipawn = Score.tablebaseToCentipawn(expected);
+        int expectedCentipawn = Score.tablebaseToCentipawn(expected, true);
 
         try (TablebaseTestSupport.TablebaseServiceRestorer restorer = TablebaseTestSupport.overrideScoreTablebase(service)) {
             Score score = new Score();
@@ -59,6 +59,18 @@ class ScoreTablebaseIntegrationTest {
         }
 
         assertThat(service.getProbedFens()).isEmpty();
+    }
+
+    @Test
+    void tablebaseCentipawnRespectsSideToMove() {
+        TablebaseResult win = new TablebaseResult(SyzygyWdl.WIN, OptionalInt.of(1), OptionalInt.empty());
+        TablebaseResult loss = new TablebaseResult(SyzygyWdl.LOSS, OptionalInt.of(1), OptionalInt.empty());
+
+        assertThat(Score.tablebaseToCentipawn(win, true)).isGreaterThan(0);
+        assertThat(Score.tablebaseToCentipawn(win, false)).isLessThan(0);
+
+        assertThat(Score.tablebaseToCentipawn(loss, true)).isLessThan(0);
+        assertThat(Score.tablebaseToCentipawn(loss, false)).isGreaterThan(0);
     }
 
     @Test
