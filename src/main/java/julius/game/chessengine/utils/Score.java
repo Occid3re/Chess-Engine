@@ -6,6 +6,7 @@ import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.evaluation.*;
 import julius.game.chessengine.syzygy.SyzygyProbeResult;
 import julius.game.chessengine.syzygy.SyzygyTablebaseService;
+import julius.game.chessengine.syzygy.SyzygyWdl;
 import julius.game.chessengine.syzygy.TablebaseResult;
 import julius.game.chessengine.tuning.EngineTuningBootstrap;
 import julius.game.chessengine.tuning.MoveOrderingParameters;
@@ -35,6 +36,12 @@ public class Score {
     public static final int CHECKMATE = 100000;
     public static final int CHECK = 50;
     public static final int DRAW = 0;
+
+    private static final int UNSPECIFIED_HALFMOVE_CLOCK = -1;
+    private static final int FIFTY_MOVE_LIMIT = 100; // measured in plies
+    private static final int FIFTY_SENSITIVE_MIN_CP = 75;
+    private static final int FIFTY_SENSITIVE_MAX_CP = CHECKMATE / 8;
+    private static final int FIFTY_SENSITIVE_UNKNOWN_CP = 200;
 
     @JsonIgnore
     private final EvaluationWeights weights;
@@ -343,7 +350,8 @@ public class Score {
         }
         TablebaseResult resolved = TablebaseResult.from(probe.get());
         this.tablebaseResult = resolved;
-        this.tablebaseCentipawn = computeTablebaseCentipawn(resolved, bitBoard.isWhitesTurn());
+        this.tablebaseCentipawn = computeTablebaseCentipawn(resolved, bitBoard.isWhitesTurn(),
+                context.getHalfmoveClock());
         this.tablebaseBypassesEvaluation = true;
         return true;
     }
@@ -355,25 +363,88 @@ public class Score {
     }
 
     public static int tablebaseToCentipawn(TablebaseResult result, boolean whiteToMove) {
-        if (result == null) return DRAW;
+        return tablebaseToCentipawn(result, whiteToMove, UNSPECIFIED_HALFMOVE_CLOCK);
+    }
 
-        int wdl = result.wdl().score();
-        if (wdl == 0) {
-            return DRAW; // theoretical draw
+    public static int tablebaseToCentipawn(TablebaseResult result, boolean whiteToMove, int halfmoveClock) {
+        if (result == null) {
+            return DRAW;
         }
 
-        // Determine side perspective
-        int sign = whiteToMove ? Integer.signum(wdl) : -Integer.signum(wdl);
+        SyzygyWdl wdl = result.wdl();
+        int wdlScore = wdl.score();
+        if (wdlScore == 0 || wdlScore == Integer.MIN_VALUE) {
+            return DRAW;
+        }
 
-        // We treat every WDL win/loss as a "mate-like" evaluation to keep stability.
-        // DTZ/DTM is only for ordering, not for score magnitude.
-        return sign * (CHECKMATE - 1);
+        int magnitude;
+        if (wdl == SyzygyWdl.CURSED_WIN || wdl == SyzygyWdl.BLESSED_LOSS) {
+            magnitude = evaluateFiftyMoveSensitiveMagnitude(result, halfmoveClock);
+            if (magnitude == DRAW) {
+                return DRAW;
+            }
+        } else if (wdl == SyzygyWdl.WIN || wdl == SyzygyWdl.LOSS) {
+            magnitude = CHECKMATE - 1;
+        } else {
+            magnitude = CHECKMATE - 1;
+        }
+
+        int sign = whiteToMove ? Integer.signum(wdlScore) : -Integer.signum(wdlScore);
+        return sign * magnitude;
     }
+
     public static double tablebaseToEvaluation(TablebaseResult result, boolean whiteToMove) {
-        return tablebaseToCentipawn(result, whiteToMove) / 100.0;
+        return tablebaseToEvaluation(result, whiteToMove, UNSPECIFIED_HALFMOVE_CLOCK);
     }
 
-    private int computeTablebaseCentipawn(TablebaseResult result, boolean whiteToMove) {
-        return tablebaseToCentipawn(result, whiteToMove);
+    public static double tablebaseToEvaluation(TablebaseResult result, boolean whiteToMove, int halfmoveClock) {
+        return tablebaseToCentipawn(result, whiteToMove, halfmoveClock) / 100.0;
+    }
+
+    private int computeTablebaseCentipawn(TablebaseResult result, boolean whiteToMove, int halfmoveClock) {
+        return tablebaseToCentipawn(result, whiteToMove, halfmoveClock);
+    }
+
+    private static int evaluateFiftyMoveSensitiveMagnitude(TablebaseResult result, int halfmoveClock) {
+        int budget = remainingFiftyMoveBudget(halfmoveClock);
+        if (budget <= 0) {
+            return DRAW;
+        }
+
+        OptionalInt dtzOpt = result.dtz();
+        if (dtzOpt.isEmpty()) {
+            return FIFTY_SENSITIVE_UNKNOWN_CP;
+        }
+
+        int dtz = dtzOpt.getAsInt();
+        if (dtz <= 0) {
+            return FIFTY_SENSITIVE_MAX_CP;
+        }
+
+        if (dtz >= budget) {
+            return FIFTY_SENSITIVE_MIN_CP;
+        }
+
+        int slack = Math.max(0, budget - dtz);
+        double slackRatio = budget == 0 ? 0.0 : (double) slack / budget;
+
+        double dtmFactor = 0.0;
+        OptionalInt dtmOpt = result.dtm();
+        if (dtmOpt.isPresent()) {
+            int dtm = Math.max(1, dtmOpt.getAsInt());
+            dtmFactor = Math.min(1.0, 6.0 / dtm);
+        }
+
+        double blend = Math.max(slackRatio, dtmFactor);
+        int span = FIFTY_SENSITIVE_MAX_CP - FIFTY_SENSITIVE_MIN_CP;
+        int scaled = FIFTY_SENSITIVE_MIN_CP + (int) Math.round(span * blend);
+        return Math.max(FIFTY_SENSITIVE_MIN_CP, Math.min(FIFTY_SENSITIVE_MAX_CP, scaled));
+    }
+
+    private static int remainingFiftyMoveBudget(int halfmoveClock) {
+        if (halfmoveClock < 0) {
+            return FIFTY_MOVE_LIMIT;
+        }
+        return Math.max(0, FIFTY_MOVE_LIMIT - halfmoveClock);
     }
 }
