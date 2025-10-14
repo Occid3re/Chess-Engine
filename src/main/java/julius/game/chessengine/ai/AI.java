@@ -397,6 +397,7 @@ public class AI {
                 heuristicsLockMetrics.recordOptimisticSnapshot();
                 return optimistic;
             }
+            optimistic.close();
         }
 
         long readStamp = acquireReadLock();
@@ -865,8 +866,9 @@ public class AI {
                 releaseWriteLock(stamp);
             }
         }
-        Heuristics.Snapshot snapshot = captureHeuristicsSnapshot(maxDepth);
-        heuristics.beginIteration(snapshot, maxDepth);
+        try (Heuristics.Snapshot snapshot = captureHeuristicsSnapshot(maxDepth)) {
+            heuristics.beginIteration(snapshot, maxDepth);
+        }
         heuristics.markPrepared(task.getId(), currentDepth);
     }
 
@@ -889,8 +891,9 @@ public class AI {
             } finally {
                 releaseWriteLock(stamp);
             }
-            Heuristics.Snapshot snapshot = captureHeuristicsSnapshot(maxDepth);
-            heuristics.beginIteration(snapshot, maxDepth);
+            try (Heuristics.Snapshot snapshot = captureHeuristicsSnapshot(maxDepth)) {
+                heuristics.beginIteration(snapshot, maxDepth);
+            }
             heuristics.markPrepared(task.getId(), depth);
         }
         return heuristics;
@@ -3629,35 +3632,95 @@ public class AI {
         void beginIteration(Snapshot snapshot, int requiredDepth) {
             resetUpdates();
             ensureCapacity(requiredDepth);
-            int limit = Math.min(requiredDepth, snapshot.killers.length);
-            for (int d = 0; d < limit; d++) {
-                System.arraycopy(snapshot.killers[d], 0, killers[d], 0, NUM_KILLER_MOVES);
-            }
-            for (int d = limit; d < requiredDepth; d++) {
-                Arrays.fill(killers[d], -1);
-            }
-            for (int f = 0; f < BOARD_SQUARES; f++) {
-                System.arraycopy(snapshot.history[f], 0, history[f], 0, BOARD_SQUARES);
-                System.arraycopy(snapshot.counter[f], 0, counter[f], 0, BOARD_SQUARES);
-            }
+            snapshot.copyKillersInto(killers, requiredDepth);
+            snapshot.copyHistoryInto(history);
+            snapshot.copyCounterInto(counter);
         }
 
         Snapshot snapshot(int requiredDepth) {
-            int killerDepth = Math.min(requiredDepth, killers.length);
-            int[][] killerCopy = new int[killerDepth][];
-            for (int d = 0; d < killerDepth; d++) {
-                killerCopy[d] = Arrays.copyOf(killers[d], NUM_KILLER_MOVES);
-            }
-            int[][] historyCopy = new int[BOARD_SQUARES][];
-            int[][] counterCopy = new int[BOARD_SQUARES][];
-            for (int f = 0; f < BOARD_SQUARES; f++) {
-                historyCopy[f] = Arrays.copyOf(history[f], BOARD_SQUARES);
-                counterCopy[f] = Arrays.copyOf(counter[f], BOARD_SQUARES);
-            }
-            return new Snapshot(killerCopy, historyCopy, counterCopy);
+            Snapshot snapshot = Snapshot.borrow();
+            snapshot.populateFrom(this, requiredDepth);
+            return snapshot;
         }
 
-        record Snapshot(int[][] killers, int[][] history, int[][] counter) {
+        private static final class Snapshot implements AutoCloseable {
+            private static final ThreadLocal<Snapshot> POOL =
+                    ThreadLocal.withInitial(Snapshot::new);
+
+            private int[][] killers;
+            private int killerDepth;
+            private final int[][] history;
+            private final int[][] counter;
+            private boolean inUse;
+
+            private Snapshot() {
+                this.killers = new int[0][];
+                this.history = new int[BOARD_SQUARES][BOARD_SQUARES];
+                this.counter = new int[BOARD_SQUARES][BOARD_SQUARES];
+            }
+
+            static Snapshot borrow() {
+                Snapshot snapshot = POOL.get();
+                if (snapshot.inUse) {
+                    snapshot = new Snapshot();
+                }
+                snapshot.inUse = true;
+                snapshot.killerDepth = 0;
+                return snapshot;
+            }
+
+            void populateFrom(Heuristics heuristics, int requiredDepth) {
+                int depth = Math.min(requiredDepth, heuristics.killers.length);
+                ensureKillerCapacity(depth);
+                for (int d = 0; d < depth; d++) {
+                    System.arraycopy(heuristics.killers[d], 0, killers[d], 0, NUM_KILLER_MOVES);
+                }
+                killerDepth = depth;
+                for (int f = 0; f < BOARD_SQUARES; f++) {
+                    System.arraycopy(heuristics.history[f], 0, history[f], 0, BOARD_SQUARES);
+                    System.arraycopy(heuristics.counter[f], 0, counter[f], 0, BOARD_SQUARES);
+                }
+            }
+
+            private void ensureKillerCapacity(int depth) {
+                if (killers.length >= depth) {
+                    return;
+                }
+                int[][] expanded = new int[depth][];
+                System.arraycopy(killers, 0, expanded, 0, killers.length);
+                for (int i = killers.length; i < depth; i++) {
+                    expanded[i] = new int[NUM_KILLER_MOVES];
+                }
+                killers = expanded;
+            }
+
+            void copyKillersInto(int[][] target, int requiredDepth) {
+                int limit = Math.min(requiredDepth, killerDepth);
+                for (int d = 0; d < limit; d++) {
+                    System.arraycopy(killers[d], 0, target[d], 0, NUM_KILLER_MOVES);
+                }
+                for (int d = limit; d < requiredDepth; d++) {
+                    Arrays.fill(target[d], -1);
+                }
+            }
+
+            void copyHistoryInto(int[][] target) {
+                for (int f = 0; f < BOARD_SQUARES; f++) {
+                    System.arraycopy(history[f], 0, target[f], 0, BOARD_SQUARES);
+                }
+            }
+
+            void copyCounterInto(int[][] target) {
+                for (int f = 0; f < BOARD_SQUARES; f++) {
+                    System.arraycopy(counter[f], 0, target[f], 0, BOARD_SQUARES);
+                }
+            }
+
+            @Override
+            public void close() {
+                killerDepth = 0;
+                inUse = false;
+            }
         }
 
         boolean isPreparedFor(long taskId, int depth) {
