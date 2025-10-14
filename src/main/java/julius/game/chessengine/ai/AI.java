@@ -10,6 +10,7 @@ import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.evaluation.EvaluationContext;
+import julius.game.chessengine.syzygy.SyzygyMove;
 import julius.game.chessengine.syzygy.SyzygyProbeResult;
 import julius.game.chessengine.syzygy.SyzygyTablebaseService;
 import julius.game.chessengine.syzygy.SyzygyWdl;
@@ -1827,6 +1828,16 @@ public class AI {
         IntArrayList sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth,
                 simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
         maybeRotateRootMoves(sortedMoves, rng);
+        promoteTablebaseMove(sortedMoves, simulatorEngine);
+
+        Optional<TablebaseHit> rootTablebase = resolveTablebaseHit(simulatorEngine, isWhitesTurn);
+        if (rootTablebase.isPresent()) {
+            TablebaseHit hit = rootTablebase.get();
+            int candidateMove = hit.bestMove();
+            if (candidateMove >= 0 && MoveContainerUtils.contains(sortedMoves, candidateMove)) {
+                return RootSearchResult.completed(createCandidate(candidateMove, hit.score()));
+            }
+        }
 
         for (int idx = 0; idx < sortedMoves.size(); idx++) {
             int moveInt = sortedMoves.getInt(idx);
@@ -1896,15 +1907,26 @@ public class AI {
         }
         double whitePerspective = Score.tablebaseToEvaluation(result, simulatorEngine.whitesTurn());
         double searchScore = isWhite ? whitePerspective : -whitePerspective;
-        int bestMove = determineTablebaseBestMove(simulatorEngine);
+        int bestMove = determineTablebaseBestMove(simulatorEngine, result);
         return Optional.of(new TablebaseHit(searchScore, bestMove, result));
     }
 
-    private int determineTablebaseBestMove(Engine simulatorEngine) {
+    private int determineTablebaseBestMove(Engine simulatorEngine, TablebaseResult parentResult) {
         IntArrayList legal = simulatorEngine.getAllLegalMoves();
         if (legal.isEmpty()) {
             return -1;
         }
+
+        if (parentResult != null) {
+            Optional<SyzygyMove> suggestion = parentResult.recommendedMove();
+            if (suggestion.isPresent()) {
+                int resolved = findSuggestedMove(legal, suggestion.get());
+                if (resolved != -1) {
+                    return resolved;
+                }
+            }
+        }
+
         double bestScore = Double.NEGATIVE_INFINITY;
         int bestMove = -1;
         for (int i = 0; i < legal.size(); i++) {
@@ -1925,6 +1947,56 @@ public class AI {
             }
         }
         return bestMove;
+    }
+
+    private int findSuggestedMove(IntArrayList legal, SyzygyMove suggestion) {
+        int fromIndex = suggestion.fromIndex();
+        int toIndex = suggestion.toIndex();
+        int promotionBits = suggestion.promotionPieceTypeBits();
+        for (int i = 0; i < legal.size(); i++) {
+            int move = legal.getInt(i);
+            if (MoveHelper.deriveFromIndex(move) != fromIndex) {
+                continue;
+            }
+            if (MoveHelper.deriveToIndex(move) != toIndex) {
+                continue;
+            }
+            int movePromotion = MoveHelper.derivePromotionPieceTypeBits(move);
+            if (promotionBits == 0) {
+                if (movePromotion != 0) {
+                    continue;
+                }
+            } else if (movePromotion != promotionBits) {
+                continue;
+            }
+            return move;
+        }
+        return -1;
+    }
+
+    private void promoteTablebaseMove(IntArrayList moves, Engine engine) {
+        if (moves == null || moves.isEmpty()) {
+            return;
+        }
+        TablebaseResult result = engine.getGameState().getLastTablebaseResult().orElse(null);
+        if (result == null) {
+            return;
+        }
+        Optional<SyzygyMove> suggestion = result.recommendedMove();
+        if (suggestion.isEmpty()) {
+            return;
+        }
+        int matchedMove = findSuggestedMove(moves, suggestion.get());
+        if (matchedMove == -1) {
+            return;
+        }
+        int index = moves.indexOf(matchedMove);
+        if (index <= 0) {
+            return;
+        }
+        int first = moves.getInt(0);
+        moves.set(0, matchedMove);
+        moves.set(index, first);
     }
 
     private double evaluateTablebaseChild(Engine simulatorEngine) {
