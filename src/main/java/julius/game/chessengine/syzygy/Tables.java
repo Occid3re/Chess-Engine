@@ -92,10 +92,13 @@ final class Tables {
         return Optional.of(new SyzygyProbeResult(wdl, dtz, OptionalInt.empty(), recommendedMove));
     }
 
-    private Optional<SyzygyMove> decodeRecommendedMove(int dtzRaw) {
+    static Optional<SyzygyMove> decodeRecommendedMove(int dtzRaw) {
         int fromSquare = SyzygyConstants.fromSquare(dtzRaw);
         int toSquare = SyzygyConstants.toSquare(dtzRaw);
-        if (fromSquare <= 0 || toSquare <= 0) {
+        if (fromSquare == toSquare) {
+            return Optional.empty();
+        }
+        if (fromSquare < 0 || fromSquare >= 64 || toSquare < 0 || toSquare >= 64) {
             return Optional.empty();
         }
 
@@ -108,7 +111,7 @@ final class Tables {
         };
 
         try {
-            return Optional.of(new SyzygyMove(fromSquare - 1, toSquare - 1, promotionBits));
+            return Optional.of(new SyzygyMove(fromSquare, toSquare, promotionBits));
         } catch (IllegalArgumentException ex) {
             log.debug("Ignoring invalid Syzygy move suggestion (dtzRaw={}, from={}, to={}, promo={})",
                     dtzRaw, fromSquare, toSquare, promotionBits, ex);
