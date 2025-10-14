@@ -1,6 +1,7 @@
 package julius.game.chessengine.ai;
 
 import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntArrays;
 import it.unimi.dsi.fastutil.ints.IntComparator;
@@ -163,7 +164,6 @@ public class AI {
     private final double ttMainWeight;
     private final double ttCaptureWeight;
     private final boolean preferFastMate;
-    private final boolean tbTieBreak;
 
     /**
      * Per-thread heuristic state used during move ordering. The tables are
@@ -215,18 +215,47 @@ public class AI {
     private final ThreadLocal<Deque<Engine>> workerSimulationPool =
             ThreadLocal.withInitial(ArrayDeque::new);
 
-    private record TablebaseHit(double score, int bestMove, TablebaseResult result) {
+    private record TablebaseHit(double score,
+                                int bestMove,
+                                TablebaseResult result,
+                                int nodeSign,
+                                Int2ObjectOpenHashMap<TablebaseChildInfo> children) {
     }
 
-    private record TablebaseInfo(int dtz, int dtm, int whiteWdlSign) {
-        boolean hasDtz() { return dtz >= 0; }
+    private record TablebaseChildInfo(int move,
+                                      int sign,
+                                      OptionalInt dtz,
+                                      OptionalInt dtm,
+                                      boolean zeroing,
+                                      boolean exact) {
+
+        boolean preserves(int rootSign) {
+            return exact && sign == rootSign;
+        }
+
+        boolean hasDtmOrApprox() {
+            return dtm.isPresent() || dtz.isPresent();
+        }
+
+        int dtmForOrdering() {
+            if (dtm.isPresent()) {
+                return Math.abs(dtm.getAsInt());
+            }
+            if (dtz.isPresent()) {
+                int dtzValue = Math.abs(dtz.getAsInt());
+                return Math.max(0, (dtzValue * 2) - 1);
+            }
+            return -1;
+        }
+
+        int dtzForOrdering() {
+            return dtz.isPresent() ? Math.abs(dtz.getAsInt()) : -1;
+        }
     }
 
     private static final int LMR_MAX_DEPTH = 64;
     private static final int LMR_MAX_MOVES = MAX_MOVE_LIST_SIZE;
     private static final double MATE_SCORE_MARGIN = 2048.0;
-    private static final double TB_TIE_EPSILON = 0.01;
-
     private ScheduledExecutorService scheduler;
 
     private final CalculationQueue calculationRequests = new CalculationQueue();
@@ -345,7 +374,6 @@ public class AI {
         this.ttMainWeight = Math.max(1e-9, Tuning.searchTtMainWeight());
         this.ttCaptureWeight = Math.max(1e-9, Tuning.searchTtCaptureWeight());
         this.preferFastMate = Tuning.searchPreferFastMate();
-        this.tbTieBreak = Tuning.searchTbTieBreak() && this.tablebaseService != null;
         this.globalHeuristics = new Heuristics(maxDepth);
         this.threadHeuristics = ThreadLocal.withInitial(() -> new Heuristics(maxDepth));
 
@@ -1846,15 +1874,18 @@ public class AI {
         IntArrayList sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth,
                 simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
         maybeRotateRootMoves(sortedMoves, rng);
-        promoteTablebaseMove(sortedMoves, simulatorEngine);
-
-        Optional<TablebaseHit> rootTablebase = resolveTablebaseHit(simulatorEngine, isWhitesTurn);
+        Optional<TablebaseHit> rootTablebase = resolveTablebaseHit(simulatorEngine, 0, sortedMoves);
         if (rootTablebase.isPresent()) {
             TablebaseHit hit = rootTablebase.get();
+            applyTablebaseOrdering(sortedMoves, hit);
             int candidateMove = hit.bestMove();
             if (candidateMove >= 0 && MoveContainerUtils.contains(sortedMoves, candidateMove)) {
                 return RootSearchResult.completed(createCandidate(candidateMove, hit.score()));
             }
+            if (!sortedMoves.isEmpty()) {
+                return RootSearchResult.completed(createCandidate(sortedMoves.getInt(0), hit.score()));
+            }
+            return RootSearchResult.completed(createCandidate(-1, hit.score()));
         }
 
         for (int idx = 0; idx < sortedMoves.size(); idx++) {
@@ -1908,11 +1939,8 @@ public class AI {
      * 5rkr/pp2Rp2/1b1p1Pb1/3P2Q1/2n3P1/2p5/P4P2/4R1K1 w - - 1 0
      * *
      */
-    private Optional<TablebaseHit> resolveTablebaseHit(Engine engine, boolean isWhite) {
-        // Fetch any cached TB result from GameState
+    private Optional<TablebaseHit> resolveTablebaseHit(Engine engine, int plyFromRoot, IntArrayList legalMoves) {
         TablebaseResult result = engine.getGameState().getLastTablebaseResult().orElse(null);
-
-        // Always try probing the Syzygy tablebase if service is available
         if (tablebaseService != null) {
             Optional<SyzygyProbeResult> probe = tablebaseService.probe(engine.getBitBoard());
             if (probe.isPresent()) {
@@ -1921,58 +1949,289 @@ public class AI {
             }
         }
 
-        // No usable WDL (unknown or incomplete probe)
         if (!isExactWdl(result)) {
             return Optional.empty();
         }
 
-        // Stable evaluation: use pure WDL sign (no DTZ/DTM scaling noise)
-        double eval = Score.tablebaseToEvaluation(result, engine.whitesTurn());
+        int nodeSign = Integer.signum(engine.whitesTurn() ? result.wdl().score() : -result.wdl().score());
+        double eval = tablebaseMateScore(nodeSign, plyFromRoot);
 
-        // Determine best move via TB guidance (if available)
-        int bestMove = determineTablebaseBestMove(engine, result, isWhite);
+        Int2ObjectOpenHashMap<TablebaseChildInfo> children = new Int2ObjectOpenHashMap<>();
+        int bestMove = -1;
 
-        return Optional.of(new TablebaseHit(eval, bestMove, result));
+        IntArrayList moves = legalMoves != null ? legalMoves : engine.getAllLegalMoves();
+        if (moves != null && !moves.isEmpty()) {
+            for (int i = 0; i < moves.size(); i++) {
+                int move = moves.getInt(i);
+                TablebaseChildInfo info = probeChildTablebase(engine, move);
+                if (info != null) {
+                    children.put(move, info);
+                }
+            }
+            bestMove = selectTablebaseBestMove(moves, result, nodeSign, children);
+        }
+
+        return Optional.of(new TablebaseHit(eval, bestMove, result, nodeSign, children));
     }
 
 
 
-    private int determineTablebaseBestMove(Engine simulatorEngine, TablebaseResult parentResult, boolean parentIsWhite) {
-        IntArrayList legal = simulatorEngine.getAllLegalMoves();
-        if (legal.isEmpty()) {
+    private double tablebaseMateScore(int nodeSign, int plyFromRoot) {
+        if (nodeSign == 0) {
+            return 0.0;
+        }
+        int mateBase = CHECKMATE - 1;
+        return nodeSign * (mateBase - plyFromRoot) / 100.0;
+    }
+
+    private TablebaseChildInfo probeChildTablebase(Engine engine, int move) {
+        boolean zeroing = isZeroingMove(move);
+        TablebaseResult previous = engine.getGameState().getLastTablebaseResult().orElse(null);
+        engine.performMove(move);
+        try {
+            TablebaseResult childResult = engine.getGameState().getLastTablebaseResult().orElse(null);
+            if (tablebaseService != null) {
+                BitBoard snapshot = new BitBoard(engine.getBitBoard());
+                Optional<SyzygyProbeResult> probe = tablebaseService.probe(snapshot);
+                if (probe.isPresent()) {
+                    childResult = TablebaseResult.from(probe.get());
+                    engine.getGameState().setLastTablebaseResult(childResult);
+                }
+            }
+            if (childResult == null || !isExactWdl(childResult)) {
+                return new TablebaseChildInfo(move, 0, OptionalInt.empty(), OptionalInt.empty(), zeroing, false);
+            }
+            int wdlScore = childResult.wdl().score();
+            boolean childWhiteToMove = engine.whitesTurn();
+            int sign = Integer.signum(childWhiteToMove ? wdlScore : -wdlScore);
+            OptionalInt dtz = childResult.dtz().isPresent()
+                    ? OptionalInt.of(Math.abs(childResult.dtz().getAsInt()))
+                    : OptionalInt.empty();
+            OptionalInt dtm = childResult.dtm().isPresent()
+                    ? OptionalInt.of(Math.abs(childResult.dtm().getAsInt()))
+                    : OptionalInt.empty();
+            return new TablebaseChildInfo(move, sign, dtz, dtm, zeroing, true);
+        } finally {
+            engine.undoLastMove();
+            engine.getGameState().setLastTablebaseResult(previous);
+        }
+    }
+
+    private int selectTablebaseBestMove(IntArrayList moves,
+                                        TablebaseResult result,
+                                        int nodeSign,
+                                        Int2ObjectOpenHashMap<TablebaseChildInfo> children) {
+        if (moves == null || moves.isEmpty()) {
             return -1;
         }
 
-        if (parentResult != null) {
-            Optional<SyzygyMove> suggestion = parentResult.recommendedMove();
+        List<TablebaseChildInfo> preserving = new ArrayList<>();
+        for (int i = 0; i < moves.size(); i++) {
+            int move = moves.getInt(i);
+            TablebaseChildInfo info = children.get(move);
+            if (info != null && info.preserves(nodeSign)) {
+                preserving.add(info);
+            }
+        }
+
+        if (!preserving.isEmpty()) {
+            if (nodeSign != 0) {
+                preserving.sort((a, b) -> compareTablebaseChildren(a, b, nodeSign));
+                return preserving.get(0).move();
+            }
+            Optional<SyzygyMove> suggestion = result.recommendedMove();
             if (suggestion.isPresent()) {
-                int resolved = findSuggestedMove(legal, suggestion.get());
-                if (resolved != -1) {
-                    return resolved;
+                int suggested = findSuggestedMove(moves, suggestion.get());
+                if (suggested != -1) {
+                    TablebaseChildInfo info = children.get(suggested);
+                    if (info != null && info.preserves(nodeSign)) {
+                        return suggested;
+                    }
+                }
+            }
+            for (int i = 0; i < moves.size(); i++) {
+                int move = moves.getInt(i);
+                TablebaseChildInfo info = children.get(move);
+                if (info != null && info.preserves(nodeSign)) {
+                    return move;
                 }
             }
         }
 
-        double bestScore = Double.NEGATIVE_INFINITY;
-        int bestMove = -1;
-        for (int i = 0; i < legal.size(); i++) {
-            int move = legal.getInt(i);
-            simulatorEngine.performMove(move);
-            double candidate;
-            try {
-                candidate = evaluateTablebaseChild(simulatorEngine, parentIsWhite);
-            } finally {
-                simulatorEngine.undoLastMove();
-            }
-            if (Double.isNaN(candidate)) {
-                continue;
-            }
-            if (candidate > bestScore) {
-                bestScore = candidate;
-                bestMove = move;
+        Optional<SyzygyMove> suggestion = result.recommendedMove();
+        if (suggestion.isPresent()) {
+            int suggested = findSuggestedMove(moves, suggestion.get());
+            if (suggested != -1) {
+                return suggested;
             }
         }
-        return bestMove;
+
+        return moves.isEmpty() ? -1 : moves.getInt(0);
+    }
+
+    private void applyTablebaseOrdering(IntArrayList moves, TablebaseHit hit) {
+        if (hit == null || moves == null || moves.isEmpty()) {
+            return;
+        }
+
+        int rootSign = hit.nodeSign();
+        if (rootSign == 0) {
+            Optional<SyzygyMove> suggestion = hit.result().recommendedMove();
+            if (suggestion.isPresent()) {
+                int suggested = findSuggestedMove(moves, suggestion.get());
+                if (suggested != -1) {
+                    for (int idx = 0; idx < moves.size(); idx++) {
+                        if (moves.getInt(idx) == suggested) {
+                            if (idx != 0) {
+                                int tmp = moves.getInt(0);
+                                moves.set(0, suggested);
+                                moves.set(idx, tmp);
+                            }
+                            return;
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
+        List<TablebaseChildInfo> preserving = new ArrayList<>();
+        for (int i = 0; i < moves.size(); i++) {
+            int move = moves.getInt(i);
+            TablebaseChildInfo info = hit.children().get(move);
+            if (info != null && info.preserves(rootSign)) {
+                preserving.add(info);
+            }
+        }
+
+        if (preserving.isEmpty()) {
+            return;
+        }
+
+        preserving.sort((a, b) -> compareTablebaseChildren(a, b, rootSign));
+
+        int insert = 0;
+        for (TablebaseChildInfo info : preserving) {
+            int move = info.move();
+            for (int idx = insert; idx < moves.size(); idx++) {
+                if (moves.getInt(idx) == move) {
+                    if (idx != insert) {
+                        int tmp = moves.getInt(insert);
+                        moves.set(insert, move);
+                        moves.set(idx, tmp);
+                    }
+                    insert++;
+                    break;
+                }
+            }
+        }
+    }
+
+    private int compareTablebaseChildren(TablebaseChildInfo lhs, TablebaseChildInfo rhs, int rootSign) {
+        boolean lhsPreserves = lhs.preserves(rootSign);
+        boolean rhsPreserves = rhs.preserves(rootSign);
+
+        if (lhsPreserves && !rhsPreserves) {
+            return -1;
+        }
+        if (!lhsPreserves && rhsPreserves) {
+            return 1;
+        }
+        if (!lhsPreserves && !rhsPreserves) {
+            return 0;
+        }
+
+        if (rootSign > 0) {
+            int dtm = compareDtmAscending(lhs, rhs);
+            if (dtm != 0) {
+                return dtm;
+            }
+            int dtz = compareDtzAscending(lhs, rhs);
+            if (dtz != 0) {
+                return dtz;
+            }
+            if (lhs.zeroing() != rhs.zeroing()) {
+                return lhs.zeroing() ? -1 : 1;
+            }
+            return 0;
+        }
+
+        if (rootSign < 0) {
+            int dtm = compareDtmDescending(lhs, rhs);
+            if (dtm != 0) {
+                return dtm;
+            }
+            int dtz = compareDtzDescending(lhs, rhs);
+            if (dtz != 0) {
+                return dtz;
+            }
+            if (lhs.zeroing() != rhs.zeroing()) {
+                return lhs.zeroing() ? 1 : -1;
+            }
+            return 0;
+        }
+
+        return 0;
+    }
+
+    private int compareDtmAscending(TablebaseChildInfo lhs, TablebaseChildInfo rhs) {
+        boolean lhsHas = lhs.hasDtmOrApprox();
+        boolean rhsHas = rhs.hasDtmOrApprox();
+        if (!lhsHas && !rhsHas) {
+            return 0;
+        }
+        if (!lhsHas) {
+            return 1;
+        }
+        if (!rhsHas) {
+            return -1;
+        }
+        return Integer.compare(lhs.dtmForOrdering(), rhs.dtmForOrdering());
+    }
+
+    private int compareDtmDescending(TablebaseChildInfo lhs, TablebaseChildInfo rhs) {
+        boolean lhsHas = lhs.hasDtmOrApprox();
+        boolean rhsHas = rhs.hasDtmOrApprox();
+        if (!lhsHas && !rhsHas) {
+            return 0;
+        }
+        if (!lhsHas) {
+            return 1;
+        }
+        if (!rhsHas) {
+            return -1;
+        }
+        return Integer.compare(rhs.dtmForOrdering(), lhs.dtmForOrdering());
+    }
+
+    private int compareDtzAscending(TablebaseChildInfo lhs, TablebaseChildInfo rhs) {
+        int lhsDtz = lhs.dtzForOrdering();
+        int rhsDtz = rhs.dtzForOrdering();
+        if (lhsDtz < 0 && rhsDtz < 0) {
+            return 0;
+        }
+        if (lhsDtz < 0) {
+            return 1;
+        }
+        if (rhsDtz < 0) {
+            return -1;
+        }
+        return Integer.compare(lhsDtz, rhsDtz);
+    }
+
+    private int compareDtzDescending(TablebaseChildInfo lhs, TablebaseChildInfo rhs) {
+        int lhsDtz = lhs.dtzForOrdering();
+        int rhsDtz = rhs.dtzForOrdering();
+        if (lhsDtz < 0 && rhsDtz < 0) {
+            return 0;
+        }
+        if (lhsDtz < 0) {
+            return 1;
+        }
+        if (rhsDtz < 0) {
+            return -1;
+        }
+        return Integer.compare(rhsDtz, lhsDtz);
     }
 
     private int findSuggestedMove(IntArrayList legal, SyzygyMove suggestion) {
@@ -2000,47 +2259,6 @@ public class AI {
         return -1;
     }
 
-    private void promoteTablebaseMove(IntArrayList moves, Engine engine) {
-        if (moves == null || moves.isEmpty()) {
-            return;
-        }
-        TablebaseResult result = engine.getGameState().getLastTablebaseResult().orElse(null);
-        if (result == null) {
-            return;
-        }
-        Optional<SyzygyMove> suggestion = result.recommendedMove();
-        if (suggestion.isEmpty()) {
-            return;
-        }
-        int matchedMove = findSuggestedMove(moves, suggestion.get());
-        if (matchedMove == -1) {
-            return;
-        }
-        int index = moves.indexOf(matchedMove);
-        if (index <= 0) {
-            return;
-        }
-        int first = moves.getInt(0);
-        moves.set(0, matchedMove);
-        moves.set(index, first);
-    }
-
-    private double evaluateTablebaseChild(Engine simulatorEngine, boolean parentIsWhite) {
-        TablebaseResult childResult = simulatorEngine.getGameState().getLastTablebaseResult().orElse(null);
-        if (tablebaseService != null) {
-            BitBoard snapshot = new BitBoard(simulatorEngine.getBitBoard());
-            Optional<SyzygyProbeResult> probe = tablebaseService.probe(snapshot);
-            if (probe.isPresent()) {
-                childResult = TablebaseResult.from(probe.get());
-                simulatorEngine.getGameState().setLastTablebaseResult(childResult);
-            }
-        }
-        if (childResult == null || !isExactWdl(childResult)) {
-            return Double.NaN;
-        }
-        double whitePerspective = Score.tablebaseToEvaluation(childResult, simulatorEngine.whitesTurn());
-        return parentIsWhite ? whitePerspective : -whitePerspective;
-    }
 
     private boolean isExactWdl(TablebaseResult result) {
         if (result == null) {
@@ -2075,16 +2293,6 @@ public class AI {
             return evaluateStaticPosition(simulatorEngine.getGameState(), boardHash, isWhite, plyFromRoot);
         }
 
-        Optional<TablebaseHit> tablebaseHit = resolveTablebaseHit(simulatorEngine, isWhite);
-        if (tablebaseHit.isPresent()) {
-            TablebaseHit hit = tablebaseHit.get();
-            int bestMove = hit.bestMove() >= 0 ? hit.bestMove() : -1;
-            double storedScore = toStoredMateScore(hit.score(), plyFromRoot);
-            transpositionTable.put(boardHash,
-                    new TranspositionTableEntry(storedScore, depth, NodeType.EXACT, bestMove), depth);
-            return hit.score();
-        }
-
         if (depth <= 0) {
             double eval = evaluateBoard(simulatorEngine, isWhite, deadline);
             if (eval == EXIT_FLAG) return EXIT_FLAG;
@@ -2104,6 +2312,17 @@ public class AI {
 
         // -------- Safer Null-move pruning (same as before, but use depthHere) --------
         IntArrayList moves = simulatorEngine.getAllLegalMoves();
+
+        Optional<TablebaseHit> tablebaseHit = resolveTablebaseHit(simulatorEngine, plyFromRoot, moves);
+        if (tablebaseHit.isPresent()) {
+            TablebaseHit hit = tablebaseHit.get();
+            int bestMove = hit.bestMove() >= 0 ? hit.bestMove() : -1;
+            double storedScore = toStoredMateScore(hit.score(), plyFromRoot);
+            transpositionTable.put(boardHash,
+                    new TranspositionTableEntry(storedScore, depth, NodeType.EXACT, bestMove), depth);
+            return hit.score();
+        }
+
         int mobility = moves.size();
         BitBoard bitBoard = simulatorEngine.getBitBoard();
         final int NULL_MOVE_SENTINEL = -1;
@@ -2310,7 +2529,6 @@ public class AI {
                              int extStreak) {
         double maxEval = Double.NEGATIVE_INFINITY;
         int bestMoveAtThisNode = -1;
-        boolean bestZeroing = false;
 
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, true);
         final Heuristics heuristics = threadHeuristics.get();
@@ -2538,18 +2756,9 @@ public class AI {
             simulatorEngine.undoLastMove();
 
             eval = adjustMateFromChild(eval);
-            boolean zeroing = isZeroingMove(move);
-
             if (eval > maxEval) {
                 maxEval = eval;
                 bestMoveAtThisNode = move;
-                bestZeroing = zeroing;
-            } else if (bestMoveAtThisNode != -1
-                    && shouldUseTablebaseTieBreak(eval, maxEval)
-                    && preferCandidateByTablebase(simulatorEngine, move, eval, zeroing, bestMoveAtThisNode, bestZeroing)) {
-                maxEval = eval;
-                bestMoveAtThisNode = move;
-                bestZeroing = zeroing;
             }
 
             alpha = Math.max(alpha, eval);
@@ -2585,7 +2794,6 @@ public class AI {
         long start = log.isDebugEnabled() ? System.nanoTime() : 0L;
         double minEval = Double.POSITIVE_INFINITY;
         int bestMoveAtThisNode = -1;
-        boolean bestZeroing = false;
 
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, false);
         final Heuristics heuristics = threadHeuristics.get();
@@ -2812,18 +3020,9 @@ public class AI {
             simulatorEngine.undoLastMove();
 
             eval = adjustMateFromChild(eval);
-            boolean zeroing = isZeroingMove(move);
-
             if (eval < minEval) {
                 minEval = eval;
                 bestMoveAtThisNode = move;
-                bestZeroing = zeroing;
-            } else if (bestMoveAtThisNode != -1
-                    && shouldUseTablebaseTieBreak(eval, minEval)
-                    && preferCandidateByTablebase(simulatorEngine, move, eval, zeroing, bestMoveAtThisNode, bestZeroing)) {
-                minEval = eval;
-                bestMoveAtThisNode = move;
-                bestZeroing = zeroing;
             }
 
             beta = Math.min(beta, eval);
@@ -3327,133 +3526,6 @@ public class AI {
         return pieceBits == 1;
     }
 
-    private boolean shouldUseTablebaseTieBreak(double candidateEval, double bestEval) {
-        if (!tbTieBreak) {
-            return false;
-        }
-        if (!Double.isFinite(candidateEval) || !Double.isFinite(bestEval)) {
-            return false;
-        }
-        if (Math.abs(candidateEval - bestEval) > TB_TIE_EPSILON) {
-            return false;
-        }
-        if (isMateValue(candidateEval) || isMateValue(bestEval)) {
-            return false;
-        }
-        double candidateSign = Math.signum(candidateEval);
-        double bestSign = Math.signum(bestEval);
-        if (candidateSign == 0.0 || bestSign == 0.0) {
-            return false;
-        }
-        return candidateSign == bestSign;
-    }
-
-    private TablebaseInfo probeMoveTablebase(Engine engine, int move) {
-        if (!tbTieBreak || tablebaseService == null || move < 0) {
-            return null;
-        }
-        engine.performMove(move);
-        try {
-            TablebaseResult result = engine.getGameState().getLastTablebaseResult().orElse(null);
-            if (!isExactWdl(result)) {
-                Optional<SyzygyProbeResult> probe = tablebaseService.probe(engine.getBitBoard());
-                if (probe.isEmpty()) {
-                    return null;
-                }
-                result = TablebaseResult.from(probe.get());
-                if (!isExactWdl(result)) {
-                    return null;
-                }
-                engine.getGameState().setLastTablebaseResult(result);
-            }
-            int dtz = result.dtz().isPresent() ? Math.abs(result.dtz().getAsInt()) : -1;
-            int dtm = result.dtm().isPresent() ? Math.abs(result.dtm().getAsInt()) : -1;
-            boolean childIsWhite = engine.whitesTurn();
-            int wdlScore = result.wdl().score();
-            int whiteWdlSign = childIsWhite ? wdlScore : -wdlScore;
-            return new TablebaseInfo(dtz, dtm, whiteWdlSign);
-        } finally {
-            engine.undoLastMove();
-        }
-    }
-
-    private boolean preferCandidateByTablebase(Engine engine,
-                                               int candidateMove,
-                                               double candidateEval,
-                                               boolean candidateZeroing,
-                                               int bestMove,
-                                               boolean bestZeroing) {
-        TablebaseInfo candidateInfo = probeMoveTablebase(engine, candidateMove);
-        TablebaseInfo bestInfo = probeMoveTablebase(engine, bestMove);
-        if (candidateInfo == null && bestInfo == null) {
-            return false;
-        }
-
-        int candidateSign = candidateInfo != null ? Integer.signum(candidateInfo.whiteWdlSign()) : 0;
-        int bestSign = bestInfo != null ? Integer.signum(bestInfo.whiteWdlSign()) : 0;
-
-        if (candidateSign > 0 && bestSign > 0) {
-            int candidateDtz = candidateInfo.hasDtz() ? candidateInfo.dtz() : Integer.MAX_VALUE;
-            int bestDtz = bestInfo.hasDtz() ? bestInfo.dtz() : Integer.MAX_VALUE;
-            if (candidateDtz < bestDtz) {
-                return true;
-            }
-            if (candidateDtz > bestDtz) {
-                return false;
-            }
-            if (candidateZeroing != bestZeroing) {
-                return candidateZeroing;
-            }
-            return false;
-        }
-
-        if (candidateSign < 0 && bestSign < 0) {
-            int candidateDtz = candidateInfo.hasDtz() ? candidateInfo.dtz() : -1;
-            int bestDtz = bestInfo.hasDtz() ? bestInfo.dtz() : -1;
-            if (candidateDtz > bestDtz) {
-                return true;
-            }
-            if (candidateDtz < bestDtz) {
-                return false;
-            }
-            if (candidateZeroing != bestZeroing) {
-                return !candidateZeroing;
-            }
-            return false;
-        }
-
-        if (candidateInfo != null && bestInfo == null) {
-            if (candidateSign > 0 && candidateInfo.hasDtz()) {
-                return true;
-            }
-            if (candidateSign < 0 && candidateInfo.hasDtz()) {
-                return true;
-            }
-            if (candidateSign > 0 && candidateZeroing != bestZeroing) {
-                return candidateZeroing;
-            }
-            if (candidateSign < 0 && candidateZeroing != bestZeroing) {
-                return !candidateZeroing;
-            }
-        }
-
-        if (candidateInfo == null) {
-            if (bestSign > 0 && bestInfo.hasDtz()) {
-                return false;
-            }
-            if (bestSign < 0 && bestInfo.hasDtz()) {
-                return false;
-            }
-            if (bestSign > 0 && candidateZeroing != bestZeroing) {
-                return candidateZeroing;
-            }
-            if (bestSign < 0 && candidateZeroing != bestZeroing) {
-                return !candidateZeroing;
-            }
-        }
-
-        return false;
-    }
 
     /**
      * Checks whether the board hash has changed since the current search task started.
