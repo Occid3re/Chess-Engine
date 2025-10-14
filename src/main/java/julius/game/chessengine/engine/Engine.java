@@ -34,7 +34,7 @@ public class Engine {
 
     private boolean legalMovesNeedUpdate = true;
     private long cachedLegalMovesHash = Long.MIN_VALUE;
-    private int[] cachedLegalMoves = new int[0];
+    private int[] cachedLegalMoves = new int[MOVE_BUFFER_CAPACITY];
     private int cachedLegalMoveCount = 0;
 
     private static final int MOVE_BUFFER_CAPACITY = 256;
@@ -118,7 +118,7 @@ public class Engine {
                 // Gate on terminality only (checkmate, stalemate, 50-move, threefold).
                 if (gameState.isTerminal()) {
                     IntArrayList empty = new IntArrayList(0);
-                    cacheLegalMoves(boardHash, legalMoveScratch, 0);
+                    cacheLegalMoves(boardHash, 0);
                     return empty;
                 }
                 return generateLegalMoves();
@@ -201,7 +201,7 @@ public class Engine {
 
             // If you auto-claim 50-move / threefold, these are terminal draws.
             if (gameState.isFiftyMoveRule() || gameState.isThreefoldRepetition()) {
-                cacheLegalMoves(getBoardStateHash(), legalMoveScratch, 0);
+                cacheLegalMoves(getBoardStateHash(), 0);
                 gameState.setState(GameStateEnum.DRAW);
                 // Still surface the UI/eval hint if material is insufficient.
                 gameState.setDrawByInsufficientMaterial(bitBoard.hasInsufficientMaterial());
@@ -325,15 +325,13 @@ public class Engine {
                 }
             }
 
-            // 3) cache (steal a copy once)
-            // copy exactly w ints into the cache; then return a wrap of that copy (no double-copy)
+            // 3) cache (reuse double-buffered arrays via swap)
             ensureLegalMoveScratchCapacity(w);
             System.arraycopy(a, 0, legalMoveScratch, 0, w);
-            int[] cached = java.util.Arrays.copyOf(legalMoveScratch, w);
-            cacheLegalMoves(boardStateHash, cached, w);
+            cacheLegalMoves(boardStateHash, w);
 
-            // 4) return a list backed by the already-copied array (no new copy here)
-            return IntArrayList.wrap(cached, w);
+            // 4) return a list backed by the cached buffer
+            return copyCachedLegalMoves();
         }
     }
 
@@ -344,30 +342,44 @@ public class Engine {
         cachedLegalMovesHash = Long.MIN_VALUE;
     }
 
-    private void cacheLegalMoves(long boardHash, int[] legalMoves, int legalMoveCount) {
+    private void cacheLegalMoves(long boardHash, int legalMoveCount) {
+        ensureCachedLegalMoveCapacity(legalMoveCount);
+
+        int[] previousCached = this.cachedLegalMoves;
+        this.cachedLegalMoves = this.legalMoveScratch;
+        this.legalMoveScratch = previousCached;
+
         this.cachedLegalMovesHash = boardHash;
         this.cachedLegalMoveCount = legalMoveCount;
-        // legalMoves must be a fresh array that we won’t mutate later
-        this.cachedLegalMoves = legalMoves;
         this.legalMovesNeedUpdate = false;
     }
 
 
     private void ensureLegalMoveScratchCapacity(int requiredSize) {
         if (legalMoveScratch.length < requiredSize) {
-            int newSize = Math.max(requiredSize, legalMoveScratch.length << 1);
+            int base = (legalMoveScratch.length == 0 ? MOVE_BUFFER_CAPACITY : legalMoveScratch.length << 1);
+            int newSize = Math.max(requiredSize, base);
             legalMoveScratch = java.util.Arrays.copyOf(legalMoveScratch, newSize);
         }
     }
 
+    private void ensureCachedLegalMoveCapacity(int requiredSize) {
+        if (cachedLegalMoves.length < requiredSize) {
+            int base = (cachedLegalMoves.length == 0 ? MOVE_BUFFER_CAPACITY : cachedLegalMoves.length << 1);
+            int newSize = Math.max(requiredSize, base);
+            cachedLegalMoves = java.util.Arrays.copyOf(cachedLegalMoves, newSize);
+        }
+    }
+
     private IntArrayList copyCachedLegalMoves() {
-        // cachedLegalMoves is *already* an exact-sized array that won’t be mutated
+        // cachedLegalMoves currently points at the active buffer; callers must treat the view as read-only.
         return IntArrayList.wrap(cachedLegalMoves, cachedLegalMoveCount);
     }
 
 
     private void resetCachedLegalMoves() {
-        cachedLegalMoves = new int[0];
+        cachedLegalMoves = new int[MOVE_BUFFER_CAPACITY];
+        legalMoveScratch = new int[MOVE_BUFFER_CAPACITY];
         cachedLegalMoveCount = 0;
         cachedLegalMovesHash = Long.MIN_VALUE;
         legalMovesNeedUpdate = true;
