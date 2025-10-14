@@ -22,6 +22,11 @@ public final class BestMoveFixtures {
                     25
             ),
             new BestMoveTestCase(
+                    "8/8/8/5b2/8/4nk2/8/6K1 b - - 55 104",
+                    List.of("Kg3"),
+                    25
+            ),
+            new BestMoveTestCase(
                     "8/7K/8/8/2kP4/8/8/7B w - - 2 61",
                     List.of("d5"),
                     25
