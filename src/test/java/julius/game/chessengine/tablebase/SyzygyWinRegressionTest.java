@@ -30,7 +30,11 @@ class SyzygyWinRegressionTest {
         assertThat(result)
                 .describedAs("Expected Syzygy to provide a result for %s", KNIGHT_BISHOP_VS_KING_PAWN_FEN)
                 .isPresent();
-        assertThat(result.get().wdl()).isEqualTo(SyzygyWdl.WIN);
+        SyzygyProbeResult probe = result.get();
+        assertThat(probe.wdl()).isEqualTo(SyzygyWdl.WIN);
+        assertThat(probe.dtm())
+                .describedAs("DTM should be populated for winning positions")
+                .isPresent();
     }
 
 }

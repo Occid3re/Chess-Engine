@@ -1,6 +1,13 @@
 package julius.game.chessengine.syzygy;
 
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import julius.game.chessengine.board.BitBoard;
+import julius.game.chessengine.board.BitBoard.MoveGenResult;
+import julius.game.chessengine.board.BitBoard.PinState;
+import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.syzygy.bridge.SyzygyBridge;
 import julius.game.chessengine.syzygy.bridge.SyzygyConstants;
 import lombok.extern.log4j.Log4j2;
@@ -10,6 +17,8 @@ import java.util.OptionalInt;
 
 @Log4j2
 final class Tables {
+
+    private static final int MAX_DTM_DEPTH = 600;
 
     private final int maxPieces;
     private final int supportedPieces;
@@ -58,6 +67,13 @@ final class Tables {
             return Optional.empty();
         }
 
+        return probeNative(board).map(data -> {
+            OptionalInt dtm = computeDtm(new BitBoard(board), data);
+            return new SyzygyProbeResult(data.wdl(), data.dtz(), dtm, data.recommendedMove());
+        });
+    }
+
+    private Optional<ProbeData> probeNative(BitBoard board) {
         long white = board.getWhitePieces();
         long black = board.getBlackPieces();
         long kings = board.getWhiteKing() | board.getBlackKing();
@@ -89,7 +105,7 @@ final class Tables {
             log.debug("Syzygy DTZ probe mismatch (wdlValue={}, dtzRaw={})", wdlValue, dtzRaw);
         }
 
-        return Optional.of(new SyzygyProbeResult(wdl, dtz, OptionalInt.empty(), recommendedMove));
+        return Optional.of(new ProbeData(wdl, dtz, recommendedMove));
     }
 
     private Optional<SyzygyMove> decodeRecommendedMove(int dtzRaw) {
@@ -125,6 +141,156 @@ final class Tables {
 
     int supportedPieces() {
         return supportedPieces;
+    }
+
+    private OptionalInt computeDtm(BitBoard board, ProbeData rootData) {
+        SyzygyWdl wdl = rootData.wdl();
+        if (wdl == SyzygyWdl.UNKNOWN || wdl == SyzygyWdl.DRAW) {
+            return OptionalInt.empty();
+        }
+
+        boolean whiteToMove = board.isWhitesTurn();
+        boolean winningWhite = wdl.score() > 0 ? whiteToMove : !whiteToMove;
+
+        Long2IntOpenHashMap memo = new Long2IntOpenHashMap();
+        memo.defaultReturnValue(Integer.MIN_VALUE);
+        LongOpenHashSet visiting = new LongOpenHashSet();
+        Long2ObjectOpenHashMap<ProbeData> probeCache = new Long2ObjectOpenHashMap<>();
+        long rootKey = board.getBoardStateHash();
+        probeCache.put(rootKey, rootData);
+
+        int distance = computeMateDistance(board, rootData, winningWhite, memo, visiting, probeCache, 0);
+        if (distance == Integer.MAX_VALUE) {
+            return OptionalInt.empty();
+        }
+
+        int signedDistance = wdl.score() > 0 ? distance : -distance;
+        return OptionalInt.of(signedDistance);
+    }
+
+    private int computeMateDistance(BitBoard board,
+                                    ProbeData probeData,
+                                    boolean winningWhite,
+                                    Long2IntOpenHashMap memo,
+                                    LongOpenHashSet visiting,
+                                    Long2ObjectOpenHashMap<ProbeData> probeCache,
+                                    int depth) {
+        if (depth >= MAX_DTM_DEPTH) {
+            return Integer.MAX_VALUE;
+        }
+
+        long key = board.getBoardStateHash();
+        int cached = memo.getOrDefault(key, Integer.MIN_VALUE);
+        if (cached != Integer.MIN_VALUE) {
+            return cached;
+        }
+
+        if (!visiting.add(key)) {
+            return Integer.MAX_VALUE;
+        }
+
+        boolean whiteToMove = board.isWhitesTurn();
+        MoveGenResult generation = board.generateAllPossibleMovesWithPins(whiteToMove);
+        IntArrayList moves = generation.moves();
+        PinState pinState = generation.pinState();
+
+        if (moves.isEmpty()) {
+            visiting.remove(key);
+            int terminal = board.isInCheck(whiteToMove) ? 0 : Integer.MAX_VALUE;
+            memo.put(key, terminal);
+            return terminal;
+        }
+
+        if (probeData != null && probeData.recommendedMove().isPresent()) {
+            prioritizeRecommendedMove(moves, probeData.recommendedMove().get());
+        }
+
+        boolean currentSideIsWinner = whiteToMove == winningWhite;
+        int best = currentSideIsWinner ? Integer.MAX_VALUE : Integer.MIN_VALUE;
+        boolean hasFiniteChild = false;
+        boolean foundLegalMove = false;
+
+        for (int i = 0; i < moves.size(); i++) {
+            int move = moves.getInt(i);
+            if (!board.isMoveLegalFast(move, pinState)) {
+                continue;
+            }
+            foundLegalMove = true;
+
+            board.performMove(move);
+            long childKey = board.getBoardStateHash();
+            ProbeData childProbe = probeCache.get(childKey);
+            if (childProbe == null) {
+                Optional<ProbeData> resolved = probeNative(board);
+                if (resolved.isPresent()) {
+                    childProbe = resolved.get();
+                    probeCache.put(childKey, childProbe);
+                }
+            }
+
+            if (childProbe != null) {
+                boolean nextSideIsWinner = board.isWhitesTurn() == winningWhite;
+                int childScore = childProbe.wdl().score();
+                boolean maintainsResult = (nextSideIsWinner && childScore > 0)
+                        || (!nextSideIsWinner && childScore < 0);
+                if (maintainsResult) {
+                    int childDistance = computeMateDistance(board, childProbe, winningWhite,
+                            memo, visiting, probeCache, depth + 1);
+                    if (childDistance != Integer.MAX_VALUE) {
+                        hasFiniteChild = true;
+                        int candidate = childDistance + 1;
+                        if (currentSideIsWinner) {
+                            if (candidate < best) {
+                                best = candidate;
+                            }
+                        } else {
+                            if (candidate > best) {
+                                best = candidate;
+                            }
+                        }
+                    }
+                }
+            }
+
+            board.undoMove(move);
+
+            if (currentSideIsWinner && best == 1) {
+                // Can't improve over mate in one for the winning side.
+                break;
+            }
+        }
+
+        visiting.remove(key);
+
+        if (!foundLegalMove) {
+            int terminal = board.isInCheck(whiteToMove) ? 0 : Integer.MAX_VALUE;
+            memo.put(key, terminal);
+            return terminal;
+        }
+
+        int result = hasFiniteChild ? best : Integer.MAX_VALUE;
+        memo.put(key, result);
+        return result;
+    }
+
+    private void prioritizeRecommendedMove(IntArrayList moves, SyzygyMove recommendation) {
+        int size = moves.size();
+        for (int i = 0; i < size; i++) {
+            int candidate = moves.getInt(i);
+            if (MoveHelper.deriveFromIndex(candidate) == recommendation.fromIndex()
+                    && MoveHelper.deriveToIndex(candidate) == recommendation.toIndex()
+                    && MoveHelper.derivePromotionPieceTypeBits(candidate) == recommendation.promotionPieceTypeBits()) {
+                if (i != 0) {
+                    int first = moves.getInt(0);
+                    moves.set(0, candidate);
+                    moves.set(i, first);
+                }
+                break;
+            }
+        }
+    }
+
+    private record ProbeData(SyzygyWdl wdl, OptionalInt dtz, Optional<SyzygyMove> recommendedMove) {
     }
 
     private static SyzygyWdl toWdl(int wdlValue) {
