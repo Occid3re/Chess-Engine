@@ -86,7 +86,7 @@ final class Tables {
             dtz = OptionalInt.of(distance);
             recommendedMove = decodeRecommendedMove(dtzRaw);
         } else {
-            log.debug("Syzygy DTZ probe mismatch (wdlValue={}, dtzRaw={})", wdlValue, dtzRaw);
+            log.info("Syzygy DTZ probe mismatch (wdlValue={}, dtzRaw={})", wdlValue, dtzRaw);
         }
 
         return Optional.of(new SyzygyProbeResult(wdl, dtz, OptionalInt.empty(), recommendedMove));
