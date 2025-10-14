@@ -221,6 +221,7 @@ def build_engine_cmd() -> List[str]:
         f"-Xms{JAVA_XMS}",
         f"-Xmx{JAVA_XMX}",
         gc_flag(JAVA_GC),
+        "--enable-native-access=ALL-UNNAMED",
         "-XX:+AlwaysPreTouch",
         # harmless even if JFR off; keeps stacks deep when you enable it
         "-XX:FlightRecorderOptions=stackdepth=256",

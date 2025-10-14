@@ -190,6 +190,7 @@ def build_java_cmd(jar: Path, jfr_file: Path, jfr_duration: str,
         "-Xms{}".format(java_xms),
         "-Xmx{}".format(java_xmx),
         gc_flag(java_gc),
+        "--enable-native-access=ALL-UNNAMED",
         "-XX:ActiveProcessorCount={}".format(apc),
     ]
 
