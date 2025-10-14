@@ -858,18 +858,14 @@ public class BitBoard {
      * Bishop-ray attacks from 'sq' with an explicit occupancy.
      */
     private long bishopAttacksFromWithOcc(int sq, long occ) {
-        long mask = bishopHelper.bishopMasks[sq];
-        long occMasked = occ & mask;
-        return bishopHelper.calculateMovesUsingBishopMagic(sq, occMasked);
+        return bishopHelper.calculateMovesUsingBishopMagic(sq, occ);
     }
 
     /**
      * Rook-ray attacks from 'sq' with an explicit occupancy.
      */
     private long rookAttacksFromWithOcc(int sq, long occ) {
-        long mask = rookHelper.rookMasks[sq];
-        long occMasked = occ & mask;
-        return rookHelper.calculateMovesUsingRookMagic(sq, occMasked);
+        return rookHelper.calculateMovesUsingRookMagic(sq, occ);
     }
 
     /**
