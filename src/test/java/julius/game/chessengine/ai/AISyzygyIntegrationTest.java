@@ -43,7 +43,7 @@ class AISyzygyIntegrationTest {
                     Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY,
                     simulation.whitesTurn(), Long.MAX_VALUE, -1, 0, 0);
 
-            double expected = Score.tablebaseToEvaluation(TablebaseResult.from(probe));
+            double expected = Score.tablebaseToEvaluation(TablebaseResult.from(probe), true);
             assertThat(score).isEqualTo(expected);
 
             ai.shutdown();
@@ -64,7 +64,8 @@ class AISyzygyIntegrationTest {
             int move = legalMoves.getInt(i);
             engine.performMove(move);
             String childFen = FEN.translateBoardToFEN(engine.getBitBoard(), engine.getGameState()).getRenderBoard();
-            SyzygyWdl childResult = childFen.contains("5QK1") ? SyzygyWdl.LOSS : SyzygyWdl.DRAW;
+            boolean forcedWin = childFen.contains("5QK1") || childFen.contains("4Q1K1");
+            SyzygyWdl childResult = forcedWin ? SyzygyWdl.LOSS : SyzygyWdl.DRAW;
             responses.put(childFen, new SyzygyProbeResult(childResult, OptionalInt.of(1), OptionalInt.empty()));
             engine.undoLastMove();
         }
@@ -75,10 +76,10 @@ class AISyzygyIntegrationTest {
             AI ai = new AI(engine, service);
             Engine simulation = engine.createSimulation();
 
-            Method determine = AI.class.getDeclaredMethod("determineTablebaseBestMove", Engine.class, boolean.class);
+            Method determine = AI.class.getDeclaredMethod("determineTablebaseBestMove", Engine.class);
             determine.setAccessible(true);
 
-            int bestMove = (int) determine.invoke(ai, simulation, simulation.whitesTurn());
+            int bestMove = (int) determine.invoke(ai, simulation);
 
             Set<String> winningChildren = responses.entrySet().stream()
                     .filter(entry -> !entry.getKey().equals(fen))

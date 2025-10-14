@@ -355,7 +355,7 @@ public class Score {
         }
         TablebaseResult resolved = TablebaseResult.from(probe.get());
         this.tablebaseResult = resolved;
-        this.tablebaseCentipawn = computeTablebaseCentipawn(resolved);
+        this.tablebaseCentipawn = computeTablebaseCentipawn(resolved, bitBoard.isWhitesTurn());
         this.tablebaseBypassesEvaluation = true;
         return true;
     }
@@ -366,16 +366,19 @@ public class Score {
         this.tablebaseBypassesEvaluation = false;
     }
 
-    public static double tablebaseToEvaluation(TablebaseResult result) {
-        return tablebaseToCentipawn(result) / 100.0;
+    public static double tablebaseToEvaluation(TablebaseResult result, boolean whiteToMove) {
+        return tablebaseToCentipawn(result, whiteToMove) / 100.0;
     }
 
-    public static int tablebaseToCentipawn(TablebaseResult result) {
+    public static int tablebaseToCentipawn(TablebaseResult result, boolean whiteToMove) {
         int wdlScore = result.wdl().score();
         if (wdlScore == 0) {
             return DRAW;
         }
         int sign = Integer.signum(wdlScore);
+        if (!whiteToMove) {
+            sign = -sign;
+        }
         int distance = result.dtm().isPresent()
                 ? Math.abs(result.dtm().getAsInt())
                 : result.dtz().isPresent() ? Math.abs(result.dtz().getAsInt()) : 0;
@@ -383,7 +386,7 @@ public class Score {
         return sign * (CHECKMATE - scaledPenalty);
     }
 
-    private int computeTablebaseCentipawn(TablebaseResult result) {
-        return tablebaseToCentipawn(result);
+    private int computeTablebaseCentipawn(TablebaseResult result, boolean whiteToMove) {
+        return tablebaseToCentipawn(result, whiteToMove);
     }
 }
