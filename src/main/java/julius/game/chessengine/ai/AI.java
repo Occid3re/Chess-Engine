@@ -2971,7 +2971,13 @@ public class AI {
                 s = maxScore;
             }
             scoreBuffer[i] = s;
-            insertByScore(targetBucket, i, scoreBuffer, moveBuffer);
+            targetBucket.add(i);
+        }
+
+        for (IntArrayList bucket : bucketIndexes) {
+            if (!bucket.isEmpty()) {
+                sortBucket(bucket, scoreBuffer, moveBuffer);
+            }
         }
 
         int outIndex = 0;
@@ -3480,24 +3486,14 @@ public class AI {
         };
     }
 
-    private static void insertByScore(IntArrayList bucket, int moveIndex, int[] scoreBuffer, int[] moveBuffer) {
-        int score = scoreBuffer[moveIndex];
-        int move = moveBuffer[moveIndex];
-        int insertPosition = bucket.size();
-        while (insertPosition > 0) {
-            int existingIndex = bucket.getInt(insertPosition - 1);
-            int existingScore = scoreBuffer[existingIndex];
-            if (score > existingScore) {
-                insertPosition--;
-                continue;
+    private static void sortBucket(IntArrayList bucket, int[] scoreBuffer, int[] moveBuffer) {
+        bucket.sort((a, b) -> {
+            int scoreCompare = Integer.compare(scoreBuffer[b], scoreBuffer[a]);
+            if (scoreCompare != 0) {
+                return scoreCompare;
             }
-            if (score == existingScore && move > moveBuffer[existingIndex]) {
-                insertPosition--;
-                continue;
-            }
-            break;
-        }
-        bucket.add(insertPosition, moveIndex);
+            return Integer.compare(moveBuffer[b], moveBuffer[a]);
+        });
     }
 
     private static int writeBucket(IntArrayList bucket, int[] sourceMoves, int[] target, int startIndex) {
