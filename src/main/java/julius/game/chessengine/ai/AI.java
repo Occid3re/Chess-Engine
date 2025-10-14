@@ -2432,8 +2432,10 @@ public class AI {
                     && entry.nodeType == NodeType.EXACT
                     && entry.depth >= nextDepth;
 
+            boolean usedTranspositionEval = false;
             if (ttExactHit) {
                 eval = fromStoredMateScore(entry.score, plyFromRoot + 1);
+                usedTranspositionEval = true;
             } else {
                 if (!inCheckAtNode
                         && !isTactical
@@ -2455,76 +2457,66 @@ public class AI {
                             && entry.depth >= nextDepth;
                     if (ttExactHit) {
                         eval = fromStoredMateScore(entry.score, plyFromRoot + 1);
-                        simulatorEngine.undoLastMove();
-                        if (eval > maxEval) {
-                            maxEval = eval;
-                            bestMoveAtThisNode = move;
+                        usedTranspositionEval = true;
+                    }
+                }
+
+                if (!usedTranspositionEval) {
+                    boolean canReduce = !inCheckAtNode
+                            && !isTactical
+                            && !givesCheck
+                            && !attacksQueen
+                            && !attacksKingZone
+                            && !opensKingFile
+                            && !seeWinsMaterial
+                            && nextDepth >= 2
+                            && index > lmrProtectIndexMax;
+
+                    if (plyFromRoot <= lmrProtectPlyMax) {
+                        canReduce = false;
+                    }
+
+                    boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
+                    double pBeta = usePvs ? (alpha + 1) : beta;
+
+                    int reduction = 0;
+                    if (canReduce) {
+                        reduction = lmrReduction(nextDepth, index, historyScore);
+                        if (reduction > 0 && isQuiet && historyScore > 0 && lmrCapGoodQuiet >= 0) {
+                            reduction = Math.min(reduction, lmrCapGoodQuiet);
                         }
-                        alpha = Math.max(alpha, eval);
-                        if (beta <= alpha) {
-                            updateKillerMoves(depth, move);
-                            incrementHistory(move, depth);
-                            heuristics.recordCounterMove(prevMove, move);
-                            break;
-                        }
-                        continue;
-                    }
-                }
-
-                boolean canReduce = !inCheckAtNode
-                        && !isTactical
-                        && !givesCheck
-                        && !attacksQueen
-                        && !attacksKingZone
-                        && !opensKingFile
-                        && !seeWinsMaterial
-                        && nextDepth >= 2
-                        && index > lmrProtectIndexMax;
-
-                if (plyFromRoot <= lmrProtectPlyMax) {
-                    canReduce = false;
-                }
-
-                boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
-                double pBeta = usePvs ? (alpha + 1) : beta;
-
-                int reduction = 0;
-                if (canReduce) {
-                    reduction = lmrReduction(nextDepth, index, historyScore);
-                    if (reduction > 0 && isQuiet && historyScore > 0 && lmrCapGoodQuiet >= 0) {
-                        reduction = Math.min(reduction, lmrCapGoodQuiet);
-                    }
-                    if (reduction <= 0) canReduce = false;
-                }
-
-                if (canReduce) {
-                    int reduced = Math.max(1, nextDepth - reduction);
-                    eval = alphaBeta(simulatorEngine, reduced, alpha, pBeta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
-                    if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
+                        if (reduction <= 0) canReduce = false;
                     }
 
-                    boolean promising = eval > alpha;
-                    if (promising) {
-                        eval = alphaBeta(simulatorEngine, nextDepth, alpha, usePvs ? beta : pBeta,
-                                false, deadline, move, plyFromRoot + 1, nextExtStreak);
+                    if (canReduce) {
+                        int reduced = Math.max(1, nextDepth - reduction);
+                        eval = alphaBeta(simulatorEngine, reduced, alpha, pBeta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
                         if (eval == EXIT_FLAG || positionChanged()) {
                             simulatorEngine.undoLastMove();
                             return EXIT_FLAG;
                         }
-                    }
-                } else {
-                    eval = alphaBeta(simulatorEngine, nextDepth, alpha, pBeta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
-                    if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
-                    }
-                    if (usePvs && eval > alpha && eval < beta) {
-                        eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
+
+                        boolean promising = eval > alpha;
+                        if (promising) {
+                            eval = alphaBeta(simulatorEngine, nextDepth, alpha, usePvs ? beta : pBeta,
+                                    false, deadline, move, plyFromRoot + 1, nextExtStreak);
+                            if (eval == EXIT_FLAG || positionChanged()) {
+                                simulatorEngine.undoLastMove();
+                                return EXIT_FLAG;
+                            }
+                        }
+                    } else {
+                        eval = alphaBeta(simulatorEngine, nextDepth, alpha, pBeta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
                         if (eval == EXIT_FLAG || positionChanged()) {
                             simulatorEngine.undoLastMove();
                             return EXIT_FLAG;
+                        }
+                        if (usePvs && eval > alpha && eval < beta) {
+                            eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
+                            if (eval == EXIT_FLAG || positionChanged()) {
+                                simulatorEngine.undoLastMove();
+                                return EXIT_FLAG;
+                            }
                         }
                     }
                 }
@@ -2707,8 +2699,10 @@ public class AI {
                     && entry.nodeType == NodeType.EXACT
                     && entry.depth >= nextDepth;
 
+            boolean usedTranspositionEval = false;
             if (ttExactHit) {
                 eval = fromStoredMateScore(entry.score, plyFromRoot + 1);
+                usedTranspositionEval = true;
             } else {
                 if (!inCheckAtNode
                         && !isTactical
@@ -2730,77 +2724,67 @@ public class AI {
                             && entry.depth >= nextDepth;
                     if (ttExactHit) {
                         eval = fromStoredMateScore(entry.score, plyFromRoot + 1);
-                        simulatorEngine.undoLastMove();
-                        if (eval < minEval) {
-                            minEval = eval;
-                            bestMoveAtThisNode = move;
+                        usedTranspositionEval = true;
+                    }
+                }
+
+                if (!usedTranspositionEval) {
+                    boolean canReduce = !inCheckAtNode
+                            && !isTactical
+                            && !givesCheck
+                            && !attacksQueen
+                            && !attacksKingZone
+                            && !opensKingFile
+                            && !seeWinsMaterial
+                            && nextDepth >= 2
+                            && index > lmrProtectIndexMax;
+
+                    if (plyFromRoot <= lmrProtectPlyMax) {
+                        canReduce = false;
+                    }
+
+                    boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
+                    double pAlpha = usePvs ? (beta - 1) : alpha;
+
+                    int reduction = 0;
+                    if (canReduce) {
+                        reduction = lmrReduction(nextDepth, index, historyScore);
+                        if (reduction > 0 && isQuiet && historyScore > 0 && lmrCapGoodQuiet >= 0) {
+                            reduction = Math.min(reduction, lmrCapGoodQuiet);
                         }
-                        beta = Math.min(beta, eval);
-                        if (alpha >= beta) {
-                            updateKillerMoves(depth, move);
-                            incrementHistory(move, depth);
-                            heuristics.recordCounterMove(prevMove, move);
-                            break;
-                        }
-                        continue;
-                    }
-                }
-
-                boolean canReduce = !inCheckAtNode
-                        && !isTactical
-                        && !givesCheck
-                        && !attacksQueen
-                        && !attacksKingZone
-                        && !opensKingFile
-                        && !seeWinsMaterial
-                        && nextDepth >= 2
-                        && index > lmrProtectIndexMax;
-
-                if (plyFromRoot <= lmrProtectPlyMax) {
-                    canReduce = false;
-                }
-
-                boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
-                double pAlpha = usePvs ? (beta - 1) : alpha;
-
-                int reduction = 0;
-                if (canReduce) {
-                    reduction = lmrReduction(nextDepth, index, historyScore);
-                    if (reduction > 0 && isQuiet && historyScore > 0 && lmrCapGoodQuiet >= 0) {
-                        reduction = Math.min(reduction, lmrCapGoodQuiet);
-                    }
-                    if (reduction <= 0) canReduce = false;
-                }
-
-                if (canReduce) {
-                    int reduced = Math.max(1, nextDepth - reduction);
-                    eval = alphaBeta(simulatorEngine, reduced, pAlpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
-                    if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
+                        if (reduction <= 0) canReduce = false;
                     }
 
-                    boolean promising = eval < beta;
-                    if (promising) {
-                        eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, beta,
-                                true, deadline, move, plyFromRoot + 1, nextExtStreak);
+                    if (canReduce) {
+                        int reduced = Math.max(1, nextDepth - reduction);
+                        eval = alphaBeta(simulatorEngine, reduced, pAlpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
                         if (eval == EXIT_FLAG || positionChanged()) {
                             simulatorEngine.undoLastMove();
                             return EXIT_FLAG;
                         }
-                    }
-                } else {
-                    eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
-                    if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
-                    }
 
-                    if (usePvs && eval > alpha && eval < beta) {
-                        eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
+                        boolean promising = eval < beta;
+                        if (promising) {
+                            eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, beta,
+                                    true, deadline, move, plyFromRoot + 1, nextExtStreak);
+                            if (eval == EXIT_FLAG || positionChanged()) {
+                                simulatorEngine.undoLastMove();
+                                return EXIT_FLAG;
+                            }
+                        }
+                    } else {
+                        eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
                         if (eval == EXIT_FLAG || positionChanged()) {
                             simulatorEngine.undoLastMove();
                             return EXIT_FLAG;
+                        }
+
+                        if (usePvs && eval > alpha && eval < beta) {
+                            eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
+                            if (eval == EXIT_FLAG || positionChanged()) {
+                                simulatorEngine.undoLastMove();
+                                return EXIT_FLAG;
+                            }
                         }
                     }
                 }
