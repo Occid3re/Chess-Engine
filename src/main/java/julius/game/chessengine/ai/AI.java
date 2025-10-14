@@ -1926,6 +1926,7 @@ public class AI {
             return -1;
         }
 
+        boolean rootIsWhite = simulatorEngine.whitesTurn();
         if (parentResult != null) {
             Optional<SyzygyMove> suggestion = parentResult.recommendedMove();
             if (suggestion.isPresent()) {
@@ -1943,7 +1944,7 @@ public class AI {
             simulatorEngine.performMove(move);
             double candidate;
             try {
-                candidate = evaluateTablebaseChild(simulatorEngine);
+                candidate = evaluateTablebaseChild(simulatorEngine, rootIsWhite);
             } finally {
                 simulatorEngine.undoLastMove();
             }
@@ -2008,7 +2009,7 @@ public class AI {
         moves.set(index, first);
     }
 
-    private double evaluateTablebaseChild(Engine simulatorEngine) {
+    private double evaluateTablebaseChild(Engine simulatorEngine, boolean rootIsWhite) {
         TablebaseResult childResult = simulatorEngine.getGameState().getLastTablebaseResult().orElse(null);
         if (tablebaseService != null) {
             BitBoard snapshot = new BitBoard(simulatorEngine.getBitBoard());
@@ -2022,9 +2023,7 @@ public class AI {
             return Double.NaN;
         }
         double whitePerspective = Score.tablebaseToEvaluation(childResult, simulatorEngine.whitesTurn());
-        boolean childIsWhite = simulatorEngine.whitesTurn();
-        double childSearchPerspective = childIsWhite ? whitePerspective : -whitePerspective;
-        return childSearchPerspective;
+        return rootIsWhite ? whitePerspective : -whitePerspective;
     }
 
     private boolean isExactWdl(TablebaseResult result) {

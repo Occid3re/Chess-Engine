@@ -3,6 +3,7 @@ package julius.game.chessengine.ai;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.board.FEN;
 import julius.game.chessengine.engine.Engine;
+import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.syzygy.SyzygyProbeResult;
 import julius.game.chessengine.syzygy.SyzygyTablebaseService;
 import julius.game.chessengine.syzygy.SyzygyWdl;
@@ -100,6 +101,55 @@ class AISyzygyIntegrationTest {
             assertThat(winningChildren)
                     .describedAs("tablebase best move should correspond to a child scored as a forced win")
                     .contains(bestChildFen);
+
+            ai.shutdown();
+        }
+    }
+
+    @Test
+    void determineTablebaseBestMovePrefersWinningMoveForRootSide() throws Exception {
+        Engine engine = new Engine();
+        String fen = "8/7K/8/8/2kP4/8/8/7B w - - 2 61";
+        engine.importBoardFromFen(fen);
+
+        IntArrayList legalMoves = engine.getAllLegalMoves();
+        Map<String, SyzygyProbeResult> responses = new HashMap<>();
+        responses.put(fen, new SyzygyProbeResult(SyzygyWdl.WIN, OptionalInt.of(7), OptionalInt.empty(), Optional.empty()));
+
+        for (int i = 0; i < legalMoves.size(); i++) {
+            int move = legalMoves.getInt(i);
+            int fromIndex = MoveHelper.deriveFromIndex(move);
+            int toIndex = MoveHelper.deriveToIndex(move);
+            String moveKey = MoveHelper.convertIndexToString(fromIndex) + MoveHelper.convertIndexToString(toIndex);
+
+            engine.performMove(move);
+            String childFen = FEN.translateBoardToFEN(engine.getBitBoard(), engine.getGameState()).getRenderBoard();
+
+            boolean winningChild = "d4d5".equals(moveKey);
+            SyzygyWdl childWdl = winningChild ? SyzygyWdl.LOSS : SyzygyWdl.DRAW;
+            responses.put(childFen, new SyzygyProbeResult(childWdl, OptionalInt.of(1), OptionalInt.empty(), Optional.empty()));
+            engine.undoLastMove();
+        }
+
+        TestSyzygyTablebaseService service = TestSyzygyTablebaseService.fromResponses(responses);
+
+        try (AutoCloseable restorer = overrideScoreTablebase(service)) {
+            AI ai = new AI(engine, service);
+            Engine simulation = engine.createSimulation();
+
+            Method determine = AI.class.getDeclaredMethod("determineTablebaseBestMove", Engine.class, TablebaseResult.class);
+            determine.setAccessible(true);
+
+            TablebaseResult parentResult = TablebaseResult.from(responses.get(fen));
+            int bestMove = (int) determine.invoke(ai, simulation, parentResult);
+
+            int fromIndex = MoveHelper.deriveFromIndex(bestMove);
+            int toIndex = MoveHelper.deriveToIndex(bestMove);
+            String bestMoveKey = MoveHelper.convertIndexToString(fromIndex) + MoveHelper.convertIndexToString(toIndex);
+
+            assertThat(bestMoveKey)
+                    .describedAs("tablebase best move should play the forced winning move for the root side")
+                    .isEqualTo("d4d5");
 
             ai.shutdown();
         }
