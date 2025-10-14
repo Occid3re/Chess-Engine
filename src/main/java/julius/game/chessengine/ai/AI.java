@@ -1908,24 +1908,34 @@ public class AI {
      * 5rkr/pp2Rp2/1b1p1Pb1/3P2Q1/2n3P1/2p5/P4P2/4R1K1 w - - 1 0
      * *
      */
-    // AI.java
-    private Optional<TablebaseHit> resolveTablebaseHit(Engine simulatorEngine, boolean isWhite) {
-        TablebaseResult result = simulatorEngine.getGameState().getLastTablebaseResult().orElse(null);
+    private Optional<TablebaseHit> resolveTablebaseHit(Engine engine, boolean isWhite) {
+        // Fetch any cached TB result from GameState
+        TablebaseResult result = engine.getGameState().getLastTablebaseResult().orElse(null);
+
+        // Always try probing the Syzygy tablebase if service is available
         if (tablebaseService != null) {
-            BitBoard snapshot = new BitBoard(simulatorEngine.getBitBoard());
-            Optional<SyzygyProbeResult> probe = tablebaseService.probe(snapshot);
+            Optional<SyzygyProbeResult> probe = tablebaseService.probe(engine.getBitBoard());
             if (probe.isPresent()) {
                 result = TablebaseResult.from(probe.get());
-                simulatorEngine.getGameState().setLastTablebaseResult(result);
+                engine.getGameState().setLastTablebaseResult(result);
             }
         }
+
+        // No usable WDL (unknown or incomplete probe)
         if (!isExactWdl(result)) {
             return Optional.empty();
         }
-        double searchScore = Score.tablebaseToEvaluation(result, simulatorEngine.whitesTurn());
-        int bestMove = determineTablebaseBestMove(simulatorEngine, result, isWhite);
-        return Optional.of(new TablebaseHit(searchScore, bestMove, result));
+
+        // Stable evaluation: use pure WDL sign (no DTZ/DTM scaling noise)
+        double eval = Score.tablebaseToEvaluation(result, engine.whitesTurn());
+
+        // Determine best move via TB guidance (if available)
+        int bestMove = determineTablebaseBestMove(engine, result, isWhite);
+
+        return Optional.of(new TablebaseHit(eval, bestMove, result));
     }
+
+
 
     private int determineTablebaseBestMove(Engine simulatorEngine, TablebaseResult parentResult, boolean parentIsWhite) {
         IntArrayList legal = simulatorEngine.getAllLegalMoves();
