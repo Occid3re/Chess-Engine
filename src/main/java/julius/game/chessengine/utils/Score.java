@@ -3,28 +3,15 @@ package julius.game.chessengine.utils;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.engine.GameStateEnum;
-import julius.game.chessengine.evaluation.ActivityModule;
-import julius.game.chessengine.evaluation.EvaluationContext;
-import julius.game.chessengine.evaluation.EvaluationPipeline;
-import julius.game.chessengine.evaluation.EvaluationWeights;
-import julius.game.chessengine.evaluation.KingSafetyModule;
-import julius.game.chessengine.evaluation.MaterialModule;
-import julius.game.chessengine.evaluation.MoveContext;
-import julius.game.chessengine.evaluation.PawnStructureModule;
-import julius.game.chessengine.evaluation.ThreatModule;
+import julius.game.chessengine.evaluation.*;
 import julius.game.chessengine.syzygy.SyzygyProbeResult;
 import julius.game.chessengine.syzygy.SyzygyTablebaseService;
 import julius.game.chessengine.syzygy.TablebaseResult;
 import julius.game.chessengine.tuning.EngineTuningBootstrap;
 import julius.game.chessengine.tuning.MoveOrderingParameters;
 import julius.game.chessengine.tuning.NumericTuningParameters;
-import julius.game.chessengine.tuning.Tuning;
 
-import java.util.List;
-import java.util.Objects;
-import java.util.Map;
-import java.util.Optional;
-import java.util.OptionalInt;
+import java.util.*;
 
 /**
  * Central entry point for the evaluation pipeline.  The legacy score bookkeeping previously
@@ -215,7 +202,7 @@ public class Score {
 
         boolean bypass = updateTablebaseState(bitBoard, next);
 
-        if (next == null || !evaluationPipeline.isInitialized()) {
+        if (!evaluationPipeline.isInitialized()) {
             evaluationPipeline.initialize(next);
             if (!bypass) {
                 evaluationPipeline.getBlendedScore();
@@ -244,7 +231,7 @@ public class Score {
 
         boolean bypass = updateTablebaseState(bitBoard, next);
 
-        if (next == null || !evaluationPipeline.isInitialized()) {
+        if (!evaluationPipeline.isInitialized()) {
             evaluationPipeline.initialize(next);
             if (!bypass) {
                 evaluationPipeline.getBlendedScore();
@@ -367,30 +354,23 @@ public class Score {
         this.tablebaseBypassesEvaluation = false;
     }
 
+    public static int tablebaseToCentipawn(TablebaseResult result, boolean whiteToMove) {
+        if (result == null) return DRAW;
+
+        int wdl = result.wdl().score();
+        if (wdl == 0) {
+            return DRAW; // theoretical draw
+        }
+
+        // Determine side perspective
+        int sign = whiteToMove ? Integer.signum(wdl) : -Integer.signum(wdl);
+
+        // We treat every WDL win/loss as a "mate-like" evaluation to keep stability.
+        // DTZ/DTM is only for ordering, not for score magnitude.
+        return sign * (CHECKMATE - 1);
+    }
     public static double tablebaseToEvaluation(TablebaseResult result, boolean whiteToMove) {
         return tablebaseToCentipawn(result, whiteToMove) / 100.0;
-    }
-
-    public static int tablebaseToCentipawn(TablebaseResult result, boolean whiteToMove) {
-        // WDL → huge score; DTZ used only as a tiny tie-break if present.
-        final int WIN  = CHECKMATE - 2;   // keep room to prefer faster mates via search
-        final int LOSS = -(CHECKMATE - 2);
-
-        int wdlScore = result.wdl().score();   // +2 win, 0 draw, -2 loss (side to move)
-        if (wdlScore == 0) return DRAW;
-
-        // Map to white's perspective
-        int sign = whiteToMove ? Integer.signum(wdlScore) : -Integer.signum(wdlScore);
-        int base = sign > 0 ? WIN : LOSS;
-
-        // Optional, tiny tie-break (monotone but bounded). DTZ is not DTM!
-        // Smaller DTZ is "better" for winning positions; larger DTZ is "better" for losing ones.
-        // Keep this tiny so it can't overpower search or cause horizon artifacts.
-        int dtz = result.dtz().isPresent() ? Math.abs(result.dtz().getAsInt()) : -1;
-        int tbNibble = (dtz >= 0) ? Math.min(dtz, 10) : 0; // cap small
-        int tweak = (sign > 0 ? -tbNibble : +tbNibble);
-
-        return base + tweak;
     }
 
     private int computeTablebaseCentipawn(TablebaseResult result, boolean whiteToMove) {
