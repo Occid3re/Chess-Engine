@@ -1957,9 +1957,6 @@ public class AI {
                     return resolved;
                 }
             }
-            else {
-                log.info("No sygyzy suggestion");
-            }
         }
 
         double bestScore = parentIsWhite ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
@@ -1989,37 +1986,22 @@ public class AI {
         int fromIndex = suggestion.fromIndex();
         int toIndex = suggestion.toIndex();
         int promotionBits = suggestion.promotionPieceTypeBits();
-        log.info("--------------------------------");
-        log.info("fromIndex: " + fromIndex);
-        log.info("toIndex: " + toIndex);
-        log.info("promotionBits: " + promotionBits);
         for (int i = 0; i < legal.size(); i++) {
             int move = legal.getInt(i);
             if (MoveHelper.deriveFromIndex(move) != fromIndex) {
-                log.info("MoveHelper.deriveFromIndex(move) != fromIndex = true");
-                log.info(legal.stream().map(m -> Move.convertIntToMove(m).toString()).collect(Collectors.joining(", ")));
                 continue;
             }
             if (MoveHelper.deriveToIndex(move) != toIndex) {
-                log.info("MoveHelper.deriveToIndex(move) != toIndex = true");
-                log.info(legal.stream().map(m -> Move.convertIntToMove(m).toString()).collect(Collectors.joining(", ")));
                 continue;
             }
             int movePromotion = MoveHelper.derivePromotionPieceTypeBits(move);
             if (promotionBits == 0) {
-                log.info("promotionBits == 0 = true");
-                log.info(legal.stream().map(m -> Move.convertIntToMove(m).toString()).collect(Collectors.joining(", ")));
                 if (movePromotion != 0) {
-                    log.info("movePromotion != 0 = true");
-                    log.info(legal.stream().map(m -> Move.convertIntToMove(m).toString()).collect(Collectors.joining(", ")));
                     continue;
                 }
             } else if (movePromotion != promotionBits) {
-                log.info("movePromotion != promotionBits = true");
-                log.info(legal.stream().map(m -> Move.convertIntToMove(m).toString()).collect(Collectors.joining(", ")));
                 continue;
             }
-            log.info("Suggested Sygyzy move: {}", Move.convertIntToMove(move).toString());
 
             return move;
         }
@@ -2036,7 +2018,6 @@ public class AI {
         }
         Optional<SyzygyMove> suggestion = result.recommendedMove();
         if (suggestion.isEmpty()) {
-            log.info("No sygyzy suggestion");
             return;
         }
         int matchedMove = findSuggestedMove(moves, suggestion.get());
