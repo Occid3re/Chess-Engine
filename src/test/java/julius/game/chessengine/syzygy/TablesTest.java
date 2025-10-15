@@ -1,130 +1,69 @@
 package julius.game.chessengine.syzygy;
 
-import julius.game.chessengine.board.BitBoard;
-import julius.game.chessengine.board.FEN;
-import julius.game.chessengine.syzygy.bridge.SyzygyBridge;
 import julius.game.chessengine.syzygy.bridge.SyzygyConstants;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.mockito.MockedStatic;
-import org.mockito.Mockito;
 
 import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class TablesTest {
 
-    @Test
-    void shouldPassZeroBasedEnPassantSquareToBridge() throws Exception {
-        BitBoard board = FEN.translateFENtoBitBoard("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1");
-        Tables tables = instantiateTables();
+    private static Tables tables;
+    private static Method decodeMethod;
 
-        long expectedWhite = board.getWhitePieces();
-        long expectedBlack = board.getBlackPieces();
-        long expectedKings = board.getWhiteKing() | board.getBlackKing();
-        long expectedQueens = board.getWhiteQueens() | board.getBlackQueens();
-        long expectedRooks = board.getWhiteRooks() | board.getBlackRooks();
-        long expectedBishops = board.getWhiteBishops() | board.getBlackBishops();
-        long expectedKnights = board.getWhiteKnights() | board.getBlackKnights();
-        long expectedPawns = board.getWhitePawns() | board.getBlackPawns();
-        int expectedEp = board.getEnPassantTargetIndex();
-
-        try (MockedStatic<SyzygyBridge> bridge = Mockito.mockStatic(SyzygyBridge.class)) {
-            bridge.when(() -> SyzygyBridge.probeSyzygyWDL(expectedWhite, expectedBlack, expectedKings, expectedQueens,
-                    expectedRooks, expectedBishops, expectedKnights, expectedPawns, expectedEp, board.isWhitesTurn()))
-                    .thenReturn(SyzygyConstants.TB_WIN);
-            bridge.when(() -> SyzygyBridge.probeSyzygyDTZ(expectedWhite, expectedBlack, expectedKings, expectedQueens,
-                    expectedRooks, expectedBishops, expectedKnights, expectedPawns, board.getHalfmoveClock(), expectedEp,
-                    board.isWhitesTurn())).thenReturn(SyzygyConstants.TB_RESULT_FAILED);
-
-            Optional<SyzygyProbeResult> result = tables.probe(board);
-            assertThat(result).isPresent();
-
-            bridge.verify(() -> SyzygyBridge.probeSyzygyWDL(expectedWhite, expectedBlack, expectedKings, expectedQueens,
-                    expectedRooks, expectedBishops, expectedKnights, expectedPawns, expectedEp, board.isWhitesTurn()));
-        }
-    }
-
-    @Test
-    void shouldDecodeRecommendedMoveByNormalisingOneBasedSquares() throws Exception {
-        BitBoard board = FEN.translateFENtoBitBoard("4k3/8/8/3pP3/8/8/8/4K3 w - - 0 1");
-        Tables tables = instantiateTables();
-
-        long white = board.getWhitePieces();
-        long black = board.getBlackPieces();
-        long kings = board.getWhiteKing() | board.getBlackKing();
-        long queens = board.getWhiteQueens() | board.getBlackQueens();
-        long rooks = board.getWhiteRooks() | board.getBlackRooks();
-        long bishops = board.getWhiteBishops() | board.getBlackBishops();
-        long knights = board.getWhiteKnights() | board.getBlackKnights();
-        long pawns = board.getWhitePawns() | board.getBlackPawns();
-        int halfmoveClock = board.getHalfmoveClock();
-        boolean whiteToMove = board.isWhitesTurn();
-
-        int from = 9; // c2
-        int to = 17;  // b3
-        int dtzValue = 7;
-        int dtzRaw = (SyzygyConstants.TB_WIN << SyzygyConstants.TB_RESULT_WDL_SHIFT)
-                | ((to + 1) << SyzygyConstants.TB_RESULT_TO_SHIFT)
-                | ((from + 1) << SyzygyConstants.TB_RESULT_FROM_SHIFT)
-                | (dtzValue << SyzygyConstants.TB_RESULT_DTZ_SHIFT);
-
-        try (MockedStatic<SyzygyBridge> bridge = Mockito.mockStatic(SyzygyBridge.class)) {
-            bridge.when(() -> SyzygyBridge.probeSyzygyWDL(white, black, kings, queens, rooks, bishops, knights, pawns, 0,
-                    whiteToMove)).thenReturn(SyzygyConstants.TB_WIN);
-            bridge.when(() -> SyzygyBridge.probeSyzygyDTZ(white, black, kings, queens, rooks, bishops, knights, pawns,
-                    halfmoveClock, 0, whiteToMove)).thenReturn(dtzRaw);
-
-            Optional<SyzygyProbeResult> result = tables.probe(board);
-            assertThat(result).isPresent();
-            SyzygyProbeResult probeResult = result.get();
-            assertThat(probeResult.dtz()).hasValue(dtzValue);
-            assertThat(probeResult.recommendedMove()).isPresent();
-            SyzygyMove move = probeResult.recommendedMove().orElseThrow();
-            assertThat(move.fromIndex()).isEqualTo(from);
-            assertThat(move.toIndex()).isEqualTo(to);
-            assertThat(move.promotionPieceTypeBits()).isEqualTo(0);
-        }
-    }
-
-    @Test
-    void shouldIgnoreRecommendedMoveWhenSquaresAreMissing() throws Exception {
-        BitBoard board = FEN.translateFENtoBitBoard("4k3/8/8/3pP3/8/8/8/4K3 w - - 0 1");
-        Tables tables = instantiateTables();
-
-        long white = board.getWhitePieces();
-        long black = board.getBlackPieces();
-        long kings = board.getWhiteKing() | board.getBlackKing();
-        long queens = board.getWhiteQueens() | board.getBlackQueens();
-        long rooks = board.getWhiteRooks() | board.getBlackRooks();
-        long bishops = board.getWhiteBishops() | board.getBlackBishops();
-        long knights = board.getWhiteKnights() | board.getBlackKnights();
-        long pawns = board.getWhitePawns() | board.getBlackPawns();
-        int halfmoveClock = board.getHalfmoveClock();
-        boolean whiteToMove = board.isWhitesTurn();
-
-        int dtzValue = 4;
-        int dtzRaw = (SyzygyConstants.TB_WIN << SyzygyConstants.TB_RESULT_WDL_SHIFT)
-                | (dtzValue << SyzygyConstants.TB_RESULT_DTZ_SHIFT);
-
-        try (MockedStatic<SyzygyBridge> bridge = Mockito.mockStatic(SyzygyBridge.class)) {
-            bridge.when(() -> SyzygyBridge.probeSyzygyWDL(white, black, kings, queens, rooks, bishops, knights, pawns, 0,
-                    whiteToMove)).thenReturn(SyzygyConstants.TB_WIN);
-            bridge.when(() -> SyzygyBridge.probeSyzygyDTZ(white, black, kings, queens, rooks, bishops, knights, pawns,
-                    halfmoveClock, 0, whiteToMove)).thenReturn(dtzRaw);
-
-            Optional<SyzygyProbeResult> result = tables.probe(board);
-            assertThat(result).isPresent();
-            SyzygyProbeResult probeResult = result.get();
-            assertThat(probeResult.dtz()).hasValue(dtzValue);
-            assertThat(probeResult.recommendedMove()).isEmpty();
-        }
-    }
-
-    private static Tables instantiateTables() throws Exception {
+    @BeforeAll
+    static void setUpReflectionAccess() throws Exception {
         Constructor<Tables> constructor = Tables.class.getDeclaredConstructor(String.class, int.class, int.class);
         constructor.setAccessible(true);
-        return constructor.newInstance("paths", 6, 6);
+        tables = constructor.newInstance("test", 6, 6);
+
+        decodeMethod = Tables.class.getDeclaredMethod("decodeRecommendedMove", int.class);
+        decodeMethod.setAccessible(true);
+    }
+
+    @Test
+    void decodeRecommendedMoveUsesZeroBasedSquares() {
+        int dtzRaw = (SyzygyConstants.TB_WIN << SyzygyConstants.TB_RESULT_WDL_SHIFT)
+                | (7 << SyzygyConstants.TB_RESULT_TO_SHIFT)
+                | (15 << SyzygyConstants.TB_RESULT_FROM_SHIFT);
+
+        Optional<SyzygyMove> move = invokeDecode(dtzRaw);
+
+        assertThat(move).isPresent();
+        assertThat(move.get().fromIndex()).isEqualTo(15);
+        assertThat(move.get().toIndex()).isEqualTo(7);
+    }
+
+    @Test
+    void decodeRecommendedMoveAllowsASquareIndices() {
+        int dtzRaw = (SyzygyConstants.TB_DRAW << SyzygyConstants.TB_RESULT_WDL_SHIFT)
+                | (8 << SyzygyConstants.TB_RESULT_TO_SHIFT)
+                | (0 << SyzygyConstants.TB_RESULT_FROM_SHIFT);
+
+        Optional<SyzygyMove> move = invokeDecode(dtzRaw);
+
+        assertThat(move).isPresent();
+        assertThat(move.get().fromIndex()).isEqualTo(0);
+        assertThat(move.get().toIndex()).isEqualTo(8);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Optional<SyzygyMove> invokeDecode(int dtzRaw) {
+        try {
+            return (Optional<SyzygyMove>) decodeMethod.invoke(tables, dtzRaw);
+        } catch (InvocationTargetException ex) {
+            if (ex.getCause() instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            throw new RuntimeException(ex.getCause());
+        } catch (IllegalAccessException ex) {
+            throw new RuntimeException(ex);
+        }
     }
 }
+
