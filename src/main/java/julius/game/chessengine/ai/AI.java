@@ -1927,9 +1927,11 @@ public class AI {
             return Optional.empty();
         }
 
-        // Stable evaluation: use pure WDL sign (no DTZ/DTM scaling noise)
-        double eval = Score.tablebaseToEvaluation(result, engine.whitesTurn(),
+        // Stable evaluation: compute from White's perspective first and convert to the
+        // side-to-move orientation expected by the caller.
+        double whitePerspective = Score.tablebaseToEvaluation(result, engine.whitesTurn(),
                 engine.getGameState().getHalfmoveClock());
+        double eval = isWhite ? whitePerspective : -whitePerspective;
 
         // Determine best move via TB guidance (if available)
         int bestMove = determineTablebaseBestMove(engine, result, isWhite);
