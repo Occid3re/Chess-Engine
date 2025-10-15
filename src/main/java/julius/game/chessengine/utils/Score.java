@@ -421,7 +421,10 @@ public class Score {
             return FIFTY_SENSITIVE_MAX_CP;
         }
 
-        if (dtz >= budget) {
+        // DTZ values equal to the remaining budget are still convertible because the side to move
+        // can reset the half-move clock on the final permissible ply. Treat only strictly larger
+        // distances as failures so cursed wins that require a last-gasp capture stay attractive.
+        if (dtz > budget) {
             return FIFTY_SENSITIVE_MIN_CP;
         }
 
