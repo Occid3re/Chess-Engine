@@ -1927,11 +1927,10 @@ public class AI {
             return Optional.empty();
         }
 
-        // Stable evaluation: compute from White's perspective first and convert to the
-        // side-to-move orientation expected by the caller.
-        double whitePerspective = Score.tablebaseToEvaluation(result, engine.whitesTurn(),
+        // Stable evaluation: compute from White's perspective so the result aligns with
+        // the engine-wide score convention.
+        double eval = Score.tablebaseToEvaluation(result, engine.whitesTurn(),
                 engine.getGameState().getHalfmoveClock());
-        double eval = isWhite ? whitePerspective : -whitePerspective;
 
         // Determine best move via TB guidance (if available)
         int bestMove = determineTablebaseBestMove(engine, result, isWhite);
@@ -1957,21 +1956,21 @@ public class AI {
             }
         }
 
-        double bestScore = Double.NEGATIVE_INFINITY;
+        double bestScore = parentIsWhite ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
         int bestMove = -1;
         for (int i = 0; i < legal.size(); i++) {
             int move = legal.getInt(i);
             simulatorEngine.performMove(move);
             double candidate;
             try {
-                candidate = evaluateTablebaseChild(simulatorEngine, parentIsWhite);
+                candidate = evaluateTablebaseChild(simulatorEngine);
             } finally {
                 simulatorEngine.undoLastMove();
             }
             if (Double.isNaN(candidate)) {
                 continue;
             }
-            if (candidate > bestScore) {
+            if (bestMove == -1 || isBetterScore(parentIsWhite, candidate, bestScore)) {
                 bestScore = candidate;
                 bestMove = move;
             }
@@ -2029,7 +2028,7 @@ public class AI {
         moves.set(index, first);
     }
 
-    private double evaluateTablebaseChild(Engine simulatorEngine, boolean parentIsWhite) {
+    private double evaluateTablebaseChild(Engine simulatorEngine) {
         TablebaseResult childResult = simulatorEngine.getGameState().getLastTablebaseResult().orElse(null);
         if (tablebaseService != null) {
             BitBoard snapshot = new BitBoard(simulatorEngine.getBitBoard());
@@ -2042,9 +2041,8 @@ public class AI {
         if (childResult == null || !isExactWdl(childResult)) {
             return Double.NaN;
         }
-        double whitePerspective = Score.tablebaseToEvaluation(childResult, simulatorEngine.whitesTurn(),
+        return Score.tablebaseToEvaluation(childResult, simulatorEngine.whitesTurn(),
                 simulatorEngine.getGameState().getHalfmoveClock());
-        return parentIsWhite ? whitePerspective : -whitePerspective;
     }
 
     private boolean isExactWdl(TablebaseResult result) {
