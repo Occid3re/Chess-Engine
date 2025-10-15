@@ -19,11 +19,11 @@ class SyzygyConstantsTest {
     }
 
     @Test
-    void distanceToZeroSignExtends() {
-        int positive = 7 << SyzygyConstants.TB_RESULT_DTZ_SHIFT;
-        int negative = 0xFFB << SyzygyConstants.TB_RESULT_DTZ_SHIFT; // -5 encoded in 12-bit two's complement
+    void distanceToZeroTreatsValuesAsUnsigned() {
+        int small = 7 << SyzygyConstants.TB_RESULT_DTZ_SHIFT;
+        int large = 0xFFB << SyzygyConstants.TB_RESULT_DTZ_SHIFT; // 4091 encoded in 12-bit storage
 
-        assertThat(SyzygyConstants.distanceToZero(positive)).isEqualTo(7);
-        assertThat(SyzygyConstants.distanceToZero(negative)).isEqualTo(-5);
+        assertThat(SyzygyConstants.distanceToZero(small)).isEqualTo(7);
+        assertThat(SyzygyConstants.distanceToZero(large)).isEqualTo(0xFFB);
     }
 }

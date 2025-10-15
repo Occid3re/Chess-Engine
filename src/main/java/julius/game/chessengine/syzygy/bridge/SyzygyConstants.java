@@ -89,13 +89,7 @@ public final class SyzygyConstants {
      * @return the number of moves needed to reach the optimal transition (where the 50 move rule would be reset).
      */
     public static int distanceToZero(int result) {
-        int raw = (result & SyzygyConstants.TB_RESULT_DTZ_MASK) >>> SyzygyConstants.TB_RESULT_DTZ_SHIFT;
-        // DTZ is stored as a signed 12-bit value. Sign-extend to 32 bits so
-        // callers observe negative distances when the tablebase encodes them.
-        if ((raw & 0x800) != 0) {
-            raw -= 0x1000;
-        }
-        return raw;
+        return (result & SyzygyConstants.TB_RESULT_DTZ_MASK) >>> SyzygyConstants.TB_RESULT_DTZ_SHIFT;
     }
 
     /**
