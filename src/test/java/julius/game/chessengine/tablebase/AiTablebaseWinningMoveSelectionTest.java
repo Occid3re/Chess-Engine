@@ -83,5 +83,68 @@ class AiTablebaseWinningMoveSelectionTest {
             assertThat(best.getScore()).isGreaterThan(0);
         }
     }
+
+    @Test
+    void tablebaseWinningMovePreferredForBlackWithNegativeScore() {
+        SyzygyTablebaseService service = mock(SyzygyTablebaseService.class);
+        when(service.getEffectiveMaxPieces()).thenReturn(6);
+
+        long d4Mask = 1L << MoveHelper.convertStringToIndex("d4");
+        long d5Mask = 1L << MoveHelper.convertStringToIndex("d5");
+        long h6Mask = 1L << MoveHelper.convertStringToIndex("h6");
+        long h7Mask = 1L << MoveHelper.convertStringToIndex("h7");
+
+        SyzygyProbeResult parentWin = new SyzygyProbeResult(
+                SyzygyWdl.WIN,
+                OptionalInt.of(1),
+                OptionalInt.empty(),
+                Optional.empty());
+        SyzygyProbeResult winningChild = new SyzygyProbeResult(
+                SyzygyWdl.LOSS,
+                OptionalInt.of(1),
+                OptionalInt.empty(),
+                Optional.empty());
+        SyzygyProbeResult drawingChild = new SyzygyProbeResult(
+                SyzygyWdl.DRAW,
+                OptionalInt.empty(),
+                OptionalInt.empty(),
+                Optional.empty());
+
+        when(service.probe(any(BitBoard.class))).thenAnswer(invocation -> {
+            BitBoard board = invocation.getArgument(0);
+            long blackPawns = board.getBlackPawns();
+            long blackKing = board.getBlackKing();
+            if ((blackPawns & d5Mask) != 0 && (blackKing & h7Mask) != 0 && !board.isWhitesTurn()) {
+                return Optional.of(parentWin);
+            }
+            if ((blackPawns & d4Mask) != 0 && (blackKing & h7Mask) != 0 && board.isWhitesTurn()) {
+                return Optional.of(winningChild);
+            }
+            if ((blackKing & h6Mask) != 0) {
+                return Optional.of(drawingChild);
+            }
+            return Optional.of(drawingChild);
+        });
+
+        try (TablebaseTestSupport.TablebaseServiceRestorer ignored = TablebaseTestSupport.overrideScoreTablebase(service)) {
+            Engine engine = new Engine();
+            engine.importBoardFromFen("8/7k/8/3p4/2K5/8/B7/8 b - - 0 1");
+            engine.getGameState().refreshScore(engine.getBitBoard());
+
+            AI ai = new AI(engine, service);
+            ai.setMaxDepth(1);
+
+            MoveAndScore best = ai.searchBestMoveBlocking(TimeUnit.MILLISECONDS.toMillis(50));
+
+            assertThat(best).as("tablebase best move should be available").isNotNull();
+
+            int moveInt = best.getMove();
+            String from = MoveHelper.convertIndexToString(MoveHelper.deriveFromIndex(moveInt));
+            String to = MoveHelper.convertIndexToString(MoveHelper.deriveToIndex(moveInt));
+
+            assertThat(from + to).isEqualTo("d5d4");
+            assertThat(best.getScore()).isLessThan(0);
+        }
+    }
 }
 
