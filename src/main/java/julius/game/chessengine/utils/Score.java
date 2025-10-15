@@ -347,7 +347,7 @@ public class Score {
         }
         Optional<SyzygyProbeResult> probe = service.probe(bitBoard);
         if (probe.isEmpty()) {
-            tablebaseBypassesEvaluation = false;
+            clearTablebaseState();
             return false;
         }
         TablebaseResult resolved = TablebaseResult.from(probe.get());
