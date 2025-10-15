@@ -12,7 +12,6 @@
         <relativePath/>
     </parent>
 
-
     <groupId>julius.game</groupId>
     <artifactId>chess-engine</artifactId>
     <version>3.8.0</version>
