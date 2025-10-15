@@ -91,6 +91,23 @@ class ScoreTablebaseIntegrationTest {
     }
 
     @Test
+    void cursedWinEvaluationTreatsExactBudgetAsConvertible() {
+        TablebaseResult mustMoveNow = new TablebaseResult(
+                SyzygyWdl.CURSED_WIN, OptionalInt.of(1), OptionalInt.of(1), Optional.empty());
+        TablebaseResult outOfTime = new TablebaseResult(
+                SyzygyWdl.CURSED_WIN, OptionalInt.of(2), OptionalInt.of(1), Optional.empty());
+
+        int halfmoveClock = 99; // budget = 1 ply remaining; inclusive per fifty-move rule.
+
+        int inclusiveBudgetScore = Score.tablebaseToCentipawn(mustMoveNow, true, halfmoveClock);
+        int exhaustedBudgetScore = Score.tablebaseToCentipawn(outOfTime, true, halfmoveClock);
+
+        assertThat(inclusiveBudgetScore).isGreaterThan(Score.DRAW);
+        assertThat(exhaustedBudgetScore).isPositive();
+        assertThat(inclusiveBudgetScore).isGreaterThan(exhaustedBudgetScore);
+    }
+
+    @Test
     void blessedLossMirrorsCursedWinMagnitude() {
         TablebaseResult cursed = new TablebaseResult(
                 SyzygyWdl.CURSED_WIN, OptionalInt.of(8), OptionalInt.of(40), Optional.empty());
