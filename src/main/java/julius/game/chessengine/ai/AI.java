@@ -1959,6 +1959,7 @@ public class AI {
             }
         }
 
+
         double bestScore = parentIsWhite ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
         int bestMove = -1;
         for (int i = 0; i < legal.size(); i++) {
