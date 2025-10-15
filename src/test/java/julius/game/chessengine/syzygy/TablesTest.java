@@ -88,6 +88,68 @@ class TablesTest {
         }
     }
 
+    @Test
+    void shouldTreatCheckmateSentinelAsLossWithoutRecommendation() throws Exception {
+        BitBoard board = FEN.translateFENtoBitBoard("7k/7p/8/8/8/8/7K/7Q b - - 0 1");
+        Tables tables = instantiateTables();
+
+        long white = board.getWhitePieces();
+        long black = board.getBlackPieces();
+        long kings = board.getWhiteKing() | board.getBlackKing();
+        long queens = board.getWhiteQueens() | board.getBlackQueens();
+        long rooks = board.getWhiteRooks() | board.getBlackRooks();
+        long bishops = board.getWhiteBishops() | board.getBlackBishops();
+        long knights = board.getWhiteKnights() | board.getBlackKnights();
+        long pawns = board.getWhitePawns() | board.getBlackPawns();
+        int halfmoveClock = board.getHalfmoveClock();
+        boolean whiteToMove = board.isWhitesTurn();
+
+        try (MockedStatic<SyzygyBridge> bridge = Mockito.mockStatic(SyzygyBridge.class)) {
+            bridge.when(() -> SyzygyBridge.probeSyzygyWDL(white, black, kings, queens, rooks, bishops, knights, pawns, 0,
+                    whiteToMove)).thenReturn(SyzygyConstants.TB_LOSS);
+            bridge.when(() -> SyzygyBridge.probeSyzygyDTZ(white, black, kings, queens, rooks, bishops, knights, pawns,
+                    halfmoveClock, 0, whiteToMove)).thenReturn(SyzygyConstants.TB_RESULT_CHECKMATE);
+
+            Optional<SyzygyProbeResult> result = tables.probe(board);
+            assertThat(result).isPresent();
+            SyzygyProbeResult probeResult = result.get();
+            assertThat(probeResult.wdl()).isEqualTo(SyzygyWdl.LOSS);
+            assertThat(probeResult.dtz()).isEmpty();
+            assertThat(probeResult.recommendedMove()).isEmpty();
+        }
+    }
+
+    @Test
+    void shouldTreatStalemateSentinelAsDrawWithoutRecommendation() throws Exception {
+        BitBoard board = FEN.translateFENtoBitBoard("7k/5Q2/7K/8/8/8/8/8 b - - 0 1");
+        Tables tables = instantiateTables();
+
+        long white = board.getWhitePieces();
+        long black = board.getBlackPieces();
+        long kings = board.getWhiteKing() | board.getBlackKing();
+        long queens = board.getWhiteQueens() | board.getBlackQueens();
+        long rooks = board.getWhiteRooks() | board.getBlackRooks();
+        long bishops = board.getWhiteBishops() | board.getBlackBishops();
+        long knights = board.getWhiteKnights() | board.getBlackKnights();
+        long pawns = board.getWhitePawns() | board.getBlackPawns();
+        int halfmoveClock = board.getHalfmoveClock();
+        boolean whiteToMove = board.isWhitesTurn();
+
+        try (MockedStatic<SyzygyBridge> bridge = Mockito.mockStatic(SyzygyBridge.class)) {
+            bridge.when(() -> SyzygyBridge.probeSyzygyWDL(white, black, kings, queens, rooks, bishops, knights, pawns, 0,
+                    whiteToMove)).thenReturn(SyzygyConstants.TB_DRAW);
+            bridge.when(() -> SyzygyBridge.probeSyzygyDTZ(white, black, kings, queens, rooks, bishops, knights, pawns,
+                    halfmoveClock, 0, whiteToMove)).thenReturn(SyzygyConstants.TB_RESULT_STALEMATE);
+
+            Optional<SyzygyProbeResult> result = tables.probe(board);
+            assertThat(result).isPresent();
+            SyzygyProbeResult probeResult = result.get();
+            assertThat(probeResult.wdl()).isEqualTo(SyzygyWdl.DRAW);
+            assertThat(probeResult.dtz()).isEmpty();
+            assertThat(probeResult.recommendedMove()).isEmpty();
+        }
+    }
+
     private static Tables instantiateTables() throws Exception {
         Constructor<Tables> constructor = Tables.class.getDeclaredConstructor(String.class, int.class, int.class);
         constructor.setAccessible(true);

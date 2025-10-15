@@ -51,6 +51,11 @@ public final class SyzygyConstants {
     public static final int TB_RESULT_DTZ_SHIFT = 20;
 
     public static final int TB_RESULT_FAILED = 0xFFFFFFFF;
+    // Special DTZ result markers returned by tb_probe_root when the side to move
+    // has no legal moves. They reuse the raw WDL constants without setting any
+    // move or distance bits, so consumers must treat them as sentinels.
+    public static final int TB_RESULT_STALEMATE = TB_DRAW;
+    public static final int TB_RESULT_CHECKMATE = TB_WIN;
 
     /**
      * return the 'from square' part of the move.

@@ -81,7 +81,15 @@ final class Tables {
                 board.getHalfmoveClock(), epSquare, whiteToMove);
         OptionalInt dtz = OptionalInt.empty();
         Optional<SyzygyMove> recommendedMove = Optional.empty();
-        if (dtzRaw != SyzygyConstants.TB_RESULT_FAILED) {
+        if (dtzRaw == SyzygyConstants.TB_RESULT_FAILED) {
+            log.debug("Syzygy DTZ probe failed for board {}", board);
+        } else if (dtzRaw == SyzygyConstants.TB_RESULT_CHECKMATE) {
+            log.debug("Syzygy DTZ probe reports checkmate (wdl={}, board={})", wdl, board);
+            // Keep the WDL returned by the dedicated probe and avoid decoding
+            // placeholder move/DTZ values. A checkmated side has no legal moves.
+        } else if (dtzRaw == SyzygyConstants.TB_RESULT_STALEMATE) {
+            log.debug("Syzygy DTZ probe reports stalemate (board={})", board);
+        } else {
             int dtzWdlValue = SyzygyConstants.winDrawLoss(dtzRaw);
             SyzygyWdl dtzWdl = toWdl(dtzWdlValue);
             if (dtzWdl == SyzygyWdl.UNKNOWN) {
@@ -104,8 +112,6 @@ final class Tables {
                 dtz = OptionalInt.of(distance);
                 recommendedMove = decodeRecommendedMove(dtzRaw);
             }
-        } else {
-            log.debug("Syzygy DTZ probe failed for board {}", board);
         }
 
         return Optional.of(new SyzygyProbeResult(wdl, dtz, OptionalInt.empty(), recommendedMove));
