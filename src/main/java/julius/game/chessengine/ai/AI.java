@@ -1927,11 +1927,11 @@ public class AI {
             return Optional.empty();
         }
 
-        // Stable evaluation: compute from White's perspective first and convert to the
-        // side-to-move orientation expected by the caller.
+        // Stable evaluation: compute from White's perspective and keep the white-oriented
+        // value so all callers reason about tablebase scores consistently.
         double whitePerspective = Score.tablebaseToEvaluation(result, engine.whitesTurn(),
                 engine.getGameState().getHalfmoveClock());
-        double eval = isWhite ? whitePerspective : -whitePerspective;
+        double eval = whitePerspective;
 
         // Determine best move via TB guidance (if available)
         int bestMove = determineTablebaseBestMove(engine, result, isWhite);
@@ -1957,7 +1957,7 @@ public class AI {
             }
         }
 
-        double bestScore = Double.NEGATIVE_INFINITY;
+        double bestScore = parentIsWhite ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
         int bestMove = -1;
         for (int i = 0; i < legal.size(); i++) {
             int move = legal.getInt(i);
@@ -1971,7 +1971,8 @@ public class AI {
             if (Double.isNaN(candidate)) {
                 continue;
             }
-            if (candidate > bestScore) {
+            boolean better = parentIsWhite ? candidate > bestScore : candidate < bestScore;
+            if (better) {
                 bestScore = candidate;
                 bestMove = move;
             }
@@ -2044,7 +2045,7 @@ public class AI {
         }
         double whitePerspective = Score.tablebaseToEvaluation(childResult, simulatorEngine.whitesTurn(),
                 simulatorEngine.getGameState().getHalfmoveClock());
-        return parentIsWhite ? whitePerspective : -whitePerspective;
+        return whitePerspective;
     }
 
     private boolean isExactWdl(TablebaseResult result) {
