@@ -66,8 +66,7 @@ final class Tables {
         long bishops = board.getWhiteBishops() | board.getBlackBishops();
         long knights = board.getWhiteKnights() | board.getBlackKnights();
         long pawns = board.getWhitePawns() | board.getBlackPawns();
-        int epIndex = board.getEnPassantTargetIndex();
-        int epSquare = epIndex >= 0 ? epIndex + 1 : 0;
+        int epSquare = encodeEnPassantSquare(board.getEnPassantTargetIndex());
         boolean whiteToMove = board.isWhitesTurn();
 
         int wdlValue = SyzygyBridge.probeSyzygyWDL(white, black, kings, queens, rooks, bishops, knights, pawns, epSquare, whiteToMove);
@@ -109,6 +108,17 @@ final class Tables {
         }
 
         return Optional.of(new SyzygyProbeResult(wdl, dtz, OptionalInt.empty(), recommendedMove));
+    }
+
+    static int encodeEnPassantSquare(int epIndex) {
+        if (epIndex < 0) {
+            return 0;
+        }
+        if (epIndex >= 64) {
+            log.warn("Ignoring invalid en passant index {} beyond board bounds", epIndex);
+            return 0;
+        }
+        return epIndex;
     }
 
     private Optional<SyzygyMove> decodeRecommendedMove(int dtzRaw) {
