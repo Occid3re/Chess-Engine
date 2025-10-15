@@ -47,7 +47,7 @@ class TablesTest {
     }
 
     @Test
-    void shouldDecodeRecommendedMoveUsingZeroBasedIndices() throws Exception {
+    void shouldDecodeRecommendedMoveByNormalisingOneBasedSquares() throws Exception {
         BitBoard board = FEN.translateFENtoBitBoard("4k3/8/8/3pP3/8/8/8/4K3 w - - 0 1");
         Tables tables = instantiateTables();
 
@@ -66,8 +66,8 @@ class TablesTest {
         int to = 17;  // b3
         int dtzValue = 7;
         int dtzRaw = (SyzygyConstants.TB_WIN << SyzygyConstants.TB_RESULT_WDL_SHIFT)
-                | (to << SyzygyConstants.TB_RESULT_TO_SHIFT)
-                | (from << SyzygyConstants.TB_RESULT_FROM_SHIFT)
+                | ((to + 1) << SyzygyConstants.TB_RESULT_TO_SHIFT)
+                | ((from + 1) << SyzygyConstants.TB_RESULT_FROM_SHIFT)
                 | (dtzValue << SyzygyConstants.TB_RESULT_DTZ_SHIFT);
 
         try (MockedStatic<SyzygyBridge> bridge = Mockito.mockStatic(SyzygyBridge.class)) {
@@ -85,6 +85,40 @@ class TablesTest {
             assertThat(move.fromIndex()).isEqualTo(from);
             assertThat(move.toIndex()).isEqualTo(to);
             assertThat(move.promotionPieceTypeBits()).isEqualTo(0);
+        }
+    }
+
+    @Test
+    void shouldIgnoreRecommendedMoveWhenSquaresAreMissing() throws Exception {
+        BitBoard board = FEN.translateFENtoBitBoard("4k3/8/8/3pP3/8/8/8/4K3 w - - 0 1");
+        Tables tables = instantiateTables();
+
+        long white = board.getWhitePieces();
+        long black = board.getBlackPieces();
+        long kings = board.getWhiteKing() | board.getBlackKing();
+        long queens = board.getWhiteQueens() | board.getBlackQueens();
+        long rooks = board.getWhiteRooks() | board.getBlackRooks();
+        long bishops = board.getWhiteBishops() | board.getBlackBishops();
+        long knights = board.getWhiteKnights() | board.getBlackKnights();
+        long pawns = board.getWhitePawns() | board.getBlackPawns();
+        int halfmoveClock = board.getHalfmoveClock();
+        boolean whiteToMove = board.isWhitesTurn();
+
+        int dtzValue = 4;
+        int dtzRaw = (SyzygyConstants.TB_WIN << SyzygyConstants.TB_RESULT_WDL_SHIFT)
+                | (dtzValue << SyzygyConstants.TB_RESULT_DTZ_SHIFT);
+
+        try (MockedStatic<SyzygyBridge> bridge = Mockito.mockStatic(SyzygyBridge.class)) {
+            bridge.when(() -> SyzygyBridge.probeSyzygyWDL(white, black, kings, queens, rooks, bishops, knights, pawns, 0,
+                    whiteToMove)).thenReturn(SyzygyConstants.TB_WIN);
+            bridge.when(() -> SyzygyBridge.probeSyzygyDTZ(white, black, kings, queens, rooks, bishops, knights, pawns,
+                    halfmoveClock, 0, whiteToMove)).thenReturn(dtzRaw);
+
+            Optional<SyzygyProbeResult> result = tables.probe(board);
+            assertThat(result).isPresent();
+            SyzygyProbeResult probeResult = result.get();
+            assertThat(probeResult.dtz()).hasValue(dtzValue);
+            assertThat(probeResult.recommendedMove()).isEmpty();
         }
     }
 
