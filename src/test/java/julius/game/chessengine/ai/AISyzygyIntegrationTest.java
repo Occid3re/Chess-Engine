@@ -55,6 +55,38 @@ class AISyzygyIntegrationTest {
     }
 
     @Test
+    void resolveTablebaseHitReturnsWhitePerspectiveWhenBlackToMoveLoses() throws Exception {
+        Engine engine = new Engine();
+        String fen = "6k1/8/8/8/8/8/5Q2/6K1 b - - 0 1";
+        engine.importBoardFromFen(fen);
+
+        SyzygyProbeResult probe = new SyzygyProbeResult(SyzygyWdl.LOSS, OptionalInt.of(5), OptionalInt.empty(), Optional.empty());
+        TestSyzygyTablebaseService service = TestSyzygyTablebaseService.fromResponses(Map.of(fen, probe));
+
+        try (AutoCloseable restorer = overrideScoreTablebase(service)) {
+            AI ai = new AI(engine, service);
+            Engine simulation = engine.createSimulation();
+
+            Method resolve = AI.class.getDeclaredMethod("resolveTablebaseHit", Engine.class, boolean.class);
+            resolve.setAccessible(true);
+
+            @SuppressWarnings("unchecked")
+            Optional<Object> hitOpt = (Optional<Object>) resolve.invoke(ai, simulation, false);
+
+            assertThat(hitOpt).isPresent();
+
+            Object hit = hitOpt.get();
+            double score = (double) hit.getClass().getMethod("score").invoke(hit);
+
+            assertThat(score)
+                    .describedAs("tablebase scores should remain white-oriented even when black to move")
+                    .isPositive();
+
+            ai.shutdown();
+        }
+    }
+
+    @Test
     void determineTablebaseBestMovePicksWinningChild() throws Exception {
         Engine engine = new Engine();
         String fen = "6k1/8/8/8/8/8/5Q2/6K1 w - - 0 1";

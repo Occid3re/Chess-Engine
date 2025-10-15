@@ -1927,11 +1927,12 @@ public class AI {
             return Optional.empty();
         }
 
-        // Stable evaluation: compute from White's perspective first and convert to the
-        // side-to-move orientation expected by the caller.
+        // Stable evaluation: compute from White's perspective. The rest of the search
+        // already treats tablebase scores as white-oriented values, regardless of the
+        // side to move at the current node.
         double whitePerspective = Score.tablebaseToEvaluation(result, engine.whitesTurn(),
                 engine.getGameState().getHalfmoveClock());
-        double eval = isWhite ? whitePerspective : -whitePerspective;
+        double eval = whitePerspective;
 
         // Determine best move via TB guidance (if available)
         int bestMove = determineTablebaseBestMove(engine, result, isWhite);
