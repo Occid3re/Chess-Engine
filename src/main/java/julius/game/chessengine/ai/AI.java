@@ -1915,10 +1915,14 @@ public class AI {
 
         // Always try probing the Syzygy tablebase if service is available
         if (tablebaseService != null) {
-            Optional<SyzygyProbeResult> probe = tablebaseService.probe(engine.getBitBoard());
+            BitBoard snapshot = new BitBoard(engine.getBitBoard());
+            Optional<SyzygyProbeResult> probe = tablebaseService.probe(snapshot);
             if (probe.isPresent()) {
                 result = TablebaseResult.from(probe.get());
                 engine.getGameState().setLastTablebaseResult(result);
+            } else {
+                result = null;
+                engine.getGameState().setLastTablebaseResult(null);
             }
         }
 
@@ -1965,6 +1969,7 @@ public class AI {
                 candidate = evaluateTablebaseChild(simulatorEngine, parentIsWhite);
             } finally {
                 simulatorEngine.undoLastMove();
+                simulatorEngine.getGameState().setLastTablebaseResult(parentResult);
             }
             if (Double.isNaN(candidate)) {
                 continue;
@@ -2035,9 +2040,13 @@ public class AI {
             if (probe.isPresent()) {
                 childResult = TablebaseResult.from(probe.get());
                 simulatorEngine.getGameState().setLastTablebaseResult(childResult);
+            } else {
+                childResult = null;
+                simulatorEngine.getGameState().setLastTablebaseResult(null);
             }
         }
         if (childResult == null || !isExactWdl(childResult)) {
+            simulatorEngine.getGameState().setLastTablebaseResult(null);
             return Double.NaN;
         }
         double whitePerspective = Score.tablebaseToEvaluation(childResult, simulatorEngine.whitesTurn(),
@@ -3356,16 +3365,22 @@ public class AI {
         if (!tbTieBreak || tablebaseService == null || move < 0) {
             return null;
         }
+        boolean cleared = false;
         engine.performMove(move);
         try {
             TablebaseResult result = engine.getGameState().getLastTablebaseResult().orElse(null);
             if (!isExactWdl(result)) {
-                Optional<SyzygyProbeResult> probe = tablebaseService.probe(engine.getBitBoard());
+                BitBoard snapshot = new BitBoard(engine.getBitBoard());
+                Optional<SyzygyProbeResult> probe = tablebaseService.probe(snapshot);
                 if (probe.isEmpty()) {
+                    engine.getGameState().setLastTablebaseResult(null);
+                    cleared = true;
                     return null;
                 }
                 result = TablebaseResult.from(probe.get());
                 if (!isExactWdl(result)) {
+                    engine.getGameState().setLastTablebaseResult(null);
+                    cleared = true;
                     return null;
                 }
                 engine.getGameState().setLastTablebaseResult(result);
@@ -3378,6 +3393,9 @@ public class AI {
             return new TablebaseInfo(dtz, dtm, whiteWdlSign);
         } finally {
             engine.undoLastMove();
+            if (cleared) {
+                engine.getGameState().setLastTablebaseResult(null);
+            }
         }
     }
 
