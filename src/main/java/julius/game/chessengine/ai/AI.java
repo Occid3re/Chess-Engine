@@ -3432,15 +3432,10 @@ public class AI {
             if (candidateSign > 0 && candidateInfo.hasDtz()) {
                 return true;
             }
-            if (candidateSign < 0 && candidateInfo.hasDtz()) {
-                return true;
-            }
             if (candidateSign > 0 && candidateZeroing != bestZeroing) {
                 return candidateZeroing;
             }
-            if (candidateSign < 0 && candidateZeroing != bestZeroing) {
-                return !candidateZeroing;
-            }
+            return false;
         }
 
         if (candidateInfo == null) {
