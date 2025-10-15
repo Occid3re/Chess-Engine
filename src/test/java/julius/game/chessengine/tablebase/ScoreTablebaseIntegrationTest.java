@@ -18,6 +18,7 @@ import java.util.OptionalInt;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -59,6 +60,37 @@ class ScoreTablebaseIntegrationTest {
         }
 
         assertThat(service.getProbedFens()).isEmpty();
+    }
+
+    @Test
+    void emptyProbeClearsCachedTablebaseState() {
+        String winningFen = "8/8/8/8/8/8/5K2/6k1 w - - 0 1";
+        String followUpFen = "8/8/8/8/8/8/5k2/6K1 b - - 0 1";
+        BitBoard initial = FEN.translateFENtoBitBoard(winningFen);
+        BitBoard followUp = FEN.translateFENtoBitBoard(followUpFen);
+
+        SyzygyProbeResult probe = new SyzygyProbeResult(SyzygyWdl.WIN, OptionalInt.of(3), OptionalInt.of(7), Optional.empty());
+        SyzygyTablebaseService service = mock(SyzygyTablebaseService.class);
+        when(service.probe(any(BitBoard.class))).thenReturn(Optional.of(probe), Optional.empty());
+
+        TablebaseResult expected = TablebaseResult.from(probe);
+        int expectedCentipawn = Score.tablebaseToCentipawn(expected, true);
+
+        try (TablebaseTestSupport.TablebaseServiceRestorer restorer = TablebaseTestSupport.overrideScoreTablebase(service)) {
+            Score score = new Score();
+            score.refresh(initial, GameStateEnum.PLAY);
+
+            assertThat(score.getTablebaseResult()).contains(expected);
+            assertThat(score.getTablebaseCentipawnScore()).hasValue(expectedCentipawn);
+
+            score.refresh(followUp, GameStateEnum.PLAY);
+
+            assertThat(score.getTablebaseResult()).isEmpty();
+            assertThat(score.getTablebaseCentipawnScore()).isEmpty();
+            assertThat(score.getBlendedScore()).isNotEqualTo(expectedCentipawn);
+        }
+
+        verify(service, times(2)).probe(any(BitBoard.class));
     }
 
     @Test
