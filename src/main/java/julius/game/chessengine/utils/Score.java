@@ -56,6 +56,8 @@ public class Score {
     private Integer tablebaseCentipawn;
     @JsonIgnore
     private boolean tablebaseBypassesEvaluation;
+    @JsonIgnore
+    private long tablebaseResultBoardHash = Long.MIN_VALUE;
 
     public Score() {
         this(EvaluationWeights.identity());
@@ -345,7 +347,7 @@ public class Score {
         }
         Optional<SyzygyProbeResult> probe = service.probe(bitBoard);
         if (probe.isEmpty()) {
-            clearTablebaseState();
+            tablebaseBypassesEvaluation = false;
             return false;
         }
         TablebaseResult resolved = TablebaseResult.from(probe.get());
@@ -353,6 +355,7 @@ public class Score {
         this.tablebaseCentipawn = computeTablebaseCentipawn(resolved, bitBoard.isWhitesTurn(),
                 context.getHalfmoveClock());
         this.tablebaseBypassesEvaluation = true;
+        this.tablebaseResultBoardHash = bitBoard.getBoardStateHash();
         return true;
     }
 
@@ -360,6 +363,7 @@ public class Score {
         this.tablebaseResult = null;
         this.tablebaseCentipawn = null;
         this.tablebaseBypassesEvaluation = false;
+        this.tablebaseResultBoardHash = Long.MIN_VALUE;
     }
 
     public static int tablebaseToCentipawn(TablebaseResult result, boolean whiteToMove) {
