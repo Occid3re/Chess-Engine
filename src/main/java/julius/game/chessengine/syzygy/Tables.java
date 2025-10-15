@@ -67,7 +67,7 @@ final class Tables {
         long knights = board.getWhiteKnights() | board.getBlackKnights();
         long pawns = board.getWhitePawns() | board.getBlackPawns();
         int epIndex = board.getEnPassantTargetIndex();
-        int epSquare = epIndex >= 0 ? epIndex + 1 : 0;
+        int epSquare = epIndex >= 0 ? epIndex : 0;
         boolean whiteToMove = board.isWhitesTurn();
 
         int wdlValue = SyzygyBridge.probeSyzygyWDL(white, black, kings, queens, rooks, bishops, knights, pawns, epSquare, whiteToMove);
@@ -114,7 +114,7 @@ final class Tables {
     private Optional<SyzygyMove> decodeRecommendedMove(int dtzRaw) {
         int fromSquare = SyzygyConstants.fromSquare(dtzRaw);
         int toSquare = SyzygyConstants.toSquare(dtzRaw);
-        if (fromSquare <= 0 || toSquare <= 0) {
+        if (fromSquare < 0 || toSquare < 0) {
             return Optional.empty();
         }
 
@@ -127,7 +127,7 @@ final class Tables {
         };
 
         try {
-            return Optional.of(new SyzygyMove(fromSquare - 1, toSquare - 1, promotionBits));
+            return Optional.of(new SyzygyMove(fromSquare, toSquare, promotionBits));
         } catch (IllegalArgumentException ex) {
             log.debug("Ignoring invalid Syzygy move suggestion (dtzRaw={}, from={}, to={}, promo={})",
                     dtzRaw, fromSquare, toSquare, promotionBits, ex);
