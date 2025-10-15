@@ -114,12 +114,12 @@ final class Tables {
     private Optional<SyzygyMove> decodeRecommendedMove(int dtzRaw) {
         int rawFrom = SyzygyConstants.fromSquare(dtzRaw);
         int rawTo = SyzygyConstants.toSquare(dtzRaw);
-        if (rawFrom <= 0 || rawTo <= 0) {
+        if (rawFrom < 0 || rawTo < 0) {
             return Optional.empty();
         }
 
-        int fromSquare = rawFrom - 1;
-        int toSquare = rawTo - 1;
+        int fromSquare = rawFrom;
+        int toSquare = rawTo;
         if (fromSquare < 0 || fromSquare >= 64 || toSquare < 0 || toSquare >= 64) {
             log.debug("Ignoring Syzygy move suggestion with out-of-bounds squares (dtzRaw={}, fromRaw={}, toRaw={})",
                     dtzRaw, rawFrom, rawTo);
