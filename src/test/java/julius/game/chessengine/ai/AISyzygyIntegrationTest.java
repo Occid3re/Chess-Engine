@@ -110,6 +110,90 @@ class AISyzygyIntegrationTest {
     }
 
     @Test
+    void resolveTablebaseHitReturnsWhitePerspectiveForBlackCaller() throws Exception {
+        Engine engine = new Engine();
+        String fen = "6k1/8/8/8/8/8/5Q2/6K1 b - - 0 1";
+        engine.importBoardFromFen(fen);
+
+        SyzygyProbeResult probe = new SyzygyProbeResult(SyzygyWdl.LOSS, OptionalInt.of(3), OptionalInt.empty(), Optional.empty());
+        TestSyzygyTablebaseService service = TestSyzygyTablebaseService.fromResponses(Map.of(fen, probe));
+
+        try (AutoCloseable restorer = overrideScoreTablebase(service)) {
+            AI ai = new AI(engine, service);
+            Engine simulation = engine.createSimulation();
+
+            Method resolver = AI.class.getDeclaredMethod("resolveTablebaseHit", Engine.class, boolean.class);
+            resolver.setAccessible(true);
+
+            Object raw = resolver.invoke(ai, simulation, false);
+            assertThat(raw).isInstanceOf(Optional.class);
+
+            Optional<?> hitOptional = (Optional<?>) raw;
+            assertThat(hitOptional).isPresent();
+
+            Object hit = hitOptional.orElseThrow();
+            Method scoreAccessor = hit.getClass().getDeclaredMethod("score");
+            scoreAccessor.setAccessible(true);
+            double score = (double) scoreAccessor.invoke(hit);
+
+            double expected = Score.tablebaseToEvaluation(TablebaseResult.from(probe), simulation.whitesTurn(),
+                    simulation.getGameState().getHalfmoveClock());
+
+            assertThat(simulation.whitesTurn()).isFalse();
+            assertThat(score).isEqualTo(expected);
+            assertThat(score).isPositive();
+
+            ai.shutdown();
+        }
+    }
+
+    @Test
+    void evaluateTablebaseChildReturnsWhitePerspectiveForBlackParent() throws Exception {
+        Engine engine = new Engine();
+        String fen = "6k1/8/8/8/8/8/5Q2/6K1 b - - 0 1";
+        engine.importBoardFromFen(fen);
+
+        IntArrayList legalMoves = engine.getAllLegalMoves();
+        assertThat(legalMoves.size()).isGreaterThan(0);
+
+        int targetMove = legalMoves.getInt(0);
+        engine.performMove(targetMove);
+        String childFen = FEN.translateBoardToFEN(engine.getBitBoard(), engine.getGameState()).getRenderBoard();
+        engine.undoLastMove();
+
+        Map<String, SyzygyProbeResult> responses = new HashMap<>();
+        responses.put(fen, new SyzygyProbeResult(SyzygyWdl.LOSS, OptionalInt.of(5), OptionalInt.empty(), Optional.empty()));
+        SyzygyProbeResult childProbe = new SyzygyProbeResult(SyzygyWdl.WIN, OptionalInt.of(7), OptionalInt.empty(), Optional.empty());
+        responses.put(childFen, childProbe);
+
+        TestSyzygyTablebaseService service = TestSyzygyTablebaseService.fromResponses(responses);
+
+        try (AutoCloseable restorer = overrideScoreTablebase(service)) {
+            AI ai = new AI(engine, service);
+            Engine simulation = engine.createSimulation();
+
+            simulation.performMove(targetMove);
+
+            try {
+                Method evaluator = AI.class.getDeclaredMethod("evaluateTablebaseChild", Engine.class, boolean.class);
+                evaluator.setAccessible(true);
+
+                double eval = (double) evaluator.invoke(ai, simulation, false);
+
+                TablebaseResult expectedResult = TablebaseResult.from(childProbe);
+                double expected = Score.tablebaseToEvaluation(expectedResult, simulation.whitesTurn(),
+                        simulation.getGameState().getHalfmoveClock());
+
+                assertThat(simulation.whitesTurn()).isTrue();
+                assertThat(eval).isEqualTo(expected);
+            } finally {
+                simulation.undoLastMove();
+                ai.shutdown();
+            }
+        }
+    }
+
+    @Test
     void tablebaseTieBreakKeepsUnprobedIncumbentWhenCandidateLoses() throws Exception {
         Engine engine = new Engine();
         String fen = "6k1/8/8/8/8/8/5Q2/6K1 w - - 0 1";
