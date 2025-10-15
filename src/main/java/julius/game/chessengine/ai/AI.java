@@ -941,21 +941,28 @@ public class AI {
         staticEvalCache.get().clear();
     }
 
+    private long makeStaticEvalKey(long boardHash, int halfmoveClock) {
+        long clock = Integer.toUnsignedLong(halfmoveClock) & 0xFFFFL;
+        long salt = (clock << 48) ^ (clock << 32) ^ (clock << 16) ^ clock;
+        return boardHash ^ Long.rotateLeft(salt, 17);
+    }
+
     private double resolveScoreDifference(GameState gameState, long boardHash, boolean whiteToMove) {
         Long2DoubleOpenHashMap cache = staticEvalCache.get();
+        int halfmoveClock = gameState.getHalfmoveClock();
+        long cacheKey = makeStaticEvalKey(boardHash, halfmoveClock);
         Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
         if (tablebase.isPresent() && isExactWdl(tablebase.get())) {
-            double exact = Score.tablebaseToEvaluation(tablebase.get(), whiteToMove,
-                    gameState.getHalfmoveClock());
-            cache.put(boardHash, exact);
+            double exact = Score.tablebaseToEvaluation(tablebase.get(), whiteToMove, halfmoveClock);
+            cache.put(cacheKey, exact);
             return exact;
         }
-        double cached = cache.get(boardHash);
+        double cached = cache.get(cacheKey);
         if (!Double.isNaN(cached)) {
             return cached;
         }
         double computed = gameState.getScore().getScoreDifference();
-        cache.put(boardHash, computed);
+        cache.put(cacheKey, computed);
         return computed;
     }
 
