@@ -58,6 +58,12 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-inline</artifactId>
+            <version>5.2.0</version>
+            <scope>test</scope>
+        </dependency>
         <!-- Spock on Groovy 4 works with Java 21 -->
         <dependency>
             <groupId>org.spockframework</groupId>
