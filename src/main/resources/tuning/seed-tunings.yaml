@@ -68,7 +68,7 @@ population:
       activity.endgamecenterqueen: 3
       activity.endgamecenterking: 4
       kingsafety.missingpawnshieldpenalty: -22
-      kingsafety.halfopenfilepenalty: -2
+      kingsafety.halfopenfilepenalty: 0
       kingsafety.openfilepenalty: -9
       kingsafety.defenderbonus: 6
       kingsafety.queenattackedpenalty: -71
@@ -76,7 +76,7 @@ population:
       kingsafety.backrankweaknessendgamepenalty: -48
       kingsafety.attackweightpawn: 7
       kingsafety.attackweightknight: 19
-      kingsafety.attackweightbishop: 8
+      kingsafety.attackweightbishop: 0
       kingsafety.attackweightrook: 36
       kingsafety.attackweightqueen: 24
       moveordering.category.tt: 7
@@ -150,7 +150,7 @@ population:
       search.aspMaxRetriesVolThresholdMed: 256
       search.aspMaxRetriesVolBonusMed: 1
       search.aspMaxRetriesDepthOffset: 16
-      search.aspMaxRetriesDivisor: 1
+      search.aspMaxRetriesDepthDivisor: 1
       search.aspMaxRetriesMomentumDivisor: 3
       search.aspMaxRetriesMin: 1
       search.aspMaxRetriesMax: 2
