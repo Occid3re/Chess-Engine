@@ -1812,6 +1812,7 @@ public class AI {
 
         long curHash = simulation.getBoardStateHash();
 
+
         while (true) {
             if (!seen.add(curHash)) break;
             if (simulation.getGameState().isTerminal()) break;
