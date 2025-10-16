@@ -17,6 +17,7 @@ import julius.game.chessengine.syzygy.SyzygyMove;
 import julius.game.chessengine.syzygy.SyzygyProbeResult;
 import julius.game.chessengine.syzygy.SyzygyTablebaseService;
 import julius.game.chessengine.syzygy.SyzygyWdl;
+import julius.game.chessengine.syzygy.TablebaseRecommendation;
 import julius.game.chessengine.syzygy.TablebaseResult;
 import julius.game.chessengine.tuning.AiTuning;
 import julius.game.chessengine.tuning.AspirationParameters;
@@ -1948,6 +1949,19 @@ public class AI {
             return -1;
         }
 
+        Optional<TablebaseRecommendation> cachedRecommendation = simulatorEngine.getGameState()
+                .getLastTablebaseRecommendation();
+        if (cachedRecommendation.isPresent()) {
+            TablebaseRecommendation rec = cachedRecommendation.get();
+            if (rec.matches(simulatorEngine.getBoardStateHash())) {
+                int hintedMove = rec.encodedMove();
+                int index = legal.indexOf(hintedMove);
+                if (index >= 0) {
+                    return hintedMove;
+                }
+            }
+        }
+
         if (parentResult != null) {
             Optional<SyzygyMove> suggestion = parentResult.recommendedMove();
             if (suggestion.isPresent()) {
@@ -2017,11 +2031,18 @@ public class AI {
         if (result == null) {
             return;
         }
-        Optional<SyzygyMove> suggestion = result.recommendedMove();
-        if (suggestion.isEmpty()) {
-            return;
+        OptionalInt encoded = engine.getGameState().getLastTablebaseRecommendedMove();
+        int matchedMove = encoded.isPresent() ? encoded.getAsInt() : -1;
+        if (matchedMove != -1 && moves.indexOf(matchedMove) < 0) {
+            matchedMove = -1;
         }
-        int matchedMove = findSuggestedMove(moves, suggestion.get());
+        if (matchedMove == -1) {
+            Optional<SyzygyMove> suggestion = result.recommendedMove();
+            if (suggestion.isEmpty()) {
+                return;
+            }
+            matchedMove = findSuggestedMove(moves, suggestion.get());
+        }
         if (matchedMove == -1) {
             return;
         }

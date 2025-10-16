@@ -2477,6 +2477,10 @@ public class BitBoard {
         return whitesTurn ? !whiteKingMoved : !blackKingMoved;
     }
 
+    public int getCastlingStateBits() {
+        return packCastlingState();
+    }
+
     private void markRookAsMoved(int rookIndex) {
         if (rookIndex == 0) {
             whiteRookA1Moved = true;

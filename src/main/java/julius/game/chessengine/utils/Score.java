@@ -7,6 +7,7 @@ import julius.game.chessengine.evaluation.*;
 import julius.game.chessengine.syzygy.SyzygyProbeResult;
 import julius.game.chessengine.syzygy.SyzygyTablebaseService;
 import julius.game.chessengine.syzygy.SyzygyWdl;
+import julius.game.chessengine.syzygy.TablebaseRecommendation;
 import julius.game.chessengine.syzygy.TablebaseResult;
 import julius.game.chessengine.tuning.EngineTuningBootstrap;
 import julius.game.chessengine.tuning.MoveOrderingParameters;
@@ -55,6 +56,8 @@ public class Score {
     @JsonIgnore
     private Integer tablebaseCentipawn;
     @JsonIgnore
+    private TablebaseRecommendation tablebaseRecommendation;
+    @JsonIgnore
     private boolean tablebaseBypassesEvaluation;
     @JsonIgnore
     private long tablebaseResultBoardHash = Long.MIN_VALUE;
@@ -99,6 +102,7 @@ public class Score {
             }
             this.tablebaseResult = other.tablebaseResult;
             this.tablebaseCentipawn = other.tablebaseCentipawn;
+            this.tablebaseRecommendation = other.tablebaseRecommendation;
             this.tablebaseBypassesEvaluation = other.tablebaseBypassesEvaluation;
         }
     }
@@ -333,6 +337,20 @@ public class Score {
         return tablebaseCentipawn != null ? OptionalInt.of(tablebaseCentipawn) : OptionalInt.empty();
     }
 
+    public Optional<TablebaseRecommendation> getTablebaseRecommendation() {
+        return Optional.ofNullable(tablebaseRecommendation);
+    }
+
+    public OptionalInt getTablebaseRecommendedMove() {
+        return tablebaseRecommendation != null
+                ? OptionalInt.of(tablebaseRecommendation.encodedMove())
+                : OptionalInt.empty();
+    }
+
+    public long getTablebaseResultBoardHash() {
+        return tablebaseResultBoardHash;
+    }
+
     private boolean updateTablebaseState(BitBoard bitBoard, EvaluationContext context) {
         SyzygyTablebaseService service = TABLEBASE_SERVICE;
         if (service == null || context == null) {
@@ -354,6 +372,9 @@ public class Score {
         this.tablebaseResult = resolved;
         this.tablebaseCentipawn = computeTablebaseCentipawn(resolved, bitBoard.isWhitesTurn(),
                 context.getHalfmoveClock());
+        this.tablebaseRecommendation = resolved.recommendedMove()
+                .flatMap(move -> TablebaseRecommendation.resolve(bitBoard, move))
+                .orElse(null);
         this.tablebaseBypassesEvaluation = true;
         this.tablebaseResultBoardHash = bitBoard.getBoardStateHash();
         return true;
@@ -362,6 +383,7 @@ public class Score {
     private void clearTablebaseState() {
         this.tablebaseResult = null;
         this.tablebaseCentipawn = null;
+        this.tablebaseRecommendation = null;
         this.tablebaseBypassesEvaluation = false;
         this.tablebaseResultBoardHash = Long.MIN_VALUE;
     }

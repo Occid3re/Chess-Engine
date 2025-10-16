@@ -5,6 +5,7 @@ import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.MoveHelper;
+import julius.game.chessengine.syzygy.TablebaseRecommendation;
 import julius.game.chessengine.syzygy.TablebaseResult;
 import julius.game.chessengine.utils.Score;
 import lombok.Data;
@@ -27,6 +28,7 @@ public class GameState {
     private boolean drawByInsufficientMaterial;
 
     private TablebaseResult lastTablebaseResult;
+    private TablebaseRecommendation lastTablebaseRecommendation;
 
     @Getter
     private int halfmoveClock = 0;          // resets on pawn move or capture
@@ -57,6 +59,7 @@ public class GameState {
         this.halfmoveStack.addAll(other.halfmoveStack);
         this.fullmoveStack.addAll(other.fullmoveStack);
         this.lastTablebaseResult = other.lastTablebaseResult;
+        this.lastTablebaseRecommendation = other.lastTablebaseRecommendation;
     }
 
     public void refreshScore(BitBoard bitBoard) {
@@ -232,6 +235,19 @@ public class GameState {
         this.lastTablebaseResult = score != null
                 ? score.getTablebaseResult().orElse(null)
                 : null;
+        this.lastTablebaseRecommendation = score != null
+                ? score.getTablebaseRecommendation().orElse(null)
+                : null;
+    }
+
+    public java.util.Optional<TablebaseRecommendation> getLastTablebaseRecommendation() {
+        return java.util.Optional.ofNullable(lastTablebaseRecommendation);
+    }
+
+    public java.util.OptionalInt getLastTablebaseRecommendedMove() {
+        return lastTablebaseRecommendation != null
+                ? java.util.OptionalInt.of(lastTablebaseRecommendation.encodedMove())
+                : java.util.OptionalInt.empty();
     }
 
     @Override
