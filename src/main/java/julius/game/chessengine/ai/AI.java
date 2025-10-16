@@ -1817,6 +1817,7 @@ public class AI {
             return;
         }
 
+
         long curHash = simulation.getBoardStateHash();
 
         while (true) {
