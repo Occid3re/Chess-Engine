@@ -219,6 +219,9 @@ public class AI {
     private record TablebaseHit(double score, int bestMove, TablebaseResult result) {
     }
 
+    private record TablebaseChildScore(double evaluation, TablebaseResult result) {
+    }
+
     private record TablebaseInfo(int dtz, int dtm, int whiteWdlSign) {
         boolean hasDtz() { return dtz >= 0; }
     }
@@ -1948,39 +1951,115 @@ public class AI {
             return -1;
         }
 
+        TablebaseChildScore best = null;
+        int bestMove = -1;
+
         if (parentResult != null) {
             Optional<SyzygyMove> suggestion = parentResult.recommendedMove();
             if (suggestion.isPresent()) {
                 int resolved = findSuggestedMove(legal, suggestion.get());
                 if (resolved != -1) {
-                    log.info(Move.convertIntToMove(resolved).toString());
-                    return resolved;
+                    best = probeTablebaseChild(simulatorEngine, resolved, parentIsWhite);
+                    if (best != null) {
+                        bestMove = resolved;
+                        if (shouldTrustSyzygyRecommendation(parentResult, best)) {
+                            return bestMove;
+                        }
+                    }
                 }
             }
         }
 
-
-        double bestScore = parentIsWhite ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
-        int bestMove = -1;
         for (int i = 0; i < legal.size(); i++) {
             int move = legal.getInt(i);
-            simulatorEngine.performMove(move);
-            double candidate;
-            try {
-                candidate = evaluateTablebaseChild(simulatorEngine, parentIsWhite);
-            } finally {
-                simulatorEngine.undoLastMove();
-            }
-            if (Double.isNaN(candidate)) {
+            if (move == bestMove) {
                 continue;
             }
-            boolean better = parentIsWhite ? candidate > bestScore : candidate < bestScore;
-            if (better) {
-                bestScore = candidate;
+            TablebaseChildScore candidate = probeTablebaseChild(simulatorEngine, move, parentIsWhite);
+            if (candidate == null) {
+                continue;
+            }
+            if (isBetterTablebaseCandidate(parentResult, candidate, best, parentIsWhite)) {
+                best = candidate;
                 bestMove = move;
             }
         }
+
         return bestMove;
+    }
+
+    private TablebaseChildScore probeTablebaseChild(Engine simulatorEngine, int move, boolean parentIsWhite) {
+        simulatorEngine.performMove(move);
+        try {
+            Optional<TablebaseChildScore> candidate = evaluateTablebaseChild(simulatorEngine, parentIsWhite);
+            return candidate.orElse(null);
+        } finally {
+            simulatorEngine.undoLastMove();
+        }
+    }
+
+    private boolean shouldTrustSyzygyRecommendation(TablebaseResult parentResult, TablebaseChildScore recommendation) {
+        if (parentResult == null || recommendation == null || recommendation.result() == null) {
+            return false;
+        }
+        SyzygyWdl parentWdl = parentResult.wdl();
+        SyzygyWdl childWdl = recommendation.result().wdl();
+        return switch (parentWdl) {
+            case WIN, CURSED_WIN -> childWdl == SyzygyWdl.LOSS || childWdl == SyzygyWdl.BLESSED_LOSS;
+            case LOSS, BLESSED_LOSS -> childWdl == SyzygyWdl.WIN || childWdl == SyzygyWdl.CURSED_WIN;
+            case DRAW -> childWdl == SyzygyWdl.DRAW || childWdl == SyzygyWdl.CURSED_WIN
+                    || childWdl == SyzygyWdl.BLESSED_LOSS;
+            default -> false;
+        };
+    }
+
+    private boolean isBetterTablebaseCandidate(TablebaseResult parentResult, TablebaseChildScore candidate,
+                                                TablebaseChildScore incumbent, boolean parentIsWhite) {
+        if (candidate == null) {
+            return false;
+        }
+        if (incumbent == null) {
+            return true;
+        }
+
+        double delta = candidate.evaluation() - incumbent.evaluation();
+        if (Math.abs(delta) > 1e-6) {
+            return parentIsWhite ? delta > 0 : delta < 0;
+        }
+
+        if (parentResult == null) {
+            return false;
+        }
+
+        SyzygyWdl parentWdl = parentResult.wdl();
+        int candidateDtz = candidate.result() != null && candidate.result().dtz().isPresent()
+                ? candidate.result().dtz().getAsInt() : Integer.MAX_VALUE;
+        int incumbentDtz = incumbent.result() != null && incumbent.result().dtz().isPresent()
+                ? incumbent.result().dtz().getAsInt() : Integer.MAX_VALUE;
+
+        if (candidateDtz != incumbentDtz) {
+            return switch (parentWdl) {
+                case WIN, CURSED_WIN -> candidateDtz < incumbentDtz;
+                case LOSS, BLESSED_LOSS -> candidateDtz > incumbentDtz;
+                default -> candidateDtz < incumbentDtz;
+            };
+        }
+
+        int candidateDtm = candidate.result() != null && candidate.result().dtm().isPresent()
+                ? candidate.result().dtm().getAsInt() : Integer.MAX_VALUE;
+        int incumbentDtm = incumbent.result() != null && incumbent.result().dtm().isPresent()
+                ? incumbent.result().dtm().getAsInt() : Integer.MAX_VALUE;
+
+        if (candidateDtm != incumbentDtm) {
+            return switch (parentWdl) {
+                case WIN, CURSED_WIN -> candidateDtm < incumbentDtm;
+                case LOSS, BLESSED_LOSS -> candidateDtm > incumbentDtm;
+                default -> candidateDtm < incumbentDtm;
+            };
+        }
+
+        return parentIsWhite ? candidate.evaluation() > incumbent.evaluation()
+                : candidate.evaluation() < incumbent.evaluation();
     }
 
     private int findSuggestedMove(IntArrayList legal, SyzygyMove suggestion) {
@@ -2034,7 +2113,7 @@ public class AI {
         moves.set(index, first);
     }
 
-    private double evaluateTablebaseChild(Engine simulatorEngine, boolean parentIsWhite) {
+    private Optional<TablebaseChildScore> evaluateTablebaseChild(Engine simulatorEngine, boolean parentIsWhite) {
         TablebaseResult childResult = simulatorEngine.getGameState().getLastTablebaseResult().orElse(null);
         if (tablebaseService != null) {
             BitBoard snapshot = new BitBoard(simulatorEngine.getBitBoard());
@@ -2045,11 +2124,11 @@ public class AI {
             }
         }
         if (childResult == null || !isExactWdl(childResult)) {
-            return Double.NaN;
+            return Optional.empty();
         }
         double whitePerspective = Score.tablebaseToEvaluation(childResult, simulatorEngine.whitesTurn(),
                 simulatorEngine.getGameState().getHalfmoveClock());
-        return whitePerspective;
+        return Optional.of(new TablebaseChildScore(whitePerspective, childResult));
     }
 
     private boolean isExactWdl(TablebaseResult result) {
