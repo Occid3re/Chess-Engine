@@ -5,6 +5,7 @@ import julius.game.chessengine.board.FEN;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.tuning.EngineTuningBootstrap;
+import julius.game.chessengine.syzygy.SyzygyMove;
 import julius.game.chessengine.syzygy.SyzygyProbeResult;
 import julius.game.chessengine.syzygy.SyzygyTablebaseService;
 import julius.game.chessengine.syzygy.SyzygyWdl;
@@ -104,6 +105,111 @@ class AISyzygyIntegrationTest {
             assertThat(winningChildren)
                     .describedAs("tablebase best move should correspond to a child scored as a forced win")
                     .contains(bestChildFen);
+
+            ai.shutdown();
+        }
+    }
+
+    @Test
+    void determineTablebaseBestMoveHonoursConsistentRecommendation() throws Exception {
+        Engine engine = new Engine();
+        String fen = "6k1/8/8/8/8/8/5Q2/6K1 w - - 0 1";
+        engine.importBoardFromFen(fen);
+
+        IntArrayList legalMoves = engine.getAllLegalMoves();
+        Map<String, SyzygyProbeResult> responses = new HashMap<>();
+
+        int recommendedMove = -1;
+        for (int i = 0; i < legalMoves.size(); i++) {
+            int move = legalMoves.getInt(i);
+            engine.performMove(move);
+            String childFen = FEN.translateBoardToFEN(engine.getBitBoard(), engine.getGameState()).getRenderBoard();
+            boolean forcedWin = childFen.contains("5QK1") || childFen.contains("4Q1K1");
+            SyzygyWdl childResult = forcedWin ? SyzygyWdl.LOSS : SyzygyWdl.DRAW;
+            responses.put(childFen, new SyzygyProbeResult(childResult, OptionalInt.of(1), OptionalInt.empty(), Optional.empty()));
+            if (forcedWin && recommendedMove == -1) {
+                recommendedMove = move;
+            }
+            engine.undoLastMove();
+        }
+
+        assertThat(recommendedMove)
+                .describedAs("expected at least one forced win move to exist")
+                .isNotEqualTo(-1);
+
+        SyzygyMove recommendation = toSyzygyMove(recommendedMove);
+        responses.put(fen, new SyzygyProbeResult(SyzygyWdl.WIN, OptionalInt.of(5), OptionalInt.of(9), Optional.of(recommendation)));
+
+        TestSyzygyTablebaseService service = TestSyzygyTablebaseService.fromResponses(responses);
+
+        try (AutoCloseable restorer = overrideScoreTablebase(service)) {
+            AI ai = new AI(engine, service);
+            Engine simulation = engine.createSimulation();
+
+            Method determine = AI.class.getDeclaredMethod("determineTablebaseBestMove", Engine.class, TablebaseResult.class,
+                    boolean.class);
+            determine.setAccessible(true);
+
+            TablebaseResult parentResult = TablebaseResult.from(responses.get(fen));
+            int bestMove = (int) determine.invoke(ai, simulation, parentResult, simulation.whitesTurn());
+
+            assertThat(bestMove).isEqualTo(recommendedMove);
+
+            ai.shutdown();
+        }
+    }
+
+    @Test
+    void determineTablebaseBestMoveSkipsInconsistentRecommendation() throws Exception {
+        Engine engine = new Engine();
+        String fen = "6k1/8/8/8/8/8/5Q2/6K1 w - - 0 1";
+        engine.importBoardFromFen(fen);
+
+        IntArrayList legalMoves = engine.getAllLegalMoves();
+        Map<String, SyzygyProbeResult> responses = new HashMap<>();
+
+        int winningMove = -1;
+        int drawingMove = -1;
+        for (int i = 0; i < legalMoves.size(); i++) {
+            int move = legalMoves.getInt(i);
+            engine.performMove(move);
+            String childFen = FEN.translateBoardToFEN(engine.getBitBoard(), engine.getGameState()).getRenderBoard();
+            boolean forcedWin = childFen.contains("5QK1") || childFen.contains("4Q1K1");
+            SyzygyWdl childResult = forcedWin ? SyzygyWdl.LOSS : SyzygyWdl.DRAW;
+            responses.put(childFen, new SyzygyProbeResult(childResult, OptionalInt.of(1), OptionalInt.empty(), Optional.empty()));
+            if (forcedWin && winningMove == -1) {
+                winningMove = move;
+            }
+            if (!forcedWin && drawingMove == -1) {
+                drawingMove = move;
+            }
+            engine.undoLastMove();
+        }
+
+        assertThat(winningMove)
+                .describedAs("expected a winning continuation")
+                .isNotEqualTo(-1);
+        assertThat(drawingMove)
+                .describedAs("expected a non-winning continuation to use as a bogus recommendation")
+                .isNotEqualTo(-1);
+
+        SyzygyMove recommendation = toSyzygyMove(drawingMove);
+        responses.put(fen, new SyzygyProbeResult(SyzygyWdl.WIN, OptionalInt.of(5), OptionalInt.of(9), Optional.of(recommendation)));
+
+        TestSyzygyTablebaseService service = TestSyzygyTablebaseService.fromResponses(responses);
+
+        try (AutoCloseable restorer = overrideScoreTablebase(service)) {
+            AI ai = new AI(engine, service);
+            Engine simulation = engine.createSimulation();
+
+            Method determine = AI.class.getDeclaredMethod("determineTablebaseBestMove", Engine.class, TablebaseResult.class,
+                    boolean.class);
+            determine.setAccessible(true);
+
+            TablebaseResult parentResult = TablebaseResult.from(responses.get(fen));
+            int bestMove = (int) determine.invoke(ai, simulation, parentResult, simulation.whitesTurn());
+
+            assertThat(bestMove).isEqualTo(winningMove);
 
             ai.shutdown();
         }
@@ -269,5 +375,11 @@ class AISyzygyIntegrationTest {
                 Score.setTablebaseService(previous);
             }
         };
+    }
+
+    private SyzygyMove toSyzygyMove(int move) {
+        return new SyzygyMove(MoveHelper.deriveFromIndex(move),
+                MoveHelper.deriveToIndex(move),
+                MoveHelper.derivePromotionPieceTypeBits(move));
     }
 }
