@@ -1,6 +1,8 @@
 package julius.game.chessengine.syzygy;
 
 import julius.game.chessengine.board.BitBoard;
+import julius.game.chessengine.board.MoveHelper;
+import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.syzygy.bridge.SyzygyBridge;
 import julius.game.chessengine.syzygy.bridge.SyzygyConstants;
 import lombok.extern.log4j.Log4j2;
@@ -66,8 +68,7 @@ final class Tables {
         long bishops = board.getWhiteBishops() | board.getBlackBishops();
         long knights = board.getWhiteKnights() | board.getBlackKnights();
         long pawns = board.getWhitePawns() | board.getBlackPawns();
-        int epIndex = board.getEnPassantTargetIndex();
-        int epSquare = epIndex >= 0 ? epIndex : 0;
+        int epSquare = resolveEnPassantSquare(board);
         boolean whiteToMove = board.isWhitesTurn();
 
         int wdlValue = SyzygyBridge.probeSyzygyWDL(white, black, kings, queens, rooks, bishops, knights, pawns, epSquare, whiteToMove);
@@ -87,22 +88,27 @@ final class Tables {
             if (dtzWdl == SyzygyWdl.UNKNOWN) {
                 log.debug("Syzygy DTZ probe returned unknown WDL slice (dtzRaw={})", dtzRaw);
             } else {
-                if (wdl != dtzWdl) {
-                    if (wdl == SyzygyWdl.WIN && dtzWdl == SyzygyWdl.DRAW) {
-                        wdl = SyzygyWdl.CURSED_WIN;
-                    } else if (wdl == SyzygyWdl.LOSS && dtzWdl == SyzygyWdl.DRAW) {
-                        wdl = SyzygyWdl.BLESSED_LOSS;
-                    } else if ((wdl == SyzygyWdl.CURSED_WIN || wdl == SyzygyWdl.BLESSED_LOSS)
-                            && dtzWdl == SyzygyWdl.DRAW) {
-                        // Keep the existing 50-move aware classification.
-                    } else {
-                        log.debug("Syzygy DTZ probe mismatch (wdlValue={}, dtzRaw={})", wdlValue, dtzRaw);
-                        wdl = dtzWdl;
+                Optional<SyzygyMove> decodedMove = decodeRecommendedMove(dtzRaw);
+                if (decodedMove.isPresent()) {
+                    if (wdl != dtzWdl) {
+                        if (wdl == SyzygyWdl.WIN && dtzWdl == SyzygyWdl.DRAW) {
+                            wdl = SyzygyWdl.CURSED_WIN;
+                        } else if (wdl == SyzygyWdl.LOSS && dtzWdl == SyzygyWdl.DRAW) {
+                            wdl = SyzygyWdl.BLESSED_LOSS;
+                        } else if ((wdl == SyzygyWdl.CURSED_WIN || wdl == SyzygyWdl.BLESSED_LOSS)
+                                && dtzWdl == SyzygyWdl.DRAW) {
+                            // Keep the existing 50-move aware classification.
+                        } else {
+                            log.debug("Syzygy DTZ probe mismatch (wdlValue={}, dtzRaw={})", wdlValue, dtzRaw);
+                            wdl = dtzWdl;
+                        }
                     }
+                } else if (wdl != dtzWdl) {
+                    log.debug("Ignoring DTZ WDL {} without recommended move (wdlValue={}, dtzRaw={})", dtzWdl, wdlValue, dtzRaw);
                 }
                 int distance = SyzygyConstants.distanceToZero(dtzRaw);
                 dtz = OptionalInt.of(distance);
-                recommendedMove = decodeRecommendedMove(dtzRaw);
+                recommendedMove = decodedMove;
             }
         } else {
             log.debug("Syzygy DTZ probe failed for board {}", board);
@@ -114,6 +120,10 @@ final class Tables {
     private Optional<SyzygyMove> decodeRecommendedMove(int dtzRaw) {
         int rawFrom = SyzygyConstants.fromSquare(dtzRaw);
         int rawTo = SyzygyConstants.toSquare(dtzRaw);
+        if (rawFrom == 0 && rawTo == 0 && SyzygyConstants.distanceToZero(dtzRaw) == 0) {
+            // Syzygy returns a zeroed move when the position is already terminal.
+            return Optional.empty();
+        }
         if (rawFrom < 0 || rawTo < 0) {
             return Optional.empty();
         }
@@ -163,5 +173,55 @@ final class Tables {
             case SyzygyConstants.TB_WIN -> SyzygyWdl.WIN;
             default -> SyzygyWdl.UNKNOWN;
         };
+    }
+
+    private static int resolveEnPassantSquare(BitBoard board) {
+        if (board == null) {
+            return 0;
+        }
+        int epIndex = board.getEnPassantTargetIndex();
+        if (epIndex < 0) {
+            return 0;
+        }
+        if (!hasLegalEnPassantCapture(board, epIndex)) {
+            return 0;
+        }
+        return epIndex;
+    }
+
+    private static boolean hasLegalEnPassantCapture(BitBoard board, int epIndex) {
+        boolean whiteToMove = board.isWhitesTurn();
+        int epFile = epIndex & 7;
+        int dir = whiteToMove ? -8 : 8;
+        int pawnRowFrom = epIndex + dir;
+        if (pawnRowFrom < 0 || pawnRowFrom >= 64) {
+            return false;
+        }
+
+        long pawns = whiteToMove ? board.getWhitePawns() : board.getBlackPawns();
+        BitBoard.PinState pinState = board.computePinState(whiteToMove);
+
+        if (epFile > 0) {
+            int from = pawnRowFrom - 1;
+            if ((pawns & (1L << from)) != 0
+                    && isLegalEnPassant(board, pinState, from, epIndex, whiteToMove)) {
+                return true;
+            }
+        }
+        if (epFile < 7) {
+            int from = pawnRowFrom + 1;
+            if ((pawns & (1L << from)) != 0
+                    && isLegalEnPassant(board, pinState, from, epIndex, whiteToMove)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isLegalEnPassant(BitBoard board, BitBoard.PinState pinState,
+                                            int fromIndex, int targetIndex, boolean whiteToMove) {
+        int move = MoveHelper.createMoveInt(fromIndex, targetIndex, PieceType.PAWN, whiteToMove,
+                true, false, true, null, PieceType.PAWN, false, false, 0);
+        return board.isMoveLegalFast(move, pinState);
     }
 }

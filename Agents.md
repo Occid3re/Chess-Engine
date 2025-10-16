@@ -113,7 +113,7 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
 * Auto tuning loop: `scripts/auto_tuning_loop.py` now reads the numeric bounds from `ParamId.java` and applies search-specific heuristics (including snapping to sentinel values such as `-1`/`0`). When new numeric search parameters are added, make sure their metadata in `ParamId` is updated so the tuner can scale mutations and clamp values correctly.
 * Search pruning knobs exposed for tuning: `search.maxCheckExtensionStreak`, `search.seePruneNearRootPly`, and `search.historyReductionMax` are now part of the seed tuning set with soft caps in `auto_tuning_loop.py`. Keep their metadata in sync when adjusting forcing-line or LMR heuristics.
 * Full-suite runs currently fail in `BestMoveSearchTest` due to long-horizon move selection mismatches. Use the PGN smoke tests above when focusing on PGN changes, or investigate the AI regressions separately before expecting a green build.
-* `BestMoveSearchTest` now mirrors the diagnostic harness from `AITest_MateThreatDiagnostics`. Each position prints an in-depth iterative-deepening trace, principal variation, and transposition-table probe summary, with aggregated JSON/TXT artifacts in `target/surefire-reports/best-move-search-*`. Expect a long console log and ~28 known assertion failures; the goal is visibility, not a green suite.
+* `BestMoveSearchTest` now mirrors the diagnostic harness from `AITest_MateThreatDiagnostics`. Each position prints an in-depth iterative-deepening trace, principal variation, and transposition-table probe summary, with aggregated JSON/TXT artifacts in `target/surefire-reports/best-move-search-*`. Expect a long console log and double-digit known assertion failures (~10–30; see the latest counts in `logs/test-runs/`); the goal is visibility, not a green suite.
 * `BestMoveSearchTest#diagnoseNe4SearchHotSpot` isolates the slow `Ne4` fixture (`3rk2r/1bqpbppp/p1n1p3/1p2P3/5Bn1/2NQ1N2/PPP1BPPP/R2R2K1 w k - 5 14`). Run it with
   ```bash
   mvn -Djava.version=21 -Dmaven.compiler.release=21 -Dmaven.compiler.enablePreview=true \
@@ -138,3 +138,39 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
 ### 2025-10-07 Time management + evaluation notes
 * The engine now relies on `TimeManager` (under `ai/time/`) for soft/hard deadlines. Update UCI tests to expect the bullet promotion allocation of **250ms** (the Java planner now mirrors the conservative reserves used in `src/main/resources/py/lichess_bot.py`). Document any future tuning against that Python helper here so the two stay aligned.
 * `ScoreEvaluationTest.backwardPawnIsPenalized` now validates the pawn-structure view directly. The overall blended score remains neutral with current tuning, so assert against `PawnStructureModule.backwardPawnPenalty()` instead of a blended delta.
+### 2025-10-16 Syzygy bridge verification
+* Current host `JAVA_HOME` points at `C:/Users/juliu/.jdks/openjdk-25`. Default Maven invocations therefore compile against Java 25, even though earlier sections document Java 21 for agents without that toolchain.
+* PowerShell tip: run the real Syzygy integration suite by delegating to `cmd.exe` so the `-D` flags survive PowerShell parsing, e.g.
+  ```powershell
+  cmd.exe /c ".\mvnw.cmd -Djava.version=25 -Dmaven.compiler.release=25 -Dmaven.compiler.enablePreview=true -DargLine=--enable-preview -Dchessengine.syzygy.nativeLibrary=C:\Development\Chess-Engine\target\classes\natives\win-x86_64\Release\JSyzygy.dll -Dchessengine.syzygy.paths=C:\Syzygy -Dtest=SyzygyRealIntegrationTest test"
+  ```
+* After correcting DTZ sentinel handling (Oct 2025), the command above now completes cleanly; expect roughly 40s wall-clock on this host.
+
+* Preconditions: real runs require the native bridge at `C:\Development\Chess-Engine\target\classes\natives\win-x86_64\Release\JSyzygy.dll` and the Syzygy tables under `C:\Syzygy` (with the 3-4-5 and 6-piece folders). Run tests with preview flags plus:
+  ```bash
+  .\mvnw.cmd -Djava.version=21 -Dmaven.compiler.release=21 -Dmaven.compiler.enablePreview=true -DargLine=--enable-preview -Dtest=SyzygyWinRegressionTest -Dchessengine.syzygy.nativeLibrary=C:\Development\Chess-Engine\target\classes\natives\win-x86_64\Release\JSyzygy.dll -Dchessengine.syzygy.paths=C:\Syzygy test
+  ```
+* What worked: `SyzygyWinRegressionTest` passed and the logs confirmed the bridge loaded `JSyzygy.dll`, expanded the path into `C:\Syzygy\3-4-5-*` and `C:\Syzygy\6-*`, and reported `supportedPieces=6` (the current TB set) even with `maxPieces=7`.
+* WDL/DTZ check: probing `3k4/4p3/8/2K5/8/3BN3/8/8 w - - 0 1` through a temporary runner returned `wdl=WIN`, `dtz=7`, no `dtm`, and a move recommendation of `c5c6`. This matches the adjustment rules in `Tables.probe` (cursed/blessed handling stays untouched when WDL and DTZ agree).
+* Edge cases: the JVM emits `System::load` native-access warnings; suppress with `--enable-native-access=ALL-UNNAMED` if a future run locks this down. Reloading different directories in the same process is blocked (`SyzygyBridge.load` keeps `tbLargest`); restart the JVM to swap TB roots.
+* Fallback: when the properties/env vars are missing, `TestSyzygySupport.isSyzygyConfigured()` stays `false` so tablebase tests auto-skip and `SyzygyTablebaseService` falls back to its no-op client, keeping CI/dev flows safe without TBs.
+* Regression coverage: `TablesTest.decodeRecommendedMoveReturnsEmptyWhenPayloadZeroed` asserts that zeroed DTZ payloads keep returning `Optional.empty()` recommendations.
+* Real vs mock coverage: use `SyzygyRealIntegrationTest` for native-backed verification and `SyzygyMockRegressionTest` for CI-friendly checks. Both expect Java preview flags; the real test also needs the properties above. Example:
+  ```bash
+  .\mvnw.cmd -Djava.version=25 -Dmaven.compiler.release=25 -Dmaven.compiler.enablePreview=true -DargLine=--enable-preview \
+      -Dchessengine.syzygy.nativeLibrary=C:\Development\Chess-Engine\target\classes\natives\win-x86_64\Release\JSyzygy.dll \
+      -Dchessengine.syzygy.paths=C:\Syzygy -Dtest=SyzygyRealIntegrationTest test
+  ```
+  Mock path:
+  ```bash
+  .\mvnw.cmd -Djava.version=25 -Dmaven.compiler.release=25 -Dmaven.compiler.enablePreview=true -DargLine=--enable-preview -Dtest=SyzygyMockRegressionTest test
+  ```
+* `BestMoveSearchTest` now assumes the same Syzygy properties when present (it auto-skips if they are missing) and expects the updated move list (`Nxg4` is now valid for `3r2k1/...`). Run it with the native properties for full diagnostics; omit them to confirm the skip:
+  ```bash
+  .\mvnw.cmd -Djava.version=25 -Dmaven.compiler.release=25 -Dmaven.compiler.enablePreview=true -DargLine=--enable-preview \
+      -Dchessengine.syzygy.nativeLibrary=C:\Development\Chess-Engine\target\classes\natives\win-x86_64\Release\JSyzygy.dll \
+      -Dchessengine.syzygy.paths=C:\Syzygy -Dtest=BestMoveSearchTest test
+  ```
+* Linux/WSL workflow: CMake’s configure step fails with `Operation not permitted` when the repo lives on a DrvFS mount (`/mnt/c/...`). When running inside WSL, copy the workspace to an ext4 volume (for example `rsync … /tmp/chess-engine-run/`), export `JAVA_HOME=/usr/lib/jvm/temurin-25-jdk-amd64`, and invoke Maven with `-Dmaven.repo.local=.m2/repository` so cached dependencies stay within that scratch area. After tests finish, copy `target/surefire-reports` back into the main repo (we stage them under `logs/test-runs/<timestamp>/`).
+* Linux tip: the Windows `mvnw` script keeps CRLF endings, so running `bash mvnw …` inside WSL trips on `$'\r'`. Prefer the system Maven (`mvn …`) or run the wrapper from PowerShell/cmd.
+* Diagnostic runs: `BestMoveSearchTest` is still expected to fail (goal = rich logs). Recent Java 25 runs produced 10–30 assertion failures (13 on 2025-10-16); see `logs/test-runs/<timestamp>/julius.game.chessengine.ai.BestMoveSearchTest.txt` for the detailed traces.

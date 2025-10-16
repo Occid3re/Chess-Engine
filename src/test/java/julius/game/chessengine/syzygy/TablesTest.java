@@ -1,5 +1,8 @@
 package julius.game.chessengine.syzygy;
 
+import julius.game.chessengine.board.BitBoard;
+import julius.game.chessengine.board.FEN;
+import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.syzygy.bridge.SyzygyConstants;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -15,6 +18,7 @@ class TablesTest {
 
     private static Tables tables;
     private static Method decodeMethod;
+    private static Method resolveEpMethod;
 
     @BeforeAll
     static void setUpReflectionAccess() throws Exception {
@@ -24,6 +28,9 @@ class TablesTest {
 
         decodeMethod = Tables.class.getDeclaredMethod("decodeRecommendedMove", int.class);
         decodeMethod.setAccessible(true);
+
+        resolveEpMethod = Tables.class.getDeclaredMethod("resolveEnPassantSquare", BitBoard.class);
+        resolveEpMethod.setAccessible(true);
     }
 
     @Test
@@ -52,10 +59,50 @@ class TablesTest {
         assertThat(move.get().toIndex()).isEqualTo(8);
     }
 
+    @Test
+    void decodeRecommendedMoveReturnsEmptyWhenPayloadZeroed() {
+        int dtzRaw = 0;
+
+        Optional<SyzygyMove> move = invokeDecode(dtzRaw);
+
+        assertThat(move).isEmpty();
+    }
+
+    @Test
+    void resolveEnPassantSquareRequiresLegalCapture() {
+        BitBoard board = FEN.translateFENtoBitBoard("4r1k1/8/8/3pP3/8/8/8/4K3 w - d6 0 1");
+
+        int epSquare = invokeResolveEp(board);
+
+        assertThat(epSquare).isZero();
+    }
+
+    @Test
+    void resolveEnPassantSquareReturnsTargetWhenCaptureLegal() {
+        BitBoard board = FEN.translateFENtoBitBoard("4r1k1/8/8/3pP3/8/8/8/6K1 w - d6 0 1");
+
+        int epSquare = invokeResolveEp(board);
+
+        assertThat(epSquare).isEqualTo(MoveHelper.convertStringToIndex("d6"));
+    }
+
     @SuppressWarnings("unchecked")
     private Optional<SyzygyMove> invokeDecode(int dtzRaw) {
         try {
             return (Optional<SyzygyMove>) decodeMethod.invoke(tables, dtzRaw);
+        } catch (InvocationTargetException ex) {
+            if (ex.getCause() instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            throw new RuntimeException(ex.getCause());
+        } catch (IllegalAccessException ex) {
+            throw new RuntimeException(ex);
+        }
+    }
+
+    private int invokeResolveEp(BitBoard board) {
+        try {
+            return (int) resolveEpMethod.invoke(null, board);
         } catch (InvocationTargetException ex) {
             if (ex.getCause() instanceof RuntimeException runtime) {
                 throw runtime;
