@@ -29,6 +29,7 @@ class SyzygyRealIntegrationTest {
         TablebaseTestSupport.assumeSyzygyConfigured();
         Assumptions.assumeTrue(SyzygyBridge.isLibLoaded(), "Syzygy native library not loaded");
 
+
         SyzygyTablebaseService service = TestSyzygySupport.maybeCreateServiceFromConfiguration()
                 .orElseThrow(() -> new IllegalStateException("Syzygy service not configured despite assumption"));
         service.ensureReady();
