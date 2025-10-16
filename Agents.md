@@ -154,6 +154,7 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
 * WDL/DTZ check: probing `3k4/4p3/8/2K5/8/3BN3/8/8 w - - 0 1` through a temporary runner returned `wdl=WIN`, `dtz=7`, no `dtm`, and a move recommendation of `c5c6`. This matches the adjustment rules in `Tables.probe` (cursed/blessed handling stays untouched when WDL and DTZ agree).
 * Edge cases: the JVM emits `System::load` native-access warnings; suppress with `--enable-native-access=ALL-UNNAMED` if a future run locks this down. Reloading different directories in the same process is blocked (`SyzygyBridge.load` keeps `tbLargest`); restart the JVM to swap TB roots.
 * Fallback: when the properties/env vars are missing, `TestSyzygySupport.isSyzygyConfigured()` stays `false` so tablebase tests auto-skip and `SyzygyTablebaseService` falls back to its no-op client, keeping CI/dev flows safe without TBs.
+* Regression coverage: `TablesTest.decodeRecommendedMoveReturnsEmptyWhenPayloadZeroed` asserts that zeroed DTZ payloads keep returning `Optional.empty()` recommendations.
 * Real vs mock coverage: use `SyzygyRealIntegrationTest` for native-backed verification and `SyzygyMockRegressionTest` for CI-friendly checks. Both expect Java preview flags; the real test also needs the properties above. Example:
   ```bash
   .\mvnw.cmd -Djava.version=25 -Dmaven.compiler.release=25 -Dmaven.compiler.enablePreview=true -DargLine=--enable-preview \
@@ -170,3 +171,6 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
       -Dchessengine.syzygy.nativeLibrary=C:\Development\Chess-Engine\target\classes\natives\win-x86_64\Release\JSyzygy.dll \
       -Dchessengine.syzygy.paths=C:\Syzygy -Dtest=BestMoveSearchTest test
   ```
+* Linux/WSL workflow: CMake’s configure step fails with `Operation not permitted` when the repo lives on a DrvFS mount (`/mnt/c/...`). When running inside WSL, copy the workspace to an ext4 volume (for example `rsync … /tmp/chess-engine-run/`), export `JAVA_HOME=/usr/lib/jvm/temurin-25-jdk-amd64`, and invoke Maven with `-Dmaven.repo.local=.m2/repository` so cached dependencies stay within that scratch area. After tests finish, copy `target/surefire-reports` back into the main repo (we stage them under `logs/test-runs/<timestamp>/`).
+* Linux tip: the Windows `mvnw` script keeps CRLF endings, so running `bash mvnw …` inside WSL trips on `$'\r'`. Prefer the system Maven (`mvn …`) or run the wrapper from PowerShell/cmd.
+* Diagnostic runs: `BestMoveSearchTest` is still expected to fail (goal = rich logs). Recent Java 25 runs produced 10–30 assertion failures (13 on 2025-10-16); see `logs/test-runs/<timestamp>/julius.game.chessengine.ai.BestMoveSearchTest.txt` for the detailed traces.

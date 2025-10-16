@@ -60,6 +60,15 @@ class TablesTest {
     }
 
     @Test
+    void decodeRecommendedMoveReturnsEmptyWhenPayloadZeroed() {
+        int dtzRaw = 0;
+
+        Optional<SyzygyMove> move = invokeDecode(dtzRaw);
+
+        assertThat(move).isEmpty();
+    }
+
+    @Test
     void resolveEnPassantSquareRequiresLegalCapture() {
         BitBoard board = FEN.translateFENtoBitBoard("4r1k1/8/8/3pP3/8/8/8/4K3 w - d6 0 1");
 
