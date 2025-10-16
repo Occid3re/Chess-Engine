@@ -150,4 +150,20 @@ class ScoreTablebaseIntegrationTest {
 
         assertThat(service.getProbedFens()).containsExactly(fen);
     }
+
+    @Test
+    void refreshAvoidsRedundantTablebaseProbeWhenStateUnchanged() {
+        String fen = "8/8/8/8/8/8/5K2/6k1 w - - 0 1";
+        BitBoard board = FEN.translateFENtoBitBoard(fen);
+        SyzygyProbeResult probe = new SyzygyProbeResult(SyzygyWdl.WIN, OptionalInt.of(3), OptionalInt.empty(), Optional.empty());
+        TestSyzygyTablebaseService service = TestSyzygyTablebaseService.fromResponses(Map.of(fen, probe), 6);
+
+        try (TablebaseTestSupport.TablebaseServiceRestorer restorer = TablebaseTestSupport.overrideScoreTablebase(service)) {
+            Score score = new Score();
+            score.refresh(board, GameStateEnum.PLAY);
+            score.refresh(board, GameStateEnum.PLAY);
+        }
+
+        assertThat(service.getProbedFens()).containsExactly(fen);
+    }
 }

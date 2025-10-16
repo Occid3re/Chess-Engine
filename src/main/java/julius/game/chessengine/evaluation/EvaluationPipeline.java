@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.LongAdder;
 
 /**
  * Coordinates a set of {@link EvaluationModule modules} and provides tapered evaluation blending.
@@ -131,11 +132,14 @@ public final class EvaluationPipeline {
         if (!aggregateDirty) {
             return;
         }
+        long profilerStart = EvaluationProfiler.onRefreshStart();
         double midgame = 0.0;
         double endgame = 0.0;
+        int evaluatedModules = 0;
         for (ModuleState state : modules) {
             if (state.module.isDirty()) {
                 state.module.evaluate(context);
+                evaluatedModules++;
             }
             state.midgameCache = state.module.getMidgameScore();
             state.endgameCache = state.module.getEndgameScore();
@@ -148,6 +152,7 @@ public final class EvaluationPipeline {
         midgameTotal = (int) Math.round(midgame);
         endgameTotal = (int) Math.round(endgame);
         aggregateDirty = false;
+        EvaluationProfiler.onRefreshEnd(profilerStart, evaluatedModules);
     }
 
     private void ensureInitialized() {
@@ -186,5 +191,88 @@ public final class EvaluationPipeline {
             case WHITE_IN_CHECK -> -Score.CHECK;
             default -> 0;
         };
+    }
+
+    public static void enableProfiling() {
+        EvaluationProfiler.enable();
+    }
+
+    public static void disableProfiling() {
+        EvaluationProfiler.disable();
+    }
+
+    public static void resetProfiling() {
+        EvaluationProfiler.reset();
+    }
+
+    public static boolean isProfilingEnabled() {
+        return EvaluationProfiler.isEnabled();
+    }
+
+    public static EvaluationStats snapshotProfiling() {
+        return EvaluationProfiler.snapshot();
+    }
+
+    public record EvaluationStats(long refreshCalls, long modulesEvaluated, long refreshNanos) {
+    }
+
+    private static final class EvaluationProfiler {
+        private static final LongAdder refreshCalls = new LongAdder();
+        private static final LongAdder modulesEvaluated = new LongAdder();
+        private static final LongAdder refreshNanos = new LongAdder();
+        private static volatile boolean enabled = Boolean.getBoolean("chessengine.eval.profile");
+
+        private EvaluationProfiler() {
+        }
+
+        static boolean isEnabled() {
+            return enabled;
+        }
+
+        static long onRefreshStart() {
+            if (!enabled) {
+                return 0L;
+            }
+            refreshCalls.increment();
+            return System.nanoTime();
+        }
+
+        static void onRefreshEnd(long start, int evaluatedModules) {
+            if (!enabled) {
+                return;
+            }
+            if (evaluatedModules > 0) {
+                modulesEvaluated.add(evaluatedModules);
+            }
+            if (start != 0L) {
+                refreshNanos.add(System.nanoTime() - start);
+            }
+        }
+
+        static void enable() {
+            enabled = true;
+        }
+
+        static void disable() {
+            enabled = false;
+            reset();
+        }
+
+        static void reset() {
+            refreshCalls.reset();
+            modulesEvaluated.reset();
+            refreshNanos.reset();
+        }
+
+        static EvaluationStats snapshot() {
+            if (!enabled) {
+                return new EvaluationStats(0, 0, 0);
+            }
+            return new EvaluationStats(
+                    refreshCalls.sum(),
+                    modulesEvaluated.sum(),
+                    refreshNanos.sum()
+            );
+        }
     }
 }

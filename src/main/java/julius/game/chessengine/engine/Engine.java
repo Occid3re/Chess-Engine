@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.LongConsumer;
+import java.util.concurrent.atomic.LongAdder;
 
 import static julius.game.chessengine.board.MoveHelper.convertIndexToString;
 
@@ -123,6 +124,7 @@ public class Engine {
                 }
                 return generateLegalMoves();
             }
+            MoveGenerationProfiler.recordCacheHit();
             return copyCachedLegalMoves();
         }
     }
@@ -283,6 +285,7 @@ public class Engine {
     private IntArrayList generateLegalMoves() {
         synchronized (boardLock) {
             final long boardStateHash = getBoardStateHash();
+            final long profilerStart = MoveGenerationProfiler.onGenerationStart();
 
             // 1) fill pseudo buffer + pins once
             IntArrayList pseudo = pseudoMoveBuffer;
@@ -331,7 +334,9 @@ public class Engine {
             cacheLegalMoves(boardStateHash, w);
 
             // 4) return a defensive copy for callers (cache retains reusable buffers)
-            return copyCachedLegalMoves();
+            IntArrayList copy = copyCachedLegalMoves();
+            MoveGenerationProfiler.onGenerationEnd(profilerStart, w);
+            return copy;
         }
     }
 
@@ -593,6 +598,93 @@ public class Engine {
         this.lastTablebaseResult = (currentState != null)
                 ? currentState.getLastTablebaseResult().orElse(null)
                 : null;
+    }
+
+    public static void enableMoveGenerationProfiling() {
+        MoveGenerationProfiler.enable();
+    }
+
+    public static void disableMoveGenerationProfiling() {
+        MoveGenerationProfiler.disable();
+    }
+
+    public static void resetMoveGenerationProfiling() {
+        MoveGenerationProfiler.reset();
+    }
+
+    public static boolean isMoveGenerationProfilingEnabled() {
+        return MoveGenerationProfiler.isEnabled();
+    }
+
+    public static MoveGenerationStats snapshotMoveGenerationStats() {
+        return MoveGenerationProfiler.snapshot();
+    }
+
+    public record MoveGenerationStats(long generationCalls, long cacheHits, long generatedMoves, long generationNanos) {
+    }
+
+    private static final class MoveGenerationProfiler {
+        private static final LongAdder generationCalls = new LongAdder();
+        private static final LongAdder cacheHits = new LongAdder();
+        private static final LongAdder generatedMoves = new LongAdder();
+        private static final LongAdder generationNanos = new LongAdder();
+        private static volatile boolean enabled = Boolean.getBoolean("chessengine.movegen.profile");
+
+        private MoveGenerationProfiler() {
+        }
+
+        static boolean isEnabled() {
+            return enabled;
+        }
+
+        static long onGenerationStart() {
+            return enabled ? System.nanoTime() : 0L;
+        }
+
+        static void onGenerationEnd(long start, int moveCount) {
+            if (!enabled) {
+                return;
+            }
+            generationCalls.increment();
+            generatedMoves.add(moveCount);
+            if (start != 0L) {
+                generationNanos.add(System.nanoTime() - start);
+            }
+        }
+
+        static void recordCacheHit() {
+            if (enabled) {
+                cacheHits.increment();
+            }
+        }
+
+        static void enable() {
+            enabled = true;
+        }
+
+        static void disable() {
+            enabled = false;
+            reset();
+        }
+
+        static void reset() {
+            generationCalls.reset();
+            cacheHits.reset();
+            generatedMoves.reset();
+            generationNanos.reset();
+        }
+
+        static MoveGenerationStats snapshot() {
+            if (!enabled) {
+                return new MoveGenerationStats(0, 0, 0, 0);
+            }
+            return new MoveGenerationStats(
+                    generationCalls.sum(),
+                    cacheHits.sum(),
+                    generatedMoves.sum(),
+                    generationNanos.sum()
+            );
+        }
     }
 }
 

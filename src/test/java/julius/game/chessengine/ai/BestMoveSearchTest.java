@@ -4,12 +4,16 @@ import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.board.Move;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
+import julius.game.chessengine.engine.Engine.MoveGenerationStats;
 import julius.game.chessengine.engine.GameState;
+import julius.game.chessengine.evaluation.EvaluationPipeline;
+import julius.game.chessengine.evaluation.EvaluationPipeline.EvaluationStats;
 import julius.game.chessengine.tuning.AiTuning;
 import julius.game.chessengine.utils.Score;
 import julius.game.chessengine.syzygy.TestSyzygySupport;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -42,6 +46,18 @@ public class BestMoveSearchTest {
     private final List<DecisionStatistics> decisionSummaries = new ArrayList<>();
     private final List<String> decisionJsonLines = new ArrayList<>();
     private final List<String> decisionTextBlocks = new ArrayList<>();
+
+    @BeforeAll
+    void configureProfiling() {
+        if (Boolean.getBoolean("chessengine.movegen.profile")) {
+            Engine.enableMoveGenerationProfiling();
+            Engine.resetMoveGenerationProfiling();
+        }
+        if (Boolean.getBoolean("chessengine.eval.profile")) {
+            EvaluationPipeline.enableProfiling();
+            EvaluationPipeline.resetProfiling();
+        }
+    }
 
     @BeforeEach
     void ensureLocale() {
@@ -488,6 +504,19 @@ public class BestMoveSearchTest {
                 "best-move-search-summary.txt",
                 List.of(summary.toHumanReadable())
         );
+
+        if (Boolean.getBoolean("chessengine.movegen.profile")) {
+            MoveGenerationStats stats = Engine.snapshotMoveGenerationStats();
+            System.out.printf(Locale.ROOT,
+                    "Move generation profiling: calls=%d cacheHits=%d generatedMoves=%d nanos=%d%n",
+                    stats.generationCalls(), stats.cacheHits(), stats.generatedMoves(), stats.generationNanos());
+        }
+        if (Boolean.getBoolean("chessengine.eval.profile")) {
+            EvaluationStats stats = EvaluationPipeline.snapshotProfiling();
+            System.out.printf(Locale.ROOT,
+                    "Evaluation profiling: refreshes=%d modulesEvaluated=%d nanos=%d%n",
+                    stats.refreshCalls(), stats.modulesEvaluated(), stats.refreshNanos());
+        }
     }
 
     private static final class DiagnosticAI extends AI {

@@ -58,6 +58,16 @@ public class Score {
     private boolean tablebaseBypassesEvaluation;
     @JsonIgnore
     private long tablebaseResultBoardHash = Long.MIN_VALUE;
+    @JsonIgnore
+    private long lastEvaluatedBoardHash = Long.MIN_VALUE;
+    @JsonIgnore
+    private int lastEvaluatedHalfmoveClock = Integer.MIN_VALUE;
+    @JsonIgnore
+    private int lastEvaluatedFullmoveNumber = Integer.MIN_VALUE;
+    @JsonIgnore
+    private GameStateEnum lastEvaluatedState;
+    @JsonIgnore
+    private boolean lastTablebaseServiceAvailable;
 
     public Score() {
         this(EvaluationWeights.identity());
@@ -176,6 +186,13 @@ public class Score {
 
     public void refresh(BitBoard bitBoard, GameStateEnum state) {
         Objects.requireNonNull(bitBoard, "bitBoard");
+        long boardHash = bitBoard.getBoardStateHash();
+        int halfmoveClock = bitBoard.getHalfmoveClock();
+        int fullmoveNumber = bitBoard.getFullmoveNumber();
+        boolean serviceAvailable = TABLEBASE_SERVICE != null;
+        if (canSkipRefresh(boardHash, halfmoveClock, fullmoveNumber, state, serviceAvailable)) {
+            return;
+        }
         if (evaluationContext == null) {
             evaluationContext = EvaluationContext.from(bitBoard, state);
         } else {
@@ -195,6 +212,7 @@ public class Score {
         if (!bypass) {
             evaluationPipeline.getBlendedScore();
         }
+        updateRefreshFingerprint(boardHash, halfmoveClock, fullmoveNumber, state);
     }
 
     public void applyMove(BitBoard bitBoard, int move, GameStateEnum state) {
@@ -210,12 +228,16 @@ public class Score {
         this.spareEvaluationContext = previous;
 
         boolean bypass = updateTablebaseState(bitBoard, next);
+        long boardHash = bitBoard.getBoardStateHash();
+        int halfmoveClock = bitBoard.getHalfmoveClock();
+        int fullmoveNumber = bitBoard.getFullmoveNumber();
 
         if (!evaluationPipeline.isInitialized()) {
             evaluationPipeline.initialize(next);
             if (!bypass) {
                 evaluationPipeline.getBlendedScore();
             }
+            updateRefreshFingerprint(boardHash, halfmoveClock, fullmoveNumber, state);
             return;
         }
 
@@ -224,6 +246,7 @@ public class Score {
             MoveContext moveContext = new MoveContext(move, previous, next);
             evaluationPipeline.applyMove(moveContext);
         }
+        updateRefreshFingerprint(boardHash, halfmoveClock, fullmoveNumber, state);
     }
 
     public void undoMove(BitBoard bitBoard, int move, GameStateEnum state) {
@@ -239,12 +262,16 @@ public class Score {
         this.spareEvaluationContext = previous;
 
         boolean bypass = updateTablebaseState(bitBoard, next);
+        long boardHash = bitBoard.getBoardStateHash();
+        int halfmoveClock = bitBoard.getHalfmoveClock();
+        int fullmoveNumber = bitBoard.getFullmoveNumber();
 
         if (!evaluationPipeline.isInitialized()) {
             evaluationPipeline.initialize(next);
             if (!bypass) {
                 evaluationPipeline.getBlendedScore();
             }
+            updateRefreshFingerprint(boardHash, halfmoveClock, fullmoveNumber, state);
             return;
         }
 
@@ -253,6 +280,7 @@ public class Score {
             MoveContext moveContext = new MoveContext(move, previous, next);
             evaluationPipeline.undoMove(moveContext);
         }
+        updateRefreshFingerprint(boardHash, halfmoveClock, fullmoveNumber, state);
     }
 
     private void synchronizePipeline(EvaluationContext context) {
@@ -364,6 +392,39 @@ public class Score {
         this.tablebaseCentipawn = null;
         this.tablebaseBypassesEvaluation = false;
         this.tablebaseResultBoardHash = Long.MIN_VALUE;
+    }
+
+    private boolean canSkipRefresh(long boardHash, int halfmoveClock, int fullmoveNumber, GameStateEnum state,
+                                   boolean serviceAvailable) {
+        if (evaluationContext == null || !evaluationPipeline.isInitialized()) {
+            return false;
+        }
+        if (serviceAvailable != lastTablebaseServiceAvailable) {
+            return false;
+        }
+        if (tablebaseBypassesEvaluation) {
+            if (!serviceAvailable || tablebaseResultBoardHash != boardHash) {
+                return false;
+            }
+        }
+        if (boardHash != lastEvaluatedBoardHash) {
+            return false;
+        }
+        if (halfmoveClock != lastEvaluatedHalfmoveClock) {
+            return false;
+        }
+        if (fullmoveNumber != lastEvaluatedFullmoveNumber) {
+            return false;
+        }
+        return Objects.equals(state, lastEvaluatedState);
+    }
+
+    private void updateRefreshFingerprint(long boardHash, int halfmoveClock, int fullmoveNumber, GameStateEnum state) {
+        this.lastEvaluatedBoardHash = boardHash;
+        this.lastEvaluatedHalfmoveClock = halfmoveClock;
+        this.lastEvaluatedFullmoveNumber = fullmoveNumber;
+        this.lastEvaluatedState = state;
+        this.lastTablebaseServiceAvailable = TABLEBASE_SERVICE != null;
     }
 
     public static int tablebaseToCentipawn(TablebaseResult result, boolean whiteToMove) {

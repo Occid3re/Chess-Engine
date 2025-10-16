@@ -1,0 +1,9 @@
+Evaluation profiling:
+  refreshCalls=112
+  modulesEvaluated=560
+  refreshNanos=6276853
+Move generation profiling:
+  generationCalls=397
+  cacheHits=325
+  generatedMoves=11690
+  generationNanos=9644665

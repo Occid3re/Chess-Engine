@@ -17,12 +17,14 @@ Track A — Evaluation Pipeline Speed
 1. **Baseline instrumentation**
    - Enable the existing logging hooks in `BestMoveSearchTest` and `AITest_QuiescenceAndTerminalInvariants` to record evaluation counts, quiescence hits, and time budget usage.
    - Record the outputs in a dated folder under `logs/test-runs/` for comparison.
+   - ✅ (2025-10-16) Added opt-in evaluation profiling via `EvaluationPipeline.enableProfiling()` / `-Dchessengine.eval.profile=true`, capturing refresh calls, modules touched, and wall-clock. `ProfilingBaselineCaptureTest` writes snapshots to `logs/test-runs/<label>/`.
 2. **Profile incremental modules**
    - Focus on `ActivityModule`, `PawnStructureModule`, and `computePositionalAdjustment` (noted in `Agents.md` as centralised orientation logic).
    - Use JFR with allocation profiling to ensure the cached helpers (`markRecalc`, `updateAttackCachesAfterChange`) are always hit after move application.
 3. **Reduce redundant recomputation**
    - Audit evaluation entry points (especially `Score.refresh`) for redundant calls inside iterative deepening; cache the blended scores when the board hash matches.
    - Verify correctness by rerunning `ScoreTablebaseIntegrationTest` and `MateSearchTest`.
+   - ✅ (2025-10-16) Introduced refresh fingerprinting in `Score.refresh/applyMove/undoMove` so unchanged hashes + clocks short-circuit without re-invoking the evaluation pipeline or Syzygy probes. Verified via `ScoreTablebaseIntegrationTest.refreshAvoidsRedundantTablebaseProbeWhenStateUnchanged`.
 4. **Tune data structures**
    - Inspect fastutil `IntArrayList` usage in evaluation helpers; confirm they reuse buffers instead of allocating.
    - If adjustments are made, stress-test with `AITest_MateThreatDiagnostics` (covers evaluation-heavy lines) and log deltas.
@@ -38,6 +40,8 @@ Track B — Legal Move Generation Speed
 2. **Measure generator hotspots**
    - Attach a sampling profiler to `BestMoveSearchTest#diagnoseNe4SearchHotSpot` (see `Agents.md`) to capture per-depth move generation time.
    - Log branching factors and per-depth node budgets (already emitted) for before/after comparisons.
+   - ✅ (2025-10-16) Added opt-in `Engine` instrumentation (`Engine.enableMoveGenerationProfiling()` / `snapshotMoveGenerationStats()`) to count generation calls, cache hits, total moves, and wall-clock without touching production hot paths. Guarded by `-Dchessengine.movegen.profile=true` for CLI usage.
+   - ✅ (2025-10-16) `BestMoveSearchTest` now prints aggregated profiling totals at suite teardown when the move/eval profilers are enabled, making it easy to grab counts from diagnostic runs.
 3. **Evaluate watcher-table impact**
    - Toggle `-Dchessengine.activity.linearScanFallback=true` (legacy scan) to contrast watcher-table performance during profiling.
    - Document findings; if watchers underperform in some scenarios, introduce targeted optimisations (e.g., reducing cache invalidation scope).
