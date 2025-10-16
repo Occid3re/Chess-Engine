@@ -139,6 +139,13 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
 * The engine now relies on `TimeManager` (under `ai/time/`) for soft/hard deadlines. Update UCI tests to expect the bullet promotion allocation of **250ms** (the Java planner now mirrors the conservative reserves used in `src/main/resources/py/lichess_bot.py`). Document any future tuning against that Python helper here so the two stay aligned.
 * `ScoreEvaluationTest.backwardPawnIsPenalized` now validates the pawn-structure view directly. The overall blended score remains neutral with current tuning, so assert against `PawnStructureModule.backwardPawnPenalty()` instead of a blended delta.
 ### 2025-10-16 Syzygy bridge verification
+* Current host `JAVA_HOME` points at `C:/Users/juliu/.jdks/openjdk-25`. Default Maven invocations therefore compile against Java 25, even though earlier sections document Java 21 for agents without that toolchain.
+* PowerShell tip: run the real Syzygy integration suite by delegating to `cmd.exe` so the `-D` flags survive PowerShell parsing, e.g.
+  ```powershell
+  cmd.exe /c ".\mvnw.cmd -Djava.version=25 -Dmaven.compiler.release=25 -Dmaven.compiler.enablePreview=true -DargLine=--enable-preview -Dchessengine.syzygy.nativeLibrary=C:\Development\Chess-Engine\target\classes\natives\win-x86_64\Release\JSyzygy.dll -Dchessengine.syzygy.paths=C:\Syzygy -Dtest=SyzygyRealIntegrationTest test"
+  ```
+* The run above completes the native bridge load but currently fails with `Syzygy outcome mismatch: expected WHITE to stay ahead (wdl=WIN)` (final WDL reports `BLACK`). Investigate tablebase follow-ups before expecting green.
+
 * Preconditions: real runs require the native bridge at `C:\Development\Chess-Engine\target\classes\natives\win-x86_64\Release\JSyzygy.dll` and the Syzygy tables under `C:\Syzygy` (with the 3-4-5 and 6-piece folders). Run tests with preview flags plus:
   ```bash
   .\mvnw.cmd -Djava.version=21 -Dmaven.compiler.release=21 -Dmaven.compiler.enablePreview=true -DargLine=--enable-preview -Dtest=SyzygyWinRegressionTest -Dchessengine.syzygy.nativeLibrary=C:\Development\Chess-Engine\target\classes\natives\win-x86_64\Release\JSyzygy.dll -Dchessengine.syzygy.paths=C:\Syzygy test
