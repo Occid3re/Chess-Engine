@@ -219,6 +219,10 @@ public class AI {
     private record TablebaseHit(double score, int bestMove, TablebaseResult result) {
     }
 
+    private record TablebaseContinuation(int move, double evaluation, TablebaseResult result,
+                                         boolean zeroingMove) {
+    }
+
     private record TablebaseInfo(int dtz, int dtm, int whiteWdlSign) {
         boolean hasDtz() { return dtz >= 0; }
     }
@@ -1948,39 +1952,183 @@ public class AI {
             return -1;
         }
 
+        int suggestedMove = -1;
+        TablebaseContinuation bestContinuation = null;
+
         if (parentResult != null) {
             Optional<SyzygyMove> suggestion = parentResult.recommendedMove();
             if (suggestion.isPresent()) {
-                int resolved = findSuggestedMove(legal, suggestion.get());
-                if (resolved != -1) {
-                    log.info(Move.convertIntToMove(resolved).toString());
-                    return resolved;
+                suggestedMove = findSuggestedMove(legal, suggestion.get());
+                if (suggestedMove != -1) {
+                    Optional<TablebaseContinuation> continuation = evaluateTablebaseContinuation(simulatorEngine, suggestedMove);
+                    if (continuation.isPresent()) {
+                        TablebaseContinuation candidate = continuation.get();
+                        if (isContinuationConsistent(parentResult, candidate)) {
+                            return candidate.move();
+                        }
+                        bestContinuation = candidate;
+                    }
                 }
             }
         }
 
-
-        double bestScore = parentIsWhite ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
-        int bestMove = -1;
         for (int i = 0; i < legal.size(); i++) {
             int move = legal.getInt(i);
-            simulatorEngine.performMove(move);
-            double candidate;
-            try {
-                candidate = evaluateTablebaseChild(simulatorEngine, parentIsWhite);
-            } finally {
-                simulatorEngine.undoLastMove();
-            }
-            if (Double.isNaN(candidate)) {
+            if (move == suggestedMove) {
                 continue;
             }
-            boolean better = parentIsWhite ? candidate > bestScore : candidate < bestScore;
-            if (better) {
-                bestScore = candidate;
-                bestMove = move;
+            Optional<TablebaseContinuation> continuation = evaluateTablebaseContinuation(simulatorEngine, move);
+            if (continuation.isEmpty()) {
+                continue;
+            }
+            TablebaseContinuation candidate = continuation.get();
+            if (bestContinuation == null
+                    || isContinuationBetter(parentIsWhite, candidate, bestContinuation, parentResult)) {
+                bestContinuation = candidate;
             }
         }
-        return bestMove;
+        return bestContinuation != null ? bestContinuation.move() : -1;
+    }
+
+    private Optional<TablebaseContinuation> evaluateTablebaseContinuation(Engine simulatorEngine, int move) {
+        boolean zeroing = MoveHelper.isCapture(move) || MoveHelper.derivePieceTypeBits(move) == 1;
+        simulatorEngine.performMove(move);
+        try {
+            Optional<TablebaseResult> childResult = resolveExactTablebaseResult(simulatorEngine);
+            if (childResult.isEmpty()) {
+                return Optional.empty();
+            }
+            TablebaseResult result = childResult.get();
+            double evaluation = Score.tablebaseToEvaluation(result, simulatorEngine.whitesTurn(),
+                    simulatorEngine.getGameState().getHalfmoveClock());
+            return Optional.of(new TablebaseContinuation(move, evaluation, result, zeroing));
+        } finally {
+            simulatorEngine.undoLastMove();
+        }
+    }
+
+    private Optional<TablebaseResult> resolveExactTablebaseResult(Engine engine) {
+        TablebaseResult result = engine.getGameState().getLastTablebaseResult().orElse(null);
+        if (tablebaseService != null) {
+            BitBoard snapshot = new BitBoard(engine.getBitBoard());
+            Optional<SyzygyProbeResult> probe = tablebaseService.probe(snapshot);
+            if (probe.isPresent()) {
+                result = TablebaseResult.from(probe.get());
+                engine.getGameState().setLastTablebaseResult(result);
+            }
+        }
+        if (!isExactWdl(result)) {
+            return Optional.empty();
+        }
+        return Optional.of(result);
+    }
+
+    private boolean isContinuationConsistent(TablebaseResult parentResult, TablebaseContinuation continuation) {
+        if (parentResult == null || continuation == null) {
+            return false;
+        }
+        int parentSign = Integer.signum(parentResult.wdl().score());
+        int childSign = Integer.signum(continuation.result().wdl().score());
+        if (parentSign == 0) {
+            return childSign == 0;
+        }
+        return parentSign == -childSign;
+    }
+
+    private boolean isContinuationBetter(boolean parentIsWhite,
+                                         TablebaseContinuation candidate,
+                                         TablebaseContinuation incumbent,
+                                         TablebaseResult parentResult) {
+        if (incumbent == null) {
+            return true;
+        }
+        if (candidate == null) {
+            return false;
+        }
+
+        double candidateEval = candidate.evaluation();
+        double incumbentEval = incumbent.evaluation();
+        if (!Double.isFinite(candidateEval)) {
+            return false;
+        }
+        if (!Double.isFinite(incumbentEval)) {
+            return true;
+        }
+
+        double diff = candidateEval - incumbentEval;
+        if (Math.abs(diff) > TB_TIE_EPSILON) {
+            return parentIsWhite ? diff > 0 : diff < 0;
+        }
+
+        int outcome = parentResult != null ? Integer.signum(parentResult.wdl().score()) : 0;
+        return switch (outcome) {
+            case 1 -> preferWinningContinuation(candidate, incumbent);
+            case -1 -> preferDefensiveContinuation(candidate, incumbent);
+            case 0 -> preferDrawingContinuation(candidate, incumbent);
+            default -> false;
+        };
+    }
+
+    private boolean preferWinningContinuation(TablebaseContinuation candidate, TablebaseContinuation incumbent) {
+        int candidateDtz = normaliseDistance(candidate.result().dtz(), Integer.MAX_VALUE);
+        int incumbentDtz = normaliseDistance(incumbent.result().dtz(), Integer.MAX_VALUE);
+        if (candidateDtz != incumbentDtz) {
+            return candidateDtz < incumbentDtz;
+        }
+
+        int candidateDtm = normaliseDistance(candidate.result().dtm(), Integer.MAX_VALUE);
+        int incumbentDtm = normaliseDistance(incumbent.result().dtm(), Integer.MAX_VALUE);
+        if (candidateDtm != incumbentDtm) {
+            return candidateDtm < incumbentDtm;
+        }
+
+        if (candidate.zeroingMove() != incumbent.zeroingMove()) {
+            return candidate.zeroingMove();
+        }
+        return false;
+    }
+
+    private boolean preferDefensiveContinuation(TablebaseContinuation candidate, TablebaseContinuation incumbent) {
+        int candidateDtz = normaliseDistance(candidate.result().dtz(), Integer.MIN_VALUE);
+        int incumbentDtz = normaliseDistance(incumbent.result().dtz(), Integer.MIN_VALUE);
+        if (candidateDtz != incumbentDtz) {
+            return candidateDtz > incumbentDtz;
+        }
+
+        int candidateDtm = normaliseDistance(candidate.result().dtm(), Integer.MIN_VALUE);
+        int incumbentDtm = normaliseDistance(incumbent.result().dtm(), Integer.MIN_VALUE);
+        if (candidateDtm != incumbentDtm) {
+            return candidateDtm > incumbentDtm;
+        }
+
+        if (candidate.zeroingMove() != incumbent.zeroingMove()) {
+            return !candidate.zeroingMove();
+        }
+        return false;
+    }
+
+    private boolean preferDrawingContinuation(TablebaseContinuation candidate, TablebaseContinuation incumbent) {
+        int candidateDtz = normaliseDistance(candidate.result().dtz(), Integer.MAX_VALUE);
+        int incumbentDtz = normaliseDistance(incumbent.result().dtz(), Integer.MAX_VALUE);
+        if (candidateDtz != incumbentDtz) {
+            return candidateDtz < incumbentDtz;
+        }
+        if (candidate.zeroingMove() != incumbent.zeroingMove()) {
+            return candidate.zeroingMove();
+        }
+        int candidateDtm = normaliseDistance(candidate.result().dtm(), Integer.MAX_VALUE);
+        int incumbentDtm = normaliseDistance(incumbent.result().dtm(), Integer.MAX_VALUE);
+        if (candidateDtm != incumbentDtm) {
+            return candidateDtm < incumbentDtm;
+        }
+        return false;
+    }
+
+    private int normaliseDistance(OptionalInt value, int fallback) {
+        if (value == null || value.isEmpty()) {
+            return fallback;
+        }
+        return Math.abs(value.getAsInt());
     }
 
     private int findSuggestedMove(IntArrayList legal, SyzygyMove suggestion) {
@@ -2035,19 +2183,11 @@ public class AI {
     }
 
     private double evaluateTablebaseChild(Engine simulatorEngine, boolean parentIsWhite) {
-        TablebaseResult childResult = simulatorEngine.getGameState().getLastTablebaseResult().orElse(null);
-        if (tablebaseService != null) {
-            BitBoard snapshot = new BitBoard(simulatorEngine.getBitBoard());
-            Optional<SyzygyProbeResult> probe = tablebaseService.probe(snapshot);
-            if (probe.isPresent()) {
-                childResult = TablebaseResult.from(probe.get());
-                simulatorEngine.getGameState().setLastTablebaseResult(childResult);
-            }
-        }
-        if (childResult == null || !isExactWdl(childResult)) {
+        Optional<TablebaseResult> childResult = resolveExactTablebaseResult(simulatorEngine);
+        if (childResult.isEmpty()) {
             return Double.NaN;
         }
-        double whitePerspective = Score.tablebaseToEvaluation(childResult, simulatorEngine.whitesTurn(),
+        double whitePerspective = Score.tablebaseToEvaluation(childResult.get(), simulatorEngine.whitesTurn(),
                 simulatorEngine.getGameState().getHalfmoveClock());
         return whitePerspective;
     }
