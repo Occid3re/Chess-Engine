@@ -138,3 +138,28 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
 ### 2025-10-07 Time management + evaluation notes
 * The engine now relies on `TimeManager` (under `ai/time/`) for soft/hard deadlines. Update UCI tests to expect the bullet promotion allocation of **250ms** (the Java planner now mirrors the conservative reserves used in `src/main/resources/py/lichess_bot.py`). Document any future tuning against that Python helper here so the two stay aligned.
 * `ScoreEvaluationTest.backwardPawnIsPenalized` now validates the pawn-structure view directly. The overall blended score remains neutral with current tuning, so assert against `PawnStructureModule.backwardPawnPenalty()` instead of a blended delta.
+### 2025-10-16 Syzygy bridge verification
+* Preconditions: real runs require the native bridge at `C:\Development\Chess-Engine\target\classes\natives\win-x86_64\Release\JSyzygy.dll` and the Syzygy tables under `C:\Syzygy` (with the 3-4-5 and 6-piece folders). Run tests with preview flags plus:
+  ```bash
+  .\mvnw.cmd -Djava.version=21 -Dmaven.compiler.release=21 -Dmaven.compiler.enablePreview=true -DargLine=--enable-preview -Dtest=SyzygyWinRegressionTest -Dchessengine.syzygy.nativeLibrary=C:\Development\Chess-Engine\target\classes\natives\win-x86_64\Release\JSyzygy.dll -Dchessengine.syzygy.paths=C:\Syzygy test
+  ```
+* What worked: `SyzygyWinRegressionTest` passed and the logs confirmed the bridge loaded `JSyzygy.dll`, expanded the path into `C:\Syzygy\3-4-5-*` and `C:\Syzygy\6-*`, and reported `supportedPieces=6` (the current TB set) even with `maxPieces=7`.
+* WDL/DTZ check: probing `3k4/4p3/8/2K5/8/3BN3/8/8 w - - 0 1` through a temporary runner returned `wdl=WIN`, `dtz=7`, no `dtm`, and a move recommendation of `c5c6`. This matches the adjustment rules in `Tables.probe` (cursed/blessed handling stays untouched when WDL and DTZ agree).
+* Edge cases: the JVM emits `System::load` native-access warnings; suppress with `--enable-native-access=ALL-UNNAMED` if a future run locks this down. Reloading different directories in the same process is blocked (`SyzygyBridge.load` keeps `tbLargest`); restart the JVM to swap TB roots.
+* Fallback: when the properties/env vars are missing, `TestSyzygySupport.isSyzygyConfigured()` stays `false` so tablebase tests auto-skip and `SyzygyTablebaseService` falls back to its no-op client, keeping CI/dev flows safe without TBs.
+* Real vs mock coverage: use `SyzygyRealIntegrationTest` for native-backed verification and `SyzygyMockRegressionTest` for CI-friendly checks. Both expect Java preview flags; the real test also needs the properties above. Example:
+  ```bash
+  .\mvnw.cmd -Djava.version=25 -Dmaven.compiler.release=25 -Dmaven.compiler.enablePreview=true -DargLine=--enable-preview \
+      -Dchessengine.syzygy.nativeLibrary=C:\Development\Chess-Engine\target\classes\natives\win-x86_64\Release\JSyzygy.dll \
+      -Dchessengine.syzygy.paths=C:\Syzygy -Dtest=SyzygyRealIntegrationTest test
+  ```
+  Mock path:
+  ```bash
+  .\mvnw.cmd -Djava.version=25 -Dmaven.compiler.release=25 -Dmaven.compiler.enablePreview=true -DargLine=--enable-preview -Dtest=SyzygyMockRegressionTest test
+  ```
+* `BestMoveSearchTest` now assumes the same Syzygy properties when present (it auto-skips if they are missing) and expects the updated move list (`Nxg4` is now valid for `3r2k1/...`). Run it with the native properties for full diagnostics; omit them to confirm the skip:
+  ```bash
+  .\mvnw.cmd -Djava.version=25 -Dmaven.compiler.release=25 -Dmaven.compiler.enablePreview=true -DargLine=--enable-preview \
+      -Dchessengine.syzygy.nativeLibrary=C:\Development\Chess-Engine\target\classes\natives\win-x86_64\Release\JSyzygy.dll \
+      -Dchessengine.syzygy.paths=C:\Syzygy -Dtest=BestMoveSearchTest test
+  ```
