@@ -88,22 +88,27 @@ final class Tables {
             if (dtzWdl == SyzygyWdl.UNKNOWN) {
                 log.debug("Syzygy DTZ probe returned unknown WDL slice (dtzRaw={})", dtzRaw);
             } else {
-                if (wdl != dtzWdl) {
-                    if (wdl == SyzygyWdl.WIN && dtzWdl == SyzygyWdl.DRAW) {
-                        wdl = SyzygyWdl.CURSED_WIN;
-                    } else if (wdl == SyzygyWdl.LOSS && dtzWdl == SyzygyWdl.DRAW) {
-                        wdl = SyzygyWdl.BLESSED_LOSS;
-                    } else if ((wdl == SyzygyWdl.CURSED_WIN || wdl == SyzygyWdl.BLESSED_LOSS)
-                            && dtzWdl == SyzygyWdl.DRAW) {
-                        // Keep the existing 50-move aware classification.
-                    } else {
-                        log.debug("Syzygy DTZ probe mismatch (wdlValue={}, dtzRaw={})", wdlValue, dtzRaw);
-                        wdl = dtzWdl;
+                Optional<SyzygyMove> decodedMove = decodeRecommendedMove(dtzRaw);
+                if (decodedMove.isPresent()) {
+                    if (wdl != dtzWdl) {
+                        if (wdl == SyzygyWdl.WIN && dtzWdl == SyzygyWdl.DRAW) {
+                            wdl = SyzygyWdl.CURSED_WIN;
+                        } else if (wdl == SyzygyWdl.LOSS && dtzWdl == SyzygyWdl.DRAW) {
+                            wdl = SyzygyWdl.BLESSED_LOSS;
+                        } else if ((wdl == SyzygyWdl.CURSED_WIN || wdl == SyzygyWdl.BLESSED_LOSS)
+                                && dtzWdl == SyzygyWdl.DRAW) {
+                            // Keep the existing 50-move aware classification.
+                        } else {
+                            log.debug("Syzygy DTZ probe mismatch (wdlValue={}, dtzRaw={})", wdlValue, dtzRaw);
+                            wdl = dtzWdl;
+                        }
                     }
+                } else if (wdl != dtzWdl) {
+                    log.debug("Ignoring DTZ WDL {} without recommended move (wdlValue={}, dtzRaw={})", dtzWdl, wdlValue, dtzRaw);
                 }
                 int distance = SyzygyConstants.distanceToZero(dtzRaw);
                 dtz = OptionalInt.of(distance);
-                recommendedMove = decodeRecommendedMove(dtzRaw);
+                recommendedMove = decodedMove;
             }
         } else {
             log.debug("Syzygy DTZ probe failed for board {}", board);
@@ -115,6 +120,10 @@ final class Tables {
     private Optional<SyzygyMove> decodeRecommendedMove(int dtzRaw) {
         int rawFrom = SyzygyConstants.fromSquare(dtzRaw);
         int rawTo = SyzygyConstants.toSquare(dtzRaw);
+        if (rawFrom == 0 && rawTo == 0 && SyzygyConstants.distanceToZero(dtzRaw) == 0) {
+            // Syzygy returns a zeroed move when the position is already terminal.
+            return Optional.empty();
+        }
         if (rawFrom < 0 || rawTo < 0) {
             return Optional.empty();
         }
