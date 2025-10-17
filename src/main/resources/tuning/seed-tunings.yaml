@@ -150,7 +150,7 @@ population:
       search.aspMaxRetriesVolThresholdMed: 256
       search.aspMaxRetriesVolBonusMed: 1
       search.aspMaxRetriesDepthOffset: 16
-      search.aspMaxRetriesDivisor: 1
+      search.aspMaxRetriesDepthDivisor : 1
       search.aspMaxRetriesMomentumDivisor: 3
       search.aspMaxRetriesMin: 1
       search.aspMaxRetriesMax: 2
