@@ -2017,6 +2017,7 @@ public class AI {
                 engine.getGameState().setLastTablebaseResult(result);
             }
         }
+
         if (!isExactWdl(result)) {
             return Optional.empty();
         }
