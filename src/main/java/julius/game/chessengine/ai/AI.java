@@ -113,9 +113,6 @@ public class AI {
     /**
      * Limit how many root moves we fan out in parallel to avoid oversubscription.
      */
-    private static final int ROOT_PARALLEL_LIMIT =
-            Integer.getInteger("chessengine.rootParallelLimit", 24);
-
     public static final double EXIT_FLAG = Double.MAX_VALUE;
 
     /**
@@ -136,6 +133,9 @@ public class AI {
     private int captureTranspositionTableCapacity;
 
     private static final int NUM_KILLER_MOVES = 2;
+
+    @Getter
+    private int rootParallelLimit;
 
     /**
      * Global heuristic tables shared across searches. Search threads work with
@@ -324,6 +324,7 @@ public class AI {
         this.maxDepth = this.tuning.maxDepth();
         this.timeManager = new TimeManager(this.tuning.timeLimitMillis());
         this.useNullMovePruning = this.tuning.nullMovePruning();
+        this.rootParallelLimit = Math.max(1, this.tuning.rootParallelLimit());
 
         log.info("### SearchThreads = {}, LazySmpThreads = {}", searchThreads, lazySmpThreads);
 
@@ -1401,7 +1402,7 @@ public class AI {
         IntArrayList orderedMoves = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
         if (orderedMoves.isEmpty()) return RootSearchResult.completed(null);
 
-        int baseFanout = Math.min(ROOT_PARALLEL_LIMIT, orderedMoves.size() - 1);
+        int baseFanout = Math.min(rootParallelLimit, Math.max(0, orderedMoves.size() - 1));
         ExecutorService pool = this.searchPool;
         int helperCapacity = 0;
         if (pool instanceof ThreadPoolExecutor) {
@@ -3973,4 +3974,3 @@ public class AI {
 
     }
 }
-

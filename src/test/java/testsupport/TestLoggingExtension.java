@@ -20,6 +20,13 @@ public class TestLoggingExtension implements BeforeTestExecutionCallback, AfterT
     private static final ExtensionContext.Namespace NAMESPACE = ExtensionContext.Namespace.create(TestLoggingExtension.class);
     private static final String START_TIME = "start-time";
 
+    static {
+        System.setProperty("chessengine.searchThreads", System.getProperty("chessengine.searchThreads", "1"));
+        System.setProperty("chessengine.lazySmpThreads", System.getProperty("chessengine.lazySmpThreads", "1"));
+        System.setProperty("chessengine.rootParallelLimit", System.getProperty("chessengine.rootParallelLimit", "24"));
+        System.setProperty("chessengine.tt.mb", System.getProperty("chessengine.tt.mb", "64"));
+    }
+
     @Override
     public void beforeTestExecution(ExtensionContext context) {
         log.info(">>> START {}", describe(context));

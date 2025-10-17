@@ -228,8 +228,10 @@ class AITest {
     private static int computeExpectedCapacity(int hashSizeMb, boolean mainTable)
             throws NoSuchMethodException, InvocationTargetException, IllegalAccessException {
         long totalBytes = Math.max(1L, (long) hashSizeMb * 1024L * 1024L);
-        double totalWeight = 2.0 + 1.0;
-        long mainBudget = Math.max(1L, (long) (totalBytes * (2.0 / totalWeight)));
+        double mainWeight = julius.game.chessengine.tuning.Tuning.searchTtMainWeight();
+        double captureWeight = julius.game.chessengine.tuning.Tuning.searchTtCaptureWeight();
+        double totalWeight = mainWeight + captureWeight;
+        long mainBudget = Math.max(1L, (long) (totalBytes * (mainWeight / totalWeight)));
         long captureBudget = Math.max(1L, totalBytes - mainBudget);
         if (captureBudget <= 0) {
             captureBudget = 1L;
