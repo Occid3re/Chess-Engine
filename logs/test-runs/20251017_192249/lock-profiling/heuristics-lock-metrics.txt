@@ -1,0 +1,10 @@
+Best move scenario: 3R4/8/P4pk1/rP4p1/8/8/1K6/8 w - - 3 65
+Concurrency: searchThreads=16, lazySmpThreads=8, rootParallelLimit=72, ttMb=256
+Run wall-clock: ~3.97 s
+Heuristics lock metrics (from AI.heuristicsLockMetrics via reflection):
+  write acquisitions: 315
+  read acquisitions: 19
+  max write wait: 0.460 ms
+  max read wait: 0.615 ms
+  optimistic snapshots: 149
+  optimistic fallbacks: 19

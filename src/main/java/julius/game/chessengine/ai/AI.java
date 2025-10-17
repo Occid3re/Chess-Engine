@@ -66,6 +66,15 @@ public class AI {
 
     private Thread calculationCoordinator;
     private Thread[] calculationThreads;
+    private final Object workerLifecycleLock = new Object();
+    private volatile boolean workerShutdown;
+    private static final String WORKER_STATS_PROPERTY = "chessengine.diagnostics.workerStats";
+    private static final String ROOT_FANOUT_PROPERTY = "chessengine.diagnostics.rootFanout";
+    private static final String ROOT_FANOUT_RATIO_PROPERTY = "chessengine.rootFanoutRatio";
+    private final boolean workerStatsEnabled;
+    private final boolean rootFanoutStatsEnabled;
+    private final double rootFanoutRatio;
+    private WorkerInstrumentation workerInstrumentation;
 
     private static final int ABS_PLY_LIMIT_MARGIN = 32;
 
@@ -236,6 +245,13 @@ public class AI {
     private final BlockingQueue<SearchJob> searchJobs = new LinkedBlockingQueue<>();
 
     private record CalculationRequest(long boardHash, boolean stop) {
+        static CalculationRequest work(long boardHash) {
+            return new CalculationRequest(boardHash, false);
+        }
+
+        static CalculationRequest stopSignal() {
+            return new CalculationRequest(0L, true);
+        }
     }
 
     private static final class CalculationQueue extends LinkedBlockingQueue<CalculationRequest> {
@@ -325,6 +341,23 @@ public class AI {
         this.timeManager = new TimeManager(this.tuning.timeLimitMillis());
         this.useNullMovePruning = this.tuning.nullMovePruning();
         this.rootParallelLimit = Math.max(1, this.tuning.rootParallelLimit());
+        this.workerStatsEnabled = Boolean.parseBoolean(System.getProperty(WORKER_STATS_PROPERTY, "false"));
+        this.rootFanoutStatsEnabled = Boolean.parseBoolean(System.getProperty(ROOT_FANOUT_PROPERTY, "false"));
+        double ratioCandidate;
+        try {
+            ratioCandidate = Double.parseDouble(System.getProperty(ROOT_FANOUT_RATIO_PROPERTY, "1.0"));
+        } catch (NumberFormatException ex) {
+            ratioCandidate = 1.0d;
+        }
+        if (Double.isNaN(ratioCandidate) || ratioCandidate <= 0d) {
+            ratioCandidate = 1.0d;
+        } else if (ratioCandidate > 1.0d) {
+            ratioCandidate = 1.0d;
+        }
+        this.rootFanoutRatio = ratioCandidate;
+        this.workerInstrumentation = workerStatsEnabled && this.lazySmpThreads > 0
+                ? new WorkerInstrumentation(this.lazySmpThreads)
+                : null;
 
         log.info("### SearchThreads = {}, LazySmpThreads = {}", searchThreads, lazySmpThreads);
 
@@ -650,29 +683,57 @@ public class AI {
 
     private void startCalculationThread() {
         keepCalculating = true;
-
-        if (calculationCoordinator != null && calculationCoordinator.isAlive()) {
-            enqueueCalculationRequestIfNeeded();
-            return;
-        }
-
-        calculationRequests.clear();
-        searchJobs.clear();
-
-        calculationCoordinator = new Thread(this::calculateLine, "Simulator-Dispatcher");
-        calculationCoordinator.setDaemon(true);
-        calculationCoordinator.start();
-
-        calculationThreads = new Thread[lazySmpThreads];
-        for (int i = 0; i < lazySmpThreads; i++) {
-            final int workerIndex = i;
-            Thread worker = new Thread(() -> searchWorkerLoop(workerIndex), "Simulator-" + workerIndex);
-            worker.setDaemon(true);
-            worker.start();
-            calculationThreads[i] = worker;
-        }
-
+        ensureCalculationThreadsRunning();
         enqueueCalculationRequestIfNeeded();
+    }
+
+    private void ensureCalculationThreadsRunning() {
+        synchronized (workerLifecycleLock) {
+            if (workerShutdown) {
+                workerShutdown = false;
+            }
+
+            if (calculationCoordinator == null || !calculationCoordinator.isAlive()) {
+                calculationRequests.clear();
+                searchJobs.clear();
+                calculationCoordinator = createCoordinatorThread();
+                calculationCoordinator.start();
+            }
+
+            if (calculationThreads == null) {
+                calculationThreads = new Thread[lazySmpThreads];
+            } else if (calculationThreads.length < lazySmpThreads) {
+                calculationThreads = Arrays.copyOf(calculationThreads, lazySmpThreads);
+            }
+            if (workerStatsEnabled) {
+                if (workerInstrumentation == null) {
+                    workerInstrumentation = new WorkerInstrumentation(lazySmpThreads);
+                } else {
+                    workerInstrumentation.ensureCapacity(lazySmpThreads);
+                }
+            }
+
+            for (int i = 0; i < lazySmpThreads; i++) {
+                Thread worker = calculationThreads[i];
+                if (worker == null || !worker.isAlive()) {
+                    Thread newWorker = createWorkerThread(i);
+                    newWorker.start();
+                    calculationThreads[i] = newWorker;
+                }
+            }
+        }
+    }
+
+    private Thread createCoordinatorThread() {
+        Thread dispatcher = new Thread(this::calculateLine, "Simulator-Dispatcher");
+        dispatcher.setDaemon(true);
+        return dispatcher;
+    }
+
+    private Thread createWorkerThread(int workerIndex) {
+        Thread worker = new Thread(() -> searchWorkerLoop(workerIndex), "Simulator-" + workerIndex);
+        worker.setDaemon(true);
+        return worker;
     }
 
     private void enqueueCalculationRequestIfNeeded() {
@@ -695,6 +756,11 @@ public class AI {
         }
 
         while (!Thread.currentThread().isInterrupted()) {
+            if (workerShutdown) {
+                break;
+            }
+            WorkerInstrumentation instrumentation = workerStatsEnabled ? workerInstrumentation : null;
+            long idleStart = instrumentation != null ? System.nanoTime() : 0L;
             SearchJob job;
             try {
                 job = searchJobs.take();
@@ -703,7 +769,11 @@ public class AI {
                 break;
             }
 
-            if (job.stop || !keepCalculating) {
+            if (instrumentation != null) {
+                instrumentation.recordIdle(workerIndex, System.nanoTime() - idleStart);
+            }
+
+            if (job.stop || workerShutdown) {
                 break;
             }
 
@@ -712,11 +782,27 @@ public class AI {
                 continue;
             }
 
+            if (!keepCalculating) {
+                task.requestStop();
+                task.workerDone();
+                if (instrumentation != null) {
+                    instrumentation.recordActive(workerIndex, 0L);
+                    instrumentation.incrementJobs(workerIndex);
+                }
+                continue;
+            }
+
+            long activeStart = instrumentation != null ? System.nanoTime() : 0L;
+
             try {
                 simulator.copyFrom(task.getRootSnapshot());
             } catch (RuntimeException e) {
                 log.error("Failed to sync simulation for worker {}", workerIndex, e);
                 task.workerDone();
+                if (instrumentation != null) {
+                    instrumentation.recordActive(workerIndex, System.nanoTime() - activeStart);
+                    instrumentation.incrementJobs(workerIndex);
+                }
                 continue;
             }
 
@@ -730,6 +816,10 @@ public class AI {
             } finally {
                 threadSearchTask.remove();
                 task.workerDone();
+                if (instrumentation != null) {
+                    instrumentation.recordActive(workerIndex, System.nanoTime() - activeStart);
+                    instrumentation.incrementJobs(workerIndex);
+                }
             }
         }
     }
@@ -752,7 +842,7 @@ public class AI {
         long hash = mainEngine.getBoardStateHash();
         currentBoardState = hash;
         calculationRequests.clear();
-        calculationRequests.offer(new CalculationRequest(hash, false));
+        calculationRequests.offer(CalculationRequest.work(hash));
     }
 
     private void iterativeDeepening(SearchTask task, Engine simulatorEngine, SplittableRandom rng) {
@@ -875,6 +965,9 @@ public class AI {
     }
 
     private void mergeThreadHeuristics(Heuristics heuristics) {
+        if (!heuristics.hasPendingUpdates()) {
+            return;
+        }
         long stamp = acquireWriteLock();
         try {
             heuristics.mergeInto(globalHeuristics);
@@ -1060,30 +1153,58 @@ public class AI {
     }
 
     public void stopCalculation() {
-        keepCalculating = false;
-
         SearchTask task = activeSearch.get();
-        if (task != null) task.requestStop();
-
-        calculationRequests.clear();
-        searchJobs.clear();
-        calculationRequests.offer(new CalculationRequest(0L, true));
-        for (int i = 0; i < lazySmpThreads; i++) {
-            searchJobs.offer(SearchJob.stopSignal());
+        if (task != null) {
+            task.requestStop();
         }
 
-        if (calculationThreads != null) {
-            for (Thread worker : calculationThreads) {
-                if (worker != null && worker.isAlive()) worker.interrupt();
+        keepCalculating = false;
+        calculationRequests.clear();
+
+        if (task != null) {
+            task.awaitCompletion();
+            while (activeSearch.get() == task && !activeSearch.compareAndSet(task, null)) {
+                Thread.yield();
+            }
+        } else {
+            activeSearch.set(null);
+        }
+
+        calculatedLine = Collections.synchronizedList(new ArrayList<>());
+        currentBestMove = -1;
+        bestMoveForHash = -1;
+        previousBestMove = -1;
+        previousBestMoveHash = -1;
+        searchResultReady = false;
+    }
+
+    private void shutdownWorkerThreads() {
+        Thread coordinatorSnapshot;
+        Thread[] workersSnapshot;
+
+        synchronized (workerLifecycleLock) {
+            workerShutdown = true;
+            calculationRequests.clear();
+            calculationRequests.offer(CalculationRequest.stopSignal());
+            searchJobs.clear();
+
+            coordinatorSnapshot = calculationCoordinator;
+            workersSnapshot = calculationThreads != null ? calculationThreads.clone() : null;
+
+            if (workersSnapshot != null) {
+                for (Thread worker : workersSnapshot) {
+                    if (worker != null && worker.isAlive()) {
+                        searchJobs.offer(SearchJob.stopSignal());
+                    }
+                }
             }
         }
-        if (calculationCoordinator != null && calculationCoordinator.isAlive()) {
-            calculationCoordinator.interrupt();
-        }
 
-        if (calculationThreads != null) {
-            for (Thread worker : calculationThreads) {
-                if (worker == null) continue;
+        if (workersSnapshot != null) {
+            for (Thread worker : workersSnapshot) {
+                if (worker == null) {
+                    continue;
+                }
                 try {
                     worker.join();
                 } catch (InterruptedException e) {
@@ -1091,26 +1212,21 @@ public class AI {
                     log.error("Thread interruption error", e);
                 }
             }
-            calculationThreads = null;
         }
 
-        if (calculationCoordinator != null) {
+        if (coordinatorSnapshot != null) {
             try {
-                calculationCoordinator.join();
+                coordinatorSnapshot.join();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 log.error("Thread interruption error", e);
             }
-            calculationCoordinator = null;
         }
 
-        activeSearch.set(null);
-        calculatedLine = Collections.synchronizedList(new ArrayList<>());
-        currentBestMove = -1;
-        bestMoveForHash = -1;
-        previousBestMove = -1;
-        previousBestMoveHash = -1;
-        searchResultReady = false;
+        synchronized (workerLifecycleLock) {
+            calculationThreads = null;
+            calculationCoordinator = null;
+        }
     }
 
 
@@ -1139,6 +1255,7 @@ public class AI {
 
     public void shutdown() {
         stopCalculation();
+        shutdownWorkerThreads();
 
         if (scheduler != null && !scheduler.isShutdown()) {
             scheduler.shutdownNow();
@@ -1205,8 +1322,16 @@ public class AI {
 
             calculationRequests.markProcessingStart();
             try {
-                if (request.stop || !keepCalculating) {
-                    break;
+                if (request.stop) {
+                    if (workerShutdown) {
+                        break;
+                    }
+                    continue;
+                }
+
+                if (!keepCalculating) {
+                    lastObservedHash = Long.MIN_VALUE;
+                    continue;
                 }
 
                 long targetHash = request.boardHash;
@@ -1308,8 +1433,14 @@ public class AI {
 
     void completeSearchTask(SearchTask task, Engine simulatorEngine) {
         clearStaticEvalCache();
-        if (task == null) return;
-        if (currentBoardState != task.getBoardHash()) return;
+        if (task == null) {
+            logAndResetWorkerInstrumentation();
+            return;
+        }
+        if (currentBoardState != task.getBoardHash()) {
+            logAndResetWorkerInstrumentation();
+            return;
+        }
 
         BestMoveDepth best = task.getBest();
         int move = best.move;
@@ -1327,6 +1458,7 @@ public class AI {
             } else {
                 this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
             }
+            logAndResetWorkerInstrumentation();
             return;
         }
 
@@ -1337,6 +1469,7 @@ public class AI {
             previousBestMoveHash = task.getBoardHash();
             searchResultReady = true;
             fillCalculatedLine(simulatorEngine);
+            logAndResetWorkerInstrumentation();
             return;
         }
 
@@ -1346,12 +1479,23 @@ public class AI {
         previousBestMoveHash = -1;
         searchResultReady = false;
         this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
+        logAndResetWorkerInstrumentation();
     }
 
     private boolean isMoveStillLegal(Engine simulatorEngine, int move) {
         if (simulatorEngine.getGameState().isTerminal()) return false;
         IntArrayList legalMoves = simulatorEngine.getAllLegalMoves();
         return MoveContainerUtils.contains(legalMoves, move);
+    }
+
+    private void logAndResetWorkerInstrumentation() {
+        if (!workerStatsEnabled || workerInstrumentation == null) {
+            return;
+        }
+        String summary = workerInstrumentation.buildSummaryAndReset(lazySmpThreads);
+        if (!summary.isEmpty()) {
+            log.info("Lazy SMP worker diagnostics: {}", summary);
+        }
     }
 
     private void maybeRotateRootMoves(IntArrayList moves, SplittableRandom rng) {
@@ -1405,8 +1549,8 @@ public class AI {
         int baseFanout = Math.min(rootParallelLimit, Math.max(0, orderedMoves.size() - 1));
         ExecutorService pool = this.searchPool;
         int helperCapacity = 0;
-        if (pool instanceof ThreadPoolExecutor) {
-            helperCapacity = ((ThreadPoolExecutor) pool).getMaximumPoolSize();
+        if (pool instanceof ThreadPoolExecutor executor) {
+            helperCapacity = executor.getMaximumPoolSize();
         } else if (searchThreads > 0) {
             helperCapacity = searchThreads;
         }
@@ -1415,7 +1559,14 @@ public class AI {
             return getBestMove(simulatorEngine, isWhitesTurn, depth, deadline, alpha, beta, rng);
         }
 
-        final int fanout = helperCapacity > 0 ? Math.min(baseFanout, helperCapacity) : baseFanout;
+        int helperFanoutCap = helperCapacity > 0
+                ? Math.max(1, (int) Math.round(helperCapacity * rootFanoutRatio))
+                : baseFanout;
+
+        final int fanout = helperCapacity > 0
+                ? Math.min(baseFanout, helperFanoutCap)
+                : baseFanout;
+        final boolean logFanout = rootFanoutStatsEnabled && log.isInfoEnabled();
 
         maybeRotateRootMoves(orderedMoves, rng);
 
@@ -1450,6 +1601,12 @@ public class AI {
         bestMove = firstMove;
         bestScore = firstScore;
 
+        if (logFanout) {
+            log.info("Root fanout diag start: task={}, depth={}, legalMoves={}, helperCapacity={}, baseFanout={}, fanout={}, firstMove={}",
+                    task.getId(), depth, orderedMoves.size(), helperCapacity, baseFanout, fanout,
+                    Move.convertIntToMove(firstMove));
+        }
+
         if (isWhitesTurn) alpha = Math.max(alpha, firstScore);
         else beta = Math.min(beta, firstScore);
         if (alpha >= beta) {
@@ -1470,6 +1627,9 @@ public class AI {
         );
         final AtomicBoolean stopRef = new AtomicBoolean(false);
         final java.util.concurrent.locks.ReentrantLock fullResLock = new java.util.concurrent.locks.ReentrantLock();
+        int submittedParallel = 0;
+        int completedParallel = 0;
+        int sequentialProcessed = 0;
 
         IntFunction<Callable<MoveAndScore>> taskFactory = (moveInt) -> () -> {
             Long2DoubleOpenHashMap evalCache = staticEvalCache.get();
@@ -1559,6 +1719,7 @@ public class AI {
                 int moveInt = orderedMoves.getInt(nextMoveIndex++);
                 Future<MoveAndScore> submitted = ecs.submit(taskFactory.apply(moveInt));
                 futures.add(submitted);
+                submittedParallel++;
                 active++;
             }
 
@@ -1581,6 +1742,7 @@ public class AI {
                             bestMove = best.move;
                             bestScore = best.score;
                         }
+                        completedParallel++;
                     }
                 } catch (ExecutionException ex) {
                     log.warn("Parallel root worker failed", ex.getCause());
@@ -1598,6 +1760,7 @@ public class AI {
                     int moveInt = orderedMoves.getInt(nextMoveIndex++);
                     Future<MoveAndScore> submitted = ecs.submit(taskFactory.apply(moveInt));
                     futures.add(submitted);
+                    submittedParallel++;
                     active++;
                 }
             }
@@ -1627,6 +1790,7 @@ public class AI {
                 }
 
                 int moveInt = orderedMoves.getInt(i);
+                sequentialProcessed++;
                 simulatorEngine.performMove(moveInt);
 
                 double score;
@@ -1663,9 +1827,15 @@ public class AI {
                     stopRef.set(true);
                     break;
                 }
-            }
+        }
 
-            MoveAndScore updatedBest = createCandidate(bestMove, bestScore);
+        if (logFanout) {
+            int remainingCandidates = Math.max(0, (orderedMoves.size() - 1) - submittedParallel - sequentialProcessed);
+            log.info("Root fanout diag end: task={}, depth={}, parallelSubmitted={}, parallelCompleted={}, sequentialFallback={}, remainingCandidates={}, aborted={}",
+                    task.getId(), depth, submittedParallel, completedParallel, sequentialProcessed, remainingCandidates, aborted);
+        }
+
+        MoveAndScore updatedBest = createCandidate(bestMove, bestScore);
             if (updatedBest != null) {
                 stateRef.set(new RootSearchState(alpha, beta, updatedBest));
             }
@@ -3684,6 +3854,107 @@ public class AI {
         return victimValue - attackerValue;
     }
 
+    private static final class WorkerInstrumentation {
+        private LongAdder[] idleNanos;
+        private LongAdder[] activeNanos;
+        private LongAdder[] jobCounters;
+
+        WorkerInstrumentation(int threads) {
+            ensureCapacityInternal(Math.max(1, threads));
+        }
+
+        synchronized void ensureCapacity(int threads) {
+            ensureCapacityInternal(Math.max(1, threads));
+        }
+
+        void recordIdle(int workerIndex, long nanos) {
+            if (idleNanos == null || workerIndex < 0 || workerIndex >= idleNanos.length || nanos <= 0L) {
+                return;
+            }
+            idleNanos[workerIndex].add(nanos);
+        }
+
+        void recordActive(int workerIndex, long nanos) {
+            if (activeNanos == null || workerIndex < 0 || workerIndex >= activeNanos.length || nanos <= 0L) {
+                return;
+            }
+            activeNanos[workerIndex].add(nanos);
+        }
+
+        void incrementJobs(int workerIndex) {
+            if (jobCounters == null || workerIndex < 0 || workerIndex >= jobCounters.length) {
+                return;
+            }
+            jobCounters[workerIndex].increment();
+        }
+
+        synchronized String buildSummaryAndReset(int workers) {
+            if (workers <= 0) {
+                resetAll();
+                return "";
+            }
+            ensureCapacityInternal(Math.max(1, workers));
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < workers; i++) {
+                long active = activeNanos[i].sum();
+                long idle = idleNanos[i].sum();
+                long jobs = jobCounters[i].sum();
+                long total = active + idle;
+                double utilisation = total > 0 ? (active * 100.0) / total : 0.0;
+                if (i > 0) {
+                    sb.append("; ");
+                }
+                sb.append("worker=").append(i)
+                        .append(" jobs=").append(jobs)
+                        .append(" activeMs=").append(TimeUnit.NANOSECONDS.toMillis(active))
+                        .append(" idleMs=").append(TimeUnit.NANOSECONDS.toMillis(idle))
+                        .append(" util=").append(String.format(Locale.ROOT, "%.1f%%", utilisation));
+            }
+            resetAll();
+            return sb.toString();
+        }
+
+        private void resetAll() {
+            if (idleNanos != null) {
+                for (LongAdder adder : idleNanos) {
+                    adder.reset();
+                }
+            }
+            if (activeNanos != null) {
+                for (LongAdder adder : activeNanos) {
+                    adder.reset();
+                }
+            }
+            if (jobCounters != null) {
+                for (LongAdder adder : jobCounters) {
+                    adder.reset();
+                }
+            }
+        }
+
+        private void ensureCapacityInternal(int threads) {
+            if (idleNanos != null && idleNanos.length >= threads) {
+                return;
+            }
+            idleNanos = grow(idleNanos, threads);
+            activeNanos = grow(activeNanos, threads);
+            jobCounters = grow(jobCounters, threads);
+        }
+
+        private static LongAdder[] grow(LongAdder[] original, int newLength) {
+            LongAdder[] expanded = new LongAdder[newLength];
+            int existing = original != null ? original.length : 0;
+            for (int i = 0; i < newLength; i++) {
+                if (i < existing && original[i] != null) {
+                    expanded[i] = original[i];
+                } else {
+                    expanded[i] = new LongAdder();
+                }
+            }
+            return expanded;
+        }
+    }
+
     private static final class LockMetrics {
         private final AtomicLong maxReadWait = new AtomicLong();
         private final AtomicLong maxWriteWait = new AtomicLong();
@@ -3898,6 +4169,10 @@ public class AI {
                 counterDirtyList[counterDirtyCount++] = idx;
             }
             counterUpdates[idx] = move;
+        }
+
+        boolean hasPendingUpdates() {
+            return killerDirtyCount > 0 || historyDirtyCount > 0 || counterDirtyCount > 0;
         }
 
         void mergeInto(Heuristics target) {

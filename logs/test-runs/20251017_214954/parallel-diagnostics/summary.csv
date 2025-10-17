@@ -1,0 +1,4 @@
+scenario,fanoutRatio,avgDurationMs,avgNodes,avgNullMoves
+BestMoveSearchTest,0.5,3791.0,1361749.0,45312.0
+BestMoveSearchTest,0.75,2869.0,909456.0,21921.0
+BestMoveSearchTest,1.0,5116.0,1731086.0,73797.0

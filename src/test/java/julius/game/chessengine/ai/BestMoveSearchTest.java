@@ -35,6 +35,16 @@ import java.util.stream.Collectors;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class BestMoveSearchTest {
 
+    private static final String PARALLEL_OVERRIDE_PROPERTY = "chessengine.diagnostics.useParallelRoot";
+    private static final String ROOT_FANOUT_RATIO_PROPERTY = "chessengine.rootFanoutRatio";
+
+    static {
+        System.setProperty(PARALLEL_OVERRIDE_PROPERTY,
+                System.getProperty(PARALLEL_OVERRIDE_PROPERTY, "true"));
+        System.setProperty(ROOT_FANOUT_RATIO_PROPERTY,
+                System.getProperty(ROOT_FANOUT_RATIO_PROPERTY, "0.75"));
+    }
+
     private static final SearchEnvironment SEARCH_ENVIRONMENT = SearchEnvironment.detect();
     private static final int DEFAULT_SEARCH_DEPTH = 4;
     private static final long UNBOUNDED_SEARCH_TIME_MILLIS = java.util.concurrent.TimeUnit.DAYS.toMillis(365L * 100L);
@@ -606,6 +616,10 @@ public class BestMoveSearchTest {
         @Override
         protected RootSearchResult searchRootMoves(Engine simulatorEngine, SearchTask task, int depth,
                                                    double alpha, double beta, SplittableRandom rng) {
+            if (Boolean.parseBoolean(System.getProperty(PARALLEL_OVERRIDE_PROPERTY, "false"))) {
+                return super.searchRootMoves(simulatorEngine, task, depth, alpha, beta, rng);
+            }
+
             DepthTrace trace = beginDepthTrace(task, depth, alpha, beta);
 
             long deadline = task.getDeadline();
