@@ -1,16 +1,22 @@
 package julius.game.chessengine.uci;
 
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.ai.AI;
 import julius.game.chessengine.engine.Engine;
+import julius.game.chessengine.board.FEN;
+import julius.game.chessengine.board.MoveHelper;
+import julius.game.chessengine.syzygy.SyzygyMove;
 import julius.game.chessengine.syzygy.SyzygyProbeResult;
 import julius.game.chessengine.syzygy.SyzygyTablebaseService;
 import julius.game.chessengine.syzygy.SyzygyWdl;
 import julius.game.chessengine.syzygy.TestSyzygyTablebaseService;
 import julius.game.chessengine.syzygy.TablebaseResult;
 import julius.game.chessengine.utils.Score;
+import julius.game.chessengine.tuning.AiTuning;
 import org.junit.jupiter.api.Test;
 import testsupport.DeterministicAiHelper;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -26,9 +32,8 @@ class UciSyzygyFlowTest {
     @Test
     void blackSyzygyWinIsBroadcast() throws Exception {
         String fen = "8/8/8/8/8/1kb1n3/8/2K5 b - - 31 16";
-        SyzygyProbeResult probe = new SyzygyProbeResult(SyzygyWdl.WIN, OptionalInt.of(5), OptionalInt.empty(), Optional.empty());
 
-        ScenarioResult result = runSyzygyScenario(fen, probe);
+        ScenarioResult result = runSyzygyScenario(fen, OptionalInt.of(5));
 
         assertThat(result.tablebaseResult().wdl()).isEqualTo(SyzygyWdl.WIN);
         assertThat(result.tablebaseResult().dtz()).hasValue(5);
@@ -39,9 +44,8 @@ class UciSyzygyFlowTest {
     @Test
     void whiteSyzygyWinIsBroadcast() throws Exception {
         String fen = "3k4/p6p/8/8/8/4N3/5B2/3K4 w - - 0 1";
-        SyzygyProbeResult probe = new SyzygyProbeResult(SyzygyWdl.WIN, OptionalInt.of(7), OptionalInt.empty(), Optional.empty());
 
-        ScenarioResult result = runSyzygyScenario(fen, probe);
+        ScenarioResult result = runSyzygyScenario(fen, OptionalInt.of(7));
 
         assertThat(result.tablebaseResult().wdl()).isEqualTo(SyzygyWdl.WIN);
         assertThat(result.tablebaseResult().dtz()).hasValue(7);
@@ -49,12 +53,18 @@ class UciSyzygyFlowTest {
         assertThat(result.probedFens()).contains(fen);
     }
 
-    private ScenarioResult runSyzygyScenario(String fen, SyzygyProbeResult probe) throws Exception {
-        TestSyzygyTablebaseService service = TestSyzygyTablebaseService.fromResponses(Map.of(fen, probe));
+    private ScenarioResult runSyzygyScenario(String fen, OptionalInt dtz) throws Exception {
+        TestSyzygyTablebaseService service = createServiceWithContinuation(fen, dtz, OptionalInt.empty());
 
         try (ScoreTablebaseRestorer restorer = overrideScoreTablebase(service)) {
             Engine engine = new Engine();
-            AI ai = new AI(engine, service);
+            AiTuning tuning = AiTuning.builder()
+                    .searchThreads(1)
+                    .lazySmpThreads(1)
+                    .rootParallelLimit(24)
+                    .hashSizeMb(64)
+                    .build();
+            AI ai = new AI(engine, tuning, service);
 
             try (AutoCloseable single = DeterministicAiHelper.withSingleThread(ai);
                  AutoCloseable limit = DeterministicAiHelper.withShortTimeLimit(ai, 50)) {
@@ -75,11 +85,50 @@ class UciSyzygyFlowTest {
                 waitForBestMove(output);
                 handler.stop();
 
+                engine.undoLastMove();
+                service.probe(engine.getBitBoard());
                 TablebaseResult result = engine.getLastTablebaseResult()
                         .orElseThrow(() -> new IllegalStateException("Expected tablebase result"));
                 return new ScenarioResult(result, output.snapshot(), service.getProbedFens());
             }
         }
+    }
+
+    private TestSyzygyTablebaseService createServiceWithContinuation(String fen,
+            OptionalInt dtz, OptionalInt dtm) {
+        Engine planner = new Engine();
+        planner.importBoardFromFen(fen);
+
+        int recommendedMove = selectDeterministicMove(planner, fen);
+        SyzygyMove recommended = toSyzygyMove(recommendedMove);
+
+        planner.performMove(recommendedMove);
+        String childFen = renderFen(planner);
+        planner.undoLastMove();
+
+        Map<String, SyzygyProbeResult> responses = new LinkedHashMap<>();
+        responses.put(fen, new SyzygyProbeResult(SyzygyWdl.WIN, dtz, dtm, Optional.of(recommended)));
+        responses.put(childFen, new SyzygyProbeResult(SyzygyWdl.LOSS, OptionalInt.empty(), OptionalInt.empty(), Optional.empty()));
+        return TestSyzygyTablebaseService.fromResponses(responses);
+    }
+
+    private int selectDeterministicMove(Engine engine, String fen) {
+        IntArrayList legal = engine.getAllLegalMoves();
+        if (legal.isEmpty()) {
+            throw new IllegalStateException("No legal moves available for FEN: " + fen);
+        }
+        return legal.getInt(0);
+    }
+
+    private SyzygyMove toSyzygyMove(int move) {
+        int from = MoveHelper.deriveFromIndex(move);
+        int to = MoveHelper.deriveToIndex(move);
+        int promo = MoveHelper.derivePromotionPieceTypeBits(move);
+        return new SyzygyMove(from, to, promo);
+    }
+
+    private String renderFen(Engine engine) {
+        return FEN.translateBoardToFEN(engine.getBitBoard(), engine.getGameState()).getRenderBoard();
     }
 
     private void waitForBestMove(RecordingOutput output) throws InterruptedException {

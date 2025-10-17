@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: julius.game.chessengine.ai.BestMoveSearchTest
+-------------------------------------------------------------------------------
+Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 6.834 s -- in julius.game.chessengine.ai.BestMoveSearchTest
