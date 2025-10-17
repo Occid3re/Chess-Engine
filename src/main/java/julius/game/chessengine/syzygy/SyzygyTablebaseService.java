@@ -56,6 +56,9 @@ public class SyzygyTablebaseService {
         if (board == null) {
             return Optional.empty();
         }
+        if (Long.bitCount(board.getAllPieces()) > effectiveMaxPieces) {
+            return Optional.empty();
+        }
         SyzygyCacheKey key = SyzygyCacheKey.from(board);
         Optional<SyzygyProbeResult> cached = cache.get(key);
         if (cached != null) {
