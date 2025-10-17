@@ -110,6 +110,50 @@ example via `file://`). Keep the Spring Boot application running in the
 background: the page automatically connects to `ws://localhost:8080/ws/uci` when
 it is not served by the app itself.
 
+## Runtime flags for single-thread vs. parallel diagnostics
+
+The production engine honours a few JVM system properties that determine how
+many threads participate in the search and whether additional instrumentation is
+enabled. The table below lists the most common combinations.
+
+| Scenario | Command-line flags | Notes |
+|----------|-------------------|-------|
+| **Single-threaded baseline** | `-Dchessengine.searchThreads=1 -Dchessengine.lazySmpThreads=1 -Dchessengine.rootParallelLimit=24 -Dchessengine.tt.mb=64` | Matches the original 3 s depth‑8 reference run. |
+| **Multi-threaded production run** | `-Dchessengine.searchThreads=<N> -Dchessengine.lazySmpThreads=<M> -Dchessengine.rootParallelLimit=<limit> -Dchessengine.tt.mb=<MB>` | Replace `<N>`, `<M>`, and `<limit>` with the desired concurrency. With 16 threads we currently use `N=16`, `M=8`, `limit=72`, `tt=256`. |
+| **Parallel diagnostics (optional)** | add `-Dchessengine.diagnostics.useParallelRoot=true` | Forces `BestMoveSearchTest` to exercise the production root-split path (instead of the sequential diagnostic harness). |
+| **Worker/fanout instrumentation (optional)** | add `-Dchessengine.diagnostics.workerStats=true -Dchessengine.diagnostics.rootFanout=true` | Logs Lazy SMP utilisation and root fanout events to help analyse scaling. |
+| **Fanout cap (optional)** | add `-Dchessengine.rootFanoutRatio=<0.0–1.0>` | Clamps the parallel root fanout to `ratio × searchThreads` (defaults to 1.0). Useful when experimenting with smaller fanout to reduce overhead. |
+
+Example single-thread run:
+
+```bash
+java \
+  -Dchessengine.searchThreads=1 \
+  -Dchessengine.lazySmpThreads=1 \
+  -Dchessengine.rootParallelLimit=24 \
+  -Dchessengine.tt.mb=64 \
+  -jar target/chess-engine-<version>-uci.jar
+```
+
+Example parallel diagnostic run (16/8 threads with instrumentation):
+
+```bash
+java \
+  -Dchessengine.searchThreads=16 \
+  -Dchessengine.lazySmpThreads=8 \
+  -Dchessengine.rootParallelLimit=72 \
+  -Dchessengine.tt.mb=256 \
+  -Dchessengine.diagnostics.useParallelRoot=true \
+  -Dchessengine.diagnostics.workerStats=true \
+  -Dchessengine.diagnostics.rootFanout=true \
+  -Dchessengine.rootFanoutRatio=0.75 \
+  -jar target/chess-engine-<version>-uci.jar
+```
+
+Adjust the ratios and cache sizes to match the hardware available in your
+production environment; the values above correspond to the current multi-thread
+diagnostic runs in `Tasks.md`.
+
 ## Engine tuning and self-play
 
 The engine can now load search and evaluation parameters from an external YAML

@@ -87,8 +87,21 @@ class AITest_ConcurrencyAndStops {
         assertTrue(requests.isEmpty(), "Calculation request queue should be empty after stop");
         assertTrue(jobs.isEmpty(), "Search job queue should be empty after stop");
         assertEquals(-1, TestUtils.readField(ai, "currentBestMove"));
-        assertNull(TestUtils.readField(ai, "calculationThreads"));
-        assertNull(TestUtils.readField(ai, "calculationCoordinator"));
+
+        Thread[] workers = (Thread[]) TestUtils.readField(ai, "calculationThreads");
+        assertNotNull(workers, "Worker threads should remain allocated for reuse");
+        for (Thread worker : workers) {
+            assertNotNull(worker, "Each worker slot should retain a thread instance");
+            assertTrue(worker.isAlive(), () -> "Worker " + worker.getName() + " must stay alive for reuse");
+            Thread.State state = worker.getState();
+            assertTrue(
+                    state == Thread.State.WAITING || state == Thread.State.TIMED_WAITING || state == Thread.State.BLOCKED,
+                    () -> "Worker should be idle after stop, observed state=" + state);
+        }
+
+        Thread coordinator = (Thread) TestUtils.readField(ai, "calculationCoordinator");
+        assertNotNull(coordinator, "Dispatcher thread should still exist for reuse");
+        assertTrue(coordinator.isAlive(), "Dispatcher should remain alive after stop");
     }
 
     @Test

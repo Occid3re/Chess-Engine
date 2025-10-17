@@ -13,13 +13,14 @@
 
 ## Phase 1 – Concurrency & Scheduling (Day 2-4)
 1. ✅ Auto-detect optimal `searchThreads`/`lazySmpThreads`/`rootParallelLimit` when no overrides are provided (SearchConcurrencyPlanner in place).
-2. ⏳ Audit thread start-up and coordination:
-   - Ensure helper threads are spawned once and reused.
-   - Remove unnecessary synchronisation (e.g., lock contention in heuristics merge).
-3. ⏳ Benchmark multi-core scaling; target ≥1.8× speed-up vs. single-thread baseline on 8+ logical cores.
-4. ⏳ Extend regression tests to cover multi-thread configurations (BestMoveSearch + AITest_MoveOrderingBuckets).
+2. ✅ Audit thread start-up and coordination:
+   - ✅ Ensure helper threads are spawned once and reused between searches while keeping shutdown deterministic.
+   - ✅ Remove unnecessary synchronisation (heuristics merge now skips the write lock when no per-thread updates exist).
+   - ✅ Wait for active searches to finish before purging worker threads to avoid dangling simulators.
+3.  Benchmark multi-core scaling; target ≥1.8× speed-up vs. single-thread baseline on 8+ logical cores. *(Latest 16-thread run: 3.1 s vs. 3.0 s baseline ⇒ 0.97×, still below goal.)*
+4.  Extend regression tests to cover multi-thread configurations (BestMoveSearch + AITest_MoveOrderingBuckets).
 
-> Current status: planner integrated; deterministic tests updated. Need multi-thread benchmark run and coordination profiling once Syzygy/TT tests pass.
+> Current status: planner integrated; deterministic tests updated; helper lifecycle stabilised with reusable threads. Next priority is running multi-thread benchmarks before advancing to Phase 2.
 
 ## Phase 2 – Root Move Ordering & Iterative Deepening (Day 5-7)
 1. Analyse root ordering statistics (TT, killers, history scores) for the slow scenario.
@@ -47,14 +48,18 @@
 3. Document changes in `Agents.md` (testing guidance) and create release notes summarising key wins.
 
 ## Ongoing Workstreams
-- Automate nightly benchmark of representative FENs across depth targets.
 - Maintain a tuning backlog for search/evaluation experiments informed by telemetry.
 - Periodically review `seed-tunings.yaml` alignment with engine changes to avoid stale parameters.
 
 ## Next Steps
 1. Stabilise test suite with the new planner defaults:
-   - Fix `UciSyzygyFlowTest` to assert TB hits without timing out (use deterministic single-thread tuning and mock result injection).
-   - Confirm transposition-table capacity tests reflect live weight ratios.
-2. Capture multi-threaded BestMoveSearch telemetry (depth 8) and compare against the 3 s baseline.
-3. Profile coordination locks with ≥16 helper threads; identify write-lock hot spots to trim in Phase 1 Step 2.
-4. Once concurrency improvements are validated, proceed to Phase 2 root-move ordering analysis.
+   - ✅ Fix `UciSyzygyFlowTest` to assert TB hits without timing out (use deterministic single-thread tuning and mock result injection).
+   - ✅ Confirm transposition-table capacity tests reflect live weight ratios.
+2. ✅ Capture multi-threaded BestMoveSearch telemetry (depth 8) and compare against the 3 s baseline.
+3. ✅ Profile coordination locks with ≥16 helper threads; identify write-lock hot spots to trim in Phase 1 Step 2.
+4. ✅ Inspect `searchJobs` and `calculationRequests` queue behaviour under load to confirm there is no producer/consumer imbalance.
+5. Once concurrency improvements are validated, proceed to Phase 2 root-move ordering analysis.
+6. Analyse the 16-thread BestMoveSearch telemetry (3.1 s, 553k nodes) to explain the missing ≥1.8× scaling and identify candidates for Phase 1 Step 3 remediation.
+7. ✅ Capture a Java Flight Recorder trace for the multi-thread benchmark (run 2025-10-17, `logs/test-runs/20251017_201135/best-move-search-multithread/bms-16t.jfr`) to surface contention hotspots.
+8. ✅ Mine the JFR (`jdk.ExecutionSample`, `jdk.ThreadPark`, `jdk.ThreadCPULoad`) plus the diagnostics above to verify how much time threads spend outside core search (init, evaluation pipeline) before attempting scaling fixes (current samples: ~39 % in evaluation, no `Simulator-*` sightings).
+9. Add instrumentation or warm-up experiments (e.g., longer pre-run, per-thread sampling, queue metrics) to confirm whether helper threads are under-utilised before pursuing algorithmic changes. *(Instrumentation runs 2025-10-17: sequential `BestMoveSearchTest` keeps Lazy SMP idle; new `BestMoveSearchParallelHarnessTest` + optional flag `-Dchessengine.diagnostics.useParallelRoot=true` exercise the real parallel path and log fanout (20 submitted/completed, zero fallback). README now documents the flag/worker options. Next = decide if the main diagnostics should enable the flag by default or remain opt-in while focusing on the production harness for scaling work.)*

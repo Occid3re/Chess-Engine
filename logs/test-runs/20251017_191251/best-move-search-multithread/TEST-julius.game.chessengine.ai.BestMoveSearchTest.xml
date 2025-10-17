@@ -1,0 +1,315 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report-3.0.xsd" version="3.0" name="julius.game.chessengine.ai.BestMoveSearchTest" time="6.984" tests="1" errors="0" skipped="0" failures="0">
+  <properties>
+    <property name="java.specification.version" value="25"/>
+    <property name="sun.jnu.encoding" value="ANSI_X3.4-1968"/>
+    <property name="java.class.path" value="/mnt/c/Development/Chess-Engine/target/test-classes:/mnt/c/Development/Chess-Engine/target/classes:/home/julius/.m2/repository/org/springframework/boot/spring-boot-starter-web/3.5.5/spring-boot-starter-web-3.5.5.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-starter/3.5.5/spring-boot-starter-3.5.5.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot/3.5.5/spring-boot-3.5.5.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-autoconfigure/3.5.5/spring-boot-autoconfigure-3.5.5.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-starter-logging/3.5.5/spring-boot-starter-logging-3.5.5.jar:/home/julius/.m2/repository/ch/qos/logback/logback-classic/1.5.18/logback-classic-1.5.18.jar:/home/julius/.m2/repository/ch/qos/logback/logback-core/1.5.18/logback-core-1.5.18.jar:/home/julius/.m2/repository/org/apache/logging/log4j/log4j-to-slf4j/2.24.3/log4j-to-slf4j-2.24.3.jar:/home/julius/.m2/repository/org/apache/logging/log4j/log4j-api/2.24.3/log4j-api-2.24.3.jar:/home/julius/.m2/repository/org/slf4j/jul-to-slf4j/2.0.17/jul-to-slf4j-2.0.17.jar:/home/julius/.m2/repository/jakarta/annotation/jakarta.annotation-api/2.1.1/jakarta.annotation-api-2.1.1.jar:/home/julius/.m2/repository/org/yaml/snakeyaml/2.4/snakeyaml-2.4.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-starter-json/3.5.5/spring-boot-starter-json-3.5.5.jar:/home/julius/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.19.2/jackson-databind-2.19.2.jar:/home/julius/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.19.2/jackson-annotations-2.19.2.jar:/home/julius/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.19.2/jackson-core-2.19.2.jar:/home/julius/.m2/repository/com/fasterxml/jackson/datatype/jackson-datatype-jdk8/2.19.2/jackson-datatype-jdk8-2.19.2.jar:/home/julius/.m2/repository/com/fasterxml/jackson/datatype/jackson-datatype-jsr310/2.19.2/jackson-datatype-jsr310-2.19.2.jar:/home/julius/.m2/repository/com/fasterxml/jackson/module/jackson-module-parameter-names/2.19.2/jackson-module-parameter-names-2.19.2.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-starter-tomcat/3.5.5/spring-boot-starter-tomcat-3.5.5.jar:/home/julius/.m2/repository/org/apache/tomcat/embed/tomcat-embed-core/10.1.44/tomcat-embed-core-10.1.44.jar:/home/julius/.m2/repository/org/apache/tomcat/embed/tomcat-embed-el/10.1.44/tomcat-embed-el-10.1.44.jar:/home/julius/.m2/repository/org/apache/tomcat/embed/tomcat-embed-websocket/10.1.44/tomcat-embed-websocket-10.1.44.jar:/home/julius/.m2/repository/org/springframework/spring-web/6.2.10/spring-web-6.2.10.jar:/home/julius/.m2/repository/org/springframework/spring-beans/6.2.10/spring-beans-6.2.10.jar:/home/julius/.m2/repository/org/springframework/spring-webmvc/6.2.10/spring-webmvc-6.2.10.jar:/home/julius/.m2/repository/org/springframework/spring-aop/6.2.10/spring-aop-6.2.10.jar:/home/julius/.m2/repository/org/springframework/spring-context/6.2.10/spring-context-6.2.10.jar:/home/julius/.m2/repository/org/springframework/spring-expression/6.2.10/spring-expression-6.2.10.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-starter-websocket/3.5.5/spring-boot-starter-websocket-3.5.5.jar:/home/julius/.m2/repository/org/springframework/spring-messaging/6.2.10/spring-messaging-6.2.10.jar:/home/julius/.m2/repository/org/springframework/spring-websocket/6.2.10/spring-websocket-6.2.10.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-starter-actuator/3.5.5/spring-boot-starter-actuator-3.5.5.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-actuator-autoconfigure/3.5.5/spring-boot-actuator-autoconfigure-3.5.5.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-actuator/3.5.5/spring-boot-actuator-3.5.5.jar:/home/julius/.m2/repository/io/micrometer/micrometer-observation/1.15.3/micrometer-observation-1.15.3.jar:/home/julius/.m2/repository/io/micrometer/micrometer-commons/1.15.3/micrometer-commons-1.15.3.jar:/home/julius/.m2/repository/io/micrometer/micrometer-jakarta9/1.15.3/micrometer-jakarta9-1.15.3.jar:/home/julius/.m2/repository/io/micrometer/micrometer-core/1.15.3/micrometer-core-1.15.3.jar:/home/julius/.m2/repository/org/hdrhistogram/HdrHistogram/2.2.2/HdrHistogram-2.2.2.jar:/home/julius/.m2/repository/org/latencyutils/LatencyUtils/2.0.3/LatencyUtils-2.0.3.jar:/home/julius/.m2/repository/org/projectlombok/lombok/1.18.42/lombok-1.18.42.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-starter-test/3.5.5/spring-boot-starter-test-3.5.5.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-test/3.5.5/spring-boot-test-3.5.5.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-test-autoconfigure/3.5.5/spring-boot-test-autoconfigure-3.5.5.jar:/home/julius/.m2/repository/com/jayway/jsonpath/json-path/2.9.0/json-path-2.9.0.jar:/home/julius/.m2/repository/org/slf4j/slf4j-api/2.0.17/slf4j-api-2.0.17.jar:/home/julius/.m2/repository/jakarta/xml/bind/jakarta.xml.bind-api/4.0.2/jakarta.xml.bind-api-4.0.2.jar:/home/julius/.m2/repository/jakarta/activation/jakarta.activation-api/2.1.3/jakarta.activation-api-2.1.3.jar:/home/julius/.m2/repository/net/minidev/json-smart/2.5.2/json-smart-2.5.2.jar:/home/julius/.m2/repository/net/minidev/accessors-smart/2.5.2/accessors-smart-2.5.2.jar:/home/julius/.m2/repository/org/ow2/asm/asm/9.7.1/asm-9.7.1.jar:/home/julius/.m2/repository/org/assertj/assertj-core/3.27.4/assertj-core-3.27.4.jar:/home/julius/.m2/repository/net/bytebuddy/byte-buddy/1.17.7/byte-buddy-1.17.7.jar:/home/julius/.m2/repository/org/awaitility/awaitility/4.2.2/awaitility-4.2.2.jar:/home/julius/.m2/repository/org/hamcrest/hamcrest/3.0/hamcrest-3.0.jar:/home/julius/.m2/repository/org/junit/jupiter/junit-jupiter/5.12.2/junit-jupiter-5.12.2.jar:/home/julius/.m2/repository/org/junit/jupiter/junit-jupiter-api/5.12.2/junit-jupiter-api-5.12.2.jar:/home/julius/.m2/repository/org/junit/jupiter/junit-jupiter-params/5.12.2/junit-jupiter-params-5.12.2.jar:/home/julius/.m2/repository/org/junit/jupiter/junit-jupiter-engine/5.12.2/junit-jupiter-engine-5.12.2.jar:/home/julius/.m2/repository/org/mockito/mockito-core/5.17.0/mockito-core-5.17.0.jar:/home/julius/.m2/repository/net/bytebuddy/byte-buddy-agent/1.17.7/byte-buddy-agent-1.17.7.jar:/home/julius/.m2/repository/org/objenesis/objenesis/3.3/objenesis-3.3.jar:/home/julius/.m2/repository/org/mockito/mockito-junit-jupiter/5.17.0/mockito-junit-jupiter-5.17.0.jar:/home/julius/.m2/repository/org/skyscreamer/jsonassert/1.5.3/jsonassert-1.5.3.jar:/home/julius/.m2/repository/com/vaadin/external/google/android-json/0.0.20131108.vaadin1/android-json-0.0.20131108.vaadin1.jar:/home/julius/.m2/repository/org/springframework/spring-core/6.2.10/spring-core-6.2.10.jar:/home/julius/.m2/repository/org/springframework/spring-jcl/6.2.10/spring-jcl-6.2.10.jar:/home/julius/.m2/repository/org/springframework/spring-test/6.2.10/spring-test-6.2.10.jar:/home/julius/.m2/repository/org/xmlunit/xmlunit-core/2.10.3/xmlunit-core-2.10.3.jar:/home/julius/.m2/repository/org/mockito/mockito-inline/5.2.0/mockito-inline-5.2.0.jar:/home/julius/.m2/repository/org/spockframework/spock-core/2.3-groovy-4.0/spock-core-2.3-groovy-4.0.jar:/home/julius/.m2/repository/org/junit/platform/junit-platform-engine/1.12.2/junit-platform-engine-1.12.2.jar:/home/julius/.m2/repository/org/opentest4j/opentest4j/1.3.0/opentest4j-1.3.0.jar:/home/julius/.m2/repository/org/junit/platform/junit-platform-commons/1.12.2/junit-platform-commons-1.12.2.jar:/home/julius/.m2/repository/org/apiguardian/apiguardian-api/1.1.2/apiguardian-api-1.1.2.jar:/home/julius/.m2/repository/org/spockframework/spock-spring/2.3-groovy-4.0/spock-spring-2.3-groovy-4.0.jar:/home/julius/.m2/repository/org/apache/groovy/groovy/4.0.28/groovy-4.0.28.jar:/home/julius/.m2/repository/it/unimi/dsi/fastutil/8.5.17/fastutil-8.5.17.jar:"/>
+    <property name="java.vm.vendor" value="Eclipse Adoptium"/>
+    <property name="sun.arch.data.model" value="64"/>
+    <property name="java.vendor.url" value="https://adoptium.net/"/>
+    <property name="user.timezone" value="Europe/Vienna"/>
+    <property name="maven.compiler.enablePreview" value="true"/>
+    <property name="os.name" value="Linux"/>
+    <property name="java.vm.specification.version" value="25"/>
+    <property name="sun.java.launcher" value="SUN_STANDARD"/>
+    <property name="user.country" value="US"/>
+    <property name="sun.boot.library.path" value="/usr/lib/jvm/temurin-25-jdk-amd64/lib"/>
+    <property name="sun.java.command" value="/mnt/c/Development/Chess-Engine/target/surefire/surefirebooter-20251017191226979_3.jar /mnt/c/Development/Chess-Engine/target/surefire 2025-10-17T19-12-26_280-jvmRun1 surefire-20251017191226979_1tmp surefire_0-20251017191226979_2tmp"/>
+    <property name="jdk.debug" value="release"/>
+    <property name="surefire.test.class.path" value="/mnt/c/Development/Chess-Engine/target/test-classes:/mnt/c/Development/Chess-Engine/target/classes:/home/julius/.m2/repository/org/springframework/boot/spring-boot-starter-web/3.5.5/spring-boot-starter-web-3.5.5.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-starter/3.5.5/spring-boot-starter-3.5.5.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot/3.5.5/spring-boot-3.5.5.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-autoconfigure/3.5.5/spring-boot-autoconfigure-3.5.5.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-starter-logging/3.5.5/spring-boot-starter-logging-3.5.5.jar:/home/julius/.m2/repository/ch/qos/logback/logback-classic/1.5.18/logback-classic-1.5.18.jar:/home/julius/.m2/repository/ch/qos/logback/logback-core/1.5.18/logback-core-1.5.18.jar:/home/julius/.m2/repository/org/apache/logging/log4j/log4j-to-slf4j/2.24.3/log4j-to-slf4j-2.24.3.jar:/home/julius/.m2/repository/org/apache/logging/log4j/log4j-api/2.24.3/log4j-api-2.24.3.jar:/home/julius/.m2/repository/org/slf4j/jul-to-slf4j/2.0.17/jul-to-slf4j-2.0.17.jar:/home/julius/.m2/repository/jakarta/annotation/jakarta.annotation-api/2.1.1/jakarta.annotation-api-2.1.1.jar:/home/julius/.m2/repository/org/yaml/snakeyaml/2.4/snakeyaml-2.4.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-starter-json/3.5.5/spring-boot-starter-json-3.5.5.jar:/home/julius/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.19.2/jackson-databind-2.19.2.jar:/home/julius/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.19.2/jackson-annotations-2.19.2.jar:/home/julius/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.19.2/jackson-core-2.19.2.jar:/home/julius/.m2/repository/com/fasterxml/jackson/datatype/jackson-datatype-jdk8/2.19.2/jackson-datatype-jdk8-2.19.2.jar:/home/julius/.m2/repository/com/fasterxml/jackson/datatype/jackson-datatype-jsr310/2.19.2/jackson-datatype-jsr310-2.19.2.jar:/home/julius/.m2/repository/com/fasterxml/jackson/module/jackson-module-parameter-names/2.19.2/jackson-module-parameter-names-2.19.2.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-starter-tomcat/3.5.5/spring-boot-starter-tomcat-3.5.5.jar:/home/julius/.m2/repository/org/apache/tomcat/embed/tomcat-embed-core/10.1.44/tomcat-embed-core-10.1.44.jar:/home/julius/.m2/repository/org/apache/tomcat/embed/tomcat-embed-el/10.1.44/tomcat-embed-el-10.1.44.jar:/home/julius/.m2/repository/org/apache/tomcat/embed/tomcat-embed-websocket/10.1.44/tomcat-embed-websocket-10.1.44.jar:/home/julius/.m2/repository/org/springframework/spring-web/6.2.10/spring-web-6.2.10.jar:/home/julius/.m2/repository/org/springframework/spring-beans/6.2.10/spring-beans-6.2.10.jar:/home/julius/.m2/repository/org/springframework/spring-webmvc/6.2.10/spring-webmvc-6.2.10.jar:/home/julius/.m2/repository/org/springframework/spring-aop/6.2.10/spring-aop-6.2.10.jar:/home/julius/.m2/repository/org/springframework/spring-context/6.2.10/spring-context-6.2.10.jar:/home/julius/.m2/repository/org/springframework/spring-expression/6.2.10/spring-expression-6.2.10.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-starter-websocket/3.5.5/spring-boot-starter-websocket-3.5.5.jar:/home/julius/.m2/repository/org/springframework/spring-messaging/6.2.10/spring-messaging-6.2.10.jar:/home/julius/.m2/repository/org/springframework/spring-websocket/6.2.10/spring-websocket-6.2.10.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-starter-actuator/3.5.5/spring-boot-starter-actuator-3.5.5.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-actuator-autoconfigure/3.5.5/spring-boot-actuator-autoconfigure-3.5.5.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-actuator/3.5.5/spring-boot-actuator-3.5.5.jar:/home/julius/.m2/repository/io/micrometer/micrometer-observation/1.15.3/micrometer-observation-1.15.3.jar:/home/julius/.m2/repository/io/micrometer/micrometer-commons/1.15.3/micrometer-commons-1.15.3.jar:/home/julius/.m2/repository/io/micrometer/micrometer-jakarta9/1.15.3/micrometer-jakarta9-1.15.3.jar:/home/julius/.m2/repository/io/micrometer/micrometer-core/1.15.3/micrometer-core-1.15.3.jar:/home/julius/.m2/repository/org/hdrhistogram/HdrHistogram/2.2.2/HdrHistogram-2.2.2.jar:/home/julius/.m2/repository/org/latencyutils/LatencyUtils/2.0.3/LatencyUtils-2.0.3.jar:/home/julius/.m2/repository/org/projectlombok/lombok/1.18.42/lombok-1.18.42.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-starter-test/3.5.5/spring-boot-starter-test-3.5.5.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-test/3.5.5/spring-boot-test-3.5.5.jar:/home/julius/.m2/repository/org/springframework/boot/spring-boot-test-autoconfigure/3.5.5/spring-boot-test-autoconfigure-3.5.5.jar:/home/julius/.m2/repository/com/jayway/jsonpath/json-path/2.9.0/json-path-2.9.0.jar:/home/julius/.m2/repository/org/slf4j/slf4j-api/2.0.17/slf4j-api-2.0.17.jar:/home/julius/.m2/repository/jakarta/xml/bind/jakarta.xml.bind-api/4.0.2/jakarta.xml.bind-api-4.0.2.jar:/home/julius/.m2/repository/jakarta/activation/jakarta.activation-api/2.1.3/jakarta.activation-api-2.1.3.jar:/home/julius/.m2/repository/net/minidev/json-smart/2.5.2/json-smart-2.5.2.jar:/home/julius/.m2/repository/net/minidev/accessors-smart/2.5.2/accessors-smart-2.5.2.jar:/home/julius/.m2/repository/org/ow2/asm/asm/9.7.1/asm-9.7.1.jar:/home/julius/.m2/repository/org/assertj/assertj-core/3.27.4/assertj-core-3.27.4.jar:/home/julius/.m2/repository/net/bytebuddy/byte-buddy/1.17.7/byte-buddy-1.17.7.jar:/home/julius/.m2/repository/org/awaitility/awaitility/4.2.2/awaitility-4.2.2.jar:/home/julius/.m2/repository/org/hamcrest/hamcrest/3.0/hamcrest-3.0.jar:/home/julius/.m2/repository/org/junit/jupiter/junit-jupiter/5.12.2/junit-jupiter-5.12.2.jar:/home/julius/.m2/repository/org/junit/jupiter/junit-jupiter-api/5.12.2/junit-jupiter-api-5.12.2.jar:/home/julius/.m2/repository/org/junit/jupiter/junit-jupiter-params/5.12.2/junit-jupiter-params-5.12.2.jar:/home/julius/.m2/repository/org/junit/jupiter/junit-jupiter-engine/5.12.2/junit-jupiter-engine-5.12.2.jar:/home/julius/.m2/repository/org/mockito/mockito-core/5.17.0/mockito-core-5.17.0.jar:/home/julius/.m2/repository/net/bytebuddy/byte-buddy-agent/1.17.7/byte-buddy-agent-1.17.7.jar:/home/julius/.m2/repository/org/objenesis/objenesis/3.3/objenesis-3.3.jar:/home/julius/.m2/repository/org/mockito/mockito-junit-jupiter/5.17.0/mockito-junit-jupiter-5.17.0.jar:/home/julius/.m2/repository/org/skyscreamer/jsonassert/1.5.3/jsonassert-1.5.3.jar:/home/julius/.m2/repository/com/vaadin/external/google/android-json/0.0.20131108.vaadin1/android-json-0.0.20131108.vaadin1.jar:/home/julius/.m2/repository/org/springframework/spring-core/6.2.10/spring-core-6.2.10.jar:/home/julius/.m2/repository/org/springframework/spring-jcl/6.2.10/spring-jcl-6.2.10.jar:/home/julius/.m2/repository/org/springframework/spring-test/6.2.10/spring-test-6.2.10.jar:/home/julius/.m2/repository/org/xmlunit/xmlunit-core/2.10.3/xmlunit-core-2.10.3.jar:/home/julius/.m2/repository/org/mockito/mockito-inline/5.2.0/mockito-inline-5.2.0.jar:/home/julius/.m2/repository/org/spockframework/spock-core/2.3-groovy-4.0/spock-core-2.3-groovy-4.0.jar:/home/julius/.m2/repository/org/junit/platform/junit-platform-engine/1.12.2/junit-platform-engine-1.12.2.jar:/home/julius/.m2/repository/org/opentest4j/opentest4j/1.3.0/opentest4j-1.3.0.jar:/home/julius/.m2/repository/org/junit/platform/junit-platform-commons/1.12.2/junit-platform-commons-1.12.2.jar:/home/julius/.m2/repository/org/apiguardian/apiguardian-api/1.1.2/apiguardian-api-1.1.2.jar:/home/julius/.m2/repository/org/spockframework/spock-spring/2.3-groovy-4.0/spock-spring-2.3-groovy-4.0.jar:/home/julius/.m2/repository/org/apache/groovy/groovy/4.0.28/groovy-4.0.28.jar:/home/julius/.m2/repository/it/unimi/dsi/fastutil/8.5.17/fastutil-8.5.17.jar:"/>
+    <property name="test" value="BestMoveSearchTest"/>
+    <property name="sun.cpu.endian" value="little"/>
+    <property name="user.home" value="/home/julius"/>
+    <property name="user.language" value="en"/>
+    <property name="java.specification.vendor" value="Oracle Corporation"/>
+    <property name="java.version.date" value="2025-09-16"/>
+    <property name="java.home" value="/usr/lib/jvm/temurin-25-jdk-amd64"/>
+    <property name="file.separator" value="/"/>
+    <property name="basedir" value="/mnt/c/Development/Chess-Engine"/>
+    <property name="java.vm.compressedOopsMode" value="Zero based"/>
+    <property name="line.separator" value="&#10;"/>
+    <property name="java.vm.specification.vendor" value="Oracle Corporation"/>
+    <property name="java.specification.name" value="Java Platform API Specification"/>
+    <property name="surefire.real.class.path" value="/mnt/c/Development/Chess-Engine/target/surefire/surefirebooter-20251017191226979_3.jar"/>
+    <property name="chessengine.tt.mb" value="256"/>
+    <property name="maven.compiler.release" value="25"/>
+    <property name="sun.management.compiler" value="HotSpot 64-Bit Tiered Compilers"/>
+    <property name="java.runtime.version" value="25+36-LTS"/>
+    <property name="user.name" value="julius"/>
+    <property name="stdout.encoding" value="ANSI_X3.4-1968"/>
+    <property name="path.separator" value=":"/>
+    <property name="os.version" value="6.6.87.2-microsoft-standard-WSL2"/>
+    <property name="java.runtime.name" value="OpenJDK Runtime Environment"/>
+    <property name="file.encoding" value="UTF-8"/>
+    <property name="java.vm.name" value="OpenJDK 64-Bit Server VM"/>
+    <property name="java.vendor.version" value="Temurin-25+36"/>
+    <property name="chessengine.searchThreads" value="16"/>
+    <property name="localRepository" value="/home/julius/.m2/repository"/>
+    <property name="java.vendor.url.bug" value="https://github.com/adoptium/adoptium-support/issues"/>
+    <property name="java.io.tmpdir" value="/tmp"/>
+    <property name="chessengine.rootParallelLimit" value="72"/>
+    <property name="java.version" value="25"/>
+    <property name="user.dir" value="/mnt/c/Development/Chess-Engine"/>
+    <property name="os.arch" value="amd64"/>
+    <property name="java.vm.specification.name" value="Java Virtual Machine Specification"/>
+    <property name="native.encoding" value="ANSI_X3.4-1968"/>
+    <property name="java.library.path" value="/usr/java/packages/lib:/usr/lib64:/lib64:/lib:/usr/lib"/>
+    <property name="java.vm.info" value="mixed mode, sharing"/>
+    <property name="chessengine.lazySmpThreads" value="8"/>
+    <property name="stderr.encoding" value="ANSI_X3.4-1968"/>
+    <property name="java.vendor" value="Eclipse Adoptium"/>
+    <property name="java.vm.version" value="25+36-LTS"/>
+    <property name="stdin.encoding" value="ANSI_X3.4-1968"/>
+    <property name="sun.io.unicode.encoding" value="UnicodeLittle"/>
+    <property name="java.class.version" value="69.0"/>
+    <property name="argLine" value="--enable-preview -Xms8g -Xmx8g -XX:+UseG1GC -XX:MaxGCPauseMillis=20 -XX:+AlwaysPreTouch -XX:+UseNUMA -XX:ActiveProcessorCount=24 -Dchessengine.tt.mb=256 -Dchessengine.searchThreads=16 -Dchessengine.lazySmpThreads=8 -Dchessengine.rootParallelLimit=72"/>
+  </properties>
+  <testcase name="testBestMove(String, List, Integer)[1]" classname="julius.game.chessengine.ai.BestMoveSearchTest" time="6.818">
+    <system-out><![CDATA[19:12:30.847 [main] INFO julius.game.chessengine.ai.SearchConcurrencyPlanner -- Search concurrency plan: availableProcessors=24, searchThreads=16 (user), lazySmpThreads=8 (user), rootParallelLimit=72 (user), ttMb=256 (user)
+19:12:30.995 [main] INFO julius.game.chessengine.ai.SearchConcurrencyPlanner -- Search concurrency plan: availableProcessors=24, searchThreads=16 (user), lazySmpThreads=8 (user), rootParallelLimit=72 (user), ttMb=256 (user)
+19:12:31.028 [main] INFO julius.game.chessengine.tuning.EngineTuningBootstrap -- Loaded 1 tuning configurations from classpath:tuning/seed-tunings.yaml
+19:12:31.063 [main] INFO julius.game.chessengine.tuning.EngineTuningBootstrap -- Applied engine tuning "v3.8.2-v3f_bishopAtk9" from classpath:tuning/seed-tunings.yaml (1 configurations available).
+19:12:32.452 [main] INFO julius.game.chessengine.ai.OpeningBookLoader -- Loaded opening book from cache (360 entries)
+19:12:32.473 [main] INFO julius.game.chessengine.ai.OpeningBook -- Opening book initialised with 131 unique positions (cache hit)
+19:12:32.493 [main] INFO julius.game.chessengine.ai.SearchConcurrencyPlanner -- Search concurrency plan: availableProcessors=24, searchThreads=16 (user), lazySmpThreads=8 (user), rootParallelLimit=72 (user), ttMb=256 (user)
+19:12:32.574 [main] INFO julius.game.chessengine.ai.AI -- ### SearchThreads = 16, LazySmpThreads = 8
+
+=== Engine decision statistics ===
+FEN: 3R4/8/P4pk1/rP4p1/8/8/1K6/8 w - - 3 65
+Side to move: White
+Expected best moves: [Kc1, Kc2, Kc3]
+Baseline evaluation: +1.24 pawns
+Search configuration: runtimeCores=24, searchThreads=16, lazySmpThreads=8, rootParallelLimit=72, ttSize=256 MB, multiThreaded=yes
+Depth target: 8, deepest completed iteration: 8
+Chosen move: Kc3 -> +1.36 pawns (Δ vs baseline: +0.12) [rank #3]
+Engine top move: Rd7 -> +2.15 pawns (Δ vs chosen: -0.07)
+Nodes visited: 726561, null-move prunes: 13889, search duration: 3631 ms
+Top candidates by evaluation:
+  1. Rd7 -> +2.15 pawns (Δ vs chosen: +0.79)
+  2. Rh8 -> +2.11 pawns (Δ vs chosen: +0.75)
+  3. Kc3 -> +2.08 pawns (Δ vs chosen: +0.72)
+  4. Kc2 -> +2.07 pawns (Δ vs chosen: +0.71)
+  5. Kc1 -> +1.91 pawns (Δ vs chosen: +0.55)
+Expected move evaluations:
+  Kc1 -> +1.91 pawns (Δ vs chosen: +0.55)
+  Kc2 -> +2.07 pawns (Δ vs chosen: +0.71)
+  Kc3 -> +2.08 pawns
+Evaluation delta vs engine best: -0.07 pawns
+Principal variation: Kc3 (+1.36 pawns) -> Ra1 (-1.36 pawns) -> Kb2 (+1.36 pawns) -> Ra5 (-1.36 pawns) -> Kc3 (+1.36 pawns)
+==================================
+
+[BMSTAT] {"environment":{"availableProcessors":24,"searchThreads":16,"lazySmpThreads":8,"rootParallelLimit":72,"ttMb":256,"multiThreaded":true},"fen":"3R4/8/P4pk1/rP4p1/8/8/1K6/8 w - - 3 65","side":"w","expected":["Kc1","Kc2","Kc3"],"chosen":"Kc3","chosenScore":1.36,"best":"Rd7","bestScore":2.15,"baseline":1.24,"cpLoss":0.07,"cpGain":0.12,"rank":3,"nodes":726561,"nullMoves":13889,"durationMs":3631,"topCandidates":[{"move":"Rd7","score":2.15},{"move":"Rh8","score":2.11},{"move":"Kc3","score":2.08},{"move":"Kc2","score":2.07},{"move":"Kc1","score":1.91}],"expectedCandidates":[{"move":"Kc1","score":1.91},{"move":"Kc2","score":2.07},{"move":"Kc3","score":2.08}],"depthTarget":8,"depthReached":8,"pv":"Kc3 (+1.36 pawns) -> Ra1 (-1.36 pawns) -> Kb2 (+1.36 pawns) -> Ra5 (-1.36 pawns) -> Kc3 (+1.36 pawns)"}
+
+================ Best Move Search Diagnostic ================
+FEN: 3R4/8/P4pk1/rP4p1/8/8/1K6/8 w - - 3 65
+Expected best moves: Kc1, Kc2, Kc3
+Depth coverage: target=8, deepestCompleted=8, iterations=8
+Search result: Kc3 [b2c3] (score=1.36)
+Principal variation: Kc3 [b2c3] → Ra1 [a5a1] → Kb2 [c3b2] → Ra5 [a1a5] → Kc3 [b2c3]
+Nodes visited: 726561
+Null moves tried: 13889
+Elapsed wall-clock: 3631 ms
+
+-- Iterative deepening overview --
+Depth  1 (attempt 1, white to move, window=[-Infinity, Infinity])
+  #01 Kc2 [b2c2] * | nodes=1      time=66381µs | window [-Infinity, Infinity] → [-Infinity, Infinity] | result=-3.87 (via alphaBeta)
+  #02 Kc1 [b2c1] * | nodes=1      time= 951µs | window [-3.87, Infinity] → [-3.87, Infinity] | result=-3.74 (via alphaBeta)
+  #03 Kb1 [b2b1]   | nodes=1      time=1937µs | window [-3.74, Infinity] → [-3.74, Infinity] | result=-3.74 (via alphaBeta)
+  #04 Rh8 [d8h8]   | nodes=1      time=3438µs | window [-3.74, Infinity] → [-3.74, Infinity] | result=-2.87 (via alphaBeta)
+  #05 Rg8 [d8g8]   | nodes=1      time=2879µs | window [-2.87, Infinity] → [-2.87, Infinity] | result=0.95 (via alphaBeta)
+  #06 Rf8 [d8f8]   | nodes=1      time=2489µs | window [0.95, Infinity] → [0.95, Infinity] | result=-3.73 (via alphaBeta)
+  #07 Re8 [d8e8]   | nodes=1      time=1459µs | window [0.95, Infinity] → [0.95, Infinity] | result=-3.74 (via alphaBeta)
+  #08 Rc8 [d8c8]   | nodes=1      time=1749µs | window [0.95, Infinity] → [0.95, Infinity] | result=-3.80 (via alphaBeta)
+  #09 Rb8 [d8b8]   | nodes=1      time=1342µs | window [0.95, Infinity] → [0.95, Infinity] | result=0.02 (via alphaBeta)
+  #10 Ra8 [d8a8]   | nodes=1      time=1898µs | window [0.95, Infinity] → [0.95, Infinity] | result=-5.16 (via alphaBeta)
+  #11 Rd7 [d8d7]   | nodes=1      time=1297µs | window [0.95, Infinity] → [0.95, Infinity] | result=-2.83 (via alphaBeta)
+  #12 Rd6 [d8d6]   | nodes=1      time=1696µs | window [0.95, Infinity] → [0.95, Infinity] | result=-3.83 (via alphaBeta)
+  #13 Rd5 [d8d5]   | nodes=1      time= 894µs | window [0.95, Infinity] → [0.95, Infinity] | result=1.68 (via alphaBeta)
+  #14 Rd4 [d8d4]   | nodes=1      time=2578µs | window [1.68, Infinity] → [1.68, Infinity] | result=-3.59 (via alphaBeta)
+  #15 Rd3 [d8d3]   | nodes=1      time=2975µs | window [1.68, Infinity] → [1.68, Infinity] | result=-3.12 (via alphaBeta)
+  #16 Rd2 [d8d2]   | nodes=1      time=2303µs | window [1.68, Infinity] → [1.68, Infinity] | result=-3.74 (via alphaBeta)
+  #17 Rd1 [d8d1]   | nodes=1      time=1250µs | window [1.68, Infinity] → [1.68, Infinity] | result=-3.86 (via alphaBeta)
+  #18 a7 [a6a7]    | nodes=1      time= 637µs | window [1.68, Infinity] → [1.68, Infinity] | result=-4.41 (via alphaBeta)
+  #19 b6 [b5b6]    | nodes=1      time= 241µs | window [1.68, Infinity] → [1.68, Infinity] | result=-3.46 (via alphaBeta)
+  #20 Kc3 [b2c3] * | nodes=1      time= 222µs | window [1.68, Infinity] → [1.68, Infinity] | result=-3.86 (via alphaBeta)
+  #21 Kb3 [b2b3]   | nodes=1      time= 621µs | window [1.68, Infinity] → [1.68, Infinity] | result=-2.93 (via alphaBeta)
+  Best so far: Rd5 [d8d5] score=1.68
+  Final window: [1.68, Infinity] after 134 ms
+Depth  2 (attempt 1, white to move, window=[-Infinity, Infinity])
+  #01 Kc1 [b2c1] * | nodes=16     time=22159µs | window [-Infinity, Infinity] → [-Infinity, Infinity] | result=-3.74 (via alphaBeta)
+  #02 Kb1 [b2b1]   | nodes=6      time= 998µs | window [-3.74, Infinity] → [-3.74, Infinity] | result=-3.74 (via alphaBeta)
+  #03 Rh8 [d8h8]   | nodes=19     time=2888µs | window [-3.74, Infinity] → [-3.74, Infinity] | result=-2.87 (via alphaBeta)
+  #04 Rg8 [d8g8]   | nodes=7      time=1179µs | window [-2.87, Infinity] → [-2.87, Infinity] | result=0.95 (via alphaBeta)
+  #05 Rf8 [d8f8]   | nodes=8      time= 647µs | window [0.95, Infinity] → [0.95, Infinity] | result=-3.73 (via alphaBeta)
+  #06 Re8 [d8e8]   | nodes=8      time= 327µs | window [0.95, Infinity] → [0.95, Infinity] | result=-3.74 (via alphaBeta)
+  #07 Rc8 [d8c8]   | nodes=8      time= 724µs | window [0.95, Infinity] → [0.95, Infinity] | result=-3.80 (via alphaBeta)
+  #08 Rb8 [d8b8]   | nodes=3      time= 286µs | window [0.95, Infinity] → [0.95, Infinity] | result=0.92 (via alphaBeta)
+  #09 Ra8 [d8a8]   | nodes=8      time=1497µs | window [0.95, Infinity] → [0.95, Infinity] | result=-5.16 (via alphaBeta)
+  #10 Rd7 [d8d7]   | nodes=8      time= 420µs | window [0.95, Infinity] → [0.95, Infinity] | result=-2.83 (via alphaBeta)
+  #11 Rd6 [d8d6]   | nodes=8      time= 561µs | window [0.95, Infinity] → [0.95, Infinity] | result=-3.83 (via alphaBeta)
+  #12 Rd5 [d8d5]   | nodes=7      time=1005µs | window [0.95, Infinity] → [0.95, Infinity] | result=0.86 (via alphaBeta)
+  #13 Rd4 [d8d4]   | nodes=9      time= 631µs | window [0.95, Infinity] → [0.95, Infinity] | result=-3.59 (via alphaBeta)
+  #14 Rd3 [d8d3]   | nodes=9      time= 671µs | window [0.95, Infinity] → [0.95, Infinity] | result=-3.12 (via alphaBeta)
+  #15 Rd2 [d8d2]   | nodes=8      time= 276µs | window [0.95, Infinity] → [0.95, Infinity] | result=-3.74 (via alphaBeta)
+  #16 Rd1 [d8d1]   | nodes=8      time= 328µs | window [0.95, Infinity] → [0.95, Infinity] | result=-3.86 (via alphaBeta)
+  #17 a7 [a6a7]    | nodes=2      time= 102µs | window [0.95, Infinity] → [0.95, Infinity] | result=-4.41 (via alphaBeta)
+  #18 b6 [b5b6]    | nodes=2      time=  76µs | window [0.95, Infinity] → [0.95, Infinity] | result=-3.46 (via alphaBeta)
+  #19 Kc3 [b2c3] * | nodes=2      time= 112µs | window [0.95, Infinity] → [0.95, Infinity] | result=-3.86 (via alphaBeta)
+  #20 Kb3 [b2b3]   | nodes=8      time= 549µs | window [0.95, Infinity] → [0.95, Infinity] | result=-2.93 (via alphaBeta)
+  #21 Kc2 [b2c2] * | nodes=2      time= 125µs | window [0.95, Infinity] → [0.95, Infinity] | result=-3.87 (via alphaBeta)
+  Best so far: Rg8 [d8g8] score=0.95
+  Final window: [0.95, Infinity] after 35 ms
+Depth  3 (attempt 1, white to move, window=[-11.00, 13.00])
+  #01 Kc3 [b2c3] * | nodes=65     time=4157µs | window [-11.00, 13.00] → [-11.00, 13.00] | result=-2.96 (via alphaBeta)
+  #02 Kb3 [b2b3]   | nodes=25     time=1798µs | window [-2.96, 13.00] → [-2.96, 13.00] | result=-3.91 (via alphaBeta)
+  #03 Kc2 [b2c2] * | nodes=18     time= 927µs | window [-2.96, 13.00] → [-2.96, 13.00] | result=-2.97 (via alphaBeta)
+  #04 Kc1 [b2c1] * | nodes=81     time=5926µs | window [-2.96, 13.00] → [-2.96, 13.00] | result=-2.83 (via alphaBeta)
+  #05 Kb1 [b2b1]   | nodes=8      time= 216µs | window [-2.83, 13.00] → [-2.83, 13.00] | result=-3.80 (via alphaBeta)
+  #06 Rh8 [d8h8]   | nodes=14     time= 589µs | window [-2.83, 13.00] → [-2.83, 13.00] | result=-2.94 (via alphaBeta)
+  #07 Rg8 [d8g8]   | nodes=52     time=6432µs | window [-2.83, 13.00] → [-2.83, 13.00] | result=0.92 (via alphaBeta)
+  #08 Rf8 [d8f8]   | nodes=14     time= 519µs | window [0.92, 13.00] → [0.92, 13.00] | result=-3.79 (via alphaBeta)
+  #09 Re8 [d8e8]   | nodes=14     time= 633µs | window [0.92, 13.00] → [0.92, 13.00] | result=-3.79 (via alphaBeta)
+  #10 Rc8 [d8c8]   | nodes=14     time= 259µs | window [0.92, 13.00] → [0.92, 13.00] | result=-3.87 (via alphaBeta)
+  #11 Rb8 [d8b8]   | nodes=98     time=6830µs | window [0.92, 13.00] → [0.92, 13.00] | result=0.78 (via alphaBeta)
+  #12 Ra8 [d8a8]   | nodes=14     time= 667µs | window [0.92, 13.00] → [0.92, 13.00] | result=-4.14 (via alphaBeta)
+  #13 Rd7 [d8d7]   | nodes=14     time= 568µs | window [0.92, 13.00] → [0.92, 13.00] | result=-2.90 (via alphaBeta)
+  #14 Rd6 [d8d6]   | nodes=20     time=1387µs | window [0.92, 13.00] → [0.92, 13.00] | result=0.87 (via alphaBeta)
+  #15 Rd5 [d8d5]   | nodes=81     time=4049µs | window [0.92, 13.00] → [0.92, 13.00] | result=1.62 (via alphaBeta)
+  #16 Rd4 [d8d4]   | nodes=22     time= 700µs | window [1.62, 13.00] → [1.62, 13.00] | result=-3.18 (via alphaBeta)
+  #17 Rd3 [d8d3]   | nodes=21     time= 296µs | window [1.62, 13.00] → [1.62, 13.00] | result=-3.12 (via alphaBeta)
+  #18 Rd2 [d8d2]   | nodes=14     time= 229µs | window [1.62, 13.00] → [1.62, 13.00] | result=-3.33 (via alphaBeta)
+  #19 Rd1 [d8d1]   | nodes=14     time= 182µs | window [1.62, 13.00] → [1.62, 13.00] | result=-3.45 (via alphaBeta)
+  #20 a7 [a6a7]    | nodes=18     time= 810µs | window [1.62, 13.00] → [1.62, 13.00] | result=-3.18 (via alphaBeta)
+  #21 b6 [b5b6]    | nodes=18     time=2402µs | window [1.62, 13.00] → [1.62, 13.00] | result=-3.46 (via alphaBeta)
+  Best so far: Rd5 [d8d5] score=1.62
+  Final window: [1.62, 13.00] after 40 ms
+Depth  4 (attempt 1, white to move, window=[-9.00, 13.00])
+  #01 Kc3 [b2c3] * | nodes=254    time=9463µs | window [-9.00, 13.00] → [-9.00, 13.00] | result=-2.76 (via alphaBeta)
+  #02 Rg8 [d8g8]   | nodes=160    time=4686µs | window [-2.76, 13.00] → [-2.76, 13.00] | result=0.02 (via alphaBeta)
+  #03 Kb3 [b2b3]   | nodes=110    time=5173µs | window [0.02, 13.00] → [0.02, 13.00] | result=-2.59 (via alphaBeta)
+  #04 Kc2 [b2c2] * | nodes=66     time=1646µs | window [0.02, 13.00] → [0.02, 13.00] | result=-2.86 (via alphaBeta)
+  #05 Kc1 [b2c1] * | nodes=46     time= 708µs | window [0.02, 13.00] → [0.02, 13.00] | result=-2.72 (via alphaBeta)
+  #06 Kb1 [b2b1]   | nodes=40     time=1468µs | window [0.02, 13.00] → [0.02, 13.00] | result=-3.97 (via alphaBeta)
+  #07 Rh8 [d8h8]   | nodes=110    time=2667µs | window [0.02, 13.00] → [0.02, 13.00] | result=-3.97 (via alphaBeta)
+  #08 Rf8 [d8f8]   | nodes=98     time=1594µs | window [0.02, 13.00] → [0.02, 13.00] | result=-3.17 (via alphaBeta)
+  #09 Re8 [d8e8]   | nodes=104    time=2544µs | window [0.02, 13.00] → [0.02, 13.00] | result=-3.97 (via alphaBeta)
+  #10 Rc8 [d8c8]   | nodes=104    time=2525µs | window [0.02, 13.00] → [0.02, 13.00] | result=-3.97 (via alphaBeta)
+  #11 Rb8 [d8b8]   | nodes=537    time=11841µs | window [0.02, 13.00] → [0.02, 13.00] | result=0.02 (via alphaBeta)
+  #12 Ra8 [d8a8]   | nodes=95     time= 851µs | window [0.02, 13.00] → [0.02, 13.00] | result=-2.72 (via alphaBeta)
+  #13 Rd7 [d8d7]   | nodes=110    time=1588µs | window [0.02, 13.00] → [0.02, 13.00] | result=-4.57 (via alphaBeta)
+  #14 Rd6 [d8d6]   | nodes=224    time=2843µs | window [0.02, 13.00] → [0.02, 13.00] | result=-2.61 (via alphaBeta)
+  #15 Rd5 [d8d5]   | nodes=649    time=13737µs | window [0.02, 13.00] → [0.02, 13.00] | result=0.69 (via alphaBeta)
+  #16 Rd4 [d8d4]   | nodes=124    time=1674µs | window [0.69, 13.00] → [0.69, 13.00] | result=-2.51 (via alphaBeta)
+  #17 Rd3 [d8d3]   | nodes=122    time= 641µs | window [0.69, 13.00] → [0.69, 13.00] | result=-2.52 (via alphaBeta)
+  #18 Rd2 [d8d2]   | nodes=110    time= 591µs | window [0.69, 13.00] → [0.69, 13.00] | result=-2.52 (via alphaBeta)
+  #19 Rd1 [d8d1]   | nodes=109    time=1431µs | window [0.69, 13.00] → [0.69, 13.00] | result=-2.52 (via alphaBeta)
+  #20 a7 [a6a7]    | nodes=71     time= 633µs | window [0.69, 13.00] → [0.69, 13.00] | result=0.45 (via alphaBeta)
+  #21 b6 [b5b6]    | nodes=151    time=2197µs | window [0.69, 13.00] → [0.69, 13.00] | result=-3.41 (via alphaBeta)
+  Best so far: Rd5 [d8d5] score=0.69
+  Final window: [0.69, 13.00] after 71 ms
+Depth  5 (attempt 1, white to move, window=[-10.00, 12.00])
+  #01 Rg8 [d8g8]   | nodes=835    time=11017µs | window [-10.00, 12.00] → [-10.00, 12.00] | result=0.02 (via alphaBeta)
+  #02 Kc2 [b2c2] * | nodes=64     time= 921µs | window [0.02, 12.00] → [0.02, 12.00] | result=-0.12 (via alphaBeta)
+  #03 Kc1 [b2c1] * | nodes=51     time= 488µs | window [0.02, 12.00] → [0.02, 12.00] | result=0.02 (via alphaBeta)
+  #04 Kb1 [b2b1]   | nodes=312    time=5234µs | window [0.02, 12.00] → [0.02, 12.00] | result=-3.18 (via alphaBeta)
+  #05 Rh8 [d8h8]   | nodes=333    time=5786µs | window [0.02, 12.00] → [0.02, 12.00] | result=-2.31 (via alphaBeta)
+  #06 Rf8 [d8f8]   | nodes=199    time=3226µs | window [0.02, 12.00] → [0.02, 12.00] | result=-3.17 (via alphaBeta)
+  #07 Re8 [d8e8]   | nodes=255    time=2787µs | window [0.02, 12.00] → [0.02, 12.00] | result=-3.18 (via alphaBeta)
+  #08 Rc8 [d8c8]   | nodes=869    time=15909µs | window [0.02, 12.00] → [0.02, 12.00] | result=-0.43 (via alphaBeta)
+  #09 Rb8 [d8b8]   | nodes=24     time= 183µs | window [0.02, 12.00] → [0.02, 12.00] | result=0.02 (via alphaBeta)
+  #10 Ra8 [d8a8]   | nodes=197    time=2161µs | window [0.02, 12.00] → [0.02, 12.00] | result=-2.71 (via alphaBeta)
+  #11 Rd7 [d8d7]   | nodes=237    time=3385µs | window [0.02, 12.00] → [0.02, 12.00] | result=-1.59 (via alphaBeta)
+  #12 Rd6 [d8d6]   | nodes=393    time=4700µs | window [0.02, 12.00] → [0.02, 12.00] | result=-0.55 (via alphaBeta)
+  #13 Rd5 [d8d5]   | nodes=1532   time=48954µs | window [0.02, 12.00] → [0.02, 12.00] | result=1.16 (via alphaBeta)
+  #14 Rd4 [d8d4]   | nodes=422    time=2469µs | window [1.16, 12.00] → [1.16, 12.00] | result=-2.03 (via alphaBeta)
+  #15 Rd3 [d8d3]   | nodes=353    time=1788µs | window [1.16, 12.00] → [1.16, 12.00] | result=-2.03 (via alphaBeta)
+  #16 Rd2 [d8d2]   | nodes=312    time=2008µs | window [1.16, 12.00] → [1.16, 12.00] | result=-2.03 (via alphaBeta)
+  #17 Rd1 [d8d1]   | nodes=307    time=2616µs | window [1.16, 12.00] → [1.16, 12.00] | result=-2.03 (via alphaBeta)
+  #18 a7 [a6a7]    | nodes=145    time= 900µs | window [1.16, 12.00] → [1.16, 12.00] | result=0.45 (via alphaBeta)
+  #19 b6 [b5b6]    | nodes=182    time=1918µs | window [1.16, 12.00] → [1.16, 12.00] | result=-0.04 (via alphaBeta)
+  #20 Kc3 [b2c3] * | nodes=3990   time=26326µs | window [1.16, 12.00] → [1.16, 12.00] | result=1.56 (via alphaBeta)
+  #21 Kb3 [b2b3]   | nodes=206    time=1283µs | window [1.56, 12.00] → [1.56, 12.00] | result=-2.59 (via alphaBeta)
+  Best so far: Kc3 [b2c3] score=1.56
+  Final window: [1.56, 12.00] after 144 ms
+Depth  6 (attempt 1, white to move, window=[-9.00, 13.00])
+  #01 Rd7 [d8d7]   | nodes=9179   time=71579µs | window [-9.00, 13.00] → [-9.00, 13.00] | result=-3.49 (via alphaBeta)
+  #02 Rh8 [d8h8]   | nodes=2979   time=26824µs | window [-3.49, 13.00] → [-3.49, 13.00] | result=-3.49 (via alphaBeta)
+  #03 Kb3 [b2b3]   | nodes=1110   time=6878µs | window [-3.49, 13.00] → [-3.49, 13.00] | result=-3.49 (via alphaBeta)
+  #04 Rg8 [d8g8]   | nodes=2477   time=11418µs | window [-3.49, 13.00] → [-3.49, 13.00] | result=0.02 (via alphaBeta)
+  #05 Rd4 [d8d4]   | nodes=531    time=2408µs | window [0.02, 13.00] → [0.02, 13.00] | result=-0.28 (via alphaBeta)
+  #06 Re8 [d8e8]   | nodes=370    time=1517µs | window [0.02, 13.00] → [0.02, 13.00] | result=-2.38 (via alphaBeta)
+  #07 Rd6 [d8d6]   | nodes=911    time=7399µs | window [0.02, 13.00] → [0.02, 13.00] | result=-0.16 (via alphaBeta)
+  #08 Kc2 [b2c2] * | nodes=13437  time=75664µs | window [0.02, 13.00] → [0.02, 13.00] | result=0.94 (via alphaBeta)
+  #09 Kc1 [b2c1] * | nodes=4758   time=21292µs | window [0.94, 13.00] → [0.94, 13.00] | result=0.86 (via alphaBeta)
+  #10 Kb1 [b2b1]   | nodes=500    time=2344µs | window [0.94, 13.00] → [0.94, 13.00] | result=-2.07 (via alphaBeta)
+  #11 Rf8 [d8f8]   | nodes=375    time=1820µs | window [0.94, 13.00] → [0.94, 13.00] | result=-2.38 (via alphaBeta)
+  #12 Rc8 [d8c8]   | nodes=615    time=2028µs | window [0.94, 13.00] → [0.94, 13.00] | result=-0.43 (via alphaBeta)
+  #13 Rb8 [d8b8]   | nodes=2971   time=16131µs | window [0.94, 13.00] → [0.94, 13.00] | result=0.80 (via alphaBeta)
+  #14 Ra8 [d8a8]   | nodes=638    time=2436µs | window [0.94, 13.00] → [0.94, 13.00] | result=0.19 (via alphaBeta)
+  #15 Rd5 [d8d5]   | nodes=9659   time=46179µs | window [0.94, 13.00] → [0.94, 13.00] | result=0.94 (via alphaBeta)
+  #16 Rd3 [d8d3]   | nodes=690    time=2695µs | window [0.94, 13.00] → [0.94, 13.00] | result=0.90 (via alphaBeta)
+  #17 Rd2 [d8d2]   | nodes=325    time=1156µs | window [0.94, 13.00] → [0.94, 13.00] | result=-0.55 (via alphaBeta)
+  #18 Rd1 [d8d1]   | nodes=309    time=1034µs | window [0.94, 13.00] → [0.94, 13.00] | result=-0.55 (via alphaBeta)
+  #19 b6 [b5b6]    | nodes=1235   time=6249µs | window [0.94, 13.00] → [0.94, 13.00] | result=0.88 (via alphaBeta)
+  #20 a7 [a6a7]    | nodes=546    time=2007µs | window [0.94, 13.00] → [0.94, 13.00] | result=0.46 (via alphaBeta)
+  #21 Kc3 [b2c3] * | nodes=15257  time=84556µs | window [0.94, 13.00] → [0.94, 13.00] | result=1.34 (via alphaBeta)
+  Best so far: Kc3 [b2c3] score=1.34
+  Final window: [1.34, 13.00] after 395 ms
+Depth  7 (attempt 1, white to move, window=[-10.00, 12.00])
+  #01 Kc3 [b2c3] * | nodes=39329  time=181048µs | window [-10.00, 12.00] → [-10.00, 12.00] | result=1.36 (via alphaBeta)
+  #02 Kb3 [b2b3]   | nodes=3143   time=10418µs | window [1.36, 12.00] → [1.36, 12.00] | result=0.94 (via alphaBeta)
+  #03 Rg8 [d8g8]   | nodes=3609   time=14128µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.28 (via alphaBeta)
+  #04 Rh8 [d8h8]   | nodes=2188   time=6251µs | window [1.36, 12.00] → [1.36, 12.00] | result=0.20 (via alphaBeta)
+  #05 Rd5 [d8d5]   | nodes=3466   time=17832µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.36 (via alphaBeta)
+  #06 Rd6 [d8d6]   | nodes=3014   time=14429µs | window [1.36, 12.00] → [1.36, 12.00] | result=0.74 (via alphaBeta)
+  #07 Kc1 [b2c1] * | nodes=3444   time=14569µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.34 (via alphaBeta)
+  #08 Rb8 [d8b8]   | nodes=3253   time=13167µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.34 (via alphaBeta)
+  #09 Kc2 [b2c2] * | nodes=3772   time=16123µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.31 (via alphaBeta)
+  #10 Kb1 [b2b1]   | nodes=521    time=1378µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.08 (via alphaBeta)
+  #11 Rd4 [d8d4]   | nodes=3414   time=16456µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.36 (via alphaBeta)
+  #12 Re8 [d8e8]   | nodes=2917   time=11625µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.18 (via alphaBeta)
+  #13 Rf8 [d8f8]   | nodes=1466   time=6075µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.02 (via alphaBeta)
+  #14 Rc8 [d8c8]   | nodes=4601   time=16224µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.18 (via alphaBeta)
+  #15 Ra8 [d8a8]   | nodes=1961   time=6126µs | window [1.36, 12.00] → [1.36, 12.00] | result=0.41 (via alphaBeta)
+  #16 Rd3 [d8d3]   | nodes=2387   time=9038µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.36 (via alphaBeta)
+  #17 Rd2 [d8d2]   | nodes=1947   time=6666µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.36 (via alphaBeta)
+  #18 Rd1 [d8d1]   | nodes=987    time=2764µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.36 (via alphaBeta)
+  #19 b6 [b5b6]    | nodes=2417   time=7799µs | window [1.36, 12.00] → [1.36, 12.00] | result=0.88 (via alphaBeta)
+  #20 a7 [a6a7]    | nodes=1333   time=3761µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.16 (via alphaBeta)
+  #21 Rd7 [d8d7]   | nodes=2141   time=7045µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.26 (via alphaBeta)
+  Best so far: Kc3 [b2c3] score=1.36
+  Final window: [1.36, 12.00] after 384 ms
+Depth  8 (attempt 1, white to move, window=[-10.00, 12.00])
+  #01 a7 [a6a7]    | nodes=79807  time=334139µs | window [-10.00, 12.00] → [-10.00, 12.00] | result=-3.78 (via alphaBeta)
+  #02 Rd7 [d8d7]   | nodes=53863  time=308139µs | window [-3.78, 12.00] → [-3.78, 12.00] | result=-2.91 (via alphaBeta)
+  #03 Rg8 [d8g8]   | nodes=54877  time=231983µs | window [-2.91, 12.00] → [-2.91, 12.00] | result=0.88 (via alphaBeta)
+  #04 Kc3 [b2c3] * | nodes=265563 time=1103964µs | window [0.88, 12.00] → [0.88, 12.00] | result=1.36 (via alphaBeta)
+  #05 Rh8 [d8h8]   | nodes=6925   time=18268µs | window [1.36, 12.00] → [1.36, 12.00] | result=0.20 (via alphaBeta)
+  #06 Rd4 [d8d4]   | nodes=5388   time=20165µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.36 (via alphaBeta)
+  #07 Kb3 [b2b3]   | nodes=2824   time=8715µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.18 (via alphaBeta)
+  #08 Re8 [d8e8]   | nodes=2244   time=6102µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.18 (via alphaBeta)
+  #09 Kc1 [b2c1] * | nodes=10488  time=43166µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.35 (via alphaBeta)
+  #10 Rd5 [d8d5]   | nodes=8324   time=32483µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.36 (via alphaBeta)
+  #11 Rd6 [d8d6]   | nodes=10861  time=42979µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.36 (via alphaBeta)
+  #12 Rd2 [d8d2]   | nodes=3629   time=11654µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.36 (via alphaBeta)
+  #13 Kc2 [b2c2] * | nodes=11416  time=51787µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.36 (via alphaBeta)
+  #14 Rb8 [d8b8]   | nodes=13321  time=48905µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.36 (via alphaBeta)
+  #15 Kb1 [b2b1]   | nodes=428    time= 970µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.08 (via alphaBeta)
+  #16 Rf8 [d8f8]   | nodes=5535   time=26538µs | window [1.36, 12.00] → [1.36, 12.00] | result=0.20 (via alphaBeta)
+  #17 Rc8 [d8c8]   | nodes=1585   time=4137µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.18 (via alphaBeta)
+  #18 Ra8 [d8a8]   | nodes=2166   time=7893µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.18 (via alphaBeta)
+  #19 Rd3 [d8d3]   | nodes=3839   time=11761µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.36 (via alphaBeta)
+  #20 Rd1 [d8d1]   | nodes=2168   time=5934µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.36 (via alphaBeta)
+  #21 b6 [b5b6]    | nodes=5700   time=16129µs | window [1.36, 12.00] → [1.36, 12.00] | result=1.36 (via alphaBeta)
+  Best so far: Kc3 [b2c3] score=1.36
+  Final window: [1.36, 12.00] after 2336 ms
+
+-- Transposition table lookups for expected moves --
+Kc1  → TT depth=7 score=1.35 type=UPPERBOUND bestMove=f5 [f6f5]
+Kc2  → TT depth=7 score=1.36 type=UPPERBOUND bestMove=Kh6 [g6h6]
+Kc3  → TT depth=7 score=1.36 type=EXACT bestMove=Ra1 [a5a1]
+========================================================
+
+]]></system-out>
+  </testcase>
+</testsuite>

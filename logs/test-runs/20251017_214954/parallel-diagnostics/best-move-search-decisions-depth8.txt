@@ -1,0 +1,44 @@
+
+=== Engine decision statistics ===
+FEN: 3R4/8/P4pk1/rP4p1/8/8/1K6/8 w - - 3 65
+Side to move: White
+Expected best moves: [Kc1, Kc2, Kc3]
+Baseline evaluation: +1.24 pawns
+Search configuration: runtimeCores=24, searchThreads=16, lazySmpThreads=8, rootParallelLimit=72, ttSize=256 MB, multiThreaded=yes
+Depth target: 8, deepest completed iteration: 0
+Chosen move: Kc3 -> +1.35 pawns (Δ vs baseline: +0.11) [rank #3]
+Engine top move: Rd7 -> +2.15 pawns (Δ vs chosen: -0.07)
+Nodes visited: 1487988, null-move prunes: 64228, search duration: 4418 ms
+Top candidates by evaluation:
+  1. Rd7 -> +2.15 pawns (Δ vs chosen: +0.80)
+  2. Rh8 -> +2.11 pawns (Δ vs chosen: +0.76)
+  3. Kc3 -> +2.08 pawns (Δ vs chosen: +0.73)
+  4. Kc2 -> +2.07 pawns (Δ vs chosen: +0.72)
+  5. Kc1 -> +1.91 pawns (Δ vs chosen: +0.56)
+Expected move evaluations:
+  Kc1 -> +1.91 pawns (Δ vs chosen: +0.56)
+  Kc2 -> +2.07 pawns (Δ vs chosen: +0.72)
+  Kc3 -> +2.08 pawns
+Evaluation delta vs engine best: -0.07 pawns
+Principal variation: Rd5 (+0.00 pawns)
+==================================
+
+================ Best Move Search Diagnostic ================
+FEN: 3R4/8/P4pk1/rP4p1/8/8/1K6/8 w - - 3 65
+Expected best moves: Kc1, Kc2, Kc3
+Depth coverage: target=8, deepestCompleted=0, iterations=0
+WARNING: target depth not reached before abort
+Search result: Kc3 [b2c3] (score=1.35)
+Principal variation: Rd5 [d8d5]
+Nodes visited: 1487988
+Null moves tried: 64228
+Elapsed wall-clock: 4418 ms
+
+-- Iterative deepening overview --
+
+-- Transposition table lookups for expected moves --
+Kc1  → TT depth=7 score=-2.62 type=LOWERBOUND bestMove=Rxb5 [a5b5]
+Kc2  → TT depth=7 score=-2.62 type=LOWERBOUND bestMove=Rxb5 [a5b5]
+Kc3  → TT depth=7 score=-2.62 type=LOWERBOUND bestMove=Rxb5 [a5b5]
+========================================================
+
