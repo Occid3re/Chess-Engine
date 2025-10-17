@@ -1,5 +1,5 @@
 population:
-  - name: tuned_v1
+  - name: v3.8.2-v3f_bishopAtk9
     evaluation:
       modules:
         materialmodule:
@@ -76,7 +76,7 @@ population:
       kingsafety.backrankweaknessendgamepenalty: -48
       kingsafety.attackweightpawn: 7
       kingsafety.attackweightknight: 19
-      kingsafety.attackweightbishop: 0
+      kingsafety.attackweightbishop: 9
       kingsafety.attackweightrook: 36
       kingsafety.attackweightqueen: 24
       moveordering.category.tt: 7
@@ -150,7 +150,7 @@ population:
       search.aspMaxRetriesVolThresholdMed: 256
       search.aspMaxRetriesVolBonusMed: 1
       search.aspMaxRetriesDepthOffset: 16
-      search.aspMaxRetriesDepthDivisor: 1
+      search.aspMaxRetriesDivisor: 1
       search.aspMaxRetriesMomentumDivisor: 3
       search.aspMaxRetriesMin: 1
       search.aspMaxRetriesMax: 2
