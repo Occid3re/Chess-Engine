@@ -2,8 +2,6 @@ package julius.game.chessengine.ai;
 
 import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
-import it.unimi.dsi.fastutil.ints.IntArrays;
-import it.unimi.dsi.fastutil.ints.IntComparator;
 import it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap;
 import julius.game.chessengine.ai.time.TimeManager;
 import julius.game.chessengine.board.BitBoard;
@@ -3144,30 +3142,7 @@ public class AI {
                 s = maxScore;
             }
             scoreBuffer[i] = s;
-            targetBucket.add(i);
-        }
-
-        IntComparator bucketComparator = new IntComparator() {
-            @Override
-            public int compare(int a, int b) {
-                int scoreCompare = Integer.compare(scoreBuffer[b], scoreBuffer[a]);
-                if (scoreCompare != 0) {
-                    return scoreCompare;
-                }
-                return Integer.compare(moveBuffer[b], moveBuffer[a]);
-            }
-
-            @Override
-            public int compare(Integer a, Integer b) {
-                return compare(a.intValue(), b.intValue());
-            }
-        };
-
-        for (IntArrayList bucket : bucketIndexes) {
-            int bucketSize = bucket.size();
-            if (bucketSize > 1) {
-                IntArrays.quickSort(bucket.elements(), 0, bucketSize, bucketComparator);
-            }
+            insertByScore(targetBucket, i, scoreBuffer, moveBuffer);
         }
 
         int outIndex = 0;
@@ -3671,6 +3646,27 @@ public class AI {
             case CAPTURE_BAD -> parameters.categoryCaptureBad();
         };
     }
+
+    private static void insertByScore(IntArrayList bucket, int moveIndex, int[] scoreBuffer, int[] moveBuffer) {
+        int score = scoreBuffer[moveIndex];
+        int move = moveBuffer[moveIndex];
+        int insertPosition = bucket.size();
+        while (insertPosition > 0) {
+            int existingIndex = bucket.getInt(insertPosition - 1);
+            int existingScore = scoreBuffer[existingIndex];
+            if (score > existingScore) {
+                insertPosition--;
+                continue;
+            }
+            if (score == existingScore && move > moveBuffer[existingIndex]) {
+                insertPosition--;
+                continue;
+            }
+            break;
+        }
+        bucket.add(insertPosition, moveIndex);
+    }
+
     private static int writeBucket(IntArrayList bucket, int[] sourceMoves, int[] target, int startIndex) {
         for (int i = 0, size = bucket.size(); i < size; i++) {
             target[startIndex++] = sourceMoves[bucket.getInt(i)];
