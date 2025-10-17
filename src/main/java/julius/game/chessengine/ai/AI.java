@@ -2011,8 +2011,7 @@ public class AI {
     private Optional<TablebaseResult> resolveExactTablebaseResult(Engine engine) {
         TablebaseResult result = engine.getGameState().getLastTablebaseResult().orElse(null);
         if (tablebaseService != null) {
-            BitBoard snapshot = new BitBoard(engine.getBitBoard());
-            Optional<SyzygyProbeResult> probe = tablebaseService.probe(snapshot);
+            Optional<SyzygyProbeResult> probe = tablebaseService.probe(engine.getBitBoard());
             if (probe.isPresent()) {
                 result = TablebaseResult.from(probe.get());
                 engine.getGameState().setLastTablebaseResult(result);
