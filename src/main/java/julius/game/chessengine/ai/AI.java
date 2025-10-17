@@ -231,6 +231,7 @@ public class AI {
     private static final int LMR_MAX_MOVES = MAX_MOVE_LIST_SIZE;
     private static final double MATE_SCORE_MARGIN = 2048.0;
     private static final double TB_TIE_EPSILON = 0.01;
+    private static final int TB_RECOMMENDED_LINE_PLY_LIMIT = 256;
 
     private ScheduledExecutorService scheduler;
 
@@ -1024,6 +1025,15 @@ public class AI {
             task.workerDone();
             completeSearchTask(task, simulatorEngine);
             task.requestStop();
+
+            Optional<TablebaseHit> override = resolveTablebaseHit(mainEngine, mainEngine.whitesTurn());
+            if (override.isPresent() && override.get().bestMove() != -1) {
+                TablebaseHit hit = override.get();
+                currentBestMove = hit.bestMove();
+                bestMoveForHash = boardStateHash;
+                searchResultReady = true;
+                return new MoveAndScore(hit.bestMove(), hit.score());
+            }
 
             if (searchResultReady && currentBestMove != -1 && bestMoveForHash == boardStateHash) {
                 return new MoveAndScore(currentBestMove, task.getBest().score);
@@ -1963,11 +1973,9 @@ public class AI {
                 if (suggestedMove != -1) {
                     Optional<TablebaseContinuation> continuation = evaluateTablebaseContinuation(simulatorEngine, suggestedMove);
                     if (continuation.isPresent()) {
-                        TablebaseContinuation candidate = continuation.get();
-                        if (isContinuationConsistent(parentResult, candidate)) {
-                            return candidate.move();
-                        }
-                        bestContinuation = candidate;
+                        return continuation.get().move();
+                    } else {
+                        return suggestedMove;
                     }
                 }
             }
@@ -2000,11 +2008,74 @@ public class AI {
                 return Optional.empty();
             }
             TablebaseResult result = childResult.get();
+            OptionalInt dtm = result.dtm();
+            if ((dtm == null || dtm.isEmpty())
+                    && result.recommendedMove().isPresent()
+                    && result.wdl().score() != 0) {
+                OptionalInt derived = deriveRecommendedLineDtm(simulatorEngine, result);
+                if (derived.isPresent()) {
+                    result = result.withDtm(derived);
+                    simulatorEngine.getGameState().setLastTablebaseResult(result);
+                }
+            }
             double evaluation = Score.tablebaseToEvaluation(result, simulatorEngine.whitesTurn(),
                     simulatorEngine.getGameState().getHalfmoveClock());
             return Optional.of(new TablebaseContinuation(move, evaluation, result, zeroing));
         } finally {
             simulatorEngine.undoLastMove();
+        }
+    }
+
+    private OptionalInt deriveRecommendedLineDtm(Engine engine, TablebaseResult initialResult) {
+        if (tablebaseService == null || initialResult == null) {
+            return OptionalInt.empty();
+        }
+        Optional<SyzygyMove> nextMove = initialResult.recommendedMove();
+        if (nextMove.isEmpty()) {
+            return OptionalInt.empty();
+        }
+
+        int plies = 0;
+        Deque<Integer> appliedMoves = new ArrayDeque<>();
+        try {
+            TablebaseResult current = initialResult;
+            while (!engine.getGameState().isTerminal()) {
+                Optional<SyzygyMove> suggestion = current.recommendedMove();
+                if (suggestion.isEmpty()) {
+                    return OptionalInt.empty();
+                }
+                IntArrayList legalMoves = engine.getAllLegalMoves();
+                int encoded = findSuggestedMove(legalMoves, suggestion.get());
+                if (encoded == -1) {
+                    return OptionalInt.empty();
+                }
+
+                engine.performMove(encoded);
+                appliedMoves.push(encoded);
+                plies++;
+
+                if (engine.getGameState().isTerminal()) {
+                    break;
+                }
+                if (plies > TB_RECOMMENDED_LINE_PLY_LIMIT) {
+                    return OptionalInt.empty();
+                }
+
+                Optional<TablebaseResult> nextResult = resolveExactTablebaseResult(engine);
+                if (nextResult.isEmpty()) {
+                    return OptionalInt.empty();
+                }
+                current = nextResult.get();
+            }
+            return engine.getGameState().isTerminal() && plies > 0
+                    ? OptionalInt.of(plies)
+                    : OptionalInt.empty();
+        } finally {
+            while (!appliedMoves.isEmpty()) {
+                engine.undoLastMove();
+                appliedMoves.pop();
+            }
+            engine.getGameState().setLastTablebaseResult(initialResult);
         }
     }
 
@@ -2027,6 +2098,9 @@ public class AI {
     private boolean isContinuationConsistent(TablebaseResult parentResult, TablebaseContinuation continuation) {
         if (parentResult == null || continuation == null) {
             return false;
+        }
+        if (parentResult == continuation.result()) {
+            return true;
         }
         int parentSign = Integer.signum(parentResult.wdl().score());
         int childSign = Integer.signum(continuation.result().wdl().score());

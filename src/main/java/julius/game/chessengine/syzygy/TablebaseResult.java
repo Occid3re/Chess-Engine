@@ -11,7 +11,7 @@ import java.util.OptionalInt;
  */
 public record TablebaseResult(SyzygyWdl wdl, OptionalInt dtz, OptionalInt dtm, Optional<SyzygyMove> recommendedMove) {
 
-    public TablebaseResult {
+    public TablebaseResult { 
         Objects.requireNonNull(wdl, "wdl");
         dtz = dtz.isEmpty() ? OptionalInt.empty() : dtz;
         dtm = dtm.isEmpty() ? OptionalInt.empty() : dtm;
@@ -20,6 +20,13 @@ public record TablebaseResult(SyzygyWdl wdl, OptionalInt dtz, OptionalInt dtm, O
     public static TablebaseResult from(SyzygyProbeResult result) {
         Objects.requireNonNull(result, "result");
         return new TablebaseResult(result.wdl(), result.dtz(), result.dtm(), result.recommendedMove());
+    }
+
+    public TablebaseResult withDtm(OptionalInt updatedDtm) {
+        OptionalInt next = updatedDtm == null || updatedDtm.isEmpty()
+                ? OptionalInt.empty()
+                : updatedDtm;
+        return new TablebaseResult(wdl, dtz, next, recommendedMove);
     }
 
     public boolean isWin() {
