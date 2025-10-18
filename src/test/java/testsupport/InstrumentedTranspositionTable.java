@@ -16,6 +16,7 @@ public final class InstrumentedTranspositionTable<V> implements TranspositionTab
 
     private static final Logger log = LogManager.getLogger(InstrumentedTranspositionTable.class);
 
+
     private final Map<Long, V> store = new ConcurrentHashMap<>();
     private final AtomicInteger getCount = new AtomicInteger();
     private final AtomicInteger putCount = new AtomicInteger();
