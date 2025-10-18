@@ -2,7 +2,9 @@
 
 ### Goal
 
-Improve **BestMoveSearchTest** pass rates without extending the current ~60 s diagnostic runtime budget.
+Improve **BestMoveSearchTest** pass rates while keeping the current ~3 min diagnostic runtime window.
+
+**Current status:** Latest tuning passes hold the suite at **15 / 71** failures (baseline was 16). The worst offenders cluster around pawn-pressure situtations (`4k3/...`, `1k1r3r/...`, `r4rk1/...`) with cpLoss in the 3–12 range; diagnostics for each run continue to live in `target/surefire-reports/`.
 
 ### Guardrails
 
@@ -35,11 +37,12 @@ mvn -Djava.version=21 -Dmaven.compiler.release=21 -Dmaven.compiler.enablePreview
 ### Accept
 
 ✅ Consistent runtime within ±5 % of the current baseline  
-✅ Failure count reduced to ≤8 without introducing new flaky cases  
+✅ Failure count reduced to ≤8 without introducing new flaky cases (currently 15 outstanding)  
 ⚠️ Note any trade-offs (e.g., increased evaluation draw bias) in the run logs
 
 ### Next Steps
 
-- Rebalance queen-safety heuristics so gambits like `Qxb5` in `4k3/1bp1bp1p/...` lose priority versus structure-preserving moves (`a3`, `f3`, `a4`). With the new back-rank guard knobs, sweep cover/attack values in small steps while confirming the `3rk2r/...` fixture stays under the 5.5 cp margin.
-- Increase endgame king activity bonuses cautiously until `Ke6` overtakes `Re6` in `3B4/3nrk1p/...` without inflating runtime; track cpLoss as `activity.endgamemobilityking` and `activity.endgamecenterking` shift.
-- Keep logging fresh runs under `logs/test-runs/<timestamp>/best-move-search/`, capturing cpLoss + node deltas for the two remaining failing FENs (`4k3/...`, `3B4/...`) to guide each tuning pass.
+- Target the pawn-pressure collapses first: raise the pawn-threat penalties for knights/rooks and/or add a light “no pawn shield” surcharge in `ThreatModule` so moves like `Nf3` (FEN `4k3/...`) get clipped before the engine commits. Profile cpLoss after each change.
+- For `Bf5` in `1k1r3r/qppb2pp/...`, compare SEE and static eval — a handful of defenders still rate the capture as safe. Consider checking the SEE score inside `ThreatModule` before accepting hanging moves or wiring a one-ply SEE guard in search to veto that capture.
+- The `Rxd2` miss (`8/2b5/...`) remains a high-magnitude regression. Instrument the diagnostics for that FEN and see whether the rook capture survives quiescence; if it does, tune the rook hanging penalty upward only for undefended squares (no friendly pawn coverage).
+- Keep the full-suite runs flowing and log `cpLoss` deltas per position. The current run (see `target/surefire-reports/julius.game.chessengine.ai.BestMoveSearchTest.txt`) lists the 15 failures with their cpLoss budgets; use that as the regression ledger for the next pass.

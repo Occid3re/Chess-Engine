@@ -44,9 +44,9 @@ public class BestMoveSearchTest {
         System.setProperty(ROOT_FANOUT_RATIO_PROPERTY,
                 System.getProperty(ROOT_FANOUT_RATIO_PROPERTY, "0.75"));
         System.setProperty("chessengine.searchThreads",
-                System.getProperty("chessengine.searchThreads", "4"));
+                System.getProperty("chessengine.searchThreads", "1"));
         System.setProperty("chessengine.lazySmpThreads",
-                System.getProperty("chessengine.lazySmpThreads", "2"));
+                System.getProperty("chessengine.lazySmpThreads", "1"));
         System.setProperty("chessengine.rootParallelLimit",
                 System.getProperty("chessengine.rootParallelLimit", "48"));
     }
