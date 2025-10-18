@@ -101,23 +101,23 @@ population:
       moveordering.maxscore: 16045354
       moveordering.historyscale: 1.2
       moveordering.historydecaydivisor: 2
-      search.fpMarginDepth1: 0
-      search.fpMarginDepth2: 0
-      search.lmpBase: 2
-      search.lmpPerDepth: 12
+      search.fpMarginDepth1: 110
+      search.fpMarginDepth2: 260
+      search.lmpBase: 1
+      search.lmpPerDepth: 6
       search.fpMaxDepth: 5
-      search.lmpMaxDepth: 3
-      search.hmpMinIndex: 64
-      search.hmpHistoryMax: 82
+      search.lmpMaxDepth: 4
+      search.hmpMinIndex: 40
+      search.hmpHistoryMax: 48
       search.iidReduceDepth: 2
       search.lmrProtectPlyMax: 0
       search.lmrProtectIndexMax: 0
       search.lmrCapGoodQuiet: 29
       search.lmrHistoryBuckets: 5
-      search.lmrHistoryWeightSlope: 0.6
-      search.lmrScaleDivisor: 2.3
-      search.lmrDepthLogOffset: 4.0
-      search.lmrMoveLogOffset: 3.7
+      search.lmrHistoryWeightSlope: 0.85
+      search.lmrScaleDivisor: 1.8
+      search.lmrDepthLogOffset: 4.6
+      search.lmrMoveLogOffset: 4.1
       search.maxCheckExtensionStreak: 2
       search.seePruneNearRootPly: 1
       search.historyReductionMax: 5205
@@ -154,10 +154,10 @@ population:
       search.aspMaxRetriesMomentumDivisor: 3
       search.aspMaxRetriesMin: 1
       search.aspMaxRetriesMax: 2
-      search.nullBaseReduction: 3.00
-      search.nullDepthWeight: 0.5
-      search.nullMaterialWeight: 1.43
-      search.nullMobilityWeight: 0.1
+      search.nullBaseReduction: 3.2
+      search.nullDepthWeight: 0.7
+      search.nullMaterialWeight: 1.55
+      search.nullMobilityWeight: 0.15
       search.nullDepthCap: 4
       search.nullMaterialCap: 22
       search.nullMobilityCap: 10
@@ -167,7 +167,7 @@ population:
       search.nullLowMaterialPenalty: 0.73
       search.nullVeryLowMobilityPenalty: 0.6
       search.nullSwingGuardMinCp: 451
-      search.nullSwingGuardDivisor: 80
+      search.nullSwingGuardDivisor: 60
       search.ttMainWeight: 3.4
       search.ttCaptureWeight: 4.0
       search.qsMaxDeltaPawn: 8.8

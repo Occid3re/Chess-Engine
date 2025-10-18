@@ -1,0 +1,239 @@
+[[1;34mINFO[m] Scanning for projects...
+[[1;34mINFO[m] 
+[[1;34mINFO[m] [1m----------------------< [0;36mjulius.game:chess-engine[0;1m >----------------------[m
+[[1;34mINFO[m] [1mBuilding chess-engine 3.8.3[m
+[[1;34mINFO[m] [1m--------------------------------[ jar ]---------------------------------[m
+[[1;34mINFO[m] 
+[[1;34mINFO[m] [1m--- [0;32mmaven-enforcer-plugin:3.6.1:enforce[m [1m(enforce)[m @ [36mchess-engine[0;1m ---[m
+[[1;34mINFO[m] Rule 0: org.apache.maven.enforcer.rules.version.RequireMavenVersion passed
+[[1;34mINFO[m] Rule 1: org.apache.maven.enforcer.rules.version.RequireJavaVersion passed
+[[1;34mINFO[m] Rule 2: org.apache.maven.enforcer.rules.dependency.DependencyConvergence passed
+[[1;34mINFO[m] 
+[[1;34mINFO[m] [1m--- [0;32mexec-maven-plugin:3.5.0:exec[m [1m(cmake-configure)[m @ [36mchess-engine[0;1m ---[m
+-- Configuring done (0.0s)
+-- Generating done (0.1s)
+-- Build files have been written to: /mnt/c/Development/Chess-Engine/target/native
+[[1;34mINFO[m] 
+[[1;34mINFO[m] [1m--- [0;32mexec-maven-plugin:3.5.0:exec[m [1m(cmake-build)[m @ [36mchess-engine[0;1m ---[m
+[100%] Built target JSyzygy
+[[1;34mINFO[m] 
+[[1;34mINFO[m] [1m--- [0;32mmaven-resources-plugin:3.3.1:resources[m [1m(default-resources)[m @ [36mchess-engine[0;1m ---[m
+[[1;34mINFO[m] Copying 1 resource from src/main/resources to target/classes
+[[1;34mINFO[m] Copying 74 resources from src/main/resources to target/classes
+[[1;34mINFO[m] 
+[[1;34mINFO[m] [1m--- [0;32mmaven-resources-plugin:3.3.1:copy-resources[m [1m(copy-native-linux)[m @ [36mchess-engine[0;1m ---[m
+[[1;34mINFO[m] Copying 1 resource from target/native to target/classes/natives/linux-x86_64
+[[1;34mINFO[m] 
+[[1;34mINFO[m] [1m--- [0;32mmaven-resources-plugin:3.3.1:copy-resources[m [1m(copy-native-windows)[m @ [36mchess-engine[0;1m ---[m
+[[1;34mINFO[m] Copying 0 resource from target/native to target/classes/natives/win-x86_64
+[[1;34mINFO[m] 
+[[1;34mINFO[m] [1m--- [0;32mmaven-compiler-plugin:3.14.0:compile[m [1m(default-compile)[m @ [36mchess-engine[0;1m ---[m
+[[1;34mINFO[m] Nothing to compile - all classes are up to date.
+[[1;34mINFO[m] 
+[[1;34mINFO[m] [1m--- [0;32mmaven-resources-plugin:3.3.1:testResources[m [1m(default-testResources)[m @ [36mchess-engine[0;1m ---[m
+[[1;34mINFO[m] Copying 18 resources from src/test/resources to target/test-classes
+[[1;34mINFO[m] 
+[[1;34mINFO[m] [1m--- [0;32mmaven-compiler-plugin:3.14.0:testCompile[m [1m(default-testCompile)[m @ [36mchess-engine[0;1m ---[m
+[[1;34mINFO[m] Nothing to compile - all classes are up to date.
+[[1;34mINFO[m] 
+[[1;34mINFO[m] [1m--- [0;32mmaven-surefire-plugin:3.2.5:test[m [1m(default-test)[m @ [36mchess-engine[0;1m ---[m
+[[1;34mINFO[m] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[[1;34mINFO[m] 
+[[1;34mINFO[m] -------------------------------------------------------
+[[1;34mINFO[m]  T E S T S
+[[1;34mINFO[m] -------------------------------------------------------
+[[1;34mINFO[m] Running julius.game.chessengine.ai.[1mBestMoveSearchTest[m
+03:00:39.901 [main] INFO julius.game.chessengine.ai.SearchConcurrencyPlanner -- Search concurrency plan: availableProcessors=24, searchThreads=16, lazySmpThreads=8, rootParallelLimit=72, ttMb=256
+03:00:40.055 [main] INFO julius.game.chessengine.ai.SearchConcurrencyPlanner -- Search concurrency plan: availableProcessors=24, searchThreads=16 (user), lazySmpThreads=8 (user), rootParallelLimit=72 (user), ttMb=256 (user)
+03:00:40.090 [main] INFO julius.game.chessengine.tuning.EngineTuningBootstrap -- Loaded 1 tuning configurations from classpath:tuning/seed-tunings.yaml
+03:00:40.129 [main] INFO julius.game.chessengine.tuning.EngineTuningBootstrap -- Applied engine tuning "v3.8.2-v3f_bishopAtk9" from classpath:tuning/seed-tunings.yaml (1 configurations available).
+03:00:41.588 [main] INFO julius.game.chessengine.ai.OpeningBookLoader -- Loaded opening book from cache (360 entries)
+03:00:41.611 [main] INFO julius.game.chessengine.ai.OpeningBook -- Opening book initialised with 131 unique positions (cache hit)
+03:00:41.633 [main] INFO julius.game.chessengine.ai.SearchConcurrencyPlanner -- Search concurrency plan: availableProcessors=24, searchThreads=16 (user), lazySmpThreads=8 (user), rootParallelLimit=72 (user), ttMb=256 (user)
+03:00:41.714 [main] INFO julius.game.chessengine.ai.AI -- ### SearchThreads = 1, LazySmpThreads = 1
+
+=== Engine decision statistics ===
+FEN: 3r4/1pk4p/p1n5/3pr3/P1p1p2P/2P1P1P1/3R1PB1/3R1K2 w - - 7 32
+Side to move: White
+Expected best moves: [Ke2, Ra2, g4, Kg1]
+Baseline evaluation: -0.25 pawns
+Search configuration: runtimeCores=24, searchThreads=1, lazySmpThreads=1, rootParallelLimit=24, ttSize=64 MB, multiThreaded=no
+Depth target: 8, deepest completed iteration: 0
+Chosen move: Bh3 -> +0.63 pawns (? vs baseline: +0.88) [rank #6]
+Engine top move: Bxe4 -> +3.83 pawns (? vs chosen: -3.65)
+Nodes visited: 238021, null-move prunes: 50915, search duration: 3844 ms
+Top candidates by evaluation:
+  1. Bxe4 -> +3.83 pawns (? vs chosen: +3.20)
+  2. Rxd5 -> +3.31 pawns (? vs chosen: +2.68)
+  3. Rb1 -> +1.82 pawns (? vs chosen: +1.19)
+  4. Rb2 -> +1.82 pawns (? vs chosen: +1.19)
+  5. f4 -> +1.70 pawns (? vs chosen: +1.07)
+Expected move evaluations:
+  Ke2 -> +0.16 pawns (? vs chosen: -0.47)
+  Ra2 -> +0.18 pawns (? vs chosen: -0.45)
+  g4 -> -0.13 pawns (? vs chosen: -0.76)
+  Kg1 -> +0.03 pawns (? vs chosen: -0.60)
+Evaluation delta vs engine best: -3.65 pawns
+Principal variation: Rb2 (+0.00 pawns) -> Rf8 (-0.29 pawns) -> Bh3 (+0.29 pawns) -> Na5 (-0.29 pawns) -> Kg1 (+0.29 pawns) -> Nb3 (-0.29 pawns) -> Kh2 (+0.29 pawns) -> b6 (-0.29 pawns)
+==================================
+
+[BMSTAT] {"environment":{"availableProcessors":24,"searchThreads":1,"lazySmpThreads":1,"rootParallelLimit":24,"ttMb":64,"multiThreaded":false},"fen":"3r4/1pk4p/p1n5/3pr3/P1p1p2P/2P1P1P1/3R1PB1/3R1K2 w - - 7 32","side":"w","expected":["Ke2","Ra2","g4","Kg1"],"chosen":"Bh3","chosenScore":0.63,"best":"Bxe4","bestScore":3.83,"baseline":-0.25,"cpLoss":3.65,"cpGain":0.88,"rank":6,"nodes":238021,"nullMoves":50915,"durationMs":3844,"topCandidates":[{"move":"Bxe4","score":3.83},{"move":"Rxd5","score":3.31},{"move":"Rb1","score":1.82},{"move":"Rb2","score":1.82},{"move":"f4","score":1.70}],"expectedCandidates":[{"move":"Ke2","score":0.16},{"move":"Ra2","score":0.18},{"move":"g4","score":-0.13},{"move":"Kg1","score":0.03}],"depthTarget":8,"depthReached":0,"pv":"Rb2 (+0.00 pawns) -> Rf8 (-0.29 pawns) -> Bh3 (+0.29 pawns) -> Na5 (-0.29 pawns) -> Kg1 (+0.29 pawns) -> Nb3 (-0.29 pawns) -> Kh2 (+0.29 pawns) -> b6 (-0.29 pawns)"}
+
+================ Best Move Search Diagnostic ================
+FEN: 3r4/1pk4p/p1n5/3pr3/P1p1p2P/2P1P1P1/3R1PB1/3R1K2 w - - 7 32
+Expected best moves: Ke2, Ra2, g4, Kg1
+Depth coverage: target=8, deepestCompleted=0, iterations=0
+WARNING: target depth not reached before abort
+Search result: Bh3 [g2h3] (score=0.63)
+Principal variation: Rb2 [d2b2] ? Rf8 [d8f8] ? Bh3 [g2h3] ? Na5 [c6a5] ? Kg1 [f1g1] ? Nb3 [a5b3] ? Kh2 [g1h2] ? b6 [b7b6]
+Nodes visited: 238021
+Null moves tried: 50915
+Elapsed wall-clock: 3844 ms
+
+-- Iterative deepening overview --
+
+-- Transposition table lookups for expected moves --
+Ke2  ? TT depth=7 score=0.63 type=UPPERBOUND bestMove=b6 [b7b6]
+Ra2  ? TT depth=5 score=1.00 type=UPPERBOUND bestMove=Rf8 [d8f8]
+g4   ? TT depth=7 score=0.63 type=UPPERBOUND bestMove=b6 [b7b6]
+Kg1  ? TT depth=7 score=0.63 type=UPPERBOUND bestMove=Na5 [c6a5]
+========================================================
+
+03:00:45.988 [main] INFO julius.game.chessengine.ai.SearchConcurrencyPlanner -- Search concurrency plan: availableProcessors=24, searchThreads=16 (user), lazySmpThreads=8 (user), rootParallelLimit=72 (user), ttMb=256 (user)
+03:00:45.988 [main] INFO julius.game.chessengine.ai.AI -- ### SearchThreads = 1, LazySmpThreads = 1
+
+=== Engine decision statistics ===
+FEN: 1q2kb1r/1r3ppp/2p1p3/3pP3/2nP4/P1NKP3/QPP3PP/R1B4R b k - 9 19
+Side to move: Black
+Expected best moves: [Rd7, Be7, c5]
+Baseline evaluation: -4.19 pawns
+Search configuration: runtimeCores=24, searchThreads=1, lazySmpThreads=1, rootParallelLimit=24, ttSize=64 MB, multiThreaded=no
+Depth target: 4, deepest completed iteration: 0
+Chosen move: Nxb2 -> -4.46 pawns (? vs baseline: -0.27) [rank #35]
+Engine top move: Re7 -> -6.04 pawns (? vs chosen: +3.96)
+Nodes visited: 11690, null-move prunes: 2584, search duration: 393 ms
+Top candidates by evaluation:
+  1. Re7 -> -6.04 pawns (? vs chosen: -1.58)
+  2. Nb6 -> -5.60 pawns (? vs chosen: -1.14)
+  3. Qd6 -> -5.37 pawns (? vs chosen: -0.91)
+  4. Nd6 -> -5.30 pawns (? vs chosen: -0.84)
+  5. Rc7 -> -5.16 pawns (? vs chosen: -0.70)
+Expected move evaluations:
+  Rd7 -> -4.85 pawns (? vs chosen: -0.39)
+  Be7 -> -3.51 pawns (? vs chosen: +0.95)
+  c5 -> -4.38 pawns (? vs chosen: +0.08)
+Evaluation delta vs engine best: +3.96 pawns
+Principal variation: Nxb2 (-0.00 pawns) -> Bxb2 (+4.46 pawns)
+==================================
+
+[BMSTAT] {"environment":{"availableProcessors":24,"searchThreads":1,"lazySmpThreads":1,"rootParallelLimit":24,"ttMb":64,"multiThreaded":false},"fen":"1q2kb1r/1r3ppp/2p1p3/3pP3/2nP4/P1NKP3/QPP3PP/R1B4R b k - 9 19","side":"b","expected":["Rd7","Be7","c5"],"chosen":"Nxb2","chosenScore":-4.46,"best":"Re7","bestScore":-6.04,"baseline":-4.19,"cpLoss":-3.96,"cpGain":-0.27,"rank":35,"nodes":11690,"nullMoves":2584,"durationMs":393,"topCandidates":[{"move":"Re7","score":-6.04},{"move":"Nb6","score":-5.60},{"move":"Qd6","score":-5.37},{"move":"Nd6","score":-5.30},{"move":"Rc7","score":-5.16}],"expectedCandidates":[{"move":"Rd7","score":-4.85},{"move":"Be7","score":-3.51},{"move":"c5","score":-4.38}],"depthTarget":4,"depthReached":0,"pv":"Nxb2 (-0.00 pawns) -> Bxb2 (+4.46 pawns)"}
+
+================ Best Move Search Diagnostic ================
+FEN: 1q2kb1r/1r3ppp/2p1p3/3pP3/2nP4/P1NKP3/QPP3PP/R1B4R b k - 9 19
+Expected best moves: Rd7, Be7, c5
+Depth coverage: target=4, deepestCompleted=0, iterations=0
+WARNING: target depth not reached before abort
+Search result: Nxb2 [c4b2] (score=4.46)
+Principal variation: Nxb2 [c4b2] ? Bxb2 [c1b2]
+Nodes visited: 11690
+Null moves tried: 2584
+Elapsed wall-clock: 393 ms
+
+-- Iterative deepening overview --
+
+-- Transposition table lookups for expected moves --
+Rd7  ? TT depth=3 score=4.46 type=LOWERBOUND bestMove=b3 [b2b3]
+Be7  ? TT depth=3 score=4.46 type=LOWERBOUND bestMove=b3 [b2b3]
+c5   ? TT depth=3 score=4.46 type=LOWERBOUND bestMove=b3 [b2b3]
+========================================================
+
+03:00:46.408 [main] INFO julius.game.chessengine.ai.SearchConcurrencyPlanner -- Search concurrency plan: availableProcessors=24, searchThreads=16 (user), lazySmpThreads=8 (user), rootParallelLimit=72 (user), ttMb=256 (user)
+03:00:46.408 [main] INFO julius.game.chessengine.ai.AI -- ### SearchThreads = 1, LazySmpThreads = 1
+
+=== Engine decision statistics ===
+FEN: 8/8/8/5b2/8/4n3/5k1K/8 b - - 97 103
+Side to move: Black
+Expected best moves: [Nf1]
+Baseline evaluation: +16.53 pawns
+Search configuration: runtimeCores=24, searchThreads=1, lazySmpThreads=1, rootParallelLimit=24, ttSize=64 MB, multiThreaded=no
+Depth target: 4, deepest completed iteration: 0
+Chosen move: Kf3 -> -0.30 pawns (? vs baseline: -16.83) [rank #20]
+Engine top move: Bh3 -> +15.77 pawns (? vs chosen: +0.77)
+Nodes visited: 1003, null-move prunes: 0, search duration: 19 ms
+Top candidates by evaluation:
+  1. Bh3 -> +15.77 pawns (? vs chosen: +16.07)
+  2. Bb1 -> +15.96 pawns (? vs chosen: +16.26)
+  3. Bh7 -> +15.96 pawns (? vs chosen: +16.26)
+  4. Bc8 -> +16.02 pawns (? vs chosen: +16.32)
+  5. Nd1 -> +16.04 pawns (? vs chosen: +16.34)
+Expected move evaluations:
+  Nf1 -> +16.77 pawns (? vs chosen: +17.07)
+Evaluation delta vs engine best: +0.77 pawns
+Principal variation: Kf3 (-0.00 pawns) -> Kh1 (+0.30 pawns) -> Kg4 (-0.30 pawns)
+==================================
+
+[BMSTAT] {"environment":{"availableProcessors":24,"searchThreads":1,"lazySmpThreads":1,"rootParallelLimit":24,"ttMb":64,"multiThreaded":false},"fen":"8/8/8/5b2/8/4n3/5k1K/8 b - - 97 103","side":"b","expected":["Nf1"],"chosen":"Kf3","chosenScore":-0.30,"best":"Bh3","bestScore":15.77,"baseline":16.53,"cpLoss":-0.77,"cpGain":-16.83,"rank":20,"nodes":1003,"nullMoves":0,"durationMs":19,"topCandidates":[{"move":"Bh3","score":15.77},{"move":"Bb1","score":15.96},{"move":"Bh7","score":15.96},{"move":"Bc8","score":16.02},{"move":"Nd1","score":16.04}],"expectedCandidates":[{"move":"Nf1","score":16.77}],"depthTarget":4,"depthReached":0,"pv":"Kf3 (-0.00 pawns) -> Kh1 (+0.30 pawns) -> Kg4 (-0.30 pawns)"}
+
+================ Best Move Search Diagnostic ================
+FEN: 8/8/8/5b2/8/4n3/5k1K/8 b - - 97 103
+Expected best moves: Nf1
+Depth coverage: target=4, deepestCompleted=0, iterations=0
+WARNING: target depth not reached before abort
+Search result: Kf3 [f2f3] (score=0.30)
+Principal variation: Kf3 [f2f3] ? Kh1 [h2h1] ? Kg4 [f3g4]
+Nodes visited: 1003
+Null moves tried: 0
+Elapsed wall-clock: 19 ms
+
+-- Iterative deepening overview --
+
+-- Transposition table lookups for expected moves --
+Nf1  ? TT depth=3 score=0.30 type=LOWERBOUND bestMove=Kh1 [h2h1]
+========================================================
+
+03:00:46.453 [main] INFO julius.game.chessengine.ai.SearchConcurrencyPlanner -- Search concurrency plan: availableProcessors=24, searchThreads=16 (user), lazySmpThreads=8 (user), rootParallelLimit=72 (user), ttMb=256 (user)
+03:00:46.453 [main] INFO julius.game.chessengine.ai.AI -- ### SearchThreads = 1, LazySmpThreads = 1
+
+=== Engine decision statistics ===
+FEN: 8/8/8/5b2/8/4nk2/8/6K1 b - - 93 104
+Side to move: Black
+Expected best moves: [Kg3]
+Baseline evaluation: +16.62 pawns
+Search configuration: runtimeCores=24, searchThreads=1, lazySmpThreads=1, rootParallelLimit=24, ttSize=64 MB, multiThreaded=no
+Depth target: 4, deepest completed iteration: 0
+Chosen move: Kg3 -> +17.08 pawns (? vs baseline: +0.46) [rank #21]
+Engine top move: Nf1 -> +15.77 pawns (? vs chosen: +0.85)
+Nodes visited: 2098, null-move prunes: 0, search duration: 9 ms
+Top candidates by evaluation:
+  1. Nf1 -> +15.77 pawns (? vs chosen: -1.31)
+  2. Nc2 -> +15.99 pawns (? vs chosen: -1.09)
+  3. Bg4 -> +15.99 pawns (? vs chosen: -1.09)
+  4. Ng2 -> +16.05 pawns (? vs chosen: -1.03)
+  5. Bc8 -> +16.11 pawns (? vs chosen: -0.97)
+Expected move evaluations:
+  Kg3 -> +16.62 pawns
+Evaluation delta vs engine best: +0.85 pawns
+Principal variation: Kg3 (-0.00 pawns) -> Kh1 (-17.08 pawns) -> Be4 (+17.08 pawns) -> Kg1 (-17.08 pawns) -> Kf4 (+17.08 pawns)
+==================================
+
+[BMSTAT] {"environment":{"availableProcessors":24,"searchThreads":1,"lazySmpThreads":1,"rootParallelLimit":24,"ttMb":64,"multiThreaded":false},"fen":"8/8/8/5b2/8/4nk2/8/6K1 b - - 93 104","side":"b","expected":["Kg3"],"chosen":"Kg3","chosenScore":17.08,"best":"Nf1","bestScore":15.77,"baseline":16.62,"cpLoss":-0.85,"cpGain":0.46,"rank":21,"nodes":2098,"nullMoves":0,"durationMs":9,"topCandidates":[{"move":"Nf1","score":15.77},{"move":"Nc2","score":15.99},{"move":"Bg4","score":15.99},{"move":"Ng2","score":16.05},{"move":"Bc8","score":16.11}],"expectedCandidates":[{"move":"Kg3","score":16.62}],"depthTarget":4,"depthReached":0,"pv":"Kg3 (-0.00 pawns) -> Kh1 (-17.08 pawns) -> Be4 (+17.08 pawns) -> Kg1 (-17.08 pawns) -> Kf4 (+17.08 pawns)"}
+
+================ Best Move Search Diagnostic ================
+FEN: 8/8/8/5b2/8/4nk2/8/6K1 b - - 93 104
+Expected best moves: Kg3
+Depth coverage: target=4, deepestCompleted=0, iterations=0
+WARNING: target depth not reached before abort
+Search result: Kg3 [f3g3] (score=-17.08)
+Principal variation: Kg3 [f3g3] ? Kh1 [g1h1] ? Be4 [f5e4] ? Kg1 [h1g1] ? Kf4 [g3f4]
+Nodes visited: 2098
+Null moves tried: 0
+Elapsed wall-clock: 9 ms
+
+-- Iterative deepening overview --
+
+-- Transposition table lookups for expected moves --
+Kg3  ? TT depth=3 score=-17.08 type=EXACT bestMove=Kh1 [g1h1]
+========================================================
+
+03:00:46.485 [main] INFO julius.game.chessengine.ai.SearchConcurrencyPlanner -- Search concurrency plan: availableProcessors=24, searchThreads=16 (user), lazySmpThreads=8 (user), rootParallelLimit=72 (user), ttMb=256 (user)
+03:00:46.486 [main] INFO julius.game.chessengine.ai.AI -- ### SearchThreads = 1, LazySmpThreads = 1

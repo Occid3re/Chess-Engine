@@ -19,7 +19,6 @@ Speed up **BestMoveSearchTest** without changing any fixture moves or depths. A 
 2. **Move Ordering**
 
     * TT move always first if score close.
-    * Knight/central capture tie‑break only within epsilon.
 3. **Aspiration Windows**
 
     * Start narrow, widen on fail high/low.
@@ -30,6 +29,8 @@ Speed up **BestMoveSearchTest** without changing any fixture moves or depths. A 
 
     * Target runtime ≤ 3 min with diagnostics on.
     * Node count or locks down; helpers > 75 % busy.
+6 . **Other Problems**
+    * BestMoveSearchTest does not show the full log of each test (Tested SingleThreaded)
 
 ### Measure
 
