@@ -48,3 +48,7 @@ mvn -Djava.version=25 -Dmaven.compiler.release=25 -Dmaven.compiler.enablePreview
 ### Log
 
 Store decision traces under `logs/test-runs/<timestamp>/best-move-search/` and note any tuning change that improved speed.
+
+### Next Steps
+
+- Push BestMoveSearchTest runtime below **1 minute** (diagnostics on) while keeping failure deltas within the existing allowance.
