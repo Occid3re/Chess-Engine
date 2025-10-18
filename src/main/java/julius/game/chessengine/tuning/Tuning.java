@@ -58,11 +58,16 @@ public final class Tuning {
     private static int queenAttackedPenalty;
     private static int backrankWeaknessMidgamePenalty;
     private static int backrankWeaknessEndgamePenalty;
+    private static int backrankCoverMidgameBonus;
+    private static int backrankCoverEndgameBonus;
+    private static int backrankAttackPenaltyMidgame;
+    private static int backrankAttackPenaltyEndgame;
     private static int kingSafetyPawnAttackWeight;
     private static int kingSafetyKnightAttackWeight;
     private static int kingSafetyBishopAttackWeight;
     private static int kingSafetyRookAttackWeight;
     private static int kingSafetyQueenAttackWeight;
+    private static int kingSafetyAttackQuadraticScale;
 
     private static int hangingPawnPenalty;
     private static int hangingKnightPenalty;
@@ -373,6 +378,22 @@ public final class Tuning {
         return backrankWeaknessEndgamePenalty;
     }
 
+    public static int backrankCoverMidgameBonus() {
+        return backrankCoverMidgameBonus;
+    }
+
+    public static int backrankCoverEndgameBonus() {
+        return backrankCoverEndgameBonus;
+    }
+
+    public static int backrankAttackPenaltyMidgame() {
+        return backrankAttackPenaltyMidgame;
+    }
+
+    public static int backrankAttackPenaltyEndgame() {
+        return backrankAttackPenaltyEndgame;
+    }
+
     public static int kingSafetyPawnAttackWeight() {
         return kingSafetyPawnAttackWeight;
     }
@@ -391,6 +412,10 @@ public final class Tuning {
 
     public static int kingSafetyQueenAttackWeight() {
         return kingSafetyQueenAttackWeight;
+    }
+
+    public static int kingSafetyAttackQuadraticScale() {
+        return kingSafetyAttackQuadraticScale;
     }
 
     public static int hangingPawnPenalty() {
@@ -900,11 +925,16 @@ public final class Tuning {
             queenAttackedPenalty = loadInt(ParamId.KING_SAFETY_QUEEN_ATTACKED_PENALTY);
             backrankWeaknessMidgamePenalty = loadInt(ParamId.KING_SAFETY_BACKRANK_WEAKNESS_MIDGAME_PENALTY);
             backrankWeaknessEndgamePenalty = loadInt(ParamId.KING_SAFETY_BACKRANK_WEAKNESS_ENDGAME_PENALTY);
+            backrankCoverMidgameBonus = loadInt(ParamId.KING_SAFETY_BACKRANK_COVER_MIDGAME_BONUS);
+            backrankCoverEndgameBonus = loadInt(ParamId.KING_SAFETY_BACKRANK_COVER_ENDGAME_BONUS);
+            backrankAttackPenaltyMidgame = loadInt(ParamId.KING_SAFETY_BACKRANK_ATTACK_PENALTY_MIDGAME);
+            backrankAttackPenaltyEndgame = loadInt(ParamId.KING_SAFETY_BACKRANK_ATTACK_PENALTY_ENDGAME);
             kingSafetyPawnAttackWeight = loadInt(ParamId.KING_SAFETY_ATTACK_WEIGHT_PAWN);
             kingSafetyKnightAttackWeight = loadInt(ParamId.KING_SAFETY_ATTACK_WEIGHT_KNIGHT);
             kingSafetyBishopAttackWeight = loadInt(ParamId.KING_SAFETY_ATTACK_WEIGHT_BISHOP);
             kingSafetyRookAttackWeight = loadInt(ParamId.KING_SAFETY_ATTACK_WEIGHT_ROOK);
             kingSafetyQueenAttackWeight = loadInt(ParamId.KING_SAFETY_ATTACK_WEIGHT_QUEEN);
+            kingSafetyAttackQuadraticScale = loadInt(ParamId.KING_SAFETY_ATTACK_QUADRATIC_SCALE);
 
             hangingPawnPenalty = loadInt(ParamId.THREAT_HANGING_PAWN_PENALTY);
             hangingKnightPenalty = loadInt(ParamId.THREAT_HANGING_KNIGHT_PENALTY);

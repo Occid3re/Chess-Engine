@@ -16,7 +16,16 @@ import java.util.stream.Stream;
 public final class BestMoveFixtures {
 
     private static final List<BestMoveTestCase> CASES = List.of(
+            new BestMoveTestCase(
+                    "2r2k1r/p3q1pp/1pB1bp2/b3p3/QP6/P2PBNP1/4PPKP/7R b - - 0 18",
+                    List.of("b5", "a6", "Qd6")
 
+            ),
+            new BestMoveTestCase(
+                    "2r2k1r/p3q1pp/1pB1bp2/4p3/Qb6/P2PBNP1/1P2PPKP/7R b - - 0 17",
+                    List.of("Bc5", "Bd6", "Qd6")
+
+            ),
             new BestMoveTestCase(
                     "1q2kb1r/1r3ppp/2p1p3/3pP3/2nP4/P1NKP3/QPP3PP/R1B4R b k - 9 19",
                     List.of("Rd7", "Be7", "c5")
