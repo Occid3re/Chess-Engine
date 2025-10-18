@@ -238,6 +238,7 @@ public class AI {
     private static final int LMR_MAX_MOVES = MAX_MOVE_LIST_SIZE;
     private static final double MATE_SCORE_MARGIN = 2048.0;
     private static final double TB_TIE_EPSILON = 0.01;
+    private static final double TABLEBASE_CLAMP = 2000.0 / 100.0;
 
     private ScheduledExecutorService scheduler;
 
@@ -848,6 +849,7 @@ public class AI {
     private void iterativeDeepening(SearchTask task, Engine simulatorEngine, SplittableRandom rng) {
         clearStaticEvalCache();
         Double lastIterScore = null;
+        boolean lastIterTablebaseExact = false;
         Heuristics heuristics = threadHeuristics.get();
         AspirationController aspirationController = new AspirationController(aspirationParameters);
 
@@ -861,7 +863,7 @@ public class AI {
             boolean usedFullWindow = false;
             boolean attemptedAspiration = false;
 
-            if (lastIterScore != null && currentDepth >= 3) {
+            if (lastIterScore != null && currentDepth >= 3 && !lastIterTablebaseExact) {
                 attemptedAspiration = true;
                 AspirationController.State aspirationState =
                         aspirationController.beginDepth(currentDepth, lastIterScore, rng);
@@ -917,6 +919,7 @@ public class AI {
             }
 
             if (!result.hasCandidate()) {
+                lastIterTablebaseExact = false;
                 if (heuristics.hasUpdates()) mergeThreadHeuristics(heuristics);
                 if (!result.isCompleted() && currentDepth == 1) {
                     // Depth-1 special-case still requires a candidate; none here.
@@ -935,6 +938,7 @@ public class AI {
             }
 
             lastIterScore = sealed.score;
+            lastIterTablebaseExact = sealed.isTablebaseExact();
             aspirationController.finishIteration(sealed.score, attemptedAspiration, usedFullWindow);
             task.publishBest(sealed, currentDepth, simulatorEngine);
 
@@ -1042,8 +1046,8 @@ public class AI {
         Long2DoubleOpenHashMap cache = staticEvalCache.get();
         Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
         if (tablebase.isPresent() && isExactWdl(tablebase.get())) {
-            double exact = Score.tablebaseToEvaluation(tablebase.get(), whiteToMove,
-                    gameState.getHalfmoveClock());
+            double exact = clampTablebaseEval(Score.tablebaseToEvaluation(tablebase.get(), whiteToMove,
+                    gameState.getHalfmoveClock()));
             cache.put(boardHash, exact);
             return exact;
         }
@@ -1118,7 +1122,7 @@ public class AI {
             task.requestStop();
 
             if (searchResultReady && currentBestMove != -1 && bestMoveForHash == boardStateHash) {
-                return new MoveAndScore(currentBestMove, task.getBest().score);
+                return new MoveAndScore(currentBestMove, task.getBest().score, task.getBest().tablebaseExact);
             }
             return null;
         } catch (RuntimeException ex) {
@@ -1575,6 +1579,7 @@ public class AI {
         double bestScore;
 
         boolean aborted = false;
+        boolean bestFromTablebase = false;
 
         if (abortRequested(deadline)) {
             return RootSearchResult.aborted(null);
@@ -1583,23 +1588,32 @@ public class AI {
         simulatorEngine.performMove(firstMove);
         long firstMoveHash = simulatorEngine.getBoardStateHash();
         double firstScore;
+        boolean firstTablebaseExact = false;
         if (simulatorEngine.getGameState().isInStateCheckMate()) {
             firstScore = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
         } else if (simulatorEngine.getGameState().isTerminal()) { // <-- terminal only (stalemate/50/3fold)
             firstScore = evaluateStaticPosition(simulatorEngine.getGameState(), firstMoveHash, !isWhitesTurn, depth);
             if (isWhitesTurn) firstScore = -firstScore;
         } else {
-            // Non-terminal (incl. insufficient material): keep searching
-            firstScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, firstMove, 1, 0);
-            if (firstScore == EXIT_FLAG || abortRequested(deadline)) {
-                simulatorEngine.undoLastMove();
-                return RootSearchResult.aborted(null);
+            Optional<TablebaseResult> firstTablebase = resolveExactTablebaseResult(simulatorEngine);
+            if (firstTablebase.isPresent()) {
+                firstTablebaseExact = true;
+                firstScore = evaluateStaticPosition(simulatorEngine.getGameState(), firstMoveHash, !isWhitesTurn, depth);
+                if (isWhitesTurn) firstScore = -firstScore;
+            } else {
+                // Non-terminal (incl. insufficient material): keep searching
+                firstScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, firstMove, 1, 0);
+                if (firstScore == EXIT_FLAG || abortRequested(deadline)) {
+                    simulatorEngine.undoLastMove();
+                    return RootSearchResult.aborted(null);
+                }
             }
         }
         simulatorEngine.undoLastMove();
 
         bestMove = firstMove;
         bestScore = firstScore;
+        bestFromTablebase = firstTablebaseExact;
 
         if (logFanout) {
             log.info("Root fanout diag start: task={}, depth={}, legalMoves={}, helperCapacity={}, baseFanout={}, fanout={}, firstMove={}",
@@ -1610,12 +1624,12 @@ public class AI {
         if (isWhitesTurn) alpha = Math.max(alpha, firstScore);
         else beta = Math.min(beta, firstScore);
         if (alpha >= beta) {
-            MoveAndScore candidate = createCandidate(bestMove, bestScore);
+            MoveAndScore candidate = createCandidate(bestMove, bestScore, bestFromTablebase);
             return RootSearchResult.completed(candidate);
         }
 
         if (fanout <= 0) {
-            MoveAndScore candidate = createCandidate(bestMove, bestScore);
+            MoveAndScore candidate = createCandidate(bestMove, bestScore, bestFromTablebase);
             return RootSearchResult.completed(candidate);
         }
 
@@ -1623,7 +1637,7 @@ public class AI {
         final List<Future<MoveAndScore>> futures = new ArrayList<>();
 
         final AtomicReference<RootSearchState> stateRef = new AtomicReference<>(
-                new RootSearchState(alpha, beta, new MoveAndScore(bestMove, bestScore))
+                new RootSearchState(alpha, beta, new MoveAndScore(bestMove, bestScore, bestFromTablebase))
         );
         final AtomicBoolean stopRef = new AtomicBoolean(false);
         final java.util.concurrent.locks.ReentrantLock fullResLock = new java.util.concurrent.locks.ReentrantLock();
@@ -1658,18 +1672,28 @@ public class AI {
                     }
 
                     double probe;
+                    boolean workerTablebaseExact = false;
                     if (workerEngine.getGameState().isInStateCheckMate()) {
                         probe = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
                     } else if (workerEngine.getGameState().isTerminal()) { // <-- terminal only
                         probe = evaluateStaticPosition(workerEngine.getGameState(), workerHash, !isWhitesTurn, depth);
                         if (isWhitesTurn) probe = -probe;
                     } else {
-                        probe = alphaBeta(workerEngine, depth - 1, pAlpha, pBeta, !isWhitesTurn, deadline, moveInt, 1, 0);
-                        if (probe == EXIT_FLAG || abortRequested(deadline)) return null;
+                        Optional<TablebaseResult> workerTablebase = resolveExactTablebaseResult(workerEngine);
+                        if (workerTablebase.isPresent()) {
+                            workerTablebaseExact = true;
+                            probe = evaluateStaticPosition(workerEngine.getGameState(), workerHash, !isWhitesTurn, depth);
+                            if (isWhitesTurn) probe = -probe;
+                        } else {
+                            probe = alphaBeta(workerEngine, depth - 1, pAlpha, pBeta, !isWhitesTurn, deadline, moveInt, 1, 0);
+                            if (probe == EXIT_FLAG || abortRequested(deadline)) return null;
+                        }
                     }
 
-                    boolean needsFull = isWhitesTurn ? (probe > snapshot.alpha()) : (probe < snapshot.beta());
+                    boolean needsFull = !workerTablebaseExact
+                            && (isWhitesTurn ? (probe > snapshot.alpha()) : (probe < snapshot.beta()));
                     double finalScore = probe;
+                    boolean finalTablebaseExact = workerTablebaseExact;
 
                     if (needsFull && !stopRef.get()) {
                         fullResLock.lock();
@@ -1681,17 +1705,18 @@ public class AI {
                                 double full = alphaBeta(workerEngine, depth - 1, aNow, bNow, !isWhitesTurn, deadline, moveInt, 1, 0);
                                 if (full != EXIT_FLAG) {
                                     finalScore = full;
-                                    updateRootState(stateRef, isWhitesTurn, moveInt, full, stopRef);
+                                    finalTablebaseExact = workerTablebaseExact;
+                                    updateRootState(stateRef, isWhitesTurn, moveInt, full, finalTablebaseExact, stopRef);
                                 }
                             }
                         } finally {
                             fullResLock.unlock();
                         }
                     } else {
-                        updateRootState(stateRef, isWhitesTurn, moveInt, finalScore, stopRef);
+                        updateRootState(stateRef, isWhitesTurn, moveInt, finalScore, finalTablebaseExact, stopRef);
                     }
 
-                    return new MoveAndScore(moveInt, finalScore);
+                    return new MoveAndScore(moveInt, finalScore, finalTablebaseExact);
                 } finally {
                     evalCache.clear();
                     releaseWorkerSimulation(workerEngine, task.getRootSnapshot());
@@ -1741,6 +1766,7 @@ public class AI {
                         if (best != null) {
                             bestMove = best.move;
                             bestScore = best.score;
+                            bestFromTablebase = best.tablebaseExact;
                         }
                         completedParallel++;
                     }
@@ -1794,6 +1820,7 @@ public class AI {
                 simulatorEngine.performMove(moveInt);
 
                 double score;
+                boolean moveTablebaseExact = false;
                 if (simulatorEngine.getGameState().isInStateCheckMate()) {
                     score = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
                 } else if (simulatorEngine.getGameState().isTerminal()) {
@@ -1803,11 +1830,21 @@ public class AI {
                         score = -score;
                     }
                 } else {
-                    score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1, 0);
-                    if (score == EXIT_FLAG || abortRequested(deadline)) {
-                        simulatorEngine.undoLastMove();
-                        aborted = true;
-                        break;
+                    Optional<TablebaseResult> childTablebase = resolveExactTablebaseResult(simulatorEngine);
+                    if (childTablebase.isPresent()) {
+                        moveTablebaseExact = true;
+                        long childHash = simulatorEngine.getBoardStateHash();
+                        score = evaluateStaticPosition(simulatorEngine.getGameState(), childHash, !isWhitesTurn, depth);
+                        if (isWhitesTurn) {
+                            score = -score;
+                        }
+                    } else {
+                        score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1, 0);
+                        if (score == EXIT_FLAG || abortRequested(deadline)) {
+                            simulatorEngine.undoLastMove();
+                            aborted = true;
+                            break;
+                        }
                     }
                 }
                 simulatorEngine.undoLastMove();
@@ -1815,6 +1852,7 @@ public class AI {
                 if (isBetterScore(isWhitesTurn, score, bestScore)) {
                     bestScore = score;
                     bestMove = moveInt;
+                    bestFromTablebase = moveTablebaseExact;
                 }
 
                 if (isWhitesTurn) {
@@ -1835,12 +1873,12 @@ public class AI {
                     task.getId(), depth, submittedParallel, completedParallel, sequentialProcessed, remainingCandidates, aborted);
         }
 
-        MoveAndScore updatedBest = createCandidate(bestMove, bestScore);
+        MoveAndScore updatedBest = createCandidate(bestMove, bestScore, bestFromTablebase);
             if (updatedBest != null) {
                 stateRef.set(new RootSearchState(alpha, beta, updatedBest));
             }
         }
-        MoveAndScore candidate = bestMove != -1 ? createCandidate(bestMove, bestScore) : null;
+        MoveAndScore candidate = bestMove != -1 ? createCandidate(bestMove, bestScore, bestFromTablebase) : null;
         if (abortRequested(deadline)) {
             aborted = true;
         }
@@ -1852,6 +1890,7 @@ public class AI {
                                  boolean isWhiteToMove,
                                  int move,
                                  double score,
+                                 boolean tablebaseExact,
                                  AtomicBoolean stopRef) {
         while (true) {
             RootSearchState current = stateRef.get();
@@ -1874,8 +1913,9 @@ public class AI {
 
             MoveAndScore nextBest = currentBest;
             if (currentBest == null || isBetterScore(isWhiteToMove, score, currentBest.score)) {
-                if (currentBest == null || currentBest.move != move || Double.compare(currentBest.score, score) != 0) {
-                    nextBest = new MoveAndScore(move, score);
+                if (currentBest == null || currentBest.move != move || Double.compare(currentBest.score, score) != 0
+                        || currentBest.tablebaseExact != tablebaseExact) {
+                    nextBest = new MoveAndScore(move, score, tablebaseExact);
                     changed = true;
                 }
             }
@@ -2018,6 +2058,7 @@ public class AI {
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
 
         boolean aborted = false;
+        boolean bestFromTablebase = false;
 
         IntArrayList sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth,
                 simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
@@ -2029,7 +2070,7 @@ public class AI {
             TablebaseHit hit = rootTablebase.get();
             int candidateMove = hit.bestMove();
             if (candidateMove >= 0 && MoveContainerUtils.contains(sortedMoves, candidateMove)) {
-                return RootSearchResult.completed(createCandidate(candidateMove, hit.score()));
+                return RootSearchResult.completed(createCandidate(candidateMove, hit.score(), true));
             }
         }
 
@@ -2043,6 +2084,7 @@ public class AI {
             simulatorEngine.performMove(moveInt);
             long childHash = simulatorEngine.getBoardStateHash();
             double score;
+            boolean moveTablebaseExact = false;
             if (simulatorEngine.getGameState().isInStateCheckMate()) {
                 score = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
             } else if (simulatorEngine.getGameState().isTerminal()) { // <-- terminal only
@@ -2052,11 +2094,20 @@ public class AI {
                 }
             } else {
                 // Non-terminal (incl. insufficient material):
-                score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1, 0);
-                if (score == EXIT_FLAG || abortRequested(deadline)) {
-                    simulatorEngine.undoLastMove();
-                    aborted = true;
-                    break;
+                Optional<TablebaseResult> childTablebase = resolveExactTablebaseResult(simulatorEngine);
+                if (childTablebase.isPresent()) {
+                    moveTablebaseExact = true;
+                    score = evaluateStaticPosition(simulatorEngine.getGameState(), childHash, !isWhitesTurn, depth);
+                    if (isWhitesTurn) {
+                        score = -score;
+                    }
+                } else {
+                    score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1, 0);
+                    if (score == EXIT_FLAG || abortRequested(deadline)) {
+                        simulatorEngine.undoLastMove();
+                        aborted = true;
+                        break;
+                    }
                 }
             }
             simulatorEngine.undoLastMove();
@@ -2064,19 +2115,24 @@ public class AI {
             if (isBetterScore(isWhitesTurn, score, bestScore)) {
                 bestScore = score;
                 bestMove = moveInt;
+                bestFromTablebase = moveTablebaseExact;
             }
             if (isWhitesTurn) alpha = Math.max(alpha, score);
             else beta = Math.min(beta, score);
             if (alpha >= beta) break;
         }
-        MoveAndScore candidate = bestMove != -1 ? createCandidate(bestMove, bestScore) : null;
+        MoveAndScore candidate = bestMove != -1 ? createCandidate(bestMove, bestScore, bestFromTablebase) : null;
         return aborted ? RootSearchResult.aborted(candidate) : RootSearchResult.completed(candidate);
     }
 
     private MoveAndScore createCandidate(int move, double score) {
+        return createCandidate(move, score, false);
+    }
+
+    private MoveAndScore createCandidate(int move, double score, boolean tablebaseExact) {
         if (move == -1) return null;
         if (!Double.isFinite(score)) return null;
-        return new MoveAndScore(move, score);
+        return new MoveAndScore(move, score, tablebaseExact);
     }
 
     /**
@@ -2104,8 +2160,8 @@ public class AI {
 
         // Stable evaluation: compute from White's perspective and keep the white-oriented
         // value so all callers reason about tablebase scores consistently.
-        double whitePerspective = Score.tablebaseToEvaluation(result, engine.whitesTurn(),
-                engine.getGameState().getHalfmoveClock());
+        double whitePerspective = clampTablebaseEval(Score.tablebaseToEvaluation(result, engine.whitesTurn(),
+                engine.getGameState().getHalfmoveClock()));
         double eval = whitePerspective;
 
         // Determine best move via TB guidance (if available)
@@ -2169,8 +2225,8 @@ public class AI {
                 return Optional.empty();
             }
             TablebaseResult result = childResult.get();
-            double evaluation = Score.tablebaseToEvaluation(result, simulatorEngine.whitesTurn(),
-                    simulatorEngine.getGameState().getHalfmoveClock());
+            double evaluation = clampTablebaseEval(Score.tablebaseToEvaluation(result, simulatorEngine.whitesTurn(),
+                    simulatorEngine.getGameState().getHalfmoveClock()));
             return Optional.of(new TablebaseContinuation(move, evaluation, result, zeroing));
         } finally {
             simulatorEngine.undoLastMove();
@@ -2356,8 +2412,8 @@ public class AI {
         if (childResult.isEmpty()) {
             return Double.NaN;
         }
-        double whitePerspective = Score.tablebaseToEvaluation(childResult.get(), simulatorEngine.whitesTurn(),
-                simulatorEngine.getGameState().getHalfmoveClock());
+        double whitePerspective = clampTablebaseEval(Score.tablebaseToEvaluation(childResult.get(), simulatorEngine.whitesTurn(),
+                simulatorEngine.getGameState().getHalfmoveClock()));
         return whitePerspective;
     }
 
@@ -2367,6 +2423,23 @@ public class AI {
         }
         SyzygyWdl wdl = result.wdl();
         return wdl == SyzygyWdl.WIN || wdl == SyzygyWdl.LOSS || wdl == SyzygyWdl.DRAW;
+    }
+
+    private double clampTablebaseEval(double eval) {
+        if (!Double.isFinite(eval)) {
+            return eval;
+        }
+        double mateThreshold = (CHECKMATE - MATE_SCORE_MARGIN) / 100.0;
+        if (Math.abs(eval) >= mateThreshold) {
+            return eval;
+        }
+        if (eval > TABLEBASE_CLAMP) {
+            return TABLEBASE_CLAMP;
+        }
+        if (eval < -TABLEBASE_CLAMP) {
+            return -TABLEBASE_CLAMP;
+        }
+        return eval;
     }
 
     private double alphaBeta(Engine simulatorEngine, int depth, double alpha, double beta,
@@ -2630,6 +2703,7 @@ public class AI {
         double maxEval = Double.NEGATIVE_INFINITY;
         int bestMoveAtThisNode = -1;
         boolean bestZeroing = false;
+        boolean tablebaseBestExact = false;
 
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, true);
         final Heuristics heuristics = threadHeuristics.get();
@@ -2738,116 +2812,124 @@ public class AI {
             simulatorEngine.performMove(move);
             long newBoardHash = simulatorEngine.getBoardStateHash();
 
-            boolean givesCheck = isSideInCheck(simulatorEngine, false);
-            boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, true);
-            boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, true);
-            boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
+            Optional<TablebaseResult> childTablebase = resolveExactTablebaseResult(simulatorEngine);
+            boolean childExact = childTablebase.isPresent();
 
-            if (futilityPossible && isQuiet && !givesCheck && !attacksQueen && !attacksKingZone
-                    && !opensKingFile && !seeWinsMaterial) {
-                int futilityMargin = futilityMarginForRemainingDepth(baseRemainingDepth);
-                if (futilityMargin > 0 && staticEvalWhite + futilityMargin <= alpha) {
-                    simulatorEngine.undoLastMove();
-                    continue;
-                }
-            }
-
-            int nextDepth = depth - 1;
-            boolean forcing = givesCheck || attacksQueen;
-            boolean allowExtend = forcing && extStreak < maxCheckExtensionStreak;
-            if (allowExtend) nextDepth++;
-            int nextExtStreak = allowExtend ? extStreak + 1 : 0;
-
-            double eval = Double.NEGATIVE_INFINITY;
-            TranspositionTableEntry entry = transpositionTable.get(newBoardHash);
-            boolean ttExactHit = entry != null
-                    && entry.nodeType == NodeType.EXACT
-                    && entry.depth >= nextDepth;
-
-            boolean usedTranspositionEval = false;
-            if (ttExactHit) {
-                eval = fromStoredMateScore(entry.score, plyFromRoot + 1);
-                usedTranspositionEval = true;
+            double eval;
+            if (childExact) {
+                eval = evaluateStaticPosition(simulatorEngine.getGameState(), newBoardHash, false, plyFromRoot + 1);
             } else {
-                if (!inCheckAtNode
-                        && !isTactical
-                        && !givesCheck
-                        && !attacksQueen
-                        && !attacksKingZone
-                        && !opensKingFile
-                        && iidReduceDepth > 0
-                        && nextDepth - iidReduceDepth >= 1) {
-                    double iidScore = alphaBeta(simulatorEngine, nextDepth - iidReduceDepth, alpha, beta,
-                            false, deadline, move, plyFromRoot + 1, 0);
-                    if (iidScore == EXIT_FLAG || positionChanged()) {
+                boolean givesCheck = isSideInCheck(simulatorEngine, false);
+                boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, true);
+                boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, true);
+                boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
+
+                if (futilityPossible && isQuiet && !givesCheck && !attacksQueen && !attacksKingZone
+                        && !opensKingFile && !seeWinsMaterial) {
+                    int futilityMargin = futilityMarginForRemainingDepth(baseRemainingDepth);
+                    if (futilityMargin > 0 && staticEvalWhite + futilityMargin <= alpha) {
                         simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
-                    }
-                    entry = transpositionTable.get(newBoardHash);
-                    ttExactHit = entry != null
-                            && entry.nodeType == NodeType.EXACT
-                            && entry.depth >= nextDepth;
-                    if (ttExactHit) {
-                        eval = fromStoredMateScore(entry.score, plyFromRoot + 1);
-                        usedTranspositionEval = true;
+                        continue;
                     }
                 }
 
-                if (!usedTranspositionEval) {
-                    boolean canReduce = !inCheckAtNode
+                int nextDepth = depth - 1;
+                boolean forcing = givesCheck || attacksQueen;
+                boolean allowExtend = forcing && extStreak < maxCheckExtensionStreak;
+                if (allowExtend) nextDepth++;
+                int nextExtStreak = allowExtend ? extStreak + 1 : 0;
+
+                eval = Double.NEGATIVE_INFINITY;
+                TranspositionTableEntry entry = transpositionTable.get(newBoardHash);
+                boolean ttExactHit = entry != null
+                        && entry.nodeType == NodeType.EXACT
+                        && entry.depth >= nextDepth;
+
+                boolean usedTranspositionEval = false;
+                if (ttExactHit) {
+                    eval = fromStoredMateScore(entry.score, plyFromRoot + 1);
+                    usedTranspositionEval = true;
+                } else {
+                    if (!inCheckAtNode
                             && !isTactical
                             && !givesCheck
                             && !attacksQueen
                             && !attacksKingZone
                             && !opensKingFile
-                            && !seeWinsMaterial
-                            && nextDepth >= 2
-                            && index > lmrProtectIndexMax;
-
-                    if (plyFromRoot <= lmrProtectPlyMax) {
-                        canReduce = false;
-                    }
-
-                    boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
-                    double pBeta = usePvs ? (alpha + 1) : beta;
-
-                    int reduction = 0;
-                    if (canReduce) {
-                        reduction = lmrReduction(nextDepth, index, historyScore);
-                        if (reduction > 0 && isQuiet && historyScore > 0 && lmrCapGoodQuiet >= 0) {
-                            reduction = Math.min(reduction, lmrCapGoodQuiet);
-                        }
-                        if (reduction <= 0) canReduce = false;
-                    }
-
-                    if (canReduce) {
-                        int reduced = Math.max(1, nextDepth - reduction);
-                        eval = alphaBeta(simulatorEngine, reduced, alpha, pBeta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
-                        if (eval == EXIT_FLAG || positionChanged()) {
+                            && iidReduceDepth > 0
+                            && nextDepth - iidReduceDepth >= 1) {
+                        double iidScore = alphaBeta(simulatorEngine, nextDepth - iidReduceDepth, alpha, beta,
+                                false, deadline, move, plyFromRoot + 1, 0);
+                        if (iidScore == EXIT_FLAG || positionChanged()) {
                             simulatorEngine.undoLastMove();
                             return EXIT_FLAG;
                         }
+                        entry = transpositionTable.get(newBoardHash);
+                        ttExactHit = entry != null
+                                && entry.nodeType == NodeType.EXACT
+                                && entry.depth >= nextDepth;
+                        if (ttExactHit) {
+                            eval = fromStoredMateScore(entry.score, plyFromRoot + 1);
+                            usedTranspositionEval = true;
+                        }
+                    }
 
-                        boolean promising = eval > alpha;
-                        if (promising) {
-                            eval = alphaBeta(simulatorEngine, nextDepth, alpha, usePvs ? beta : pBeta,
-                                    false, deadline, move, plyFromRoot + 1, nextExtStreak);
+                    if (!usedTranspositionEval) {
+                        boolean canReduce = !inCheckAtNode
+                                && !isTactical
+                                && !givesCheck
+                                && !attacksQueen
+                                && !attacksKingZone
+                                && !opensKingFile
+                                && !seeWinsMaterial
+                                && nextDepth >= 2
+                                && index > lmrProtectIndexMax;
+
+                        if (plyFromRoot <= lmrProtectPlyMax) {
+                            canReduce = false;
+                        }
+
+                        boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
+                        double pBeta = usePvs ? (alpha + 1) : beta;
+
+                        int reduction = 0;
+                        if (canReduce) {
+                            reduction = lmrReduction(nextDepth, index, historyScore);
+                            if (reduction > 0 && isQuiet && historyScore > 0 && lmrCapGoodQuiet >= 0) {
+                                reduction = Math.min(reduction, lmrCapGoodQuiet);
+                            }
+                            if (reduction <= 0) canReduce = false;
+                        }
+
+                        if (canReduce) {
+                            int reduced = Math.max(1, nextDepth - reduction);
+                            eval = alphaBeta(simulatorEngine, reduced, alpha, pBeta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
                             if (eval == EXIT_FLAG || positionChanged()) {
                                 simulatorEngine.undoLastMove();
                                 return EXIT_FLAG;
                             }
-                        }
-                    } else {
-                        eval = alphaBeta(simulatorEngine, nextDepth, alpha, pBeta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
-                        if (eval == EXIT_FLAG || positionChanged()) {
-                            simulatorEngine.undoLastMove();
-                            return EXIT_FLAG;
-                        }
-                        if (usePvs && eval > alpha && eval < beta) {
-                            eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
+
+                            boolean promising = eval > alpha;
+                            if (promising) {
+                                eval = alphaBeta(simulatorEngine, nextDepth, alpha, usePvs ? beta : pBeta,
+                                        false, deadline, move, plyFromRoot + 1, nextExtStreak);
+                                if (eval == EXIT_FLAG || positionChanged()) {
+                                    simulatorEngine.undoLastMove();
+                                    return EXIT_FLAG;
+                                }
+                            }
+                        } else {
+                            eval = alphaBeta(simulatorEngine, nextDepth, alpha, pBeta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
                             if (eval == EXIT_FLAG || positionChanged()) {
                                 simulatorEngine.undoLastMove();
                                 return EXIT_FLAG;
+                            }
+                            if (usePvs && eval > alpha && eval < beta) {
+                                eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
+                                if (eval == EXIT_FLAG || positionChanged()) {
+                                    simulatorEngine.undoLastMove();
+                                    return EXIT_FLAG;
+                                }
                             }
                         }
                     }
@@ -2863,12 +2945,14 @@ public class AI {
                 maxEval = eval;
                 bestMoveAtThisNode = move;
                 bestZeroing = zeroing;
+                tablebaseBestExact = childExact;
             } else if (bestMoveAtThisNode != -1
                     && shouldUseTablebaseTieBreak(eval, maxEval)
                     && preferCandidateByTablebase(simulatorEngine, move, eval, zeroing, bestMoveAtThisNode, bestZeroing)) {
                 maxEval = eval;
                 bestMoveAtThisNode = move;
                 bestZeroing = zeroing;
+                tablebaseBestExact = childExact;
             }
 
             alpha = Math.max(alpha, eval);
@@ -2884,12 +2968,18 @@ public class AI {
         boolean shouldUpdate = existingEntry == null || existingEntry.depth < depth;
 
         double storedScore = toStoredMateScore(maxEval, plyFromRoot);
-        if (maxEval <= alphaOriginal && shouldUpdate) {
-            transpositionTable.put(boardHash, new TranspositionTableEntry(storedScore, depth, NodeType.UPPERBOUND, bestMoveAtThisNode), depth);
-        } else if (maxEval >= betaOriginal && shouldUpdate) {
-            transpositionTable.put(boardHash, new TranspositionTableEntry(storedScore, depth, NodeType.LOWERBOUND, bestMoveAtThisNode), depth);
-        } else if (shouldUpdate) {
-            transpositionTable.put(boardHash, new TranspositionTableEntry(storedScore, depth, NodeType.EXACT, bestMoveAtThisNode), depth);
+        if (shouldUpdate) {
+            NodeType nodeType;
+            if (tablebaseBestExact) {
+                nodeType = NodeType.EXACT;
+            } else if (maxEval <= alphaOriginal) {
+                nodeType = NodeType.UPPERBOUND;
+            } else if (maxEval >= betaOriginal) {
+                nodeType = NodeType.LOWERBOUND;
+            } else {
+                nodeType = NodeType.EXACT;
+            }
+            transpositionTable.put(boardHash, new TranspositionTableEntry(storedScore, depth, nodeType, bestMoveAtThisNode), depth);
         }
 
         return maxEval;
@@ -2905,6 +2995,7 @@ public class AI {
         double minEval = Double.POSITIVE_INFINITY;
         int bestMoveAtThisNode = -1;
         boolean bestZeroing = false;
+        boolean tablebaseBestExact = false;
 
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, false);
         final Heuristics heuristics = threadHeuristics.get();
@@ -3005,117 +3096,125 @@ public class AI {
             simulatorEngine.performMove(move);
             long newBoardHash = simulatorEngine.getBoardStateHash();
 
-            boolean givesCheck = isSideInCheck(simulatorEngine, true);
-            boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, false);
-            boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, false);
-            boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
+            Optional<TablebaseResult> childTablebase = resolveExactTablebaseResult(simulatorEngine);
+            boolean childExact = childTablebase.isPresent();
 
-            if (futilityPossible && isQuiet && !givesCheck && !attacksQueen && !attacksKingZone
-                    && !opensKingFile && !seeWinsMaterial) {
-                int futilityMargin = futilityMarginForRemainingDepth(baseRemainingDepth);
-                if (futilityMargin > 0 && staticEvalWhite - futilityMargin >= beta) {
-                    simulatorEngine.undoLastMove();
-                    continue;
-                }
-            }
-
-            int nextDepth = depth - 1;
-            boolean forcing = givesCheck || attacksQueen;
-            boolean allowExtend = forcing && extStreak < maxCheckExtensionStreak;
-            if (allowExtend) nextDepth++;
-            int nextExtStreak = allowExtend ? extStreak + 1 : 0;
-
-            double eval = Double.POSITIVE_INFINITY;
-            TranspositionTableEntry entry = transpositionTable.get(newBoardHash);
-            boolean ttExactHit = entry != null
-                    && entry.nodeType == NodeType.EXACT
-                    && entry.depth >= nextDepth;
-
-            boolean usedTranspositionEval = false;
-            if (ttExactHit) {
-                eval = fromStoredMateScore(entry.score, plyFromRoot + 1);
-                usedTranspositionEval = true;
+            double eval;
+            if (childExact) {
+                eval = evaluateStaticPosition(simulatorEngine.getGameState(), newBoardHash, true, plyFromRoot + 1);
             } else {
-                if (!inCheckAtNode
-                        && !isTactical
-                        && !givesCheck
-                        && !attacksQueen
-                        && !attacksKingZone
-                        && !opensKingFile
-                        && iidReduceDepth > 0
-                        && nextDepth - iidReduceDepth >= 1) {
-                    double iidScore = alphaBeta(simulatorEngine, nextDepth - iidReduceDepth, alpha, beta,
-                            true, deadline, move, plyFromRoot + 1, 0);
-                    if (iidScore == EXIT_FLAG || positionChanged()) {
+                boolean givesCheck = isSideInCheck(simulatorEngine, true);
+                boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, false);
+                boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, false);
+                boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
+
+                if (futilityPossible && isQuiet && !givesCheck && !attacksQueen && !attacksKingZone
+                        && !opensKingFile && !seeWinsMaterial) {
+                    int futilityMargin = futilityMarginForRemainingDepth(baseRemainingDepth);
+                    if (futilityMargin > 0 && staticEvalWhite - futilityMargin >= beta) {
                         simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
-                    }
-                    entry = transpositionTable.get(newBoardHash);
-                    ttExactHit = entry != null
-                            && entry.nodeType == NodeType.EXACT
-                            && entry.depth >= nextDepth;
-                    if (ttExactHit) {
-                        eval = fromStoredMateScore(entry.score, plyFromRoot + 1);
-                        usedTranspositionEval = true;
+                        continue;
                     }
                 }
 
-                if (!usedTranspositionEval) {
-                    boolean canReduce = !inCheckAtNode
+                int nextDepth = depth - 1;
+                boolean forcing = givesCheck || attacksQueen;
+                boolean allowExtend = forcing && extStreak < maxCheckExtensionStreak;
+                if (allowExtend) nextDepth++;
+                int nextExtStreak = allowExtend ? extStreak + 1 : 0;
+
+                eval = Double.POSITIVE_INFINITY;
+                TranspositionTableEntry entry = transpositionTable.get(newBoardHash);
+                boolean ttExactHit = entry != null
+                        && entry.nodeType == NodeType.EXACT
+                        && entry.depth >= nextDepth;
+
+                boolean usedTranspositionEval = false;
+                if (ttExactHit) {
+                    eval = fromStoredMateScore(entry.score, plyFromRoot + 1);
+                    usedTranspositionEval = true;
+                } else {
+                    if (!inCheckAtNode
                             && !isTactical
                             && !givesCheck
                             && !attacksQueen
                             && !attacksKingZone
                             && !opensKingFile
-                            && !seeWinsMaterial
-                            && nextDepth >= 2
-                            && index > lmrProtectIndexMax;
-
-                    if (plyFromRoot <= lmrProtectPlyMax) {
-                        canReduce = false;
-                    }
-
-                    boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
-                    double pAlpha = usePvs ? (beta - 1) : alpha;
-
-                    int reduction = 0;
-                    if (canReduce) {
-                        reduction = lmrReduction(nextDepth, index, historyScore);
-                        if (reduction > 0 && isQuiet && historyScore > 0 && lmrCapGoodQuiet >= 0) {
-                            reduction = Math.min(reduction, lmrCapGoodQuiet);
-                        }
-                        if (reduction <= 0) canReduce = false;
-                    }
-
-                    if (canReduce) {
-                        int reduced = Math.max(1, nextDepth - reduction);
-                        eval = alphaBeta(simulatorEngine, reduced, pAlpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
-                        if (eval == EXIT_FLAG || positionChanged()) {
+                            && iidReduceDepth > 0
+                            && nextDepth - iidReduceDepth >= 1) {
+                        double iidScore = alphaBeta(simulatorEngine, nextDepth - iidReduceDepth, alpha, beta,
+                                true, deadline, move, plyFromRoot + 1, 0);
+                        if (iidScore == EXIT_FLAG || positionChanged()) {
                             simulatorEngine.undoLastMove();
                             return EXIT_FLAG;
                         }
+                        entry = transpositionTable.get(newBoardHash);
+                        ttExactHit = entry != null
+                                && entry.nodeType == NodeType.EXACT
+                                && entry.depth >= nextDepth;
+                        if (ttExactHit) {
+                            eval = fromStoredMateScore(entry.score, plyFromRoot + 1);
+                            usedTranspositionEval = true;
+                        }
+                    }
 
-                        boolean promising = eval < beta;
-                        if (promising) {
-                            eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, beta,
-                                    true, deadline, move, plyFromRoot + 1, nextExtStreak);
+                    if (!usedTranspositionEval) {
+                        boolean canReduce = !inCheckAtNode
+                                && !isTactical
+                                && !givesCheck
+                                && !attacksQueen
+                                && !attacksKingZone
+                                && !opensKingFile
+                                && !seeWinsMaterial
+                                && nextDepth >= 2
+                                && index > lmrProtectIndexMax;
+
+                        if (plyFromRoot <= lmrProtectPlyMax) {
+                            canReduce = false;
+                        }
+
+                        boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
+                        double pAlpha = usePvs ? (beta - 1) : alpha;
+
+                        int reduction = 0;
+                        if (canReduce) {
+                            reduction = lmrReduction(nextDepth, index, historyScore);
+                            if (reduction > 0 && isQuiet && historyScore > 0 && lmrCapGoodQuiet >= 0) {
+                                reduction = Math.min(reduction, lmrCapGoodQuiet);
+                            }
+                            if (reduction <= 0) canReduce = false;
+                        }
+
+                        if (canReduce) {
+                            int reduced = Math.max(1, nextDepth - reduction);
+                            eval = alphaBeta(simulatorEngine, reduced, pAlpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
                             if (eval == EXIT_FLAG || positionChanged()) {
                                 simulatorEngine.undoLastMove();
                                 return EXIT_FLAG;
                             }
-                        }
-                    } else {
-                        eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
-                        if (eval == EXIT_FLAG || positionChanged()) {
-                            simulatorEngine.undoLastMove();
-                            return EXIT_FLAG;
-                        }
 
-                        if (usePvs && eval > alpha && eval < beta) {
-                            eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
+                            boolean promising = eval < beta;
+                            if (promising) {
+                                eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, beta,
+                                        true, deadline, move, plyFromRoot + 1, nextExtStreak);
+                                if (eval == EXIT_FLAG || positionChanged()) {
+                                    simulatorEngine.undoLastMove();
+                                    return EXIT_FLAG;
+                                }
+                            }
+                        } else {
+                            eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
                             if (eval == EXIT_FLAG || positionChanged()) {
                                 simulatorEngine.undoLastMove();
                                 return EXIT_FLAG;
+                            }
+
+                            if (usePvs && eval > alpha && eval < beta) {
+                                eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
+                                if (eval == EXIT_FLAG || positionChanged()) {
+                                    simulatorEngine.undoLastMove();
+                                    return EXIT_FLAG;
+                                }
                             }
                         }
                     }
@@ -3137,12 +3236,14 @@ public class AI {
                 minEval = eval;
                 bestMoveAtThisNode = move;
                 bestZeroing = zeroing;
+                tablebaseBestExact = childExact;
             } else if (bestMoveAtThisNode != -1
                     && shouldUseTablebaseTieBreak(eval, minEval)
                     && preferCandidateByTablebase(simulatorEngine, move, eval, zeroing, bestMoveAtThisNode, bestZeroing)) {
                 minEval = eval;
                 bestMoveAtThisNode = move;
                 bestZeroing = zeroing;
+                tablebaseBestExact = childExact;
             }
 
             beta = Math.min(beta, eval);
@@ -3158,12 +3259,18 @@ public class AI {
         boolean shouldUpdate = existingEntry == null || existingEntry.depth < depth;
 
         double storedScore = toStoredMateScore(minEval, plyFromRoot);
-        if (minEval >= betaOriginal && shouldUpdate) {
-            transpositionTable.put(boardHash, new TranspositionTableEntry(storedScore, depth, NodeType.LOWERBOUND, bestMoveAtThisNode), depth);
-        } else if (minEval <= alphaOriginal && shouldUpdate) {
-            transpositionTable.put(boardHash, new TranspositionTableEntry(storedScore, depth, NodeType.UPPERBOUND, bestMoveAtThisNode), depth);
-        } else if (shouldUpdate) {
-            transpositionTable.put(boardHash, new TranspositionTableEntry(storedScore, depth, NodeType.EXACT, bestMoveAtThisNode), depth);
+        if (shouldUpdate) {
+            NodeType nodeType;
+            if (tablebaseBestExact) {
+                nodeType = NodeType.EXACT;
+            } else if (minEval >= betaOriginal) {
+                nodeType = NodeType.LOWERBOUND;
+            } else if (minEval <= alphaOriginal) {
+                nodeType = NodeType.UPPERBOUND;
+            } else {
+                nodeType = NodeType.EXACT;
+            }
+            transpositionTable.put(boardHash, new TranspositionTableEntry(storedScore, depth, nodeType, bestMoveAtThisNode), depth);
         }
 
         return minEval;
@@ -3385,16 +3492,23 @@ public class AI {
             return AI.EXIT_FLAG;
         }
 
-        // Never expand terminal nodes in qsearch: just evaluate
-        if (simulatorEngine.getGameState().isTerminal()) {
+        GameState gameState = simulatorEngine.getGameState();
+        Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
+        if (tablebase.isPresent() && isExactWdl(tablebase.get())) {
             long boardHash = simulatorEngine.getBoardStateHash();
-            return evaluateStaticPosition(simulatorEngine.getGameState(), boardHash, isWhitesTurn, depth);
+            return evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depth);
+        }
+
+        // Never expand terminal nodes in qsearch: just evaluate
+        if (gameState.isTerminal()) {
+            long boardHash = simulatorEngine.getBoardStateHash();
+            return evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depth);
         }
 
         final boolean inCheck = isSideInCheck(simulatorEngine, isWhitesTurn);
 
         long boardHash = simulatorEngine.getBoardStateHash();
-        double standPat = evaluateStaticPosition(simulatorEngine.getGameState(), boardHash, isWhitesTurn, depth);
+        double standPat = evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depth);
 
         double alphaBeforeStandPat = alpha;
 
@@ -3469,7 +3583,14 @@ public class AI {
             }
 
             simulatorEngine.performMove(m);
-            double child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
+            Optional<TablebaseResult> childTablebase = resolveExactTablebaseResult(simulatorEngine);
+            double child;
+            if (childTablebase.isPresent()) {
+                long childHash = simulatorEngine.getBoardStateHash();
+                child = evaluateStaticPosition(simulatorEngine.getGameState(), childHash, !isWhitesTurn, depth + 1);
+            } else {
+                child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
+            }
             simulatorEngine.undoLastMove();
 
             if (child == EXIT_FLAG) {
@@ -3501,8 +3622,8 @@ public class AI {
         boolean whiteToMove = context != null && context.isWhiteToMove();
         Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
         if (tablebase.isPresent() && isExactWdl(tablebase.get())) {
-            double whitePerspective = Score.tablebaseToEvaluation(tablebase.get(), whiteToMove,
-                    gameState.getHalfmoveClock());
+            double whitePerspective = clampTablebaseEval(Score.tablebaseToEvaluation(tablebase.get(), whiteToMove,
+                    gameState.getHalfmoveClock()));
             return isWhitesTurn ? whitePerspective : -whitePerspective;
         }
         if (gameState.isDrawForUIOrEval()) { // <-- include insufficient material for eval/UI
