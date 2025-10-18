@@ -351,12 +351,14 @@ public class Score {
             return false;
         }
         TablebaseResult resolved = TablebaseResult.from(probe.get());
+        boolean exact = isExactWdl(resolved);
         this.tablebaseResult = resolved;
-        this.tablebaseCentipawn = computeTablebaseCentipawn(resolved, bitBoard.isWhitesTurn(),
-                context.getHalfmoveClock());
-        this.tablebaseBypassesEvaluation = true;
+        this.tablebaseCentipawn = exact
+                ? computeTablebaseCentipawn(resolved, bitBoard.isWhitesTurn(), context.getHalfmoveClock())
+                : null;
+        this.tablebaseBypassesEvaluation = exact;
         this.tablebaseResultBoardHash = bitBoard.getBoardStateHash();
-        return true;
+        return exact;
     }
 
     private void clearTablebaseState() {
@@ -364,6 +366,14 @@ public class Score {
         this.tablebaseCentipawn = null;
         this.tablebaseBypassesEvaluation = false;
         this.tablebaseResultBoardHash = Long.MIN_VALUE;
+    }
+
+    private static boolean isExactWdl(TablebaseResult result) {
+        if (result == null) {
+            return false;
+        }
+        SyzygyWdl wdl = result.wdl();
+        return wdl == SyzygyWdl.WIN || wdl == SyzygyWdl.LOSS || wdl == SyzygyWdl.DRAW;
     }
 
     public static int tablebaseToCentipawn(TablebaseResult result, boolean whiteToMove) {
