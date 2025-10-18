@@ -14,6 +14,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class InstrumentedTranspositionTable<V> implements TranspositionTable<V> {
 
+
     private static final Logger log = LogManager.getLogger(InstrumentedTranspositionTable.class);
 
     private final Map<Long, V> store = new ConcurrentHashMap<>();
