@@ -4,6 +4,7 @@ import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.board.FEN;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
+import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.tuning.EngineTuningBootstrap;
 import julius.game.chessengine.syzygy.SyzygyMove;
 import julius.game.chessengine.syzygy.SyzygyProbeResult;
@@ -19,6 +20,7 @@ import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -48,7 +50,8 @@ class AISyzygyIntegrationTest {
                     Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY,
                     simulation.whitesTurn(), Long.MAX_VALUE, -1, 0, 0);
 
-            double expected = Score.tablebaseToEvaluation(TablebaseResult.from(probe), true);
+            double raw = Score.tablebaseToEvaluation(TablebaseResult.from(probe), true);
+            double expected = Math.max(-20.0, Math.min(20.0, raw));
             assertThat(score).isEqualTo(expected);
 
             ai.shutdown();
@@ -231,10 +234,10 @@ class AISyzygyIntegrationTest {
             Method resolver = AI.class.getDeclaredMethod("resolveTablebaseHit", Engine.class, boolean.class);
             resolver.setAccessible(true);
 
-            Object raw = resolver.invoke(ai, simulation, false);
-            assertThat(raw).isInstanceOf(Optional.class);
+            Object resolved = resolver.invoke(ai, simulation, false);
+            assertThat(resolved).isInstanceOf(Optional.class);
 
-            Optional<?> hitOptional = (Optional<?>) raw;
+            Optional<?> hitOptional = (Optional<?>) resolved;
             assertThat(hitOptional).isPresent();
 
             Object hit = hitOptional.orElseThrow();
@@ -242,8 +245,9 @@ class AISyzygyIntegrationTest {
             scoreAccessor.setAccessible(true);
             double score = (double) scoreAccessor.invoke(hit);
 
-            double expected = Score.tablebaseToEvaluation(TablebaseResult.from(probe), simulation.whitesTurn(),
+            double raw = Score.tablebaseToEvaluation(TablebaseResult.from(probe), simulation.whitesTurn(),
                     simulation.getGameState().getHalfmoveClock());
+            double expected = Math.max(-20.0, Math.min(20.0, raw));
 
             assertThat(simulation.whitesTurn()).isFalse();
             assertThat(score).isEqualTo(expected);
@@ -254,7 +258,7 @@ class AISyzygyIntegrationTest {
     }
 
     @Test
-    void evaluateTablebaseChildReturnsWhitePerspectiveForBlackParent() throws Exception {
+    void exactTablebaseScoreReturnsOpponentPerspectiveForBlackParent() throws Exception {
         Engine engine = new Engine();
         String fen = "6k1/8/8/8/8/8/5Q2/6K1 b - - 0 1";
         engine.importBoardFromFen(fen);
@@ -281,14 +285,19 @@ class AISyzygyIntegrationTest {
             simulation.performMove(targetMove);
 
             try {
-                Method evaluator = AI.class.getDeclaredMethod("evaluateTablebaseChild", Engine.class, boolean.class);
+                simulation.getGameState().setLastTablebaseResult(TablebaseResult.from(childProbe));
+
+                Method evaluator = AI.class.getDeclaredMethod("exactTablebaseScore", GameState.class, boolean.class);
                 evaluator.setAccessible(true);
 
-                double eval = (double) evaluator.invoke(ai, simulation, false);
+                OptionalDouble optional = (OptionalDouble) evaluator.invoke(ai, simulation.getGameState(), false);
+                assertThat(optional).isPresent();
+                double eval = optional.getAsDouble();
 
                 TablebaseResult expectedResult = TablebaseResult.from(childProbe);
-                double expected = Score.tablebaseToEvaluation(expectedResult, simulation.whitesTurn(),
+                double whitePerspective = Score.tablebaseToEvaluation(expectedResult, simulation.whitesTurn(),
                         simulation.getGameState().getHalfmoveClock());
+                double expected = Math.max(-20.0, Math.min(20.0, -whitePerspective));
 
                 assertThat(simulation.whitesTurn()).isTrue();
                 assertThat(eval).isEqualTo(expected);
