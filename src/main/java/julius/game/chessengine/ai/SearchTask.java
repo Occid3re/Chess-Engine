@@ -42,7 +42,7 @@ public final class SearchTask {
         this.softDeadline = new AtomicLong(budget.softDeadlineNanos());
         this.completion = new CountDownLatch(Math.max(1, threadCount));
         double initialScore = whiteToMove ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
-        this.best = new AtomicReference<>(new BestMoveDepth(-1, initialScore, 0));
+        this.best = new AtomicReference<>(new BestMoveDepth(-1, initialScore, 0, false));
         this.rootSnapshot = rootSnapshot;
         this.allocationMillis = budget.allocationMillis();
     }
@@ -110,7 +110,7 @@ public final class SearchTask {
             boolean betterAtSameDepth = depth == cur.depth && isBetterScore(whiteToMove, ms.score, cur.score);
             if (!deeperIteration && !betterAtSameDepth) return false;
 
-            BestMoveDepth next = new BestMoveDepth(ms.move, ms.score, depth);
+            BestMoveDepth next = new BestMoveDepth(ms.move, ms.score, depth, ms.tablebaseExact);
             if (best.compareAndSet(cur, next)) {
                 if (isFailHardMate(ms.score)) requestStop();
                 return true;
