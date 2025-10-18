@@ -237,6 +237,7 @@ public class AI {
     private static final int LMR_MAX_DEPTH = 64;
     private static final int LMR_MAX_MOVES = MAX_MOVE_LIST_SIZE;
     private static final double MATE_SCORE_MARGIN = 2048.0;
+    private static final double TABLEBASE_CLAMP_PAWNS = 2000.0 / 100.0;
     private static final double TB_TIE_EPSILON = 0.01;
 
     private ScheduledExecutorService scheduler;
@@ -1040,10 +1041,9 @@ public class AI {
 
     private double resolveScoreDifference(GameState gameState, long boardHash, boolean whiteToMove) {
         Long2DoubleOpenHashMap cache = staticEvalCache.get();
-        Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
-        if (tablebase.isPresent() && isExactWdl(tablebase.get())) {
-            double exact = Score.tablebaseToEvaluation(tablebase.get(), whiteToMove,
-                    gameState.getHalfmoveClock());
+        OptionalDouble tablebaseScore = exactTablebaseScore(gameState, whiteToMove);
+        if (tablebaseScore.isPresent()) {
+            double exact = tablebaseScore.getAsDouble();
             cache.put(boardHash, exact);
             return exact;
         }
@@ -2102,11 +2102,11 @@ public class AI {
             return Optional.empty();
         }
 
-        // Stable evaluation: compute from White's perspective and keep the white-oriented
-        // value so all callers reason about tablebase scores consistently.
-        double whitePerspective = Score.tablebaseToEvaluation(result, engine.whitesTurn(),
-                engine.getGameState().getHalfmoveClock());
-        double eval = whitePerspective;
+        OptionalDouble evalOpt = exactTablebaseScore(engine.getGameState(), true);
+        if (evalOpt.isEmpty()) {
+            return Optional.empty();
+        }
+        double eval = evalOpt.getAsDouble();
 
         // Determine best move via TB guidance (if available)
         int bestMove = determineTablebaseBestMove(engine, result, isWhite);
@@ -2351,22 +2351,28 @@ public class AI {
         moves.set(index, first);
     }
 
-    private double evaluateTablebaseChild(Engine simulatorEngine, boolean parentIsWhite) {
-        Optional<TablebaseResult> childResult = resolveExactTablebaseResult(simulatorEngine);
-        if (childResult.isEmpty()) {
-            return Double.NaN;
-        }
-        double whitePerspective = Score.tablebaseToEvaluation(childResult.get(), simulatorEngine.whitesTurn(),
-                simulatorEngine.getGameState().getHalfmoveClock());
-        return whitePerspective;
-    }
-
     private boolean isExactWdl(TablebaseResult result) {
         if (result == null) {
             return false;
         }
         SyzygyWdl wdl = result.wdl();
         return wdl == SyzygyWdl.WIN || wdl == SyzygyWdl.LOSS || wdl == SyzygyWdl.DRAW;
+    }
+
+    private OptionalDouble exactTablebaseScore(GameState gameState, boolean perspectiveIsWhite) {
+        Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
+        if (tablebase.isEmpty() || !isExactWdl(tablebase.get())) {
+            return OptionalDouble.empty();
+        }
+        EvaluationContext context = gameState.getScore().getEvaluationContext();
+        boolean whiteToMove = context != null && context.isWhiteToMove();
+        double whitePerspective = Score.tablebaseToEvaluation(tablebase.get(), whiteToMove,
+                gameState.getHalfmoveClock());
+        double oriented = perspectiveIsWhite ? whitePerspective : -whitePerspective;
+        if (!isMateValue(oriented)) {
+            oriented = Math.max(-TABLEBASE_CLAMP_PAWNS, Math.min(TABLEBASE_CLAMP_PAWNS, oriented));
+        }
+        return OptionalDouble.of(oriented);
     }
 
     private double alphaBeta(Engine simulatorEngine, int depth, double alpha, double beta,
@@ -3391,6 +3397,11 @@ public class AI {
             return evaluateStaticPosition(simulatorEngine.getGameState(), boardHash, isWhitesTurn, depth);
         }
 
+        OptionalDouble tablebaseExact = exactTablebaseScore(simulatorEngine.getGameState(), isWhitesTurn);
+        if (tablebaseExact.isPresent()) {
+            return tablebaseExact.getAsDouble();
+        }
+
         final boolean inCheck = isSideInCheck(simulatorEngine, isWhitesTurn);
 
         long boardHash = simulatorEngine.getBoardStateHash();
@@ -3469,12 +3480,24 @@ public class AI {
             }
 
             simulatorEngine.performMove(m);
-            double child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
-            simulatorEngine.undoLastMove();
-
-            if (child == EXIT_FLAG) {
-                return EXIT_FLAG;
+            double child;
+            OptionalDouble childTablebase = OptionalDouble.empty();
+            Optional<TablebaseResult> probed = resolveExactTablebaseResult(simulatorEngine);
+            if (probed.isPresent()) {
+                childTablebase = exactTablebaseScore(simulatorEngine.getGameState(), !isWhitesTurn);
             }
+
+            if (childTablebase.isPresent()) {
+                child = childTablebase.getAsDouble();
+            } else {
+                child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
+                if (child == EXIT_FLAG) {
+                    simulatorEngine.undoLastMove();
+                    return EXIT_FLAG;
+                }
+            }
+
+            simulatorEngine.undoLastMove();
 
             double score = -child;
             score = adjustMateFromChild(score);
@@ -3499,11 +3522,9 @@ public class AI {
         }
         EvaluationContext context = gameState.getScore().getEvaluationContext();
         boolean whiteToMove = context != null && context.isWhiteToMove();
-        Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
-        if (tablebase.isPresent() && isExactWdl(tablebase.get())) {
-            double whitePerspective = Score.tablebaseToEvaluation(tablebase.get(), whiteToMove,
-                    gameState.getHalfmoveClock());
-            return isWhitesTurn ? whitePerspective : -whitePerspective;
+        OptionalDouble tablebaseScore = exactTablebaseScore(gameState, isWhitesTurn);
+        if (tablebaseScore.isPresent()) {
+            return tablebaseScore.getAsDouble();
         }
         if (gameState.isDrawForUIOrEval()) { // <-- include insufficient material for eval/UI
             if (log.isDebugEnabled()) log.debug("DRAW");

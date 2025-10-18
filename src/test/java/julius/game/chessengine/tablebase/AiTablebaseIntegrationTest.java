@@ -44,7 +44,8 @@ class AiTablebaseIntegrationTest {
             double evaluation = ai.evaluateBoard(engine, true, deadline);
 
             TablebaseResult expected = TablebaseResult.from(probe);
-            double expectedEval = Score.tablebaseToEvaluation(expected, true);
+            double rawEval = Score.tablebaseToEvaluation(expected, true);
+            double expectedEval = Math.max(-20.0, Math.min(20.0, rawEval));
 
             assertThat(engine.getGameState().getLastTablebaseResult()).contains(expected);
             assertThat(evaluation).isEqualTo(expectedEval);
@@ -75,10 +76,11 @@ class AiTablebaseIntegrationTest {
 
             double whitePerspective = Score.tablebaseToEvaluation(tablebaseResult, engine.whitesTurn(),
                     engine.getGameState().getHalfmoveClock());
+            double expected = Math.max(-20.0, Math.min(20.0, -whitePerspective));
 
             assertThat(whitePerspective).isLessThan(0.0);
             assertThat(evaluation).isGreaterThan(0.0);
-            assertThat(evaluation).isCloseTo(-whitePerspective, within(1e-6));
+            assertThat(evaluation).isCloseTo(expected, within(1e-6));
         }
     }
 }
