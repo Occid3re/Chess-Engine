@@ -757,6 +757,26 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "soft_min": -120.0,
         "soft_max": 0.0,
     },
+    "kingsafety.backrankcovermidgamebonus": {
+        "step": 4.0,
+        "soft_min": -64.0,
+        "soft_max": 128.0,
+    },
+    "kingsafety.backrankcoverendgamebonus": {
+        "step": 4.0,
+        "soft_min": -64.0,
+        "soft_max": 96.0,
+    },
+    "kingsafety.backrankattackpenaltymidgame": {
+        "step": 8.0,
+        "soft_min": 0.0,
+        "soft_max": 256.0,
+    },
+    "kingsafety.backrankattackpenaltyendgame": {
+        "step": 8.0,
+        "soft_min": 0.0,
+        "soft_max": 256.0,
+    },
     "kingsafety.defenderbonus": {
         "step": 1.0,
         "soft_min": 0.0,

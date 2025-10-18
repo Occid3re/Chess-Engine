@@ -46,7 +46,12 @@ public final class KingSafetyModule implements EvaluationModule {
     private final int queenAttackedPenalty;
     private final int backrankWeaknessMidgamePenalty;
     private final int backrankWeaknessEndgamePenalty;
+    private final int backrankCoverMidgameBonus;
+    private final int backrankCoverEndgameBonus;
+    private final int backrankAttackPenaltyMidgame;
+    private final int backrankAttackPenaltyEndgame;
     private final int[] attackWeights = new int[7];
+    private final int attackQuadraticScale;
 
     private final SideState[] sideStates = {new SideState(), new SideState()};
     private final KingSafetyView currentView = new KingSafetyView();
@@ -63,11 +68,16 @@ public final class KingSafetyModule implements EvaluationModule {
         this.queenAttackedPenalty = Tuning.queenAttackedPenalty();
         this.backrankWeaknessMidgamePenalty = Tuning.backrankWeaknessMidgamePenalty();
         this.backrankWeaknessEndgamePenalty = Tuning.backrankWeaknessEndgamePenalty();
+        this.backrankCoverMidgameBonus = Tuning.backrankCoverMidgameBonus();
+        this.backrankCoverEndgameBonus = Tuning.backrankCoverEndgameBonus();
+        this.backrankAttackPenaltyMidgame = Tuning.backrankAttackPenaltyMidgame();
+        this.backrankAttackPenaltyEndgame = Tuning.backrankAttackPenaltyEndgame();
         attackWeights[PAWN] = Tuning.kingSafetyPawnAttackWeight();
         attackWeights[KNIGHT] = Tuning.kingSafetyKnightAttackWeight();
         attackWeights[BISHOP] = Tuning.kingSafetyBishopAttackWeight();
         attackWeights[ROOK] = Tuning.kingSafetyRookAttackWeight();
         attackWeights[QUEEN] = Tuning.kingSafetyQueenAttackWeight();
+        this.attackQuadraticScale = Tuning.kingSafetyAttackQuadraticScale();
     }
 
     @Override
@@ -294,6 +304,10 @@ public final class KingSafetyModule implements EvaluationModule {
 
         int shieldPenalty = state.missingShield * missingPawnShieldPenalty;
         int attackPenalty = -state.totalAttackWeight;
+        if (attackQuadraticScale > 0 && state.totalAttackWeight != 0) {
+            long weight = state.totalAttackWeight;
+            attackPenalty -= (int) ((weight * weight) / attackQuadraticScale);
+        }
         int defenderBonus = state.defenderCount * this.defenderBonus;
         computeBackrankWeaknessPenalty(state, board, isWhite);
         int baseMidgame = shieldPenalty + state.filePenalty + attackPenalty + defenderBonus;
@@ -340,12 +354,54 @@ public final class KingSafetyModule implements EvaluationModule {
         }
 
         long friendlyNonKingAttacks = computeFriendlyNonKingAttacks(board, isWhite);
+        int backrankAttackWeight = sumBackrankAttackWeight(state, backrankMask);
         if ((friendlyNonKingAttacks & backrankMask) != 0) {
+            if (backrankCoverMidgameBonus != 0 || backrankCoverEndgameBonus != 0) {
+                int midBonus = backrankCoverMidgameBonus;
+                int endBonus = backrankCoverEndgameBonus;
+                if (backrankAttackPenaltyMidgame > 0 && backrankAttackWeight > 0) {
+                    midBonus -= scaledBackrankPenalty(backrankAttackWeight, backrankAttackPenaltyMidgame);
+                }
+                if (backrankAttackPenaltyEndgame > 0 && backrankAttackWeight > 0) {
+                    endBonus -= scaledBackrankPenalty(backrankAttackWeight, backrankAttackPenaltyEndgame);
+                }
+                state.backrankWeaknessMidgame = midBonus;
+                state.backrankWeaknessEndgame = endBonus;
+            }
             return;
         }
 
-        state.backrankWeaknessMidgame = backrankWeaknessMidgamePenalty;
-        state.backrankWeaknessEndgame = backrankWeaknessEndgamePenalty;
+        int midPenalty = backrankWeaknessMidgamePenalty;
+        int endPenalty = backrankWeaknessEndgamePenalty;
+        if (backrankAttackWeight > 0) {
+            if (backrankAttackPenaltyMidgame > 0) {
+                midPenalty -= scaledBackrankPenalty(backrankAttackWeight, backrankAttackPenaltyMidgame);
+            }
+            if (backrankAttackPenaltyEndgame > 0) {
+                endPenalty -= scaledBackrankPenalty(backrankAttackWeight, backrankAttackPenaltyEndgame);
+            }
+        }
+        state.backrankWeaknessMidgame = midPenalty;
+        state.backrankWeaknessEndgame = endPenalty;
+    }
+
+    private static int sumBackrankAttackWeight(SideState state, long backrankMask) {
+        int total = 0;
+        long remaining = backrankMask;
+        while (remaining != 0) {
+            int square = Long.numberOfTrailingZeros(remaining);
+            total += state.zoneAttackWeights[square];
+            remaining &= remaining - 1;
+        }
+        return total;
+    }
+
+    private int scaledBackrankPenalty(int attackWeight, int scale) {
+        if (scale <= 0 || attackWeight <= 0) {
+            return 0;
+        }
+        long penalty = (long) attackWeight * scale;
+        return (int) Math.max(1L, penalty / 32L);
     }
 
     private static long computeEscapeSquares(long kingMask, boolean isWhite) {
