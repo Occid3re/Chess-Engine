@@ -83,6 +83,7 @@ public class AI {
     private final AtomicLong searchIdGenerator = new AtomicLong();
     private final Object searchConfigLock = new Object();
     private boolean reconfiguringSearchThreads = false;
+    private final AtomicBoolean rootTablebaseExact = new AtomicBoolean(false);
     /**
      * Requested size of the transposition table in megabytes. The current
      * implementation does not dynamically resize the table, but the value is
@@ -238,6 +239,7 @@ public class AI {
     private static final int LMR_MAX_MOVES = MAX_MOVE_LIST_SIZE;
     private static final double MATE_SCORE_MARGIN = 2048.0;
     private static final double TB_TIE_EPSILON = 0.01;
+    private static final int TABLEBASE_NON_MATE_CLAMP_CP = 2000;
 
     private ScheduledExecutorService scheduler;
 
@@ -848,6 +850,7 @@ public class AI {
     private void iterativeDeepening(SearchTask task, Engine simulatorEngine, SplittableRandom rng) {
         clearStaticEvalCache();
         Double lastIterScore = null;
+        boolean lastIterWasTablebase = false;
         Heuristics heuristics = threadHeuristics.get();
         AspirationController aspirationController = new AspirationController(aspirationParameters);
 
@@ -861,7 +864,7 @@ public class AI {
             boolean usedFullWindow = false;
             boolean attemptedAspiration = false;
 
-            if (lastIterScore != null && currentDepth >= 3) {
+            if (lastIterScore != null && currentDepth >= 3 && !lastIterWasTablebase) {
                 attemptedAspiration = true;
                 AspirationController.State aspirationState =
                         aspirationController.beginDepth(currentDepth, lastIterScore, rng);
@@ -916,11 +919,14 @@ public class AI {
                 }
             }
 
+            boolean rootUsedTablebase = rootTablebaseExact.getAndSet(false);
+
             if (!result.hasCandidate()) {
                 if (heuristics.hasUpdates()) mergeThreadHeuristics(heuristics);
                 if (!result.isCompleted() && currentDepth == 1) {
                     // Depth-1 special-case still requires a candidate; none here.
                 }
+                lastIterWasTablebase = rootUsedTablebase;
                 break;
             }
 
@@ -931,10 +937,16 @@ public class AI {
                     task.publishBest(sealed, currentDepth, simulatorEngine);
                 }
                 if (heuristics.hasUpdates()) mergeThreadHeuristics(heuristics);
+                lastIterWasTablebase = rootUsedTablebase;
                 break;
             }
 
-            lastIterScore = sealed.score;
+            if (rootUsedTablebase) {
+                lastIterScore = null;
+            } else {
+                lastIterScore = sealed.score;
+            }
+            lastIterWasTablebase = rootUsedTablebase;
             aspirationController.finishIteration(sealed.score, attemptedAspiration, usedFullWindow);
             task.publishBest(sealed, currentDepth, simulatorEngine);
 
@@ -1042,7 +1054,7 @@ public class AI {
         Long2DoubleOpenHashMap cache = staticEvalCache.get();
         Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
         if (tablebase.isPresent() && isExactWdl(tablebase.get())) {
-            double exact = Score.tablebaseToEvaluation(tablebase.get(), whiteToMove,
+            double exact = tablebaseEvaluation(tablebase.get(), whiteToMove,
                     gameState.getHalfmoveClock());
             cache.put(boardHash, exact);
             return exact;
@@ -1057,6 +1069,7 @@ public class AI {
     }
 
     protected RootSearchResult searchRootMoves(Engine sim, SearchTask task, int depth, double alpha, double beta, SplittableRandom rng) {
+        rootTablebaseExact.set(false);
         if (searchThreads > 1) {
             return getBestMoveParallel(sim, task, depth, task.getHardDeadline(), alpha, beta, rng);
         }
@@ -2029,6 +2042,7 @@ public class AI {
             TablebaseHit hit = rootTablebase.get();
             int candidateMove = hit.bestMove();
             if (candidateMove >= 0 && MoveContainerUtils.contains(sortedMoves, candidateMove)) {
+                rootTablebaseExact.set(true);
                 return RootSearchResult.completed(createCandidate(candidateMove, hit.score()));
             }
         }
@@ -2104,9 +2118,8 @@ public class AI {
 
         // Stable evaluation: compute from White's perspective and keep the white-oriented
         // value so all callers reason about tablebase scores consistently.
-        double whitePerspective = Score.tablebaseToEvaluation(result, engine.whitesTurn(),
+        double eval = tablebaseEvaluation(result, engine.whitesTurn(),
                 engine.getGameState().getHalfmoveClock());
-        double eval = whitePerspective;
 
         // Determine best move via TB guidance (if available)
         int bestMove = determineTablebaseBestMove(engine, result, isWhite);
@@ -2169,7 +2182,7 @@ public class AI {
                 return Optional.empty();
             }
             TablebaseResult result = childResult.get();
-            double evaluation = Score.tablebaseToEvaluation(result, simulatorEngine.whitesTurn(),
+            double evaluation = tablebaseEvaluation(result, simulatorEngine.whitesTurn(),
                     simulatorEngine.getGameState().getHalfmoveClock());
             return Optional.of(new TablebaseContinuation(move, evaluation, result, zeroing));
         } finally {
@@ -2356,9 +2369,8 @@ public class AI {
         if (childResult.isEmpty()) {
             return Double.NaN;
         }
-        double whitePerspective = Score.tablebaseToEvaluation(childResult.get(), simulatorEngine.whitesTurn(),
+        return tablebaseEvaluation(childResult.get(), simulatorEngine.whitesTurn(),
                 simulatorEngine.getGameState().getHalfmoveClock());
-        return whitePerspective;
     }
 
     private boolean isExactWdl(TablebaseResult result) {
@@ -3385,16 +3397,23 @@ public class AI {
             return AI.EXIT_FLAG;
         }
 
-        // Never expand terminal nodes in qsearch: just evaluate
-        if (simulatorEngine.getGameState().isTerminal()) {
+        GameState gameState = simulatorEngine.getGameState();
+        Optional<TablebaseResult> tbAtNode = gameState.getLastTablebaseResult();
+        if (tbAtNode.isPresent() && isExactWdl(tbAtNode.get())) {
             long boardHash = simulatorEngine.getBoardStateHash();
-            return evaluateStaticPosition(simulatorEngine.getGameState(), boardHash, isWhitesTurn, depth);
+            return evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depth);
+        }
+
+        // Never expand terminal nodes in qsearch: just evaluate
+        if (gameState.isTerminal()) {
+            long boardHash = simulatorEngine.getBoardStateHash();
+            return evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depth);
         }
 
         final boolean inCheck = isSideInCheck(simulatorEngine, isWhitesTurn);
 
         long boardHash = simulatorEngine.getBoardStateHash();
-        double standPat = evaluateStaticPosition(simulatorEngine.getGameState(), boardHash, isWhitesTurn, depth);
+        double standPat = evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depth);
 
         double alphaBeforeStandPat = alpha;
 
@@ -3469,10 +3488,19 @@ public class AI {
             }
 
             simulatorEngine.performMove(m);
-            double child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
+            double child;
+            boolean usedTablebaseChild = false;
+            Optional<TablebaseResult> childTablebase = resolveExactTablebaseResult(simulatorEngine);
+            if (childTablebase.isPresent()) {
+                child = tablebaseEvaluation(childTablebase.get(), simulatorEngine.whitesTurn(),
+                        simulatorEngine.getGameState().getHalfmoveClock());
+                usedTablebaseChild = true;
+            } else {
+                child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
+            }
             simulatorEngine.undoLastMove();
 
-            if (child == EXIT_FLAG) {
+            if (!usedTablebaseChild && child == EXIT_FLAG) {
                 return EXIT_FLAG;
             }
 
@@ -3493,6 +3521,32 @@ public class AI {
     }
 
 
+    private double tablebaseEvaluation(TablebaseResult result, boolean whiteToMove, int halfmoveClock) {
+        if (result == null) {
+            return Double.NaN;
+        }
+        int centipawn = Score.tablebaseToCentipawn(result, whiteToMove, halfmoveClock);
+        if (!isTablebaseMate(result, centipawn)) {
+            if (centipawn > TABLEBASE_NON_MATE_CLAMP_CP) {
+                centipawn = TABLEBASE_NON_MATE_CLAMP_CP;
+            } else if (centipawn < -TABLEBASE_NON_MATE_CLAMP_CP) {
+                centipawn = -TABLEBASE_NON_MATE_CLAMP_CP;
+            }
+        }
+        return centipawn / 100.0;
+    }
+
+    private boolean isTablebaseMate(TablebaseResult result, int centipawn) {
+        if (result == null) {
+            return false;
+        }
+        if (result.dtm().isPresent()) {
+            return result.dtm().getAsInt() != 0;
+        }
+        return Math.abs(centipawn) >= (CHECKMATE - 1);
+    }
+
+
     private double evaluateStaticPosition(GameState gameState, long boardHash, boolean isWhitesTurn, int depthOrPly) {
         if (gameState.isInStateCheckMate()) {
             return -(CHECKMATE - depthOrPly);
@@ -3501,9 +3555,12 @@ public class AI {
         boolean whiteToMove = context != null && context.isWhiteToMove();
         Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
         if (tablebase.isPresent() && isExactWdl(tablebase.get())) {
-            double whitePerspective = Score.tablebaseToEvaluation(tablebase.get(), whiteToMove,
+            double tablebaseScore = tablebaseEvaluation(tablebase.get(), whiteToMove,
                     gameState.getHalfmoveClock());
-            return isWhitesTurn ? whitePerspective : -whitePerspective;
+            if (isWhitesTurn) {
+                return tablebaseScore;
+            }
+            return -tablebaseScore;
         }
         if (gameState.isDrawForUIOrEval()) { // <-- include insufficient material for eval/UI
             if (log.isDebugEnabled()) log.debug("DRAW");
