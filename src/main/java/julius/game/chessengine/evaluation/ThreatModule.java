@@ -3,6 +3,10 @@ package julius.game.chessengine.evaluation;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.board.ImmutableBoardView;
 import julius.game.chessengine.figures.PieceType;
+import julius.game.chessengine.helper.BishopHelper;
+import julius.game.chessengine.helper.KingHelper;
+import julius.game.chessengine.helper.KnightHelper;
+import julius.game.chessengine.helper.RookHelper;
 import julius.game.chessengine.tuning.Tuning;
 
 import java.util.Objects;
@@ -25,6 +29,9 @@ public final class ThreatModule implements EvaluationModule {
     private static final int ROOK = MoveHelper.pieceTypeToInt(PieceType.ROOK);
     private static final int QUEEN = MoveHelper.pieceTypeToInt(PieceType.QUEEN);
     private static final int KING = MoveHelper.pieceTypeToInt(PieceType.KING);
+
+    private static final BishopHelper BISHOP_HELPER = BishopHelper.getInstance();
+    private static final RookHelper ROOK_HELPER = RookHelper.getInstance();
 
     private final int[] hangingPenalties = new int[7];
     private final int[] pawnThreatPenalties = new int[7];
@@ -109,8 +116,12 @@ public final class ThreatModule implements EvaluationModule {
     private int evaluateSide(ImmutableBoardView board, boolean isWhite, long friendlyAttacks, long enemyAttacks) {
         long pieces = isWhite ? board.getWhitePieces() : board.getBlackPieces();
         long enemyPawns = isWhite ? board.getBlackPawns() : board.getWhitePawns();
+        long friendlyPawns = isWhite ? board.getWhitePawns() : board.getBlackPawns();
         int enemyPawnColor = isWhite ? BLACK : WHITE;
+        int friendlyPawnColor = isWhite ? WHITE : BLACK;
         long enemyPawnAttacks = computePawnAttackMask(enemyPawns, enemyPawnColor);
+        long friendlyPawnAttacks = computePawnAttackMask(friendlyPawns, friendlyPawnColor);
+        long occupancy = board.getAllPieces();
 
         int penalty = 0;
         long remaining = pieces;
@@ -128,19 +139,30 @@ public final class ThreatModule implements EvaluationModule {
                 continue;
             }
             long mask = 1L << square;
-            if ((enemyAttacks & mask) == 0) {
-                remaining ^= bit;
-                continue;
-            }
-            if ((friendlyAttacks & mask) != 0) {
+            boolean attackedByEnemy = (enemyAttacks & mask) != 0;
+            boolean attackedByPawn = (enemyPawnAttacks & mask) != 0;
+            if (!attackedByEnemy && !attackedByPawn) {
                 remaining ^= bit;
                 continue;
             }
 
-            penalty += hangingPenalties[typeBits];
-            if (typeBits > PAWN && (enemyPawnAttacks & mask) != 0) {
+            boolean defended = (friendlyAttacks & mask) != 0;
+            boolean pawnDefended = (friendlyPawnAttacks & mask) != 0;
+            boolean attackedByKnight = attackedByEnemy && isAttackedByKnight(board, !isWhite, square);
+            boolean attackedByMinorOrPawn = attackedByPawn
+                    || attackedByKnight
+                    || (attackedByEnemy && isAttackedBySlidingMinor(board, !isWhite, square, occupancy));
+
+            if (attackedByEnemy && !defended) {
+                penalty += hangingPenalties[typeBits];
+            } else if (attackedByEnemy && attackedByMinorOrPawn && typeBits != PAWN && !pawnDefended) {
+                penalty += Math.max(1, hangingPenalties[typeBits] / 3);
+            }
+
+            if (typeBits > PAWN && attackedByPawn) {
                 penalty += pawnThreatPenalties[typeBits];
             }
+
             remaining ^= bit;
         }
         return penalty;
@@ -156,5 +178,63 @@ public final class ThreatModule implements EvaluationModule {
             remaining ^= pawn;
         }
         return mask;
+    }
+
+    private boolean isAttackedByKnight(ImmutableBoardView board, boolean attackerWhite, int targetSquare) {
+        long knights = attackerWhite ? board.getWhiteKnights() : board.getBlackKnights();
+        long remaining = knights;
+        long targetMask = 1L << targetSquare;
+        while (remaining != 0) {
+            long knight = remaining & -remaining;
+            int from = Long.numberOfTrailingZeros(knight);
+            if ((KnightHelper.knightMoveTable[from] & targetMask) != 0) {
+                return true;
+            }
+            remaining ^= knight;
+        }
+        return false;
+    }
+
+    private boolean isAttackedBySlidingMinor(ImmutableBoardView board, boolean attackerWhite, int targetSquare,
+                                             long occupancy) {
+        long targetMask = 1L << targetSquare;
+
+        long bishops = attackerWhite ? board.getWhiteBishops() : board.getBlackBishops();
+        long queens = attackerWhite ? board.getWhiteQueens() : board.getBlackQueens();
+
+        long bishopLike = bishops | queens;
+        long remaining = bishopLike;
+        while (remaining != 0) {
+            long piece = remaining & -remaining;
+            int from = Long.numberOfTrailingZeros(piece);
+            long attacks = BISHOP_HELPER.calculateMovesUsingBishopMagic(from, occupancy);
+            if ((attacks & targetMask) != 0) {
+                return true;
+            }
+            remaining ^= piece;
+        }
+
+        long rooks = attackerWhite ? board.getWhiteRooks() : board.getBlackRooks();
+        long rookLike = rooks | queens;
+        remaining = rookLike;
+        while (remaining != 0) {
+            long piece = remaining & -remaining;
+            int from = Long.numberOfTrailingZeros(piece);
+            long attacks = ROOK_HELPER.calculateMovesUsingRookMagic(from, occupancy);
+            if ((attacks & targetMask) != 0) {
+                return true;
+            }
+            remaining ^= piece;
+        }
+
+        long king = attackerWhite ? board.getWhiteKing() : board.getBlackKing();
+        if (king != 0) {
+            int from = Long.numberOfTrailingZeros(king);
+            if ((KingHelper.KING_ATTACKS[from] & targetMask) != 0) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
