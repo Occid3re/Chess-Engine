@@ -1,5 +1,5 @@
 population:
-  - name: v3.8.2-v3q_ultra5b
+  - name: v3.8.2-v3g_fastdepth1
     evaluation:
       modules:
         materialmodule:
@@ -89,47 +89,47 @@ population:
       moveordering.category.capturebad: 0
       moveordering.killermovescore: 10119
       moveordering.promotionbonus: 1465
-      moveordering.killer0bonus: 300
-      moveordering.killer1bonus: 150
+      moveordering.killer0bonus: 1200
+      moveordering.killer1bonus: 600
       moveordering.countermovebonus: 464
       moveordering.capturemvvmultiplier: 15
       moveordering.captureseemultiplier: 96
       moveordering.promotionseemultiplier: 23
-      moveordering.castlingbonus: 200
+      moveordering.castlingbonus: 800
       moveordering.captureseeclamp: 512
       moveordering.promotionseeclamp: 322
       moveordering.capturegoodbonus: 900
       moveordering.captureequalbonus: 250
       moveordering.capturebadbonus: -700
       moveordering.capturelosingseepenalty: -1024
-      moveordering.quiethistorymultiplier: 3.0
-      moveordering.quiethistorybonus: 900
+      moveordering.quiethistorymultiplier: 1.4
+      moveordering.quiethistorybonus: 300
       moveordering.maxscore: 16045354
-      moveordering.historyscale: 3.8
+      moveordering.historyscale: 2.0
       moveordering.historydecaydivisor: 2
-      search.fpMarginDepth1: 240
-      search.fpMarginDepth2: 560
-      search.lmpBase: 2
-      search.lmpPerDepth: 13
-      search.fpMaxDepth: 8
-      search.lmpMaxDepth: 10
-      search.hmpMinIndex: 5
-      search.hmpHistoryMax: 100
-      search.iidReduceDepth: 0
-      search.lmrProtectPlyMax: 0
-      search.lmrProtectIndexMax: 0
+      search.fpMarginDepth1: 110
+      search.fpMarginDepth2: 260
+      search.lmpBase: 1
+      search.lmpPerDepth: 3
+      search.fpMaxDepth: 5
+      search.lmpMaxDepth: 3
+      search.hmpMinIndex: 6
+      search.hmpHistoryMax: 400
+      search.iidReduceDepth: 1
+      search.lmrProtectPlyMax: 2
+      search.lmrProtectIndexMax: 4
       search.lmrCapGoodQuiet: 29
       search.lmrHistoryBuckets: 5
       search.lmrHistoryWeightSlope: 0.85
-      search.lmrScaleDivisor: 4.0
-      search.lmrDepthLogOffset: 6.6
-      search.lmrMoveLogOffset: 6.2
-      search.maxCheckExtensionStreak: 0
-      search.seePruneNearRootPly: 7
+      search.lmrScaleDivisor: 2.2
+      search.lmrDepthLogOffset: 5.0
+      search.lmrMoveLogOffset: 4.6
+      search.maxCheckExtensionStreak: 2
+      search.seePruneNearRootPly: 0
       search.historyReductionMax: 5205
-      search.aspMinSpanCp: 36
+      search.aspMinSpanCp: 16
       search.aspMaxSpanCp: 640
-      search.aspDefaultSpanCp: 160
+      search.aspDefaultSpanCp: 64
       search.aspHistoryBlend: 0.4
       search.aspMomentumStepCp: 4
       search.aspMomentumCap: 32
@@ -147,10 +147,10 @@ population:
       search.aspBumpDepthCp: 2
       search.aspFullWindowScale: 2.00
       search.aspLastSpanScale: 2.0
-      search.aspFullWindowMinMultiplier: 1.8
+      search.aspFullWindowMinMultiplier: 2.1
       search.aspBlendBaselineWeight: 0.6
       search.aspBlendCandidateWeight: 0.6
-      search.aspMaxRetriesBase: 0
+      search.aspMaxRetriesBase: 3
       search.aspMaxRetriesVolThresholdHigh: 104
       search.aspMaxRetriesVolBonusHigh: 8
       search.aspMaxRetriesVolThresholdMed: 256
@@ -158,13 +158,13 @@ population:
       search.aspMaxRetriesDepthOffset: 16
       search.aspMaxRetriesDepthDivisor: 1
       search.aspMaxRetriesMomentumDivisor: 3
-      search.aspMaxRetriesMin: 0
-      search.aspMaxRetriesMax: 0
-      search.nullBaseReduction: 5.2
+      search.aspMaxRetriesMin: 1
+      search.aspMaxRetriesMax: 3
+      search.nullBaseReduction: 2.6
       search.nullDepthWeight: 0.7
       search.nullMaterialWeight: 1.55
       search.nullMobilityWeight: 0.15
-      search.nullDepthCap: 9
+      search.nullDepthCap: 3
       search.nullMaterialCap: 22
       search.nullMobilityCap: 10
       search.nullLowMaterialThreshold: 3
@@ -172,11 +172,11 @@ population:
       search.nullVeryLowMobilityThreshold: 8
       search.nullLowMaterialPenalty: 0.73
       search.nullVeryLowMobilityPenalty: 0.6
-      search.nullSwingGuardMinCp: 200
+      search.nullSwingGuardMinCp: 300
       search.nullSwingGuardDivisor: 60
       search.ttMainWeight: 3.4
       search.ttCaptureWeight: 4.0
-      search.qsMaxDeltaPawn: 4.6
+      search.qsMaxDeltaPawn: 8.8
       search.drawBias: 0.0
       search.preferFastMate: 1.0
       search.tbTieBreak: 1.0
