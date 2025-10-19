@@ -102,6 +102,16 @@ Agents should compute `S, L, R, TT` via the heuristics above and substitute into
   WebSocket handshake and teardown paths.
 
 ### Additional notes
+* **MoveOrderingPriority store**: the engine loads `target/engine-data/move-ordering/move-ordering-priority.txt` on startup. When present you will now see an `INFO` line with the entry count; if the file is missing, the engine falls back to an empty history.
+* **Regenerating move-ordering priorities**: only run the expensive importer when you intend to update the default file. Use the Maven profile below so regular builds stay fast:
+  ```bash
+  mvn -Pmove-ordering-train \
+      -Dmove.ordering.pgnDir=E:/Engine-Pgns \
+      -Dmove.ordering.minElo=3000 \
+      -Dcmake.skip=true
+  ```
+  This streams every PGN under `move.ordering.pgnDir`, filters out draws and games with both players below the ELO threshold, and writes the refreshed history to `target/engine-data/move-ordering/move-ordering-priority.txt`. After verification, copy that file into `src/main/resources/move-ordering/move-ordering-priority.txt` to keep the checked-in seed in sync.
+* To reuse the committed seed without retraining, build normally (`mvn …`) and the existing `src/main/resources/move-ordering/move-ordering-priority.txt` will be copied during `process-resources`.
 * `MateSearchTest` keeps the shorter time budgets (50–500ms) for diagnostics only. The suite now requires the engine to
   succeed when it receives the largest configured per-move budget (currently 10s), so occasional misses at lower limits are
   acceptable.
