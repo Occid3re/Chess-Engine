@@ -35,7 +35,7 @@ public final class MoveOrderingPriority {
     private static final MoveOrderingPriority INSTANCE = new MoveOrderingPriority();
 
     private final Int2IntOpenHashMap priorities;
-    private final Path storagePath;
+    private Path storagePath;
 
     private MoveOrderingPriority() {
         this.storagePath = resolveStoragePath();
@@ -155,5 +155,20 @@ public final class MoveOrderingPriority {
         } catch (IOException e) {
             log.warn("Failed to persist move ordering priorities to {}", storagePath, e);
         }
+    }
+
+    /**
+     * Resets the in-memory table and storage location. Intended for tests so they can
+     * operate on isolated temporary files without interfering with the default store.
+     */
+    static void resetForTests(Path newPath) {
+        INSTANCE.resetInternal(newPath);
+    }
+
+    private synchronized void resetInternal(Path newPath) {
+        Objects.requireNonNull(newPath, "newPath");
+        this.priorities.clear();
+        this.storagePath = newPath;
+        loadFromDisk();
     }
 }
