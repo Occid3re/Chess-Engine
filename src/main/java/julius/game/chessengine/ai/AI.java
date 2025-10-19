@@ -76,6 +76,14 @@ public class AI {
     private final double rootFanoutRatio;
     private WorkerInstrumentation workerInstrumentation;
 
+    private final MoveOrderingPriority moveOrderingPriority;
+    private final boolean reviseGameEnabled;
+    private final Object gameTrackingLock = new Object();
+    private final IntArrayList engineMovesThisGame = new IntArrayList();
+    private Boolean enginePlayingWhite;
+    private boolean gameResultApplied;
+    private int lastKnownLineSize;
+
     private static final int ABS_PLY_LIMIT_MARGIN = 32;
 
     private final AtomicReference<SearchTask> activeSearch = new AtomicReference<>();
@@ -387,11 +395,15 @@ public class AI {
         this.globalHeuristics = new Heuristics(maxDepth);
         this.threadHeuristics = ThreadLocal.withInitial(() -> new Heuristics(maxDepth));
 
+        this.moveOrderingPriority = MoveOrderingPriority.getInstance();
+        this.reviseGameEnabled = moveOrderingPriority.isRevisionEnabled();
+        this.lastKnownLineSize = mainEngine.getLine().size();
+
         rebuildTranspositionTables();
 
         this.searchPool = createSearchPool();
 
-        this.mainEngine.setOnPositionChanged(_ -> updateBoardStateHash());
+        this.mainEngine.setOnPositionChanged(this::handlePositionChanged);
     }
 
     private ExecutorService createSearchPool() {
@@ -1150,6 +1162,10 @@ public class AI {
         calculatedLine = Collections.synchronizedList(new ArrayList<>());
         mainEngine.startNewGame();
         clearHistoryTable();
+        synchronized (gameTrackingLock) {
+            resetGameTrackingUnsafe();
+            lastKnownLineSize = 0;
+        }
     }
 
     public void stopCalculation() {
@@ -1300,12 +1316,26 @@ public class AI {
         }
 
         mainEngine.performMove(currentBestMove);
+        onMoveExecuted(currentBestMove);
         enqueueCalculationRequest();
         currentBestMove = -1; // don’t re-play it
         bestMoveForHash = -1;
         previousBestMove = -1;
         previousBestMoveHash = -1;
         searchResultReady = false;
+    }
+
+    public void onMoveExecuted(int move) {
+        if (!reviseGameEnabled || move < 0) {
+            return;
+        }
+        synchronized (gameTrackingLock) {
+            engineMovesThisGame.add(move);
+            if (enginePlayingWhite == null) {
+                enginePlayingWhite = MoveHelper.isWhitesMove(move);
+            }
+            gameResultApplied = false;
+        }
     }
 
 
@@ -3312,6 +3342,7 @@ public class AI {
             }
 
             moveBuffer[i] = moveInt;
+            score += moveOrderingPriority.getPriority(moveInt);
             int s = score;
             if (s < 0) {
                 s = 0;
@@ -3790,6 +3821,57 @@ public class AI {
 
     public void updateBoardStateHash() {
         enqueueCalculationRequest();
+    }
+
+    private void handlePositionChanged(long hash) {
+        updateBoardStateHash();
+
+        if (!reviseGameEnabled) {
+            lastKnownLineSize = mainEngine.getLine().size();
+            return;
+        }
+
+        IntArrayList movesSnapshot = null;
+        Boolean engineWon = null;
+
+        synchronized (gameTrackingLock) {
+            int lineSize = mainEngine.getLine().size();
+            if (lineSize < lastKnownLineSize) {
+                resetGameTrackingUnsafe();
+            }
+            lastKnownLineSize = lineSize;
+
+            GameState gameState = mainEngine.getGameState();
+            if (!gameResultApplied && gameState != null && gameState.isGameOver()
+                    && enginePlayingWhite != null && !engineMovesThisGame.isEmpty()) {
+                GameStateEnum result = gameState.getState();
+                if (result == GameStateEnum.WHITE_WON || result == GameStateEnum.BLACK_WON) {
+                    boolean won = (result == GameStateEnum.WHITE_WON && Boolean.TRUE.equals(enginePlayingWhite))
+                            || (result == GameStateEnum.BLACK_WON && Boolean.FALSE.equals(enginePlayingWhite));
+                    boolean lost = (result == GameStateEnum.WHITE_WON && Boolean.FALSE.equals(enginePlayingWhite))
+                            || (result == GameStateEnum.BLACK_WON && Boolean.TRUE.equals(enginePlayingWhite));
+                    if (won || lost) {
+                        movesSnapshot = new IntArrayList(engineMovesThisGame);
+                        engineWon = won;
+                    }
+                }
+                gameResultApplied = true;
+            }
+
+            if (!gameState.isGameOver() && lineSize == 0) {
+                resetGameTrackingUnsafe();
+            }
+        }
+
+        if (movesSnapshot != null && engineWon != null) {
+            moveOrderingPriority.applyGameResult(movesSnapshot, engineWon);
+        }
+    }
+
+    private void resetGameTrackingUnsafe() {
+        engineMovesThisGame.clear();
+        enginePlayingWhite = null;
+        gameResultApplied = false;
     }
 
     private void updateKillerMoves(int depth, int move) {

@@ -59,6 +59,7 @@ public final class MatchRunner {
                 int move = ms.getMove();
                 whiteEngine.performMove(move);
                 blackEngine.performMove(move);
+                mover.onMoveExecuted(move);
                 plies++;
             }
 
