@@ -47,7 +47,7 @@ class MoveOrderingPriorityTest {
         if (originalPath != null) {
             MoveOrderingPriority.resetForTests(originalPath);
         } else {
-            MoveOrderingPriority.resetForTests(Paths.get(System.getProperty("user.dir"), "logs", "move-ordering-priority.txt"));
+            MoveOrderingPriority.resetForTests(MoveOrderingPriority.defaultStoragePath());
         }
     }
 

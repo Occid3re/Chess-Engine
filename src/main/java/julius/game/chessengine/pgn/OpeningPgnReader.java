@@ -1,15 +1,19 @@
 package julius.game.chessengine.pgn;
 
-import julius.game.chessengine.board.MoveHelper;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
+import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.figures.PieceType;
 import lombok.extern.log4j.Log4j2;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -35,31 +39,75 @@ public class OpeningPgnReader {
 
     public record ParsedGame(Map<String, String> headers, List<Integer> moves, List<Long> hashes) {}
 
+    @FunctionalInterface
+    public interface GameConsumer {
+        /**
+         * @return {@code true} to continue parsing, {@code false} to stop.
+         */
+        boolean onGame(ParsedGame game);
+    }
+
     public List<ParsedGame> parse(byte[] data) {
         Objects.requireNonNull(data, "data");
-        String raw = new String(data, StandardCharsets.UTF_8);
-        return parse(raw);
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(new ByteArrayInputStream(data), StandardCharsets.UTF_8))) {
+            return parseInternal(reader, null);
+        } catch (IOException ex) {
+            log.warn("Failed reading PGN stream", ex);
+            return List.of();
+        }
     }
 
     public List<ParsedGame> parse(String rawPgn) {
         Objects.requireNonNull(rawPgn, "rawPgn");
-        List<ParsedGame> games = new ArrayList<>();
         try (BufferedReader reader = new BufferedReader(new StringReader(rawPgn))) {
-            while (true) {
-                Map<String, String> headers = readHeaders(reader);
-                if (headers == null) {
-                    break;
-                }
-                List<String> tokens = readMoves(reader);
-                if (tokens.isEmpty()) {
-                    continue;
-                }
-                games.add(convertToGame(headers, tokens));
-            }
+            return parseInternal(reader, null);
         } catch (IOException ex) {
             log.warn("Failed reading PGN stream", ex);
+            return List.of();
         }
-        return games;
+    }
+
+    public List<ParsedGame> parse(Path path) {
+        Objects.requireNonNull(path, "path");
+        try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+            return parseInternal(reader, null);
+        } catch (IOException ex) {
+            log.warn("Failed reading PGN file {}", path, ex);
+            return List.of();
+        }
+    }
+
+    public void stream(Path path, GameConsumer consumer) throws IOException {
+        Objects.requireNonNull(path, "path");
+        Objects.requireNonNull(consumer, "consumer");
+        try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+            parseInternal(reader, consumer);
+        }
+    }
+
+    private List<ParsedGame> parseInternal(BufferedReader reader, GameConsumer consumer) throws IOException {
+        List<ParsedGame> games = consumer == null ? new ArrayList<>() : null;
+        while (true) {
+            Map<String, String> headers = readHeaders(reader);
+            if (headers == null) {
+                break;
+            }
+            List<String> tokens = readMoves(reader);
+            if (tokens.isEmpty()) {
+                continue;
+            }
+            ParsedGame game = convertToGame(headers, tokens);
+            if (consumer != null) {
+                boolean keep = consumer.onGame(game);
+                if (!keep) {
+                    break;
+                }
+            } else {
+                games.add(game);
+            }
+        }
+        return games == null ? List.of() : List.copyOf(games);
     }
 
     private Map<String, String> readHeaders(BufferedReader reader) throws IOException {
@@ -174,6 +222,10 @@ public class OpeningPgnReader {
         List<Integer> moves = new ArrayList<>();
         List<Long> hashes = new ArrayList<>();
         for (String token : tokens) {
+            if (engine.getGameState().isGameOver()) {
+                log.debug("Ignoring trailing token '{}' because game already reached a terminal state", token);
+                break;
+            }
             hashes.add(engine.getBoardStateHash());
             int move = translateSanToMove(engine, token);
             moves.add(move);

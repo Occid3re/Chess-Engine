@@ -1,48 +1,53 @@
-# BestMoveSearch – Accuracy Focus
+# MoveOrderingPriority – Training & Verification
 
 ### Goal
 
-Improve **BestMoveSearchTest** pass rates while keeping the current ~3 min diagnostic runtime window.
-
-**Current status:** Latest tuning passes hold the suite at **15 / 71** failures (baseline was 16). The worst offenders cluster around pawn-pressure situtations (`4k3/...`, `1k1r3r/...`, `r4rk1/...`) with cpLoss in the 3–12 range; diagnostics for each run continue to live in `target/surefire-reports/`.
+Deliver a repeatable pipeline that (a) verifies `MoveOrderingPriority` integration inside
+`AI.sortMovesByEfficiency`, and (b) produces a packaged default priority file generated from
+decisive games so the engine boots with useful history without extra arguments.
 
 ### Guardrails
 
-- Keep fixtures unchanged; treat `BestMoveFixtures` as read-only.
-- Favor adjustments through `seed-tunings.yaml`, evaluation modules, or clearly targeted AI search fixes.
-- Diagnostics, logging, and parallel search stay enabled so regression signals remain rich.
+- Keep `MoveOrderingPriority` updates deterministic: priorities must only change via the importer or in-game revision hooks.
+- Persist the store under `target/engine-data/move-ordering/move-ordering-priority.txt` so packaging and Runtime defaults stay aligned.
+- Avoid mutating the PGN source files; all transformations should happen in-memory.
 
 ### Workstreams
 
-1. **Failure Triage**
-   - Aggregate failing FENs, classify by motif (tactical miss, evaluation skew, pruning overshoot).
-   - Capture representative traces under `logs/test-runs/<timestamp>/best-move-search/`.
-2. **Evaluation Tweaks**
-   - Audit the blended score deltas for the high-loss positions.
-   - Adjust weights (via tuning + evaluation modules) to close gaps where the engine picks the wrong move at the same depth.
-3. **Search Stability**
-   - Revisit aspiration, null-move, and reduction thresholds that cause the engine to bail out early on winning lines.
-   - Add targeted safeguards (e.g., SEE/Futility tightening) only if they reduce false errors without adding runtime.
-4. **Verification**
-   - Re-run the suite (≥2 passes) to confirm failure counts drop while wall-clock stays in the existing window.
-   - Record node counts and depth coverage summaries for before/after comparison.
+1. **Integration Verification**
+   - Exercise `AI.sortMovesByEfficiency` with seeded priorities to confirm ordering shifts, backed by unit/integration coverage.
+   - Continue running `MoveOrderingPriorityImporter` in `--dry-run --report` mode against a single decisive PGN to audit move-int deltas before writing.
+2. **PGN Ingestion Pipeline**
+   - Extend `OpeningPgnReader` to stream large archives without materialising every game.
+   - Implement `MoveOrderingPriorityImporter` CLI (reset, reporting, verification flags) to import decisive games and cross-check the persisted store.
+3. **Default Artifact Generation**
+   - Seed the repository with `src/main/resources/move-ordering/move-ordering-priority.txt` and ensure Maven copies it to `target/engine-data/...` during builds.
+   - `MoveOrderingPriorityImporter --reset` must re-train from the latest PGN dump and leave the verified file ready for packaging.
 
 ### Measure
 
 ```bash
-mvn -Djava.version=21 -Dmaven.compiler.release=21 -Dmaven.compiler.enablePreview=true \
-    -DargLine="--enable-preview" -Dtest=BestMoveSearchTest test
+# Single-game verification with move delta report
+mvn -Dcmake.skip=true -Djava.version=25 -Dmaven.compiler.release=25 \
+    -Dmaven.compiler.enablePreview=true -DargLine="--enable-preview" \
+    -Dexec.mainClass=julius.game.chessengine.ai.MoveOrderingPriorityImporter \
+    -Dexec.args='/mnt/e/Engine-Pgns/2025-10.bare.[12315].pgn --limit=1 --dry-run --report --min-elo=3000' exec:java
+
+# Full training from scratch (decisive games only)
+mvn -Dcmake.skip=true -Djava.version=25 -Dmaven.compiler.release=25 \
+    -Dmaven.compiler.enablePreview=true -DargLine="--enable-preview" \
+    -Dexec.mainClass=julius.game.chessengine.ai.MoveOrderingPriorityImporter \
+    -Dexec.args='/mnt/e/Engine-Pgns/2025-10.bare.[12315].pgn --reset --min-elo=3000' exec:java
 ```
 
 ### Accept
 
-✅ Consistent runtime within ±5 % of the current baseline  
-✅ Failure count reduced to ≤8 without introducing new flaky cases (currently 15 outstanding)  
-⚠️ Note any trade-offs (e.g., increased evaluation draw bias) in the run logs
+✅ `MoveOrderingPriority` loads automatically from the packaged file with no command-line flags.  
+✅ Importer verification passes (no delta mismatches) for both single-game spot checks and the full archive.  
+✅ Priority file reflects only decisive games (draws skipped) and survives a clean rebuild.
 
 ### Next Steps
 
-- Target the pawn-pressure collapses first: raise the pawn-threat penalties for knights/rooks and/or add a light “no pawn shield” surcharge in `ThreatModule` so moves like `Nf3` (FEN `4k3/...`) get clipped before the engine commits. Profile cpLoss after each change.
-- For `Bf5` in `1k1r3r/qppb2pp/...`, compare SEE and static eval — a handful of defenders still rate the capture as safe. Consider checking the SEE score inside `ThreatModule` before accepting hanging moves or wiring a one-ply SEE guard in search to veto that capture.
-- The `Rxd2` miss (`8/2b5/...`) remains a high-magnitude regression. Instrument the diagnostics for that FEN and see whether the rook capture survives quiescence; if it does, tune the rook hanging penalty upward only for undefended squares (no friendly pawn coverage).
-- Keep the full-suite runs flowing and log `cpLoss` deltas per position. The current run (see `target/surefire-reports/julius.game.chessengine.ai.BestMoveSearchTest.txt`) lists the 15 failures with their cpLoss budgets; use that as the regression ledger for the next pass.
+1. Surface a regression-friendly smoke test that reads the packaged priority file and ensures non-empty content plus monotonic ordering changes for a canned node list.
+2. Document the importer workflow (flags, expected runtime, output locations) in `Agents.md` once stabilised.
+3. Schedule periodic re-training (new PGN drops) via CI or a scripted task so the default history keeps pace with engine improvements.

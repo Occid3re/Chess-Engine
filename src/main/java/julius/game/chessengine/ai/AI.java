@@ -3342,7 +3342,8 @@ public class AI {
             }
 
             moveBuffer[i] = moveInt;
-            score += moveOrderingPriority.getPriority(moveInt);
+            int priority = moveOrderingPriority.getPriority(moveInt);
+            score += priority;
             int s = score;
             if (s > maxScore) {
                 s = maxScore;
