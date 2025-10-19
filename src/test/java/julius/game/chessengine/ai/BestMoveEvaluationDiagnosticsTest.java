@@ -150,16 +150,17 @@ class BestMoveEvaluationDiagnosticsTest {
         return whiteToMove ? scoreDifference : -scoreDifference;
     }
 
-    private static String formatCentipawns(double centipawns) {
-        if (!Double.isFinite(centipawns)) {
+    private static String formatCentipawns(double pawns) {
+        if (!Double.isFinite(pawns)) {
             return "n/a";
         }
-        if (Math.abs(centipawns) >= Score.CHECKMATE - 1000) {
-            double mateDistance = Score.CHECKMATE - Math.abs(centipawns);
+        double cp = pawns * 100.0;
+        if (Math.abs(cp) >= Score.CHECKMATE - 1000) {
+            double mateDistance = Score.CHECKMATE - Math.abs(cp);
             long plies = Math.max(0, Math.round(mateDistance));
-            return (centipawns > 0 ? "#+" : "#-") + (plies > 0 ? plies : "");
+            return (pawns > 0 ? "#+" : "#-") + (plies > 0 ? plies : "");
         }
-        return String.format(Locale.US, "%+.2f", centipawns / 100.0);
+        return String.format(Locale.US, "%+.2f", pawns);
     }
 
     private record MoveEvaluation(String move, double score) {

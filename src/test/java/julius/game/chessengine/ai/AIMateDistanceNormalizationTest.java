@@ -25,15 +25,15 @@ class AIMateDistanceNormalizationTest {
             Method adjust = AI.class.getDeclaredMethod("adjustMateFromChild", double.class);
             adjust.setAccessible(true);
 
-            double winningMate = Score.CHECKMATE - 10;
+            double winningMate = (Score.CHECKMATE - 10) / 100.0;
             double adjustedWin = (double) adjust.invoke(ai, winningMate);
-            assertThat(adjustedWin).isEqualTo(winningMate - 1);
+            assertThat(adjustedWin).isEqualTo(winningMate - 0.01);
 
-            double losingMate = -Score.CHECKMATE + 12;
+            double losingMate = -(Score.CHECKMATE - 12) / 100.0;
             double adjustedLoss = (double) adjust.invoke(ai, losingMate);
-            assertThat(adjustedLoss).isEqualTo(losingMate + 1);
+            assertThat(adjustedLoss).isEqualTo(losingMate + 0.01);
 
-            double nonMate = Score.CHECKMATE - 5000;
+            double nonMate = (Score.CHECKMATE - 5000) / 100.0;
             double unchanged = (double) adjust.invoke(ai, nonMate);
             assertThat(unchanged).isEqualTo(nonMate);
         } finally {
@@ -52,19 +52,19 @@ class AIMateDistanceNormalizationTest {
 
             int ply = 5;
 
-            double winningMate = Score.CHECKMATE - 20;
+            double winningMate = (Score.CHECKMATE - 20) / 100.0;
             double storedWin = (double) toStored.invoke(ai, winningMate, ply);
-            assertThat(storedWin).isEqualTo(winningMate + ply);
+            assertThat(storedWin).isEqualTo(winningMate + ply * 0.01);
             double restoredWin = (double) fromStored.invoke(ai, storedWin, ply);
             assertThat(restoredWin).isEqualTo(winningMate);
 
-            double losingMate = -Score.CHECKMATE + 28;
+            double losingMate = -(Score.CHECKMATE - 28) / 100.0;
             double storedLoss = (double) toStored.invoke(ai, losingMate, ply);
-            assertThat(storedLoss).isEqualTo(losingMate - ply);
+            assertThat(storedLoss).isEqualTo(losingMate - ply * 0.01);
             double restoredLoss = (double) fromStored.invoke(ai, storedLoss, ply);
             assertThat(restoredLoss).isEqualTo(losingMate);
 
-            double nonMate = Score.CHECKMATE - 5000;
+            double nonMate = (Score.CHECKMATE - 5000) / 100.0;
             double storedNonMate = (double) toStored.invoke(ai, nonMate, ply);
             assertThat(storedNonMate).isEqualTo(nonMate);
             double restoredNonMate = (double) fromStored.invoke(ai, storedNonMate, ply);

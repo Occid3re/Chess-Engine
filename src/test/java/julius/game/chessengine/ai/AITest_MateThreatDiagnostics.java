@@ -334,7 +334,9 @@ class AITest_MateThreatDiagnostics {
                 throws InvocationTargetException, IllegalAccessException {
             GameState state = simulatorEngine.getGameState();
             if (state.isInStateCheckMate()) {
-                double score = isWhite ? (Score.CHECKMATE - 1) : -(Score.CHECKMATE - 1);
+                double score = isWhite
+                        ? (Score.CHECKMATE - 1) / 100.0
+                        : -(Score.CHECKMATE - 1) / 100.0;
                 return EvaluationResult.mate(score);
             }
             if (state.isTerminal()) {

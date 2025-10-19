@@ -122,7 +122,10 @@ public final class SearchTask {
     private static boolean isBetterScore(boolean whiteToMove, double score, double bestScore) {
         return whiteToMove ? score > bestScore : score < bestScore;
     }
+    private static final double CHECKMATE_PAWNS = CHECKMATE / 100.0;
+    private static final double FAIL_HARD_MARGIN_PAWNS = 50.0 / 100.0;
+
     private static boolean isFailHardMate(double score) {
-        return Math.abs(score) >= CHECKMATE - 50;
+        return Math.abs(score) >= CHECKMATE_PAWNS - FAIL_HARD_MARGIN_PAWNS;
     }
 }
