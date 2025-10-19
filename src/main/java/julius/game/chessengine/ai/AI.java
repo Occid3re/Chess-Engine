@@ -2102,7 +2102,7 @@ public class AI {
             return Optional.empty();
         }
 
-        OptionalDouble evalOpt = exactTablebaseScore(engine.getGameState(), true);
+        OptionalDouble evalOpt = exactTablebaseScore(engine.getGameState(), isWhite);
         if (evalOpt.isEmpty()) {
             return Optional.empty();
         }
@@ -2162,6 +2162,7 @@ public class AI {
 
     private Optional<TablebaseContinuation> evaluateTablebaseContinuation(Engine simulatorEngine, int move) {
         boolean zeroing = MoveHelper.isCapture(move) || MoveHelper.derivePieceTypeBits(move) == 1;
+        TablebaseResult previousResult = simulatorEngine.getGameState().getLastTablebaseResult().orElse(null);
         simulatorEngine.performMove(move);
         try {
             Optional<TablebaseResult> childResult = resolveExactTablebaseResult(simulatorEngine);
@@ -2174,6 +2175,7 @@ public class AI {
             return Optional.of(new TablebaseContinuation(move, evaluation, result, zeroing));
         } finally {
             simulatorEngine.undoLastMove();
+            simulatorEngine.getGameState().setLastTablebaseResult(previousResult);
         }
     }
 
@@ -3510,25 +3512,28 @@ public class AI {
                 return standPat; // nothing more to do from here
             }
 
+            TablebaseResult previousResult = simulatorEngine.getGameState().getLastTablebaseResult().orElse(null);
             simulatorEngine.performMove(m);
             double child;
-            OptionalDouble childTablebase = OptionalDouble.empty();
-            Optional<TablebaseResult> probed = resolveExactTablebaseResult(simulatorEngine);
-            if (probed.isPresent()) {
-                childTablebase = exactTablebaseScore(simulatorEngine.getGameState(), !isWhitesTurn);
-            }
-
-            if (childTablebase.isPresent()) {
-                child = childTablebase.getAsDouble();
-            } else {
-                child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
-                if (child == EXIT_FLAG) {
-                    simulatorEngine.undoLastMove();
-                    return EXIT_FLAG;
+            try {
+                OptionalDouble childTablebase = OptionalDouble.empty();
+                Optional<TablebaseResult> probed = resolveExactTablebaseResult(simulatorEngine);
+                if (probed.isPresent()) {
+                    childTablebase = exactTablebaseScore(simulatorEngine.getGameState(), !isWhitesTurn);
                 }
-            }
 
-            simulatorEngine.undoLastMove();
+                if (childTablebase.isPresent()) {
+                    child = childTablebase.getAsDouble();
+                } else {
+                    child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
+                    if (child == EXIT_FLAG) {
+                        return EXIT_FLAG;
+                    }
+                }
+            } finally {
+                simulatorEngine.undoLastMove();
+                simulatorEngine.getGameState().setLastTablebaseResult(previousResult);
+            }
 
             double score = -child;
             score = adjustMateFromChild(score);
