@@ -98,6 +98,12 @@ population:
       moveordering.castlingbonus: 4205
       moveordering.captureseeclamp: 512
       moveordering.promotionseeclamp: 322
+      moveordering.capturegoodbonus: 0
+      moveordering.captureequalbonus: 0
+      moveordering.capturebadbonus: 0
+      moveordering.capturelosingseepenalty: 0
+      moveordering.quiethistorymultiplier: 1.0
+      moveordering.quiethistorybonus: 0
       moveordering.maxscore: 16045354
       moveordering.historyscale: 1.2
       moveordering.historydecaydivisor: 2
