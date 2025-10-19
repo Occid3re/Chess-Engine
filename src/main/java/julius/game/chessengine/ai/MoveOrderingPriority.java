@@ -30,12 +30,14 @@ public final class MoveOrderingPriority {
     private static final String FILE_PROPERTY = "chessengine.moveOrdering.priorityFile";
     private static final String LEGACY_FLAG_PROPERTY = "ReviseGame";
     private static final String FLAG_PROPERTY = "chessengine.moveOrdering.reviseGame";
-    private static final Path DEFAULT_PATH = Paths.get(System.getProperty("user.dir"), "logs", "move-ordering-priority.txt");
+    private static final String DEFAULT_RESOURCE = "/move-ordering/move-ordering-priority.txt";
+    private static final Path DEFAULT_PATH = Paths.get(System.getProperty("user.dir"),
+            "target", "engine-data", "move-ordering", "move-ordering-priority.txt");
 
     private static final MoveOrderingPriority INSTANCE = new MoveOrderingPriority();
 
     private final Int2IntOpenHashMap priorities;
-    private final Path storagePath;
+    private Path storagePath;
 
     private MoveOrderingPriority() {
         this.storagePath = resolveStoragePath();
@@ -91,15 +93,14 @@ public final class MoveOrderingPriority {
     }
 
     private void loadFromDisk() {
+        ensureParentDirectory();
+
         if (!Files.exists(storagePath)) {
-            Path parent = storagePath.getParent();
-            if (parent != null) {
-                try {
-                    Files.createDirectories(parent);
-                } catch (IOException e) {
-                    log.warn("Failed to create move ordering priority directory {}", parent, e);
-                }
-            }
+            seedFromResource();
+        }
+
+        if (!Files.exists(storagePath)) {
+            log.info("Move-ordering priority file not found, starting with empty store (expected at {})", storagePath);
             return;
         }
 
@@ -124,15 +125,18 @@ public final class MoveOrderingPriority {
                         priorities.put(move, score);
                     }
                 } catch (NumberFormatException ex) {
-                    log.debug("Ignoring malformed priority line '{}': {}", line, ex.getMessage());
+                    log.warn("Ignoring malformed priority line '{}': {}", line, ex.getMessage());
                 }
             }
+            log.info("Loaded {} move-ordering priority entries from {}", priorities.size(), storagePath);
         } catch (IOException e) {
             log.warn("Failed to load move ordering priorities from {}", storagePath, e);
         }
     }
 
     private void persist() {
+        ensureParentDirectory();
+
         IntList keys = new IntArrayList(priorities.size());
         for (Int2IntMap.Entry entry : priorities.int2IntEntrySet()) {
             keys.add(entry.getIntKey());
@@ -146,14 +150,55 @@ public final class MoveOrderingPriority {
         }
 
         try {
-            Path parent = storagePath.getParent();
-            if (parent != null) {
-                Files.createDirectories(parent);
-            }
             Files.write(storagePath, payload, StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
         } catch (IOException e) {
             log.warn("Failed to persist move ordering priorities to {}", storagePath, e);
+        }
+    }
+
+    /**
+     * Resets the in-memory table and storage location. Intended for tests so they can
+     * operate on isolated temporary files without interfering with the default store.
+     */
+    static void resetForTests(Path newPath) {
+        INSTANCE.resetInternal(newPath);
+    }
+
+    public static Path defaultStoragePath() {
+        return DEFAULT_PATH;
+    }
+
+    private synchronized void resetInternal(Path newPath) {
+        Objects.requireNonNull(newPath, "newPath");
+        this.priorities.clear();
+        this.storagePath = newPath;
+        loadFromDisk();
+    }
+
+    public synchronized Path getStoragePath() {
+        return storagePath;
+    }
+
+    private void ensureParentDirectory() {
+        Path parent = storagePath.getParent();
+        if (parent != null) {
+            try {
+                Files.createDirectories(parent);
+            } catch (IOException e) {
+                log.warn("Failed to create move ordering priority directory {}", parent, e);
+            }
+        }
+    }
+
+    private void seedFromResource() {
+        try (var input = MoveOrderingPriority.class.getResourceAsStream(DEFAULT_RESOURCE)) {
+            if (input == null) {
+                return;
+            }
+            Files.copy(input, storagePath);
+        } catch (IOException e) {
+            log.warn("Failed to seed move ordering priorities from bundled resource {}", DEFAULT_RESOURCE, e);
         }
     }
 }

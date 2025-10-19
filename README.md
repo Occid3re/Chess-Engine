@@ -201,6 +201,34 @@ same time when you have spare CPU cores. The tuner defaults to the number of
 available processors so you can fully utilise the machine without additional
 arguments.
 
+## Move-ordering priority store
+
+The search reuses a persistent priority table to bias move ordering. On
+startup the engine looks for
+`target/engine-data/move-ordering/move-ordering-priority.txt` and logs how many
+entries were loaded. If the file is missing it simply starts with an empty
+table. The checked-in seed lives under
+`src/main/resources/move-ordering/move-ordering-priority.txt`; regular Maven
+builds copy it into the target directory so developers always get the baseline
+history without extra steps.
+
+To regenerate the history from PGNs, enable the `move-ordering-train` profile
+so the importer runs during the build. The default configuration streams every
+PGN under `E:/Engine-Pgns`, skips draws, requires at least one player to meet
+the ELO threshold, and writes the refreshed store to the target directory.
+
+```bash
+mvn -Pmove-ordering-train \
+    -Dmove.ordering.pgnDir=E:/Engine-Pgns \
+    -Dmove.ordering.minElo=3000 \
+    -Dcmake.skip=true
+```
+
+Review the generated `target/engine-data/move-ordering/move-ordering-priority.txt`
+and, when you are satisfied, copy it back into
+`src/main/resources/move-ordering/move-ordering-priority.txt` so future builds
+pick up the updated seed.
+
 ## Syzygy Tablebases
 
 The engine understands Syzygy endgame tablebases and uses them to bypass static evaluation

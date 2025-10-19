@@ -3342,12 +3342,13 @@ public class AI {
             }
 
             moveBuffer[i] = moveInt;
-            score += moveOrderingPriority.getPriority(moveInt);
+            int priority = moveOrderingPriority.getPriority(moveInt);
+            score += priority;
             int s = score;
-            if (s < 0) {
-                s = 0;
-            } else if (s > maxScore) {
+            if (s > maxScore) {
                 s = maxScore;
+            } else if (s < -maxScore) {
+                s = -maxScore;
             }
             scoreBuffer[i] = s;
             insertByScore(targetBucket, i, scoreBuffer, moveBuffer);

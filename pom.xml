@@ -24,6 +24,10 @@
         <lombok.version>1.18.42</lombok.version>
         <!-- Default preview flag for Surefire's argLine; CLI -DargLine overrides when provided -->
         <argLine>--enable-preview</argLine>
+        <!-- Move-ordering defaults -->
+        <move.ordering.copy.skip>false</move.ordering.copy.skip>
+        <move.ordering.pgnDir>E:/Engine-Pgns</move.ordering.pgnDir>
+        <move.ordering.minElo>3000</move.ordering.minElo>
     </properties>
 
     <dependencies>
@@ -123,6 +127,7 @@
                             <goal>exec</goal>
                         </goals>
                         <configuration>
+                            <skip>${cmake.skip}</skip>
                             <executable>cmake</executable>
                             <arguments>
                                 <argument>-S</argument>
@@ -140,6 +145,7 @@
                             <goal>exec</goal>
                         </goals>
                         <configuration>
+                            <skip>${cmake.skip}</skip>
                             <executable>cmake</executable>
                             <arguments>
                                 <argument>--build</argument>
@@ -189,6 +195,26 @@
                                     <directory>${project.build.directory}/native</directory>
                                     <includes>
                                         <include>**/JSyzygy.dll</include>
+                                    </includes>
+                                    <filtering>false</filtering>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>copy-move-ordering-priority</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <skip>${move.ordering.copy.skip}</skip>
+                            <outputDirectory>${project.build.directory}/engine-data/move-ordering</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${project.basedir}/src/main/resources/move-ordering</directory>
+                                    <includes>
+                                        <include>move-ordering-priority.txt</include>
                                     </includes>
                                     <filtering>false</filtering>
                                 </resource>
@@ -270,6 +296,40 @@
                                     <arguments combine.children="append">
                                         <argument>-A</argument>
                                         <argument>x64</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <id>move-ordering-train</id>
+            <properties>
+                <!-- skip copying the stale seed when retraining -->
+                <move.ordering.copy.skip>true</move.ordering.copy.skip>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <executions>
+                            <execution>
+                                <id>train-move-ordering-priority</id>
+                                <phase>generate-resources</phase>
+                                <goals>
+                                    <goal>java</goal>
+                                </goals>
+                                <configuration>
+                                    <mainClass>julius.game.chessengine.ai.MoveOrderingPriorityImporter</mainClass>
+                                    <classpathScope>runtime</classpathScope>
+                                    <arguments>
+                                        <argument>${move.ordering.pgnDir}</argument>
+                                        <argument>--reset</argument>
+                                        <argument>--min-elo=${move.ordering.minElo}</argument>
                                     </arguments>
                                 </configuration>
                             </execution>
