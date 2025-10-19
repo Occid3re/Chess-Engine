@@ -89,8 +89,8 @@ population:
       moveordering.category.capturebad: 0
       moveordering.killermovescore: 10119
       moveordering.promotionbonus: 1465
-      moveordering.killer0bonus: 0
-      moveordering.killer1bonus: 63
+      moveordering.killer0bonus: 3200
+      moveordering.killer1bonus: 1700
       moveordering.countermovebonus: 464
       moveordering.capturemvvmultiplier: 15
       moveordering.captureseemultiplier: 96
@@ -98,12 +98,12 @@ population:
       moveordering.castlingbonus: 4205
       moveordering.captureseeclamp: 512
       moveordering.promotionseeclamp: 322
-      moveordering.capturegoodbonus: 0
-      moveordering.captureequalbonus: 0
-      moveordering.capturebadbonus: 0
-      moveordering.capturelosingseepenalty: 0
+      moveordering.capturegoodbonus: 900
+      moveordering.captureequalbonus: 250
+      moveordering.capturebadbonus: -700
+      moveordering.capturelosingseepenalty: -1024
       moveordering.quiethistorymultiplier: 1.0
-      moveordering.quiethistorybonus: 0
+      moveordering.quiethistorybonus: 160
       moveordering.maxscore: 16045354
       moveordering.historyscale: 1.2
       moveordering.historydecaydivisor: 2
