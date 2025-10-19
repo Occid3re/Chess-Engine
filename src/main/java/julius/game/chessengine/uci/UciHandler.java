@@ -434,15 +434,16 @@ public class UciHandler {
     }
 
     private String formatScore(double score) {
-        double abs = Math.abs(score);
-        if (abs >= Score.CHECKMATE - 1000) {
-            int mate = (int) Math.max(1, Math.round((Score.CHECKMATE - abs) / 100.0));
-            if (score < 0) {
+        double cpScore = score * 100.0;
+        double absCp = Math.abs(cpScore);
+        if (absCp >= Score.CHECKMATE - 1000) {
+            int mate = (int) Math.max(1, Math.round((Score.CHECKMATE - absCp) / 100.0));
+            if (cpScore < 0) {
                 mate = -mate;
             }
             return "score mate " + mate;
         }
-        int cp = (int) Math.round(score * 100.0);
+        int cp = (int) Math.round(cpScore);
         return "score cp " + cp;
     }
 
