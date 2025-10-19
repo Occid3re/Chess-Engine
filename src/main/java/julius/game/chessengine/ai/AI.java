@@ -3230,6 +3230,12 @@ public class AI {
         final int castlingBonus = moveOrderingParameters.castlingBonus();
         final int captureSeeClamp = Math.max(0, moveOrderingParameters.captureSeeClamp());
         final int promotionSeeClamp = Math.max(0, moveOrderingParameters.promotionSeeClamp());
+        final int captureGoodBonus = moveOrderingParameters.captureGoodBonus();
+        final int captureEqualBonus = moveOrderingParameters.captureEqualBonus();
+        final int captureBadBonus = moveOrderingParameters.captureBadBonus();
+        final int captureLosingSeePenalty = Math.max(0, moveOrderingParameters.captureLosingSeePenalty());
+        final double quietHistoryMultiplier = moveOrderingParameters.quietHistoryMultiplier();
+        final int quietHistoryBonus = moveOrderingParameters.quietHistoryBonus();
         final int maxScore = Math.max(1, moveOrderingParameters.maxScore());
 
         // Hash move (TT)
@@ -3288,10 +3294,21 @@ public class AI {
                 score = (mvvLva * captureMvvMultiplier) + (cappedSee * captureSeeMultiplier);
                 if (score < 0) score = 0;
                 if (seeValue > 0) {
+                    score += captureGoodBonus;
                     targetBucket = captureGoodBucket;
                 } else if (seeValue == 0) {
+                    score += captureEqualBonus;
                     targetBucket = captureEqualBucket;
                 } else {
+                    score += captureBadBonus;
+                    if (captureLosingSeePenalty > 0) {
+                        long seePenalty = Math.abs((long) seeValue) * (long) captureLosingSeePenalty;
+                        if (seePenalty >= Integer.MAX_VALUE) {
+                            score = Integer.MIN_VALUE;
+                        } else {
+                            score -= (int) seePenalty;
+                        }
+                    }
                     targetBucket = captureBadBucket;
                 }
             } else if (moveInt == k0) {
@@ -3303,7 +3320,21 @@ public class AI {
             } else {
                 final int from = moveInt & 0x3F;
                 final int to = (moveInt >>> 6) & 0x3F;
-                score = historyTable[from][to];
+                int historyScore = historyTable[from][to];
+                long scaledHistoryLong = Math.round(historyScore * quietHistoryMultiplier);
+                if (scaledHistoryLong > Integer.MAX_VALUE) {
+                    scaledHistoryLong = Integer.MAX_VALUE;
+                } else if (scaledHistoryLong < Integer.MIN_VALUE) {
+                    scaledHistoryLong = Integer.MIN_VALUE;
+                }
+                long quietScoreLong = scaledHistoryLong + quietHistoryBonus;
+                if (quietScoreLong > Integer.MAX_VALUE) {
+                    score = Integer.MAX_VALUE;
+                } else if (quietScoreLong < Integer.MIN_VALUE) {
+                    score = Integer.MIN_VALUE;
+                } else {
+                    score = (int) quietScoreLong;
+                }
                 if (moveInt == cm) score += counterMoveBonus;
                 if (MoveHelper.isCastlingMove(moveInt)) {
                     score += castlingBonus;

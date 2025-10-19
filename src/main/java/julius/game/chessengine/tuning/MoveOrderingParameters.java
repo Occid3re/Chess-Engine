@@ -37,6 +37,12 @@ public final class MoveOrderingParameters {
                 Tuning.moveOrderingCastlingBonus(),
                 Tuning.moveOrderingCaptureSeeClamp(),
                 Tuning.moveOrderingPromotionSeeClamp(),
+                Tuning.moveOrderingCaptureGoodBonus(),
+                Tuning.moveOrderingCaptureEqualBonus(),
+                Tuning.moveOrderingCaptureBadBonus(),
+                Tuning.moveOrderingCaptureLosingSeePenalty(),
+                Tuning.moveOrderingQuietHistoryMultiplier(),
+                Tuning.moveOrderingQuietHistoryBonus(),
                 Tuning.moveOrderingMaxScore(),
                 Tuning.moveOrderingHistoryScale(),
                 Tuning.moveOrderingHistoryDecayDivisor()
@@ -76,6 +82,12 @@ public final class MoveOrderingParameters {
         defaults.put(ParamId.MOVE_ORDERING_CASTLING_BONUS.key(), ParamId.MOVE_ORDERING_CASTLING_BONUS.defaultValue());
         defaults.put(ParamId.MOVE_ORDERING_CAPTURE_SEE_CLAMP.key(), ParamId.MOVE_ORDERING_CAPTURE_SEE_CLAMP.defaultValue());
         defaults.put(ParamId.MOVE_ORDERING_PROMOTION_SEE_CLAMP.key(), ParamId.MOVE_ORDERING_PROMOTION_SEE_CLAMP.defaultValue());
+        defaults.put(ParamId.MOVE_ORDERING_CAPTURE_GOOD_BONUS.key(), ParamId.MOVE_ORDERING_CAPTURE_GOOD_BONUS.defaultValue());
+        defaults.put(ParamId.MOVE_ORDERING_CAPTURE_EQUAL_BONUS.key(), ParamId.MOVE_ORDERING_CAPTURE_EQUAL_BONUS.defaultValue());
+        defaults.put(ParamId.MOVE_ORDERING_CAPTURE_BAD_BONUS.key(), ParamId.MOVE_ORDERING_CAPTURE_BAD_BONUS.defaultValue());
+        defaults.put(ParamId.MOVE_ORDERING_CAPTURE_LOSING_SEE_PENALTY.key(), ParamId.MOVE_ORDERING_CAPTURE_LOSING_SEE_PENALTY.defaultValue());
+        defaults.put(ParamId.MOVE_ORDERING_QUIET_HISTORY_MULTIPLIER.key(), ParamId.MOVE_ORDERING_QUIET_HISTORY_MULTIPLIER.defaultValue());
+        defaults.put(ParamId.MOVE_ORDERING_QUIET_HISTORY_BONUS.key(), ParamId.MOVE_ORDERING_QUIET_HISTORY_BONUS.defaultValue());
         defaults.put(ParamId.MOVE_ORDERING_MAX_SCORE.key(), ParamId.MOVE_ORDERING_MAX_SCORE.defaultValue());
         defaults.put(ParamId.MOVE_ORDERING_HISTORY_SCALE.key(), ParamId.MOVE_ORDERING_HISTORY_SCALE.defaultValue());
         defaults.put(ParamId.MOVE_ORDERING_HISTORY_DECAY_DIVISOR.key(), ParamId.MOVE_ORDERING_HISTORY_DECAY_DIVISOR.defaultValue());
@@ -102,6 +114,12 @@ public final class MoveOrderingParameters {
             int castlingBonus,
             int captureSeeClamp,
             int promotionSeeClamp,
+            int captureGoodBonus,
+            int captureEqualBonus,
+            int captureBadBonus,
+            int captureLosingSeePenalty,
+            double quietHistoryMultiplier,
+            int quietHistoryBonus,
             int maxScore,
             double historyScale,
             int historyDecayDivisor
@@ -127,6 +145,12 @@ public final class MoveOrderingParameters {
             values.put("moveOrdering.castlingBonus", castlingBonus);
             values.put("moveOrdering.captureSeeClamp", captureSeeClamp);
             values.put("moveOrdering.promotionSeeClamp", promotionSeeClamp);
+            values.put("moveOrdering.captureGoodBonus", captureGoodBonus);
+            values.put("moveOrdering.captureEqualBonus", captureEqualBonus);
+            values.put("moveOrdering.captureBadBonus", captureBadBonus);
+            values.put("moveOrdering.captureLosingSeePenalty", captureLosingSeePenalty);
+            values.put("moveOrdering.quietHistoryMultiplier", quietHistoryMultiplier);
+            values.put("moveOrdering.quietHistoryBonus", quietHistoryBonus);
             values.put("moveOrdering.maxScore", maxScore);
             values.put("moveOrdering.historyScale", historyScale);
             values.put("moveOrdering.historyDecayDivisor", historyDecayDivisor);
