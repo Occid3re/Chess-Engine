@@ -109,6 +109,12 @@ public final class Tuning {
     private static int moveOrderingCastlingBonus;
     private static int moveOrderingCaptureSeeClamp;
     private static int moveOrderingPromotionSeeClamp;
+    private static int moveOrderingCaptureGoodBonus;
+    private static int moveOrderingCaptureEqualBonus;
+    private static int moveOrderingCaptureBadBonus;
+    private static int moveOrderingCaptureLosingSeePenalty;
+    private static double moveOrderingQuietHistoryMultiplier;
+    private static int moveOrderingQuietHistoryBonus;
     private static int moveOrderingMaxScore;
     private static double moveOrderingHistoryScale;
     private static int moveOrderingHistoryDecayDivisor;
@@ -566,6 +572,30 @@ public final class Tuning {
         return moveOrderingPromotionSeeClamp;
     }
 
+    public static int moveOrderingCaptureGoodBonus() {
+        return moveOrderingCaptureGoodBonus;
+    }
+
+    public static int moveOrderingCaptureEqualBonus() {
+        return moveOrderingCaptureEqualBonus;
+    }
+
+    public static int moveOrderingCaptureBadBonus() {
+        return moveOrderingCaptureBadBonus;
+    }
+
+    public static int moveOrderingCaptureLosingSeePenalty() {
+        return moveOrderingCaptureLosingSeePenalty;
+    }
+
+    public static double moveOrderingQuietHistoryMultiplier() {
+        return moveOrderingQuietHistoryMultiplier;
+    }
+
+    public static int moveOrderingQuietHistoryBonus() {
+        return moveOrderingQuietHistoryBonus;
+    }
+
     public static int moveOrderingMaxScore() {
         return moveOrderingMaxScore;
     }
@@ -967,6 +997,12 @@ public final class Tuning {
             moveOrderingCastlingBonus = loadInt(ParamId.MOVE_ORDERING_CASTLING_BONUS);
             moveOrderingCaptureSeeClamp = loadInt(ParamId.MOVE_ORDERING_CAPTURE_SEE_CLAMP);
             moveOrderingPromotionSeeClamp = loadInt(ParamId.MOVE_ORDERING_PROMOTION_SEE_CLAMP);
+            moveOrderingCaptureGoodBonus = loadInt(ParamId.MOVE_ORDERING_CAPTURE_GOOD_BONUS);
+            moveOrderingCaptureEqualBonus = loadInt(ParamId.MOVE_ORDERING_CAPTURE_EQUAL_BONUS);
+            moveOrderingCaptureBadBonus = loadInt(ParamId.MOVE_ORDERING_CAPTURE_BAD_BONUS);
+            moveOrderingCaptureLosingSeePenalty = loadInt(ParamId.MOVE_ORDERING_CAPTURE_LOSING_SEE_PENALTY);
+            moveOrderingQuietHistoryMultiplier = loadDouble(ParamId.MOVE_ORDERING_QUIET_HISTORY_MULTIPLIER);
+            moveOrderingQuietHistoryBonus = loadInt(ParamId.MOVE_ORDERING_QUIET_HISTORY_BONUS);
             moveOrderingMaxScore = loadInt(ParamId.MOVE_ORDERING_MAX_SCORE);
             moveOrderingHistoryScale = loadDouble(ParamId.MOVE_ORDERING_HISTORY_SCALE);
             moveOrderingHistoryDecayDivisor = loadInt(ParamId.MOVE_ORDERING_HISTORY_DECAY_DIVISOR);

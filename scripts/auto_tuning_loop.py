@@ -932,6 +932,28 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "soft_min": 512.0,
         "soft_max": 4096.0,
     },
+    "moveordering.capturegoodbonus": {
+        "step": 32.0,
+        "soft_min": -2048.0,
+        "soft_max": 2048.0,
+    },
+    "moveordering.captureequalbonus": {
+        "step": 32.0,
+        "soft_min": -2048.0,
+        "soft_max": 2048.0,
+    },
+    "moveordering.capturebadbonus": {
+        "step": 32.0,
+        "soft_min": -4096.0,
+        "soft_max": 1024.0,
+    },
+    "moveordering.capturelosingseepenalty": {
+        "step": 8.0,
+        "soft_min": 0.0,
+        "soft_max": 256.0,
+        "sentinel_probe": 0.05,
+        "sentinels": [0.0],
+    },
     "moveordering.promotionseemultiplier": {
         "step": 2.0,
         "soft_min": 0.0,
@@ -946,6 +968,16 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "step": 200.0,
         "soft_min": 0.0,
         "soft_max": 5000.0,
+    },
+    "moveordering.quiethistorymultiplier": {
+        "step": 0.1,
+        "soft_min": 0.0,
+        "soft_max": 4.0,
+    },
+    "moveordering.quiethistorybonus": {
+        "step": 32.0,
+        "soft_min": -4096.0,
+        "soft_max": 4096.0,
     },
     "moveordering.maxscore": {
         "step": 1048576.0,
