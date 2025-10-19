@@ -429,6 +429,7 @@ public class UciHandler {
             output.accept("bestmove (none)");
         } else {
             engine.performMove(move);
+            ai.onMoveExecuted(move);
             output.accept("bestmove " + toUci(move));
         }
     }
