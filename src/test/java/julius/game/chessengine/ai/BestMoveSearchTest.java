@@ -747,7 +747,9 @@ public class BestMoveSearchTest {
                 throws InvocationTargetException, IllegalAccessException {
             GameState state = simulatorEngine.getGameState();
             if (state.isInStateCheckMate()) {
-                double score = isWhite ? (Score.CHECKMATE - 1) : -(Score.CHECKMATE - 1);
+                double score = isWhite
+                        ? (Score.CHECKMATE - 1) / 100.0
+                        : -(Score.CHECKMATE - 1) / 100.0;
                 return EvaluationResult.mate(score);
             }
             if (state.isTerminal()) {
@@ -1805,9 +1807,9 @@ public class BestMoveSearchTest {
 
     private static String formatScore(double pawns) {
         if (!Double.isFinite(pawns)) return "n/a";
-        // If you keep CHECKMATE in pawns too:
-        if (Math.abs(pawns) >= Score.CHECKMATE - 10) {
-            double mateDistance = Score.CHECKMATE - Math.abs(pawns);
+        double cp = pawns * 100.0;
+        if (Math.abs(cp) >= Score.CHECKMATE - 10) {
+            double mateDistance = Score.CHECKMATE - Math.abs(cp);
             long plies = Math.max(0, Math.round(mateDistance));
             return (pawns > 0 ? "#+" : "#-") + (plies > 0 ? plies : "");
         }

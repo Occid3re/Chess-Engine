@@ -238,6 +238,9 @@ public class AI {
     private static final int LMR_MAX_MOVES = MAX_MOVE_LIST_SIZE;
     private static final double MATE_SCORE_MARGIN = 2048.0;
     private static final double TABLEBASE_CLAMP_PAWNS = 2000.0 / 100.0;
+    private static final double CHECKMATE_PAWNS = CHECKMATE / 100.0;
+    private static final double MATE_SCORE_MARGIN_PAWNS = MATE_SCORE_MARGIN / 100.0;
+    private static final double MATE_STEP_PAWNS = 1.0 / 100.0;
     private static final double TB_TIE_EPSILON = 0.01;
 
     private ScheduledExecutorService scheduler;
@@ -1584,7 +1587,9 @@ public class AI {
         long firstMoveHash = simulatorEngine.getBoardStateHash();
         double firstScore;
         if (simulatorEngine.getGameState().isInStateCheckMate()) {
-            firstScore = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
+            firstScore = isWhitesTurn
+                    ? (CHECKMATE_PAWNS - MATE_STEP_PAWNS)
+                    : -(CHECKMATE_PAWNS - MATE_STEP_PAWNS);
         } else if (simulatorEngine.getGameState().isTerminal()) { // <-- terminal only (stalemate/50/3fold)
             firstScore = evaluateStaticPosition(simulatorEngine.getGameState(), firstMoveHash, !isWhitesTurn, depth);
             if (isWhitesTurn) firstScore = -firstScore;
@@ -1659,7 +1664,9 @@ public class AI {
 
                     double probe;
                     if (workerEngine.getGameState().isInStateCheckMate()) {
-                        probe = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
+                        probe = isWhitesTurn
+                                ? (CHECKMATE_PAWNS - MATE_STEP_PAWNS)
+                                : -(CHECKMATE_PAWNS - MATE_STEP_PAWNS);
                     } else if (workerEngine.getGameState().isTerminal()) { // <-- terminal only
                         probe = evaluateStaticPosition(workerEngine.getGameState(), workerHash, !isWhitesTurn, depth);
                         if (isWhitesTurn) probe = -probe;
@@ -1795,7 +1802,9 @@ public class AI {
 
                 double score;
                 if (simulatorEngine.getGameState().isInStateCheckMate()) {
-                    score = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
+                    score = isWhitesTurn
+                            ? (CHECKMATE_PAWNS - MATE_STEP_PAWNS)
+                            : -(CHECKMATE_PAWNS - MATE_STEP_PAWNS);
                 } else if (simulatorEngine.getGameState().isTerminal()) {
                     long childHash = simulatorEngine.getBoardStateHash();
                     score = evaluateStaticPosition(simulatorEngine.getGameState(), childHash, !isWhitesTurn, depth);
@@ -2044,7 +2053,9 @@ public class AI {
             long childHash = simulatorEngine.getBoardStateHash();
             double score;
             if (simulatorEngine.getGameState().isInStateCheckMate()) {
-                score = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
+                score = isWhitesTurn
+                        ? (CHECKMATE_PAWNS - MATE_STEP_PAWNS)
+                        : -(CHECKMATE_PAWNS - MATE_STEP_PAWNS);
             } else if (simulatorEngine.getGameState().isTerminal()) { // <-- terminal only
                 score = evaluateStaticPosition(simulatorEngine.getGameState(), childHash, !isWhitesTurn, depth);
                 if (isWhitesTurn) {
@@ -2393,7 +2404,7 @@ public class AI {
 
         // Terminal states first, with distance-to-mate
         if (simulatorEngine.getGameState().isInStateCheckMate()) {
-            double m = CHECKMATE - plyFromRoot;
+            double m = CHECKMATE_PAWNS - plyFromRoot * MATE_STEP_PAWNS;
             return isWhite ? -m : +m; // side-to-move is losing here
         }
         if (simulatorEngine.getGameState().isTerminal()) { // <-- terminal draw only
@@ -2443,7 +2454,7 @@ public class AI {
                 && !previousMoveWasNull;
 
         if (allowNullMove) {
-            double mateThreatScore = CHECKMATE - (plyFromRoot + 1);
+            double mateThreatScore = CHECKMATE_PAWNS - (plyFromRoot + 1) * MATE_STEP_PAWNS;
             boolean betaSignalsMateThreat = isWhite && Double.isFinite(beta) && beta >= mateThreatScore;
             boolean alphaSignalsMateThreat = !isWhite && Double.isFinite(alpha) && alpha <= -mateThreatScore;
             if (betaSignalsMateThreat || alphaSignalsMateThreat) {
@@ -2462,7 +2473,7 @@ public class AI {
 
             boolean nullFailHigh = isWhite ? nullScore >= beta : nullScore <= alpha;
             if (nullFailHigh) {
-                double mateThreshold = CHECKMATE - (plyFromRoot + 1);
+                double mateThreshold = CHECKMATE_PAWNS - (plyFromRoot + 1) * MATE_STEP_PAWNS;
                 double windowEdge = isWhite ? beta : alpha;
                 double swingThreshold = Math.max(nullSwingGuardMinCp, mateThreshold / nullSwingGuardDivisor);
                 double swing = Double.isFinite(windowEdge) ? Math.abs(nullScore - windowEdge) : Math.abs(nullScore);
@@ -3365,7 +3376,7 @@ public class AI {
 
     public double evaluateBoard(Engine simulatorEngine, boolean isWhitesTurn, long deadline) {
         if (simulatorEngine.getGameState().isInStateCheckMate()) {
-            return -CHECKMATE;
+            return -CHECKMATE_PAWNS;
         }
 
         long boardStateHash = simulatorEngine.getBoardStateHash();
@@ -3549,7 +3560,7 @@ public class AI {
 
     private double evaluateStaticPosition(GameState gameState, long boardHash, boolean isWhitesTurn, int depthOrPly) {
         if (gameState.isInStateCheckMate()) {
-            return -(CHECKMATE - depthOrPly);
+            return -(CHECKMATE_PAWNS - depthOrPly * MATE_STEP_PAWNS);
         }
         EvaluationContext context = gameState.getScore().getEvaluationContext();
         boolean whiteToMove = context != null && context.isWhiteToMove();
@@ -3623,18 +3634,19 @@ public class AI {
     }
 
     private boolean isMateValue(double score) {
-        return Double.isFinite(score) && Math.abs(score) >= (CHECKMATE - MATE_SCORE_MARGIN);
+        return Double.isFinite(score)
+                && Math.abs(score) >= (CHECKMATE_PAWNS - MATE_SCORE_MARGIN_PAWNS);
     }
 
     private double adjustMateFromChild(double score) {
         if (!preferFastMate || !Double.isFinite(score)) {
             return score;
         }
-        if (score >= CHECKMATE - MATE_SCORE_MARGIN) {
-            return score - 1;
+        if (score >= CHECKMATE_PAWNS - MATE_SCORE_MARGIN_PAWNS) {
+            return score - MATE_STEP_PAWNS;
         }
-        if (score <= -CHECKMATE + MATE_SCORE_MARGIN) {
-            return score + 1;
+        if (score <= -CHECKMATE_PAWNS + MATE_SCORE_MARGIN_PAWNS) {
+            return score + MATE_STEP_PAWNS;
         }
         return score;
     }
@@ -3643,11 +3655,11 @@ public class AI {
         if (!preferFastMate || !Double.isFinite(score)) {
             return score;
         }
-        if (score >= CHECKMATE - MATE_SCORE_MARGIN) {
-            return score + plyFromRoot;
+        if (score >= CHECKMATE_PAWNS - MATE_SCORE_MARGIN_PAWNS) {
+            return score + plyFromRoot * MATE_STEP_PAWNS;
         }
-        if (score <= -CHECKMATE + MATE_SCORE_MARGIN) {
-            return score - plyFromRoot;
+        if (score <= -CHECKMATE_PAWNS + MATE_SCORE_MARGIN_PAWNS) {
+            return score - plyFromRoot * MATE_STEP_PAWNS;
         }
         return score;
     }
@@ -3656,11 +3668,11 @@ public class AI {
         if (!preferFastMate || !Double.isFinite(score)) {
             return score;
         }
-        if (score >= CHECKMATE - MATE_SCORE_MARGIN) {
-            return score - plyFromRoot;
+        if (score >= CHECKMATE_PAWNS - MATE_SCORE_MARGIN_PAWNS) {
+            return score - plyFromRoot * MATE_STEP_PAWNS;
         }
-        if (score <= -CHECKMATE + MATE_SCORE_MARGIN) {
-            return score + plyFromRoot;
+        if (score <= -CHECKMATE_PAWNS + MATE_SCORE_MARGIN_PAWNS) {
+            return score + plyFromRoot * MATE_STEP_PAWNS;
         }
         return score;
     }
