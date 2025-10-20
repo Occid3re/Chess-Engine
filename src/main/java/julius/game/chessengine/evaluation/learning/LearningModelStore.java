@@ -1,8 +1,10 @@
 package julius.game.chessengine.evaluation.learning;
 
+import julius.game.chessengine.tuning.ParamId;
 import julius.game.chessengine.tuning.ParameterRegistry;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
@@ -43,6 +45,8 @@ public final class LearningModelStore {
             {0.0, 0.0}
     };
 
+    private static final double[] DEFAULT_OUTPUT_SCALES = {120.0, 80.0};
+
     private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
     private volatile LearningModel model;
@@ -62,6 +66,10 @@ public final class LearningModelStore {
     }
 
     public double[] infer(double[] features) {
+        return inferWithScales(features).output();
+    }
+
+    public InferenceResult inferWithScales(double[] features) {
         Objects.requireNonNull(features, "features");
         LearningModel local = model;
         if (local == null) {
@@ -69,7 +77,8 @@ public final class LearningModelStore {
         }
         lock.readLock().lock();
         try {
-            return local.infer(features);
+            double[] output = local.infer(features);
+            return new InferenceResult(output, local.outputScales());
         } finally {
             lock.readLock().unlock();
         }
@@ -108,7 +117,8 @@ public final class LearningModelStore {
             layers.add(new LayerDefinition(weights, bias, LAYER_ACTIVATIONS[layerIndex].name()));
             previousWidth = outputWidth;
         }
-        return new Definition(INPUT_SIZE, layers);
+        double[] outputScales = resolveOutputScales(previousWidth);
+        return new Definition(INPUT_SIZE, layers, outputScales);
     }
 
     private static double[][] resolveWeights(int layerIndex, int inputWidth, double[][] defaults) {
@@ -137,6 +147,20 @@ public final class LearningModelStore {
         return bias;
     }
 
+    private static double[] resolveOutputScales(int outputSize) {
+        double[] scales = new double[outputSize];
+        for (int i = 0; i < outputSize; i++) {
+            double fallback = DEFAULT_OUTPUT_SCALES.length > i ? DEFAULT_OUTPUT_SCALES[i] : 1.0;
+            double value = switch (i) {
+                case 0 -> ParameterRegistry.get(ParamId.LEARNING_OUTPUT_MIDGAME_SCALE);
+                case 1 -> ParameterRegistry.get(ParamId.LEARNING_OUTPUT_ENDGAME_SCALE);
+                default -> ParameterRegistry.get(outputScaleKey(i), fallback);
+            };
+            scales[i] = value;
+        }
+        return scales;
+    }
+
     private static String weightKey(int layerIndex, int neuronIndex, int inputIndex) {
         return "learning.layer" + layerIndex + ".neuron" + neuronIndex + ".weight" + inputIndex;
     }
@@ -145,7 +169,11 @@ public final class LearningModelStore {
         return "learning.layer" + layerIndex + ".neuron" + neuronIndex + ".bias";
     }
 
-    private record LearningModel(int inputSize, List<Layer> layers) {
+    private static String outputScaleKey(int outputIndex) {
+        return "learning.output.scale" + outputIndex;
+    }
+
+    private record LearningModel(int inputSize, List<Layer> layers, double[] outputScales) {
 
         static LearningModel fromDefinition(Definition definition) {
             Objects.requireNonNull(definition, "definition");
@@ -156,7 +184,8 @@ public final class LearningModelStore {
                 compiled.add(Layer.fromDefinition(layer, previousWidth));
                 previousWidth = layer.outputSize();
             }
-            return new LearningModel(input, Collections.unmodifiableList(compiled));
+            double[] resolvedScales = resolveScales(definition.outputScalesRaw(), previousWidth);
+            return new LearningModel(input, Collections.unmodifiableList(compiled), resolvedScales);
         }
 
         double[] infer(double[] features) {
@@ -169,6 +198,25 @@ public final class LearningModelStore {
                 current = layer.forward(current);
             }
             return current;
+        }
+
+        public double[] outputScales() {
+            return outputScales.clone();
+        }
+
+        private static double[] resolveScales(double[] candidate, int expectedLength) {
+            double[] resolved;
+            if (candidate == null || candidate.length == 0) {
+                resolved = new double[expectedLength];
+                Arrays.fill(resolved, 1.0);
+            } else {
+                if (candidate.length != expectedLength) {
+                    throw new IllegalArgumentException("Output scales length " + candidate.length
+                            + " does not match output width " + expectedLength);
+                }
+                resolved = candidate.clone();
+            }
+            return resolved;
         }
     }
 
@@ -256,10 +304,16 @@ public final class LearningModelStore {
     public static final class Definition {
         private final int inputSize;
         private final List<LayerDefinition> layers;
+        private final double[] outputScales;
 
         public Definition(int inputSize, List<LayerDefinition> layers) {
+            this(inputSize, layers, null);
+        }
+
+        public Definition(int inputSize, List<LayerDefinition> layers, double[] outputScales) {
             this.inputSize = inputSize;
             this.layers = (layers == null ? List.of() : List.copyOf(layers));
+            this.outputScales = outputScales == null ? null : outputScales.clone();
         }
 
         public int inputSize() {
@@ -268,6 +322,14 @@ public final class LearningModelStore {
 
         public List<LayerDefinition> layers() {
             return layers;
+        }
+
+        double[] outputScalesRaw() {
+            return outputScales == null ? null : outputScales.clone();
+        }
+
+        public double[] outputScales() {
+            return outputScalesRaw();
         }
 
         Definition validate() {
@@ -282,6 +344,10 @@ public final class LearningModelStore {
                 layer.validate(previousWidth);
                 previousWidth = layer.outputSize();
             }
+            if (outputScales != null && outputScales.length != previousWidth) {
+                throw new IllegalArgumentException("Output scales length " + outputScales.length
+                        + " must match final layer output width " + previousWidth);
+            }
             return this;
         }
 
@@ -289,7 +355,24 @@ public final class LearningModelStore {
             double[][] weights = new double[2][inputSize];
             double[] bias = new double[2];
             List<LayerDefinition> layers = List.of(new LayerDefinition(weights, bias, "LINEAR"));
-            return new Definition(inputSize, layers);
+            double[] scales = new double[] {1.0, 1.0};
+            return new Definition(inputSize, layers, scales);
+        }
+    }
+
+    public record InferenceResult(double[] output, double[] outputScales) {
+
+        public InferenceResult {
+            output = output.clone();
+            outputScales = outputScales.clone();
+        }
+
+        public double[] output() {
+            return output.clone();
+        }
+
+        public double[] outputScales() {
+            return outputScales.clone();
         }
     }
 

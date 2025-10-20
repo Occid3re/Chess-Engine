@@ -76,6 +76,8 @@ public enum ParamId {
     THREAT_PAWN_THREAT_QUEEN_PENALTY("threat.pawnThreatQueenPenalty", -25),
 
     EVALUATION_BLEND_SCALE("evaluation.blendScale", 256, 1.0, 1024.0),
+    LEARNING_OUTPUT_MIDGAME_SCALE("learning.outputMidgameScale", 120.0, -1024.0, 1024.0),
+    LEARNING_OUTPUT_ENDGAME_SCALE("learning.outputEndgameScale", 80.0, -1024.0, 1024.0),
 
     MOVE_ORDERING_CATEGORY_TT("moveOrdering.category.tt", 7, 6.0, 8.0),
     MOVE_ORDERING_CATEGORY_PROMOTION("moveOrdering.category.promotion", 6, 5.0, 7.0),

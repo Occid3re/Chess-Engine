@@ -138,6 +138,16 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "soft_min": 128.0,
         "soft_max": 768.0,
     },
+    "learning.outputmidgamescale": {
+        "step": 10.0,
+        "soft_min": -512.0,
+        "soft_max": 512.0,
+    },
+    "learning.outputendgamescale": {
+        "step": 10.0,
+        "soft_min": -512.0,
+        "soft_max": 512.0,
+    },
     "material.pawnvalue": {
         "step": 1.0,
         "soft_min": 60.0,

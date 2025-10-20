@@ -87,16 +87,37 @@ class LearningEvaluationModuleTest {
         assertThat(module.getEndgameScore()).isEqualTo(rebuild.getEndgameScore());
     }
 
-    private static LearningModelStore buildLinearStore(double midgameWeight, double endgameWeight) {
+    @Test
+    void defaultDefinitionProducesNonZeroScoresForCommonPositions() {
+        LearningEvaluationModule module = new LearningEvaluationModule();
+
+        List<String> representativeFens = List.of(
+                "8/8/2k5/8/4K3/6P1/8/8 w - - 0 1",
+                "4k3/8/8/8/8/8/8/3K4 w - - 0 1"
+        );
+        for (String fen : representativeFens) {
+            BitBoard board = FEN.translateFENtoBitBoard(fen);
+            EvaluationContext context = EvaluationContext.from(board, null);
+            module.initialize(context);
+            module.evaluate(context);
+            int midgameScore = module.getMidgameScore();
+            int endgameScore = module.getEndgameScore();
+            assertThat(Math.abs(midgameScore) + Math.abs(endgameScore)).as("Scaled output for FEN %s", fen)
+                    .isNotZero();
+        }
+    }
+
+    private static LearningModelStore buildLinearStore(double midgameScale, double endgameScale) {
         double[][] weights = new double[2][LearningEvaluationModule.FEATURE_VECTOR_SIZE];
-        weights[0][0] = midgameWeight;
-        weights[1][0] = endgameWeight;
+        weights[0][0] = 1.0;
+        weights[1][0] = 1.0;
         double[] bias = new double[] {0.0, 0.0};
+        double[] scales = new double[] {midgameScale, endgameScale};
         LearningModelStore.LayerDefinition layer =
                 new LearningModelStore.LayerDefinition(weights, bias, "LINEAR");
         LearningModelStore.Definition definition =
                 new LearningModelStore.Definition(LearningEvaluationModule.FEATURE_VECTOR_SIZE,
-                        List.of(layer));
+                        List.of(layer), scales);
         return new LearningModelStore(definition);
     }
 
