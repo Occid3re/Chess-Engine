@@ -87,6 +87,9 @@ public final class Tuning {
     private static int startPositionPenalty;
     private static int castlingBonus;
     private static int notCastledRookMovePenalty;
+    private static int queenDisplacementPenalty;
+    private static int queenUnderAttackPenalty;
+    private static int queenHangingPenalty;
 
     private static int evaluationBlendScale;
 
@@ -190,6 +193,10 @@ public final class Tuning {
     private static double searchTtCaptureWeight;
     private static double searchQsMaxDeltaPawn;
     private static double searchDrawBias;
+    private static double searchRootStaticOverrideCp;
+    private static double searchRootStaticBlend;
+    private static double searchRootQueenAttackBonusCp;
+    private static double searchRootEarlyStopMarginCp;
     private static boolean searchPreferFastMate;
     private static boolean searchTbTieBreak;
 
@@ -490,6 +497,18 @@ public final class Tuning {
 
     public static int notCastledRookMovePenalty() {
         return notCastledRookMovePenalty;
+    }
+
+    public static int queenDisplacementPenalty() {
+        return queenDisplacementPenalty;
+    }
+
+    public static int queenUnderAttackPenalty() {
+        return queenUnderAttackPenalty;
+    }
+
+    public static int queenHangingPenalty() {
+        return queenHangingPenalty;
     }
 
     public static int evaluationBlendScale() {
@@ -892,6 +911,22 @@ public final class Tuning {
         return searchDrawBias;
     }
 
+    public static double searchRootStaticBlend() {
+        return searchRootStaticBlend;
+    }
+
+    public static double searchRootQueenAttackBonusCp() {
+        return searchRootQueenAttackBonusCp;
+    }
+
+    public static double searchRootStaticOverrideCp() {
+        return searchRootStaticOverrideCp;
+    }
+
+    public static double searchRootEarlyStopMarginCp() {
+        return searchRootEarlyStopMarginCp;
+    }
+
     public static boolean searchPreferFastMate() {
         return searchPreferFastMate;
     }
@@ -975,6 +1010,18 @@ public final class Tuning {
             pawnThreatBishopPenalty = loadInt(ParamId.THREAT_PAWN_THREAT_BISHOP_PENALTY);
             pawnThreatRookPenalty = loadInt(ParamId.THREAT_PAWN_THREAT_ROOK_PENALTY);
             pawnThreatQueenPenalty = loadInt(ParamId.THREAT_PAWN_THREAT_QUEEN_PENALTY);
+
+            developmentPhaseThreshold = loadInt(ParamId.DEVELOPMENT_PHASE_THRESHOLD);
+            queenDevelopmentPhaseThreshold = loadInt(ParamId.QUEEN_DEVELOPMENT_PHASE_THRESHOLD);
+            undevelopedMinorPenalty = loadInt(ParamId.UNDEVELOPED_MINOR_PENALTY);
+            earlyQueenDevelopmentPenaltyPerMinor = loadInt(ParamId.EARLY_QUEEN_DEVELOPMENT_PENALTY_PER_MINOR);
+            minUndevelopedMinorsForQueenPenalty = loadInt(ParamId.MIN_UNDEVELOPED_MINORS_FOR_QUEEN_PENALTY);
+            startPositionPenalty = loadInt(ParamId.START_POSITION_PENALTY);
+            castlingBonus = loadInt(ParamId.CASTLING_BONUS);
+            notCastledRookMovePenalty = loadInt(ParamId.NOT_CASTLED_ROOK_MOVE_PENALTY);
+            queenDisplacementPenalty = loadInt(ParamId.QUEEN_DISPLACEMENT_PENALTY);
+            queenUnderAttackPenalty = loadInt(ParamId.QUEEN_UNDER_ATTACK_PENALTY);
+            queenHangingPenalty = loadInt(ParamId.QUEEN_HANGING_PENALTY);
 
             evaluationBlendScale = loadInt(ParamId.EVALUATION_BLEND_SCALE);
 
@@ -1078,6 +1125,10 @@ public final class Tuning {
             searchTtCaptureWeight = loadDouble(ParamId.SEARCH_TT_CAPTURE_WEIGHT);
             searchQsMaxDeltaPawn = loadDouble(ParamId.SEARCH_QS_MAX_DELTA_PAWN);
             searchDrawBias = loadDouble(ParamId.SEARCH_DRAW_BIAS);
+            searchRootStaticBlend = loadDouble(ParamId.SEARCH_ROOT_STATIC_BLEND);
+            searchRootStaticOverrideCp = loadDouble(ParamId.SEARCH_ROOT_STATIC_OVERRIDE_CP);
+            searchRootQueenAttackBonusCp = loadDouble(ParamId.SEARCH_ROOT_QUEEN_ATTACK_BONUS_CP);
+            searchRootEarlyStopMarginCp = loadDouble(ParamId.SEARCH_ROOT_EARLY_STOP_MARGIN_CP);
             searchPreferFastMate = loadBoolean(ParamId.SEARCH_PREFER_FAST_MATE);
             searchTbTieBreak = loadBoolean(ParamId.SEARCH_TB_TIE_BREAK);
         }

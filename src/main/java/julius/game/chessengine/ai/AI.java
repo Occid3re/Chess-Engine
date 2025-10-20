@@ -5,8 +5,10 @@ import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap;
 import julius.game.chessengine.ai.time.TimeManager;
 import julius.game.chessengine.board.BitBoard;
+import julius.game.chessengine.board.FEN;
 import julius.game.chessengine.board.Move;
 import julius.game.chessengine.board.MoveHelper;
+import julius.game.chessengine.helper.KnightHelper;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
@@ -168,6 +170,10 @@ public class AI {
     private final double nullSwingGuardDivisor;
     private final double quiescenceMaxDeltaPawn;
     private final double drawBias;
+    private final double rootStaticBlendWeight;
+    private final double rootStaticOverrideThreshold;
+    private final double rootQueenAttackBonus;
+    private final double rootEarlyStopMargin;
     private final double ttMainWeight;
     private final double ttCaptureWeight;
     private final boolean preferFastMate;
@@ -187,6 +193,9 @@ public class AI {
     // Buffers used for move ordering. Reused across calls to avoid repeated
     // allocations when ordering moves.
     private static final int MAX_MOVE_LIST_SIZE = 218; // maximum legal moves
+    private static final double ROOT_CAPTURE_VALUE_THRESHOLD = 4.0; // pawns
+    private static final double ROOT_CAPTURE_GAIN_THRESHOLD = 2.0; // pawns
+    private static final double ROOT_RUNNER_UP_MARGIN_RATIO = 0.5; // require half-margin lead over runner-up
 
     private enum MoveBucket {
         TT,
@@ -383,6 +392,12 @@ public class AI {
         this.nullSwingGuardDivisor = Math.max(1e-9, Tuning.searchNullSwingGuardDivisor());
         this.quiescenceMaxDeltaPawn = Tuning.searchQsMaxDeltaPawn();
         this.drawBias = Tuning.searchDrawBias();
+        this.rootStaticBlendWeight = Math.max(0.0, Math.min(1.0, Tuning.searchRootStaticBlend()));
+        log.info("Root static blend weight: {}", rootStaticBlendWeight);
+        this.rootStaticOverrideThreshold = Math.max(0.0, Tuning.searchRootStaticOverrideCp() / 100.0);
+        this.rootQueenAttackBonus = Math.max(0.0, Tuning.searchRootQueenAttackBonusCp() / 100.0);
+        log.info("Root queen attack bonus (pawns): {}", rootQueenAttackBonus);
+        this.rootEarlyStopMargin = Math.max(0.0, Tuning.searchRootEarlyStopMarginCp() / 100.0);
         this.ttMainWeight = Math.max(1e-9, Tuning.searchTtMainWeight());
         this.ttCaptureWeight = Math.max(1e-9, Tuning.searchTtCaptureWeight());
         this.preferFastMate = Tuning.searchPreferFastMate();
@@ -1057,6 +1072,14 @@ public class AI {
         double computed = gameState.getScore().getScoreDifference();
         cache.put(boardHash, computed);
         return computed;
+    }
+
+    /**
+     * Returns a positive margin when {@code candidateScore} is better for the current
+     * player than {@code referenceScore}. The magnitude is expressed in pawns.
+     */
+    private double orientedMargin(double candidateScore, double referenceScore, boolean perspectiveIsWhite) {
+        return perspectiveIsWhite ? (candidateScore - referenceScore) : (referenceScore - candidateScore);
     }
 
     protected RootSearchResult searchRootMoves(Engine sim, SearchTask task, int depth, double alpha, double beta, SplittableRandom rng) {
@@ -2042,6 +2065,26 @@ public class AI {
             }
         }
 
+        long rootHash = simulatorEngine.getBoardStateHash();
+        double baselineWhiteScore = resolveScoreDifference(
+                simulatorEngine.getGameState(), rootHash, simulatorEngine.whitesTurn());
+        double baselineScore = isWhitesTurn ? baselineWhiteScore : -baselineWhiteScore;
+        if (!Double.isFinite(baselineScore)) {
+            baselineScore = 0.0;
+        }
+
+        double bestStaticScore = Double.NEGATIVE_INFINITY;
+        double bestStaticSearchScore = Double.NaN;
+        int bestStaticMove = -1;
+        double bestMoveStaticScore = Double.NaN;
+        double bestCaptureGain = Double.NEGATIVE_INFINITY;
+        int bestCaptureMove = -1;
+        double bestCaptureStaticScore = Double.NaN;
+        double bestCaptureSearchScore = Double.NaN;
+        int runnerUpMove = -1;
+        double runnerUpScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
+
+        final double losingCaptureWeight = 0.5;
         for (int idx = 0; idx < sortedMoves.size(); idx++) {
             int moveInt = sortedMoves.getInt(idx);
             if (abortRequested(deadline)) {
@@ -2049,10 +2092,30 @@ public class AI {
                 break;
             }
 
+            int losingSee = 0;
+            boolean isCapture = MoveHelper.isCapture(moveInt);
+            if (isCapture) {
+                losingSee = simulatorEngine.getBitBoard().see(moveInt);
+            }
+            int movingPieceBits = MoveHelper.derivePieceTypeBits(moveInt);
+            int toIndex = MoveHelper.deriveToIndex(moveInt);
+
             simulatorEngine.performMove(moveInt);
             long childHash = simulatorEngine.getBoardStateHash();
+            boolean childIsMate = simulatorEngine.getGameState().isInStateCheckMate();
+            double staticScore;
+            if (childIsMate) {
+                double mateScore = CHECKMATE_PAWNS - MATE_STEP_PAWNS;
+                staticScore = isWhitesTurn ? mateScore : -mateScore;
+            } else {
+                double staticWhiteScore = resolveScoreDifference(
+                        simulatorEngine.getGameState(), childHash, simulatorEngine.whitesTurn());
+                staticScore = isWhitesTurn ? staticWhiteScore : -staticWhiteScore;
+            }
+            double gainFromBaseline = staticScore - baselineScore;
+
             double score;
-            if (simulatorEngine.getGameState().isInStateCheckMate()) {
+            if (childIsMate) {
                 score = isWhitesTurn
                         ? (CHECKMATE_PAWNS - MATE_STEP_PAWNS)
                         : -(CHECKMATE_PAWNS - MATE_STEP_PAWNS);
@@ -2072,15 +2135,129 @@ public class AI {
             }
             simulatorEngine.undoLastMove();
 
-            if (isBetterScore(isWhitesTurn, score, bestScore)) {
+            boolean queenPressure = false;
+            if (rootQueenAttackBonus > 0.0 && movingPieceBits == 2) { // knight move
+                BitBoard bb = simulatorEngine.getBitBoard();
+                long enemyQueens = isWhitesTurn ? bb.getBlackQueens() : bb.getWhiteQueens();
+                if (enemyQueens != 0L) {
+                    long knightAttacks = KnightHelper.knightMoveTable[toIndex];
+                    queenPressure = (knightAttacks & enemyQueens) != 0L;
+                }
+            }
+
+            double rootSearchScore = isWhitesTurn ? score : -score;
+            double staticForBlend = Double.isFinite(staticScore) ? staticScore : rootSearchScore;
+            double blendedScore = blendRootScore(rootSearchScore, staticForBlend);
+
+            if (isCapture && losingSee < 0) {
+                double penalty = (Math.abs(losingSee) / 100.0) * losingCaptureWeight;
+                if (isWhitesTurn) {
+                    score -= penalty;
+                    staticScore -= penalty;
+                    blendedScore -= penalty;
+                } else {
+                    score += penalty;
+                    staticScore += penalty;
+                    blendedScore += penalty;
+                }
+            }
+            if (queenPressure) {
+                double orientedBonus = isWhitesTurn ? rootQueenAttackBonus : -rootQueenAttackBonus;
+                score += orientedBonus;
+                staticScore += orientedBonus;
+                blendedScore += orientedBonus;
+            }
+
+            if (Double.isFinite(staticScore) && staticScore > bestStaticScore) {
+                bestStaticScore = staticScore;
+                bestStaticMove = moveInt;
+                bestStaticSearchScore = score;
+            }
+            if (Double.isFinite(staticScore) && Double.isFinite(gainFromBaseline) && gainFromBaseline > bestCaptureGain) {
+                int capturedBits = MoveHelper.deriveCapturedPieceTypeBits(moveInt);
+                if (capturedBits != 0) {
+                    double capturedValue = Score.getPieceValue(capturedBits) / 100.0;
+                    if (capturedValue >= ROOT_CAPTURE_VALUE_THRESHOLD
+                            && gainFromBaseline >= ROOT_CAPTURE_GAIN_THRESHOLD) {
+                        bestCaptureGain = gainFromBaseline;
+                        bestCaptureMove = moveInt;
+                        bestCaptureStaticScore = staticScore;
+                        bestCaptureSearchScore = score;
+                    }
+                }
+            }
+            if (Double.isFinite(score) && isBetterScore(isWhitesTurn, score, bestScore)) {
+                if (bestMove != -1) {
+                    runnerUpScore = bestScore;
+                    runnerUpMove = bestMove;
+                }
                 bestScore = score;
                 bestMove = moveInt;
+                bestMoveStaticScore = staticScore;
+            } else if (Double.isFinite(score) && moveInt != bestMove) {
+                if (runnerUpMove == -1 || isBetterScore(isWhitesTurn, score, runnerUpScore)) {
+                    runnerUpScore = score;
+                    runnerUpMove = moveInt;
+                }
+            }
+
+            if (rootEarlyStopMargin > 0.0 && bestMove != -1 && runnerUpMove != -1
+                    && Double.isFinite(bestScore) && Double.isFinite(runnerUpScore)) {
+                double improvement = orientedMargin(bestScore, baselineScore, isWhitesTurn);
+                double runnerUpGap = orientedMargin(bestScore, runnerUpScore, isWhitesTurn);
+                if (improvement >= rootEarlyStopMargin
+                        && runnerUpGap >= rootEarlyStopMargin * ROOT_RUNNER_UP_MARGIN_RATIO) {
+                    if (log.isDebugEnabled()) {
+                        log.debug("Root early-stop triggered at move {} improvement={} runnerGap={}",
+                                Move.convertIntToMove(bestMove), improvement, runnerUpGap);
+                    }
+                    if (isWhitesTurn) {
+                        alpha = Math.max(alpha, bestScore);
+                    } else {
+                        beta = Math.min(beta, bestScore);
+                    }
+                    break;
+                }
             }
             if (isWhitesTurn) alpha = Math.max(alpha, score);
             else beta = Math.min(beta, score);
             if (alpha >= beta) break;
         }
         MoveAndScore candidate = bestMove != -1 ? createCandidate(bestMove, bestScore) : null;
+        if (!aborted
+                && bestMove != -1
+                && bestStaticMove != -1
+                && bestStaticMove != bestMove
+                && rootStaticOverrideThreshold > 0.0
+                && Double.isFinite(bestStaticScore)
+                && Double.isFinite(bestMoveStaticScore)
+                && Double.isFinite(bestStaticSearchScore)) {
+            double staticDelta = bestStaticScore - bestMoveStaticScore;
+            if (staticDelta >= rootStaticOverrideThreshold) {
+                if (log.isDebugEnabled()) {
+                    log.debug("Root static override triggered: bestMove={} staticAlt={} delta={}",
+                            Move.convertIntToMove(bestMove), Move.convertIntToMove(bestStaticMove), staticDelta);
+                }
+                bestMove = bestStaticMove;
+                bestScore = bestStaticSearchScore;
+                bestMoveStaticScore = bestStaticScore;
+                candidate = createCandidate(bestMove, bestScore);
+            }
+        }
+        if (!aborted
+                && bestCaptureMove != -1
+                && bestCaptureMove != bestMove
+                && Double.isFinite(bestCaptureStaticScore)
+                && Double.isFinite(bestCaptureSearchScore)) {
+            if (log.isDebugEnabled()) {
+                log.debug("Root capture override triggered: replacing {} with {} (gain={})",
+                        Move.convertIntToMove(bestMove), Move.convertIntToMove(bestCaptureMove), bestCaptureGain);
+            }
+            bestMove = bestCaptureMove;
+            bestScore = bestCaptureSearchScore;
+            bestMoveStaticScore = bestCaptureStaticScore;
+            candidate = createCandidate(bestMove, bestScore);
+        }
         return aborted ? RootSearchResult.aborted(candidate) : RootSearchResult.completed(candidate);
     }
 
@@ -3827,6 +4004,15 @@ public class AI {
     /**
      * Checks if the current score is better than the best score based on the player's color.
      */
+    private double blendRootScore(double searchScore, double staticScore) {
+        double weight = rootStaticBlendWeight;
+        if (weight <= 0.0 || !Double.isFinite(searchScore) || !Double.isFinite(staticScore)) {
+            return searchScore;
+        }
+        double complement = 1.0 - weight;
+        return (searchScore * complement) + (staticScore * weight);
+    }
+
     private boolean isBetterScore(boolean isWhite, double score, double bestScore) {
         return isWhite ? score > bestScore : score < bestScore;
     }

@@ -2,9 +2,29 @@
 
 ### Goal
 
-Improve **BestMoveSearchTest** pass rates while keeping the current ~3 min diagnostic runtime window.
+Improve **BestMoveSearchTest** pass rates while keeping runtime within the 30 s target under the mandated Java 25 + Syzygy configuration.
 
-**Current status:** Latest tuning passes hold the suite at **15 / 71** failures (baseline was 16). The worst offenders cluster around pawn-pressure situtations (`4k3/...`, `1k1r3r/...`, `r4rk1/...`) with cpLoss in the 3–12 range; diagnostics for each run continue to live in `target/surefire-reports/`.
+**Current status (2025‑10‑20):** Depth‑4 runs previously completed in **~31–33 s** with the required flags, returning **24 / 86** failures. Root early-stop now kicks in once the leader is ≥300 cp ahead of the baseline and 150 cp clear of the runner-up; this should trim root fan-out without touching fixtures. Fresh timings still pending while the local toolchain is wired up (`JAVA_HOME` is required before Maven can finish the JNI configure step). Diagnostics remain in `target/surefire-reports/` for each run.
+
+Baseline commands & stats:
+
+```bash
+# Full static diagnostics (Java 25, preview features)
+mvn -Djava.version=25 -Dmaven.compiler.release=25 -Dmaven.compiler.enablePreview=true \
+    -DargLine="--enable-preview" -Dtest=BestMoveEvaluationDiagnosticsTest test
+
+# Full BestMoveSearchTest with required runtime flags
+mvn -Djava.version=25 -Dmaven.compiler.release=25 -Dmaven.compiler.enablePreview=true \
+    -DargLine="--enable-preview -Xms8g -Xmx8g -XX:+UseG1GC -XX:MaxGCPauseMillis=20 -XX:+AlwaysPreTouch -XX:+UseNUMA -XX:ActiveProcessorCount=24" \
+    -Dchessengine.syzygy.nativeLibrary="C:\\Development\\Chess-Engine\\target\\classes\\natives\\win-x86_64\\Release\\JSyzygy.dll" \
+    -Dchessengine.syzygy.paths="C:\\Syzygy" -Dchessengine.tt.mb=1024 -Dchessengine.searchThreads=1 \
+    -Dtest=BestMoveSearchTest test
+
+# Representative runtime result (2025-10-20)
+#   - Wall-clock: 31.7 s
+#   - Failures: 24 / 86
+#   - Nodes: see target/surefire-reports/julius.game.chessengine.ai.BestMoveSearchTest.txt
+```
 
 ### Guardrails
 
@@ -18,31 +38,33 @@ Improve **BestMoveSearchTest** pass rates while keeping the current ~3 min dia
    - Aggregate failing FENs, classify by motif (tactical miss, evaluation skew, pruning overshoot).
    - Capture representative traces under `logs/test-runs/<timestamp>/best-move-search/`.
 2. **Evaluation Tweaks**
-   - Audit the blended score deltas for the high-loss positions.
-   - Adjust weights (via tuning + evaluation modules) to close gaps where the engine picks the wrong move at the same depth.
-3. **Search Stability**
-   - Revisit aspiration, null-move, and reduction thresholds that cause the engine to bail out early on winning lines.
-   - Add targeted safeguards (e.g., SEE/Futility tightening) only if they reduce false errors without adding runtime.
+   - Audit blended vs static deltas for high-loss positions.
+   - Adjust weights (via `seed-tunings.yaml` + evaluation modules) to address queen/rook tactical slips without inflating cp-loss elsewhere.
+3. **Search Stability & Runtime**
+   - Revisit aspiration, null-move, and reduction thresholds that cause the engine to waste time or miss shallow wins.
+   - Use targeted heuristics (e.g., SEE/futility tightening, early-stop margin tuning) if they lower wall-clock while preserving depth coverage.
 4. **Verification**
-   - Re-run the suite (≥2 passes) to confirm failure counts drop while wall-clock stays in the existing window.
+   - Re-run the suite (≥2 passes) to confirm failure counts drop and wall-clock ≤30 s.
    - Record node counts and depth coverage summaries for before/after comparison.
 
 ### Measure
 
 ```bash
-mvn -Djava.version=21 -Dmaven.compiler.release=21 -Dmaven.compiler.enablePreview=true \
-    -DargLine="--enable-preview" -Dtest=BestMoveSearchTest test
+mvn -Djava.version=25 -Dmaven.compiler.release=25 -Dmaven.compiler.enablePreview=true \
+    -DargLine="--enable-preview -Xms8g -Xmx8g -XX:+UseG1GC -XX:MaxGCPauseMillis=20 -XX:+AlwaysPreTouch -XX:+UseNUMA -XX:ActiveProcessorCount=24" \
+    -Dchessengine.syzygy.nativeLibrary="C:\\Development\\Chess-Engine\\target\\classes\\natives\\win-x86_64\\Release\\JSyzygy.dll" \
+    -Dchessengine.syzygy.paths="C:\\Syzygy" -Dchessengine.tt.mb=1024 -Dchessengine.searchThreads=1 \
+    -Dtest=BestMoveSearchTest test
 ```
 
 ### Accept
 
 ✅ Consistent runtime within ±5 % of the current baseline  
-✅ Failure count reduced to ≤8 without introducing new flaky cases (currently 15 outstanding)  
-⚠️ Note any trade-offs (e.g., increased evaluation draw bias) in the run logs
+✅ Failure count reduced to ≤8 without introducing new flaky cases (currently 24 outstanding)  
+⚠️ Note any trade-offs (e.g., increased evaluation draw bias, higher queen-safety penalties) in the run logs
 
 ### Next Steps
 
-- Target the pawn-pressure collapses first: raise the pawn-threat penalties for knights/rooks and/or add a light “no pawn shield” surcharge in `ThreatModule` so moves like `Nf3` (FEN `4k3/...`) get clipped before the engine commits. Profile cpLoss after each change.
-- For `Bf5` in `1k1r3r/qppb2pp/...`, compare SEE and static eval — a handful of defenders still rate the capture as safe. Consider checking the SEE score inside `ThreatModule` before accepting hanging moves or wiring a one-ply SEE guard in search to veto that capture.
-- The `Rxd2` miss (`8/2b5/...`) remains a high-magnitude regression. Instrument the diagnostics for that FEN and see whether the rook capture survives quiescence; if it does, tune the rook hanging penalty upward only for undefended squares (no friendly pawn coverage).
-- Keep the full-suite runs flowing and log `cpLoss` deltas per position. The current run (see `target/surefire-reports/julius.game.chessengine.ai.BestMoveSearchTest.txt`) lists the 15 failures with their cpLoss budgets; use that as the regression ledger for the next pass.
+- Capture a new BestMoveSearchTest run (same flags) once `JAVA_HOME` is exported so the JNI build step succeeds; record wall-clock, failure count, and root fan-out deltas after the 300 cp early-stop change.
+- If runtime still hovers above 30 s, experiment with narrowing the runner-up gap (currently 50 % of the margin) or mild aspiration tightening, and document any regression risk in the logs.
+- Continue logging `cpLoss` deltas per position; use `target/surefire-reports/julius.game.chessengine.ai.BestMoveSearchTest.txt` as the working ledger for regressions.

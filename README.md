@@ -13,6 +13,17 @@ executable JAR that bundles all dependencies and specifies
 The command above creates
 `target/chess-engine-<version>-uci.jar`.
 
+### WSL note
+
+When invoking Maven from WSL, point `JAVA_HOME` at the Linux JDK to avoid JNI configure failures:
+
+```bash
+export JAVA_HOME=/usr/lib/jvm/temurin-25-jdk-amd64
+mvn -DskipTests compile
+```
+
+Using the Windows path (for example `C:\Users\juliu\.jdks\openjdk-25`) from WSL causes the native build step to exit with `JAVA_HOME must be defined`.
+
 ## Running
 
 Launch the engine without adding anything to the classpath:
