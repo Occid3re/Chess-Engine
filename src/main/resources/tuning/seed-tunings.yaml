@@ -3,7 +3,7 @@ population:
     evaluation:
       modules:
         materialmodule:
-          midgame: 2.1
+          midgame: 2.4
           endgame: 0.9
         pawnstructuremodule:
           midgame: 1.0
@@ -13,15 +13,15 @@ population:
           endgame: 0.9
         developmentmodule:
           midgame: 1.2
-          endgame: 0.7
+          endgame: 0.8
         kingsafetymodule:
-          midgame: 1.1
+          midgame: 1.2
           endgame: 0.3
         threatmodule:
           midgame: 1.4
-          endgame: 2.9
+          endgame: 3.3
     numericParameters:
-      evaluation.blendscale: 761
+      evaluation.blendscale: 768
       material.pawnvalue: 118
       material.knightvalue: 389
       material.bishopvalue: 420
@@ -93,7 +93,7 @@ population:
       development.queenDisplacementPenalty: 64
       development.queenUnderAttackPenalty: 67
       development.queenHangingPenalty: 202
-      moveordering.category.tt: 7
+      moveordering.category.tt: 8
       moveordering.category.promotion: 6
       moveordering.category.capturegood: 5
       moveordering.category.captureequal: 4
@@ -111,11 +111,11 @@ population:
       moveordering.promotionseemultiplier: 23
       moveordering.castlingbonus: 154
       moveordering.captureseeclamp: 518
-      moveordering.promotionseeclamp: 323
+      moveordering.promotionseeclamp: 330
       moveordering.capturegoodbonus: 929
-      moveordering.captureequalbonus: 282
+      moveordering.captureequalbonus: 268
       moveordering.capturebadbonus: -701
-      moveordering.capturelosingseepenalty: -1070
+      moveordering.capturelosingseepenalty: -1114
       moveordering.quiethistorymultiplier: 3.2
       moveordering.quiethistorybonus: 1297
       moveordering.maxscore: 16408385
@@ -137,7 +137,7 @@ population:
       search.lmrHistoryWeightSlope: 0.95
       search.lmrScaleDivisor: 3.4
       search.lmrDepthLogOffset: 7.2
-      search.lmrMoveLogOffset: 6.9
+      search.lmrMoveLogOffset: 7.9
       search.maxCheckExtensionStreak: 0
       search.seePruneNearRootPly: 14
       search.historyReductionMax: 7906
@@ -161,11 +161,11 @@ population:
       search.aspMaxSpanCp: 640
       search.aspDefaultSpanCp: 170
       search.aspHistoryBlend: 0.4
-      search.aspMomentumStepCp: 4
+      search.aspMomentumStepCp: 5
       search.aspMomentumCap: 32
       search.aspFailureRatio: 1.0
       search.aspBaseOffsetCp: 0
-      search.aspSwingWeight: 0.14
+      search.aspSwingWeight: 0.13
       search.aspVolatilityWeight: 0.7
       search.aspDepthScale: 0.05
       search.aspDepthPivot: 3
@@ -177,8 +177,8 @@ population:
       search.aspBumpDepthCp: 2
       search.aspFullWindowScale: 2.00
       search.aspLastSpanScale: 1.9
-      search.aspFullWindowMinMultiplier: 1.9
-      search.aspBlendBaselineWeight: 0.6
+      search.aspFullWindowMinMultiplier: 2.1
+      search.aspBlendBaselineWeight: 0.7
       search.aspBlendCandidateWeight: 0.6
       search.aspMaxRetriesBase: 0
       search.aspMaxRetriesVolThresholdHigh: 102
