@@ -214,7 +214,7 @@ population:
       learning.layer0.neuron0.weight12: 0.03
       learning.layer0.neuron0.weight13: 0.02
       learning.layer0.neuron0.weight14: 0.01
-      learning.layer0.neuron0.weight15: 0.0
+      learning.layer0.neuron0.weight15: -0.0
       learning.layer0.neuron0.weight16: -0.01
       learning.layer0.neuron0.weight17: -0.02
       learning.layer0.neuron0.weight18: -0.03
@@ -233,11 +233,11 @@ population:
       learning.layer0.neuron1.weight12: 0.02
       learning.layer0.neuron1.weight13: 0.01
       learning.layer0.neuron1.weight14: 0.0
-      learning.layer0.neuron1.weight15: -0.01
+      learning.layer0.neuron1.weight15: -0.00
       learning.layer0.neuron1.weight16: -0.02
       learning.layer0.neuron1.weight17: -0.03
       learning.layer0.neuron1.weight18: -0.04
-      learning.layer0.neuron2.weight0: 0.01
+      learning.layer0.neuron2.weight0: 0.00
       learning.layer0.neuron2.weight1: 0.02
       learning.layer0.neuron2.weight2: 0.03
       learning.layer0.neuron2.weight3: 0.04
@@ -249,7 +249,7 @@ population:
       learning.layer0.neuron2.weight9: 0.04
       learning.layer0.neuron2.weight10: 0.03
       learning.layer0.neuron2.weight11: 0.02
-      learning.layer0.neuron2.weight12: 0.01
+      learning.layer0.neuron2.weight12: -0.00
       learning.layer0.neuron2.weight13: 0.0
       learning.layer0.neuron2.weight14: -0.01
       learning.layer0.neuron2.weight15: -0.02
@@ -280,7 +280,7 @@ population:
       learning.layer0.neuron4.weight2: -0.01
       learning.layer0.neuron4.weight3: 0.0
       learning.layer0.neuron4.weight4: 0.01
-      learning.layer0.neuron4.weight5: -0.02
+      learning.layer0.neuron4.weight5: -0.03
       learning.layer0.neuron4.weight6: -0.01
       learning.layer0.neuron4.weight7: 0.0
       learning.layer0.neuron4.weight8: 0.01
@@ -379,4 +379,3 @@ population:
       learning.layer1.neuron1.bias: 0.0
       learning.outputMidgameScale: 120.0
       learning.outputEndgameScale: 80.0
-
