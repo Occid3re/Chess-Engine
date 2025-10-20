@@ -388,10 +388,8 @@ public class AI {
         this.quiescenceMaxDeltaPawn = Tuning.searchQsMaxDeltaPawn();
         this.drawBias = Tuning.searchDrawBias();
         this.rootStaticBlendWeight = Math.max(0.0, Math.min(1.0, Tuning.searchRootStaticBlend()));
-        log.info("Root static blend weight: {}", rootStaticBlendWeight);
         this.rootStaticOverrideThreshold = Math.max(0.0, Tuning.searchRootStaticOverrideCp() / 100.0);
         this.rootQueenAttackBonus = Math.max(0.0, Tuning.searchRootQueenAttackBonusCp() / 100.0);
-        log.info("Root queen attack bonus (pawns): {}", rootQueenAttackBonus);
         this.rootEarlyStopMargin = Math.max(0.0, Tuning.searchRootEarlyStopMarginCp() / 100.0);
         this.rootCaptureValueThreshold = Math.max(0.0, Tuning.searchRootCaptureValueThresholdCp() / 100.0);
         this.rootCaptureGainThreshold = Math.max(0.0, Tuning.searchRootCaptureGainThresholdCp() / 100.0);
