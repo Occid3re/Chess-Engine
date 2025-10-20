@@ -204,7 +204,7 @@ population:
       learning.layer0.neuron0.weight2: 0.03
       learning.layer0.neuron0.weight3: 0.02
       learning.layer0.neuron0.weight4: 0.01
-      learning.layer0.neuron0.weight5: 0.05
+      learning.layer0.neuron0.weight5: 0.06
       learning.layer0.neuron0.weight6: 0.02
       learning.layer0.neuron0.weight7: 0.01
       learning.layer0.neuron0.weight8: 0.01
@@ -326,7 +326,7 @@ population:
       learning.layer0.neuron6.weight10: -0.02
       learning.layer0.neuron6.weight11: -0.03
       learning.layer0.neuron6.weight12: -0.04
-      learning.layer0.neuron6.weight13: -0.03
+      learning.layer0.neuron6.weight13: -0.02
       learning.layer0.neuron6.weight14: -0.02
       learning.layer0.neuron6.weight15: -0.01
       learning.layer0.neuron6.weight16: 0.0
