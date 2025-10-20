@@ -5,6 +5,8 @@ import julius.game.chessengine.evaluation.EvaluationModule;
 import julius.game.chessengine.evaluation.MoveContext;
 import julius.game.chessengine.evaluation.MaterialModule;
 import julius.game.chessengine.tuning.Tuning;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -14,6 +16,8 @@ import java.util.Objects;
  * and queries a trainable neural network to produce tapered centipawn scores.
  */
 public final class LearningEvaluationModule implements EvaluationModule, MaterialModule.PawnChangeListener {
+
+    private static final Logger LOG = LoggerFactory.getLogger(LearningEvaluationModule.class);
 
     public static final int FEATURE_VECTOR_SIZE = 19;
 
@@ -192,6 +196,9 @@ public final class LearningEvaluationModule implements EvaluationModule, Materia
         }
         midgameScore = (int) Math.round(output[0]);
         endgameScore = (int) Math.round(output[1]);
+        if (LOG.isInfoEnabled()) {
+            LOG.info("Learning evaluation scores: midgame={}, endgame={}", midgameScore, endgameScore);
+        }
     }
 
     private double normalize(double value, double scale) {
