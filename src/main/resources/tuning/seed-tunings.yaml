@@ -19,7 +19,7 @@ population:
           endgame: 0.3
         threatmodule:
           midgame: 2.0
-          endgame: 3.4
+          endgame: 3.1
     numericParameters:
       evaluation.blendscale: 705
       material.pawnvalue: 118
@@ -74,9 +74,9 @@ population:
       kingsafety.halfopenfilepenalty: 0
       kingsafety.openfilepenalty: -14
       kingsafety.defenderbonus: 7
-      kingsafety.queenattackedpenalty: -68
-      kingsafety.backrankweaknessmidgamepenalty: -86
-      kingsafety.backrankweaknessendgamepenalty: -48
+      kingsafety.queenattackedpenalty: -69
+      kingsafety.backrankweaknessmidgamepenalty: -84
+      kingsafety.backrankweaknessendgamepenalty: -50
       kingsafety.attackweightpawn: 7
       kingsafety.attackweightknight: 19
       kingsafety.attackweightbishop: 10
