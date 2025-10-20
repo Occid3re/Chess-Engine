@@ -1,5 +1,5 @@
 population:
-  - name: v3.8.2-v4k_depth6_blitzfast
+  - name: beast
     evaluation:
       modules:
         materialmodule:
@@ -13,7 +13,7 @@ population:
           endgame: 0.9
         developmentmodule:
           midgame: 1.2
-          endgame: 0.8
+          endgame: 0.7
         kingsafetymodule:
           midgame: 1.1
           endgame: 0.3
@@ -87,11 +87,11 @@ population:
       development.undevelopedMinorPenalty: 23
       development.earlyQueenPenaltyPerMinor: 198
       development.minUndevelopedMinorsForQueenPenalty: 2
-      development.startPositionPenalty: 15
+      development.startPositionPenalty: 16
       development.castlingBonus: 27
       development.notCastledRookMovePenalty: 13
       development.queenDisplacementPenalty: 64
-      development.queenUnderAttackPenalty: 59
+      development.queenUnderAttackPenalty: 67
       development.queenHangingPenalty: 202
       moveordering.category.tt: 7
       moveordering.category.promotion: 6
@@ -122,7 +122,7 @@ population:
       moveordering.historyscale: 4.0
       moveordering.historydecaydivisor: 2
       search.fpMarginDepth1: 360
-      search.fpMarginDepth2: 799
+      search.fpMarginDepth2: 883
       search.lmpBase: 4
       search.lmpPerDepth: 18
       search.fpMaxDepth: 12
