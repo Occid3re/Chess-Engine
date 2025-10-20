@@ -87,7 +87,7 @@ population:
       development.undevelopedMinorPenalty: 23
       development.earlyQueenPenaltyPerMinor: 239
       development.minUndevelopedMinorsForQueenPenalty: 2
-      development.startPositionPenalty: 15
+      development.startPositionPenalty: 14
       development.castlingBonus: 27
       development.notCastledRookMovePenalty: 13
       development.queenDisplacementPenalty: 64
