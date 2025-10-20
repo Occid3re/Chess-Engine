@@ -18,7 +18,7 @@ population:
           midgame: 1.2
           endgame: 0.3
         threatmodule:
-          midgame: 2.0
+          midgame: 2.1
           endgame: 3.1
     numericParameters:
       evaluation.blendscale: 705
@@ -80,10 +80,10 @@ population:
       kingsafety.attackweightpawn: 7
       kingsafety.attackweightknight: 19
       kingsafety.attackweightbishop: 10
-      kingsafety.attackweightrook: 35
+      kingsafety.attackweightrook: 36
       kingsafety.attackweightqueen: 24
       development.phaseThreshold: 448
-      development.queenPhaseThreshold: 296
+      development.queenPhaseThreshold: 307
       development.undevelopedMinorPenalty: 23
       development.earlyQueenPenaltyPerMinor: 239
       development.minUndevelopedMinorsForQueenPenalty: 2
