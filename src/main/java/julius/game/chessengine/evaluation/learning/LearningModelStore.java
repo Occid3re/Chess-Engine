@@ -1,17 +1,7 @@
 package julius.game.chessengine.evaluation.learning;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import julius.game.chessengine.tuning.ParameterRegistry;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -22,61 +12,55 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * Stores and serves a simple feed-forward neural network used by the learning evaluation module.
- * The store is responsible for loading and saving checkpoints expressed as JSON structures under
- * {@code src/main/resources/learning/}. Inference requests are thread-safe and reuse a cached
- * in-memory representation of the model weights.
+ * The store now resolves its weights and biases from the tuning registry so the auto-tuner can
+ * mutate every coefficient without touching external checkpoint files.
  */
 public final class LearningModelStore {
 
-    private static final Path DEFAULT_DIRECTORY = Paths.get("src", "main", "resources", "learning");
-    private static final String DEFAULT_CHECKPOINT = "default-model.json";
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper()
-            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    private static final int INPUT_SIZE = LearningEvaluationModule.FEATURE_VECTOR_SIZE;
+    private static final int[] LAYER_WIDTHS = {8, 2};
+    private static final Activation[] LAYER_ACTIVATIONS = {Activation.RELU, Activation.LINEAR};
 
-    private final Path directory;
+    private static final double[][][] DEFAULT_LAYER_WEIGHTS = {
+            {
+                    {0.05, 0.04, 0.03, 0.02, 0.01, 0.05, 0.02, 0.01, 0.01, 0.02, 0.03, 0.04, 0.03, 0.02, 0.01, 0.0, -0.01, -0.02, -0.03},
+                    {-0.02, -0.01, 0.0, 0.01, 0.02, -0.03, -0.02, -0.01, 0.0, 0.01, 0.02, 0.03, 0.02, 0.01, 0.0, -0.01, -0.02, -0.03, -0.04},
+                    {0.01, 0.02, 0.03, 0.04, 0.05, 0.02, 0.03, 0.04, 0.05, 0.04, 0.03, 0.02, 0.01, 0.0, -0.01, -0.02, -0.03, -0.04, -0.05},
+                    {0.0, 0.0, 0.01, 0.02, 0.03, 0.0, 0.01, 0.02, 0.03, 0.02, 0.01, 0.0, -0.01, -0.02, -0.03, -0.02, -0.01, 0.0, 0.01},
+                    {-0.03, -0.02, -0.01, 0.0, 0.01, -0.02, -0.01, 0.0, 0.01, 0.02, 0.03, 0.02, 0.01, 0.0, -0.01, -0.02, -0.03, -0.02, -0.01},
+                    {0.02, 0.01, 0.0, -0.01, -0.02, 0.03, 0.02, 0.01, 0.0, -0.01, -0.02, -0.03, -0.02, -0.01, 0.0, 0.01, 0.02, 0.03, 0.04},
+                    {0.04, 0.03, 0.02, 0.01, 0.0, 0.03, 0.02, 0.01, 0.0, -0.01, -0.02, -0.03, -0.04, -0.03, -0.02, -0.01, 0.0, 0.01, 0.02},
+                    {-0.01, -0.02, -0.03, -0.04, -0.05, -0.01, -0.02, -0.03, -0.04, -0.03, -0.02, -0.01, 0.0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06}
+            },
+            {
+                    {0.4, 0.2, 0.1, 0.0, -0.1, 0.3, 0.2, -0.2},
+                    {-0.3, -0.1, 0.0, 0.1, 0.2, -0.2, -0.1, 0.3}
+            }
+    };
+
+    private static final double[][] DEFAULT_LAYER_BIASES = {
+            {0.02, -0.01, 0.0, 0.01, -0.02, 0.0, 0.01, -0.01},
+            {0.0, 0.0}
+    };
+
     private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
     private volatile LearningModel model;
     private volatile Definition definition;
 
-    /**
-     * Creates a store that loads the default checkpoint from {@code src/main/resources/learning}.
-     */
     public LearningModelStore() {
-        this(DEFAULT_DIRECTORY, DEFAULT_CHECKPOINT);
+        applyDefinition(buildDefinitionFromParameters());
     }
 
-    /**
-     * Creates a store rooted at the provided directory and loads the given checkpoint.
-     */
-    public LearningModelStore(Path directory, String checkpointName) {
-        Objects.requireNonNull(directory, "directory");
-        Objects.requireNonNull(checkpointName, "checkpointName");
-        this.directory = directory;
-        ensureDirectoryExists(directory);
-        loadCheckpoint(checkpointName);
-    }
-
-    /**
-     * Creates a store backed by the provided model definition. Primarily used by tests.
-     */
     LearningModelStore(Definition definition) {
-        this.directory = DEFAULT_DIRECTORY;
         applyDefinition(Objects.requireNonNull(definition, "definition"));
     }
 
-    /**
-     * Returns the number of expected input features.
-     */
     public int inputSize() {
         LearningModel local = model;
         return local != null ? local.inputSize : 0;
     }
 
-    /**
-     * Performs inference using the cached model. The returned array contains two values representing
-     * the midgame and endgame centipawn contributions respectively.
-     */
     public double[] infer(double[] features) {
         Objects.requireNonNull(features, "features");
         LearningModel local = model;
@@ -91,44 +75,10 @@ public final class LearningModelStore {
         }
     }
 
-    /**
-     * Reloads the model from the specified checkpoint.
-     */
-    public void loadCheckpoint(String checkpointName) {
-        Objects.requireNonNull(checkpointName, "checkpointName");
-        Path checkpoint = directory.resolve(checkpointName);
-        Definition parsed;
-        if (Files.exists(checkpoint)) {
-            parsed = readDefinition(checkpoint);
-        } else {
-            parsed = Definition.identity(LearningEvaluationModule.FEATURE_VECTOR_SIZE);
-            writeDefinition(checkpoint, parsed);
-        }
-        applyDefinition(parsed);
+    public void reloadFromParameters() {
+        applyDefinition(buildDefinitionFromParameters());
     }
 
-    /**
-     * Persists the current model definition to the provided checkpoint file.
-     */
-    public void saveCheckpoint(String checkpointName) {
-        Objects.requireNonNull(checkpointName, "checkpointName");
-        Definition snapshot;
-        lock.readLock().lock();
-        try {
-            snapshot = this.definition;
-        } finally {
-            lock.readLock().unlock();
-        }
-        if (snapshot == null) {
-            throw new IllegalStateException("No model definition loaded");
-        }
-        Path checkpoint = directory.resolve(checkpointName);
-        writeDefinition(checkpoint, snapshot);
-    }
-
-    /**
-     * Exposes the current model definition for inspection or serialization.
-     */
     public Definition currentDefinition() {
         lock.readLock().lock();
         try {
@@ -148,28 +98,51 @@ public final class LearningModelStore {
         }
     }
 
-    private static void ensureDirectoryExists(Path directory) {
-        try {
-            Files.createDirectories(directory);
-        } catch (IOException e) {
-            throw new IllegalStateException("Unable to create model directory " + directory, e);
+    private static Definition buildDefinitionFromParameters() {
+        List<LayerDefinition> layers = new ArrayList<>();
+        int previousWidth = INPUT_SIZE;
+        for (int layerIndex = 0; layerIndex < LAYER_WIDTHS.length; layerIndex++) {
+            int outputWidth = LAYER_WIDTHS[layerIndex];
+            double[][] weights = resolveWeights(layerIndex, previousWidth, DEFAULT_LAYER_WEIGHTS[layerIndex]);
+            double[] bias = resolveBias(layerIndex, DEFAULT_LAYER_BIASES[layerIndex]);
+            layers.add(new LayerDefinition(weights, bias, LAYER_ACTIVATIONS[layerIndex].name()));
+            previousWidth = outputWidth;
         }
+        return new Definition(INPUT_SIZE, layers);
     }
 
-    private static Definition readDefinition(Path checkpoint) {
-        try (InputStream in = Files.newInputStream(checkpoint)) {
-            return OBJECT_MAPPER.readValue(in, Definition.class);
-        } catch (IOException e) {
-            throw new IllegalStateException("Failed to read learning model from " + checkpoint, e);
+    private static double[][] resolveWeights(int layerIndex, int inputWidth, double[][] defaults) {
+        double[][] weights = new double[defaults.length][inputWidth];
+        for (int neuron = 0; neuron < defaults.length; neuron++) {
+            double[] neuronDefaults = defaults[neuron];
+            if (neuronDefaults.length != inputWidth) {
+                throw new IllegalStateException("Default weight matrix mismatch for layer " + layerIndex);
+            }
+            for (int input = 0; input < inputWidth; input++) {
+                double fallback = neuronDefaults[input];
+                double value = ParameterRegistry.get(weightKey(layerIndex, neuron, input), fallback);
+                weights[neuron][input] = value;
+            }
         }
+        return weights;
     }
 
-    private static void writeDefinition(Path checkpoint, Definition definition) {
-        try (OutputStream out = Files.newOutputStream(checkpoint)) {
-            OBJECT_MAPPER.writerWithDefaultPrettyPrinter().writeValue(out, definition);
-        } catch (IOException e) {
-            throw new IllegalStateException("Failed to write learning model to " + checkpoint, e);
+    private static double[] resolveBias(int layerIndex, double[] defaults) {
+        double[] bias = new double[defaults.length];
+        for (int neuron = 0; neuron < defaults.length; neuron++) {
+            double fallback = defaults[neuron];
+            double value = ParameterRegistry.get(biasKey(layerIndex, neuron), fallback);
+            bias[neuron] = value;
         }
+        return bias;
+    }
+
+    private static String weightKey(int layerIndex, int neuronIndex, int inputIndex) {
+        return "learning.layer" + layerIndex + ".neuron" + neuronIndex + ".weight" + inputIndex;
+    }
+
+    private static String biasKey(int layerIndex, int neuronIndex) {
+        return "learning.layer" + layerIndex + ".neuron" + neuronIndex + ".bias";
     }
 
     private record LearningModel(int inputSize, List<Layer> layers) {
@@ -280,14 +253,11 @@ public final class LearningModelStore {
         }
     }
 
-    @JsonInclude(JsonInclude.Include.NON_NULL)
     public static final class Definition {
         private final int inputSize;
         private final List<LayerDefinition> layers;
 
-        @JsonCreator
-        public Definition(@JsonProperty("inputSize") int inputSize,
-                           @JsonProperty("layers") List<LayerDefinition> layers) {
+        public Definition(int inputSize, List<LayerDefinition> layers) {
             this.inputSize = inputSize;
             this.layers = (layers == null ? List.of() : List.copyOf(layers));
         }
@@ -323,16 +293,12 @@ public final class LearningModelStore {
         }
     }
 
-    @JsonInclude(JsonInclude.Include.NON_NULL)
     public static final class LayerDefinition {
         private final double[][] weights;
         private final double[] bias;
         private final String activation;
 
-        @JsonCreator
-        public LayerDefinition(@JsonProperty("weights") double[][] weights,
-                               @JsonProperty("bias") double[] bias,
-                               @JsonProperty("activation") String activation) {
+        public LayerDefinition(double[][] weights, double[] bias, String activation) {
             this.weights = weights;
             this.bias = bias;
             this.activation = activation;
@@ -370,3 +336,4 @@ public final class LearningModelStore {
         }
     }
 }
+

@@ -1061,6 +1061,20 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
     },
 }
 
+for layer_index, output_count, input_count in ((0, 8, 19), (1, 2, 8)):
+    for neuron in range(output_count):
+        for weight in range(input_count):
+            PARAM_MUTATION_HINTS[f"learning.layer{layer_index}.neuron{neuron}.weight{weight}"] = {
+                "step": 0.01,
+                "soft_min": -1.0,
+                "soft_max": 1.0,
+            }
+        PARAM_MUTATION_HINTS[f"learning.layer{layer_index}.neuron{neuron}.bias"] = {
+            "step": 0.01,
+            "soft_min": -1.0,
+            "soft_max": 1.0,
+        }
+
 # ----------------------------
 # Data classes
 # ----------------------------

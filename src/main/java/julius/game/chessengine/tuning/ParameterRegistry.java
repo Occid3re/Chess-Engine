@@ -63,4 +63,21 @@ public final class ParameterRegistry {
     public static void hotReload(Map<String, Double> parameters) {
         NumericTuningParameters.hotReload(parameters);
     }
+
+    public static double get(String key, double defaultValue) {
+        Objects.requireNonNull(key, "key");
+        String normalized = ParameterNormalizer.normalizeKey(key);
+        ParamId id = ParamId.forKey(normalized);
+        if (id != null) {
+            return get(id);
+        }
+        Double override = lookupExtra(normalized);
+        if (override != null) {
+            double value = override;
+            if (Double.isFinite(value)) {
+                return value;
+            }
+        }
+        return defaultValue;
+    }
 }
