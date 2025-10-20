@@ -69,7 +69,6 @@ public class Score {
         MaterialModule materialModule = new MaterialModule();
         PawnStructureModule pawnStructureModule = new PawnStructureModule();
         ActivityModule activityModule = new ActivityModule();
-        DevelopmentModule developmentModule = new DevelopmentModule();
         KingSafetyModule kingSafetyModule = new KingSafetyModule();
         ThreatModule threatModule = new ThreatModule();
 
@@ -78,7 +77,6 @@ public class Score {
                 materialModule,
                 pawnStructureModule,
                 activityModule,
-                developmentModule,
                 kingSafetyModule,
                 threatModule
         ), this.weights);

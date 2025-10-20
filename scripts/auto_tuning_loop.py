@@ -872,61 +872,6 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "soft_min": 0.0,
         "soft_max": 48.0,
     },
-    "development.phasethreshold": {
-        "step": 8.0,
-        "soft_min": 160.0,
-        "soft_max": 512.0,
-    },
-    "development.queenphasethreshold": {
-        "step": 8.0,
-        "soft_min": 128.0,
-        "soft_max": 352.0,
-    },
-    "development.undevelopedminorpenalty": {
-        "step": 1.0,
-        "soft_min": 0.0,
-        "soft_max": 48.0,
-    },
-    "development.earlyqueenpenaltyperminor": {
-        "step": 10.0,
-        "soft_min": 0.0,
-        "soft_max": 400.0,
-    },
-    "development.minundevelopedminorsforqueenpenalty": {
-        "step": 1.0,
-        "soft_min": 0.0,
-        "soft_max": 4.0,
-    },
-    "development.startpositionpenalty": {
-        "step": 1.0,
-        "soft_min": 0.0,
-        "soft_max": 40.0,
-    },
-    "development.castlingbonus": {
-        "step": 1.0,
-        "soft_min": 0.0,
-        "soft_max": 64.0,
-    },
-    "development.notcastledrookmovepenalty": {
-        "step": 1.0,
-        "soft_min": 0.0,
-        "soft_max": 32.0,
-    },
-    "development.queendisplacementpenalty": {
-        "step": 2.0,
-        "soft_min": 0.0,
-        "soft_max": 160.0,
-    },
-    "development.queenunderattackpenalty": {
-        "step": 2.0,
-        "soft_min": 0.0,
-        "soft_max": 160.0,
-    },
-    "development.queenhangingpenalty": {
-        "step": 10.0,
-        "soft_min": 0.0,
-        "soft_max": 400.0,
-    },
     "threat.hangingpawnpenalty": {
         "step": 2.0,
         "soft_min": -50.0,

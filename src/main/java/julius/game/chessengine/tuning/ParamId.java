@@ -75,18 +75,6 @@ public enum ParamId {
     THREAT_PAWN_THREAT_ROOK_PENALTY("threat.pawnThreatRookPenalty", -18),
     THREAT_PAWN_THREAT_QUEEN_PENALTY("threat.pawnThreatQueenPenalty", -25),
 
-    DEVELOPMENT_PHASE_THRESHOLD("development.phaseThreshold", 256, 0.0, 1024.0),
-    QUEEN_DEVELOPMENT_PHASE_THRESHOLD("development.queenPhaseThreshold", 192, 0.0, 1024.0),
-    UNDEVELOPED_MINOR_PENALTY("development.undevelopedMinorPenalty", 24, 0.0, 256.0),
-    EARLY_QUEEN_DEVELOPMENT_PENALTY_PER_MINOR("development.earlyQueenPenaltyPerMinor", 200, 0.0, 1024.0),
-    MIN_UNDEVELOPED_MINORS_FOR_QUEEN_PENALTY("development.minUndevelopedMinorsForQueenPenalty", 2, 0.0, 4.0),
-    START_POSITION_PENALTY("development.startPositionPenalty", 16, 0.0, 256.0),
-    CASTLING_BONUS("development.castlingBonus", 24, 0.0, 256.0),
-    NOT_CASTLED_ROOK_MOVE_PENALTY("development.notCastledRookMovePenalty", 12, 0.0, 256.0),
-    QUEEN_DISPLACEMENT_PENALTY("development.queenDisplacementPenalty", 180, 0.0, 2048.0),
-    QUEEN_UNDER_ATTACK_PENALTY("development.queenUnderAttackPenalty", 120, 0.0, 1024.0),
-    QUEEN_HANGING_PENALTY("development.queenHangingPenalty", 360, 0.0, 2048.0),
-
     EVALUATION_BLEND_SCALE("evaluation.blendScale", 256, 1.0, 1024.0),
 
     MOVE_ORDERING_CATEGORY_TT("moveOrdering.category.tt", 7, 6.0, 8.0),
