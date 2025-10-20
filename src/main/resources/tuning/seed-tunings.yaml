@@ -375,7 +375,7 @@ population:
       learning.layer1.neuron1.weight5: -0.2
       learning.layer1.neuron1.weight6: -0.1
       learning.layer1.neuron1.weight7: 0.4
-      learning.layer1.neuron0.bias: -0.0
+      learning.layer1.neuron0.bias: 0.0
       learning.layer1.neuron1.bias: 0.0
       learning.outputMidgameScale: 93.4
       learning.outputEndgameScale: 82.7
