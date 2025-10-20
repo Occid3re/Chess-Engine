@@ -53,7 +53,7 @@ python .\scripts\auto_tuning_loop.py `
   --mut-frac-min 0.02 `
   --mut-frac-max 0.04 `
   --freeze-after 10 `
-  --allow-pattern "^(evaluation\.|pawnstructure\.|activity\.|development\.|kingsafety\.|threat\.)" `
+  --allow-pattern "^(evaluation\.|pawnstructure\.|activity\.|kingsafety\.|threat\.)" `
   --noimp-reheat 12 `
   --reheat-factor 1.7 `
   --jvm-gc zgc `
@@ -85,7 +85,7 @@ python .\scripts\auto_tuning_loop.py `
 Focuses on eval weights (modules + *pawnstructure/activity/etc.*).
 
 ```powershell
---allow-pattern "^(evaluation\.|pawnstructure\.|activity\.|development\.|kingsafety\.|threat\.)"
+--allow-pattern "^(evaluation\.|pawnstructure\.|activity\.|kingsafety\.|threat\.)"
 ```
 
 Full command template:
@@ -95,9 +95,12 @@ python .\scripts\auto_tuning_loop.py `
   --mvn .\mvnw.cmd `
   --test julius.game.chessengine.ai.BestMoveSearchTest `
   --preview `
+  --engine-threads 1 `
+  --lazy-threads 1 `
+  --root-par-limit 48 `
   --mut-frac 0.15 --mut-frac-min 0.10 --mut-frac-max 0.30 `
   --freeze-after 10 `
-  --allow-pattern "^(evaluation\.|pawnstructure\.|activity\.|development\.|kingsafety\.|threat\.)" `
+  --allow-pattern "^(evaluation\.|pawnstructure\.|activity\.|kingsafety\.|threat\.)" `
   --extra-maven-args -q
 ```
 
@@ -107,7 +110,18 @@ python .\scripts\auto_tuning_loop.py `
 Great for speed/strength from pruning, LMR/LMP, aspiration windows, etc.
 
 ```powershell
---allow-pattern "^search\."
+python .\scripts\auto_tuning_loop.py `
+  --project-root C:\Development\Chess-Engine `
+  --mvn .\mvnw.cmd `
+  --test julius.game.chessengine.ai.BestMoveSearchTest `
+  --preview `
+  --engine-threads 1 `
+  --lazy-threads 1 `
+  --root-par-limit 48 `
+  --mut-frac 0.15 --mut-frac-min 0.10 --mut-frac-max 0.30 `
+  --freeze-after 10 `
+  --allow-pattern "^search\." `
+  --extra-maven-args -q
 ```
 
 Suggested conservative sweep:
@@ -176,7 +190,7 @@ Leans into endgame eval and null‑move/qs tuning.
 Development, king safety shell, midgame activity.
 
 ```powershell
---allow-pattern "^(evaluation\.modules\..*\.midgame$|activity\.midgame|development\.|kingsafety\.(missingpawnshieldpenalty|halfopenfilepenalty|openfilepenalty|defenderbonus))"
+--allow-pattern "^(evaluation\.modules\..*\.midgame$|activity\.midgame|kingsafety\.(missingpawnshieldpenalty|halfopenfilepenalty|openfilepenalty|defenderbonus))"
 ```
 
 ---
@@ -203,7 +217,7 @@ Target late move reductions in isolation.
 Covers all families but blocks risky toggles & giant constants.
 
 ```powershell
---allow-pattern "^(evaluation\.|pawnstructure\.|activity\.|development\.|kingsafety\.|threat\.|moveordering\.|search\.)" `
+--allow-pattern "^(evaluation\.|pawnstructure\.|activity\.|kingsafety\.|threat\.|moveordering\.|search\.)" `
 --deny-pattern   "^(moveordering\.maxscore$|search\.preferfastmate$|search\.tbtiebreak$)"
 ```
 
@@ -308,7 +322,7 @@ python .\scripts\auto_tuning_loop.py `
   --preview `
   --mut-frac 0.03 --mut-frac-min 0.02 --mut-frac-max 0.06 `
   --freeze-after 12 `
-  --allow-pattern "^(evaluation\.|pawnstructure\.|activity\.|development\.|kingsafety\.|threat\.)" `
+  --allow-pattern "^(evaluation\.|pawnstructure\.|activity\.|kingsafety\.|threat\.)" `
   --accept-worse --accept-temp 0.08 `
   --priority-duration-metric durationMsP95 `
   --duration-bonus-threshold 0.18 `

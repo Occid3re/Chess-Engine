@@ -34,6 +34,14 @@ Tablebase awareness
 - The loop inherits tablebase settings from `chessengine.syzygy.path`/`paths` and forwards them to the Surefire JVM.
 - When tuning evaluation weights, keep the setting constant (or clear it) so Syzygy probes do not hide score deltas between candidates.
 
+Parameter filtering & auto-freeze
+---------------------------------
+- New flags:
+    --allow-pattern REGEX  (only mutate params whose normalized name matches)
+    --deny-pattern  REGEX  (never mutate params matching this)
+    --freeze-after  N      (freeze params after N non-improving mutations)
+- Frozen parameters are skipped automatically; this shrinks the search space over time.
+
 Typical usage (PowerShell)
 --------------------------
 python .\scripts\auto_tuning_loop.py `
@@ -54,6 +62,7 @@ python .\scripts\auto_tuning_loop.py `
   --root-par-limit auto `
   --xms auto `
   --xmx auto `
+  --plan-concurrent 1 `
   --extra-maven-args -q
 
 If the test lives in a submodule:
@@ -95,9 +104,9 @@ def resolve_syzygy_from_env(env: Optional[Dict[str, str]] = None) -> Tuple[str, 
     source = env if env is not None else os.environ
     native = source.get("CHESSENGINE_SYZYGY_NATIVE") or DEFAULT_SYZYGY_NATIVE
     paths = (
-        source.get("CHESSENGINE_SYZYGY_PATHS")
-        or source.get("CHESSENGINE_SYZYGY_PATH")
-        or DEFAULT_SYZYGY_PATHS
+            source.get("CHESSENGINE_SYZYGY_PATHS")
+            or source.get("CHESSENGINE_SYZYGY_PATH")
+            or DEFAULT_SYZYGY_PATHS
     )
     return native, paths
 
@@ -863,61 +872,6 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "soft_min": 0.0,
         "soft_max": 48.0,
     },
-    "development.phasethreshold": {
-        "step": 8.0,
-        "soft_min": 160.0,
-        "soft_max": 512.0,
-    },
-    "development.queenphasethreshold": {
-        "step": 8.0,
-        "soft_min": 128.0,
-        "soft_max": 352.0,
-    },
-    "development.undevelopedminorpenalty": {
-        "step": 1.0,
-        "soft_min": 0.0,
-        "soft_max": 48.0,
-    },
-    "development.earlyqueenpenaltyperminor": {
-        "step": 10.0,
-        "soft_min": 0.0,
-        "soft_max": 400.0,
-    },
-    "development.minundevelopedminorsforqueenpenalty": {
-        "step": 1.0,
-        "soft_min": 0.0,
-        "soft_max": 4.0,
-    },
-    "development.startpositionpenalty": {
-        "step": 1.0,
-        "soft_min": 0.0,
-        "soft_max": 40.0,
-    },
-    "development.castlingbonus": {
-        "step": 1.0,
-        "soft_min": 0.0,
-        "soft_max": 64.0,
-    },
-    "development.notcastledrookmovepenalty": {
-        "step": 1.0,
-        "soft_min": 0.0,
-        "soft_max": 32.0,
-    },
-    "development.queendisplacementpenalty": {
-        "step": 2.0,
-        "soft_min": 0.0,
-        "soft_max": 160.0,
-    },
-    "development.queenunderattackpenalty": {
-        "step": 2.0,
-        "soft_min": 0.0,
-        "soft_max": 160.0,
-    },
-    "development.queenhangingpenalty": {
-        "step": 10.0,
-        "soft_min": 0.0,
-        "soft_max": 400.0,
-    },
     "threat.hangingpawnpenalty": {
         "step": 2.0,
         "soft_min": -50.0,
@@ -1368,6 +1322,13 @@ class SeedTuningOptimizer:
         self._step_scale: DefaultDict[str, float] = defaultdict(lambda: 1.0)
         self._last_mutated: Set[str] = set()
 
+        # NEW: mutation outcome tracking + filters + freezing
+        self._bad_streak: DefaultDict[str, int] = defaultdict(int)
+        self._frozen: Set[str] = set()
+        self._allow_re: Optional[re.Pattern] = None
+        self._deny_re: Optional[re.Pattern] = None
+        self._freeze_after: int = 8  # default; overridden by main()
+
     def backup(self, suffix: str) -> Path:
         dst = self.tuning_path.with_suffix(self.tuning_path.suffix + f".{suffix}.{timestamp()}.bak")
         shutil.copy2(self.tuning_path, dst)
@@ -1623,18 +1584,30 @@ class SeedTuningOptimizer:
             mut_frac: float = 0.33,
             clamp_mult: float = 5.0,
     ) -> List[str]:
-        """Adjust a random subset of numeric parameters."""
+        """Adjust a random subset of numeric parameters with allow/deny/freeze filters."""
         updated_lines = list(lines)
 
         temperature = max(temp_min, temp_start * math.exp(-iteration / max(1e-9, temp_decay)))
         spectral_frequency = spectral_base + 0.07 * math.sin(iteration * 0.173)
 
-        keys = list(parameters.keys())
-        if not keys:
+        # Build candidate list with filters
+        def allowed(norm_name: str) -> bool:
+            if norm_name in self._frozen:
+                return False
+            if self._allow_re and not self._allow_re.search(norm_name):
+                return False
+            if self._deny_re and self._deny_re.search(norm_name):
+                return False
+            return True
+
+        eligible_items = [(k, p) for k, p in parameters.items() if allowed(p.normalized_name)]
+        if not eligible_items:
+            print("[mut] No eligible parameters to mutate (all filtered/frozen).")
             return updated_lines
 
-        k = max(1, int(round(len(keys) * max(0.0, min(1.0, mut_frac)))))
-        mutate_keys = set(rng.sample(keys, k))
+        eligible_names = [name for name, _ in eligible_items]
+        k = max(1, int(round(len(eligible_names) * max(0.0, min(1.0, mut_frac)))))
+        mutate_keys = set(rng.sample(eligible_names, k))
         self._last_mutated = set(mutate_keys)
 
         for name, param in parameters.items():
@@ -1736,12 +1709,14 @@ class SeedTuningOptimizer:
         return updated_lines
 
     def update_step_scales(
-        self,
-        decision: AcceptanceDecision,
-        best: TestResult,
-        candidate: TestResult,
+            self,
+            decision: AcceptanceDecision,
+            best: TestResult,
+            candidate: TestResult,
     ) -> Dict[str, object]:
-        """Adjust per-parameter step scaling based on the last decision outcome."""
+        """Adjust per-parameter step scaling based on the last decision outcome.
+           Also track 'bad streaks' and auto-freeze parameters after repeated non-improvements.
+        """
 
         mutated = list(self._last_mutated)
         if not mutated:
@@ -1749,6 +1724,8 @@ class SeedTuningOptimizer:
                 "mutated": 0,
                 "grow": {"count": 0, "avg": 1.0},
                 "shrink": {"count": 0, "avg": 1.0},
+                "frozen_now": 0,
+                "frozen_total": len(self._frozen),
             }
             return summary
 
@@ -1774,6 +1751,20 @@ class SeedTuningOptimizer:
                 factor = updated / prev if prev > 0 else grow_multiplier
                 grow_factors.append(factor)
 
+        # NEW: bad-streak tracking & freezing
+        newly_frozen = 0
+        if decision.keep and decision.improved:
+            for key in mutated:
+                self._bad_streak[key] = 0
+        else:
+            for key in mutated:
+                self._bad_streak[key] += 1
+                if self._bad_streak[key] >= max(1, self._freeze_after):
+                    norm = key.lower()
+                    if norm not in self._frozen:
+                        self._frozen.add(norm)
+                        newly_frozen += 1
+
         summary = {
             "mutated": len(mutated),
             "grow": {
@@ -1784,6 +1775,8 @@ class SeedTuningOptimizer:
                 "count": len(shrink_factors),
                 "avg": (sum(shrink_factors) / len(shrink_factors)) if shrink_factors else 1.0,
             },
+            "frozen_now": newly_frozen,
+            "frozen_total": len(self._frozen),
         }
 
         self._last_mutated.clear()
@@ -2078,6 +2071,7 @@ def run_best_move_tests(
             f"Full outputs dumped to:\n  {out_path}\n  {err_path}"
         )
 
+
 # ----------------------------
 # Scoring and acceptance
 # ----------------------------
@@ -2105,13 +2099,13 @@ def scalar_score(res: TestResult, duration_metric: str, duration_weight: float) 
     else:
         duration_priority_sec = res.duration_s
     return (
-        (res.successes * 1.0)
-        - (res.failures * 0.6)
-        - (res.errors * 1.5)
-        - (0.02 * res.duration_s)
-        - (duration_weight * duration_priority_sec)
-        - (0.005 * avg_cp_loss)
-        + (0.5 * top1_rate)
+            (res.successes * 1.0)
+            - (res.failures * 0.6)
+            - (res.errors * 1.5)
+            - (0.02 * res.duration_s)
+            - (duration_weight * duration_priority_sec)
+            - (0.005 * avg_cp_loss)
+            + (0.5 * top1_rate)
     )
 
 
@@ -2131,23 +2125,21 @@ def _clamp(value: float, lower: float, upper: float) -> float:
 
 def _effective_mut_frac(base: float, floor: float, ceiling: float, no_improve: int) -> float:
     """Return the mutation fraction applied for this iteration."""
-
     if no_improve <= 0:
         return _clamp(base, floor, ceiling)
-
     plateau_pull = min(0.65, 0.1 * no_improve)
     adjusted = base - (base - floor) * plateau_pull
     return _clamp(adjusted, floor, ceiling)
 
 
 def _mut_frac_next(
-    previous_used: float,
-    decision: AcceptanceDecision,
-    candidate: TestResult,
-    prior_best: TestResult,
-    no_improve: int,
-    floor: float,
-    ceiling: float,
+        previous_used: float,
+        decision: AcceptanceDecision,
+        candidate: TestResult,
+        prior_best: TestResult,
+        no_improve: int,
+        floor: float,
+        ceiling: float,
 ) -> float:
     value = _clamp(previous_used, floor, ceiling)
 
@@ -2162,9 +2154,9 @@ def _mut_frac_next(
         delta = decision.info.get("delta")
         regress = abs(delta) if isinstance(delta, (int, float)) else 0.0
         if (
-            regress >= 0.5
-            or candidate.failures > prior_best.failures
-            or candidate.errors > prior_best.errors
+                regress >= 0.5
+                or candidate.failures > prior_best.failures
+                or candidate.errors > prior_best.errors
         ):
             value += (ceiling - value) * 0.35
         else:
@@ -2217,10 +2209,10 @@ def accept_candidate(
 
     time_drop_flag, drop_ratio = _time_improvement(best, cand, duration_metric)
     if (
-        time_drop_flag
-        and drop_ratio >= max(0.0, duration_bonus_threshold)
-        and cand.failures <= best.failures + max(0, max_failure_regress)
-        and cand.errors <= best.errors + max(0, max_error_regress)
+            time_drop_flag
+            and drop_ratio >= max(0.0, duration_bonus_threshold)
+            and cand.failures <= best.failures + max(0, max_failure_regress)
+            and cand.errors <= best.errors + max(0, max_error_regress)
     ):
         return AcceptanceDecision(True, True, "time_bonus", {"time_drop": drop_ratio})
 
@@ -2228,8 +2220,8 @@ def accept_candidate(
         return AcceptanceDecision(False, False, "rejected")
 
     db = (
-        scalar_score(cand, duration_metric, duration_weight)
-        - scalar_score(best, duration_metric, duration_weight)
+            scalar_score(cand, duration_metric, duration_weight)
+            - scalar_score(best, duration_metric, duration_weight)
     )
     if time_drop_flag:
         db += max(0.0, drop_ratio) * duration_weight
@@ -2237,6 +2229,7 @@ def accept_candidate(
     if rng.random() < prob:
         return AcceptanceDecision(True, False, "annealed", {"prob": prob, "delta": db})
     return AcceptanceDecision(False, False, "annealed_reject", {"prob": prob, "delta": db})
+
 
 # ----------------------------
 # Logging
@@ -2264,6 +2257,7 @@ def save_iteration_config(base_dir: Path, iteration: int, result: TestResult, li
         content += "\n"
     path.write_text(content, encoding="utf-8")
     return path
+
 
 # ----------------------------
 # Main
@@ -2331,6 +2325,14 @@ def main() -> None:
     parser.add_argument("--duration-weight", type=float, default=1.1,
                         help="Score penalty per second of the priority duration metric for annealing decisions.")
 
+    # NEW: Filtering & auto-freeze controls
+    parser.add_argument("--allow-pattern", type=str, default="",
+                        help="Regex over normalized parameter names to ALLOW (case-insensitive). Empty = allow all.")
+    parser.add_argument("--deny-pattern", type=str, default="",
+                        help="Regex over normalized parameter names to DENY (case-insensitive).")
+    parser.add_argument("--freeze-after", type=int, default=8,
+                        help="If a parameter is mutated this many times without an accepted improvement, freeze it.")
+
     parser.add_argument("--log-jsonl", type=Path, default=Path("logs/auto_tuning_log.jsonl"))
     parser.add_argument("--git-commit", action="store_true")
 
@@ -2395,6 +2397,19 @@ def main() -> None:
     print(f"Tuning file : {tuning_path}")
 
     optimizer = SeedTuningOptimizer(tuning_path)
+
+    # Wire up filters & freeze settings
+    if args.allow_pattern:
+        try:
+            optimizer._allow_re = re.compile(args.allow_pattern, re.IGNORECASE)
+        except re.error as e:
+            print(f"[warn] Invalid --allow-pattern regex: {e}. Ignoring.", file=sys.stderr)
+    if args.deny_pattern:
+        try:
+            optimizer._deny_re = re.compile(args.deny_pattern, re.IGNORECASE)
+        except re.error as e:
+            print(f"[warn] Invalid --deny-pattern regex: {e}. Ignoring.", file=sys.stderr)
+    optimizer._freeze_after = max(1, int(args.freeze_after))
 
     rng = random.Random()
     if args.seed is None:
@@ -2590,12 +2605,12 @@ def main() -> None:
             )
             scale_summary = optimizer.update_step_scales(decision, best_result, candidate_result)
             if (
-                isinstance(scale_summary.get("grow"), dict)
-                and scale_summary["grow"].get("count", 0)
+                    isinstance(scale_summary.get("grow"), dict)
+                    and scale_summary["grow"].get("count", 0)
             ) or (
-                isinstance(scale_summary.get("shrink"), dict)
-                and scale_summary["shrink"].get("count", 0)
-            ):
+                    isinstance(scale_summary.get("shrink"), dict)
+                    and scale_summary["shrink"].get("count", 0)
+            ) or scale_summary.get("frozen_now", 0):
                 print("[step-scale]", json.dumps(scale_summary))
 
             if decision.keep:
@@ -2684,6 +2699,12 @@ def main() -> None:
                     },
                     "step_scale": scale_summary,
                     "no_improve": no_improve,
+                    "filters": {
+                        "allow": args.allow_pattern or None,
+                        "deny": args.deny_pattern or None,
+                        "freeze_after": optimizer._freeze_after,
+                        "frozen_total": len(optimizer._frozen),
+                    },
                 },
             )
 
@@ -2693,6 +2714,7 @@ def main() -> None:
         optimizer.write(best_content)
         print("Final best :", best_result.summary())
         print("Done.")
+
 
 if __name__ == "__main__":
     try:

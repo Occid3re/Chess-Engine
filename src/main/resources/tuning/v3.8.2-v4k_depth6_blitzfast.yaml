@@ -11,9 +11,6 @@ population:
         activitymodule:
           midgame: 1.5
           endgame: 0.9
-        developmentmodule:
-          midgame: 1.2
-          endgame: 0.7
         kingsafetymodule:
           midgame: 1.1
           endgame: 0.3
@@ -82,17 +79,6 @@ population:
       kingsafety.attackweightbishop: 9
       kingsafety.attackweightrook: 36
       kingsafety.attackweightqueen: 24
-      development.phaseThreshold: 320
-      development.queenPhaseThreshold: 224
-      development.undevelopedMinorPenalty: 24
-      development.earlyQueenPenaltyPerMinor: 200
-      development.minUndevelopedMinorsForQueenPenalty: 2
-      development.startPositionPenalty: 16
-      development.castlingBonus: 28
-      development.notCastledRookMovePenalty: 12
-      development.queenDisplacementPenalty: 64
-      development.queenUnderAttackPenalty: 60
-      development.queenHangingPenalty: 200
       moveordering.category.tt: 7
       moveordering.category.promotion: 6
       moveordering.category.capturegood: 5

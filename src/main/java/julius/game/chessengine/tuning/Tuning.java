@@ -79,18 +79,6 @@ public final class Tuning {
     private static int pawnThreatRookPenalty;
     private static int pawnThreatQueenPenalty;
 
-    private static int developmentPhaseThreshold;
-    private static int queenDevelopmentPhaseThreshold;
-    private static int undevelopedMinorPenalty;
-    private static int earlyQueenDevelopmentPenaltyPerMinor;
-    private static int minUndevelopedMinorsForQueenPenalty;
-    private static int startPositionPenalty;
-    private static int castlingBonus;
-    private static int notCastledRookMovePenalty;
-    private static int queenDisplacementPenalty;
-    private static int queenUnderAttackPenalty;
-    private static int queenHangingPenalty;
-
     private static int evaluationBlendScale;
 
     private static int moveOrderingCategoryTt;
@@ -477,50 +465,6 @@ public final class Tuning {
 
     public static int pawnThreatQueenPenalty() {
         return pawnThreatQueenPenalty;
-    }
-
-    public static int developmentPhaseThreshold() {
-        return developmentPhaseThreshold;
-    }
-
-    public static int queenDevelopmentPhaseThreshold() {
-        return queenDevelopmentPhaseThreshold;
-    }
-
-    public static int undevelopedMinorPenalty() {
-        return undevelopedMinorPenalty;
-    }
-
-    public static int earlyQueenDevelopmentPenaltyPerMinor() {
-        return earlyQueenDevelopmentPenaltyPerMinor;
-    }
-
-    public static int minUndevelopedMinorsForQueenPenalty() {
-        return minUndevelopedMinorsForQueenPenalty;
-    }
-
-    public static int startPositionPenalty() {
-        return startPositionPenalty;
-    }
-
-    public static int castlingBonus() {
-        return castlingBonus;
-    }
-
-    public static int notCastledRookMovePenalty() {
-        return notCastledRookMovePenalty;
-    }
-
-    public static int queenDisplacementPenalty() {
-        return queenDisplacementPenalty;
-    }
-
-    public static int queenUnderAttackPenalty() {
-        return queenUnderAttackPenalty;
-    }
-
-    public static int queenHangingPenalty() {
-        return queenHangingPenalty;
     }
 
     public static int evaluationBlendScale() {
@@ -1071,17 +1015,6 @@ public final class Tuning {
             pawnThreatRookPenalty = loadInt(ParamId.THREAT_PAWN_THREAT_ROOK_PENALTY);
             pawnThreatQueenPenalty = loadInt(ParamId.THREAT_PAWN_THREAT_QUEEN_PENALTY);
 
-            developmentPhaseThreshold = loadInt(ParamId.DEVELOPMENT_PHASE_THRESHOLD);
-            queenDevelopmentPhaseThreshold = loadInt(ParamId.QUEEN_DEVELOPMENT_PHASE_THRESHOLD);
-            undevelopedMinorPenalty = loadInt(ParamId.UNDEVELOPED_MINOR_PENALTY);
-            earlyQueenDevelopmentPenaltyPerMinor = loadInt(ParamId.EARLY_QUEEN_DEVELOPMENT_PENALTY_PER_MINOR);
-            minUndevelopedMinorsForQueenPenalty = loadInt(ParamId.MIN_UNDEVELOPED_MINORS_FOR_QUEEN_PENALTY);
-            startPositionPenalty = loadInt(ParamId.START_POSITION_PENALTY);
-            castlingBonus = loadInt(ParamId.CASTLING_BONUS);
-            notCastledRookMovePenalty = loadInt(ParamId.NOT_CASTLED_ROOK_MOVE_PENALTY);
-            queenDisplacementPenalty = loadInt(ParamId.QUEEN_DISPLACEMENT_PENALTY);
-            queenUnderAttackPenalty = loadInt(ParamId.QUEEN_UNDER_ATTACK_PENALTY);
-            queenHangingPenalty = loadInt(ParamId.QUEEN_HANGING_PENALTY);
 
             evaluationBlendScale = loadInt(ParamId.EVALUATION_BLEND_SCALE);
 

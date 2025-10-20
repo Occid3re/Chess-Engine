@@ -14,7 +14,7 @@ mvn -Djava.version=25 -Dmaven.compiler.release=25 -Dmaven.compiler.enablePreview
     -Dtest=BestMoveSearchTest test
 ```
 
-Root early-stop now requires a **200 cp** improvement over baseline plus a 50 cp cushion over the runner-up before pruning the remaining root moves. Additional root futility / despair guards (all now tunable via `seed-tunings.yaml`) skip hopeless quiet moves once the leader is clearly ahead (≥300 cp) or the evaluation exceeds ±5 pawns, trimming depth‑6 fan-out without touching fixtures. Diagnostics remain in `target/surefire-reports/` for each run.
+Root early-stop now requires a **200 cp** improvement over baseline plus a 50 cp cushion over the runner-up before pruning the remaining root moves. Additional root futility / despair guards (all now tunable via `seed-tunings.yaml`) skip hopeless quiet moves once the leader is clearly ahead (≥300 cp) or the evaluation exceeds ±5 pawns, trimming depth‑6 fan-out without touching fixtures. The legacy `DevelopmentModule` has been retired entirely to reduce evaluation overhead; seed tunings and scripts no longer reference it. Diagnostics remain in `target/surefire-reports/` for each run.
 
 Baseline commands & stats:
 
