@@ -30,7 +30,7 @@ population:
       material.bishoppairbonus: 58
       pawnstructure.centerpawnbonus: 26
       pawnstructure.passedpawnbonus: 48
-      pawnstructure.connectedpawnbonus: 6
+      pawnstructure.connectedpawnbonus: 7
       pawnstructure.islandpenalty: -7
       pawnstructure.doubledpawnpenalty: -9
       pawnstructure.isolatedpawnpenalty: -7
@@ -43,9 +43,9 @@ population:
       pawnstructure.rookopenfilebonus: 31
       threat.hangingpawnpenalty: -12
       threat.hangingknightpenalty: -25
-      threat.hangingbishoppenalty: -14
+      threat.hangingbishoppenalty: -15
       threat.hangingrookpenalty: -62
-      threat.hangingqueenpenalty: -61
+      threat.hangingqueenpenalty: -59
       threat.pawnthreatknightpenalty: -9
       threat.pawnthreatbishoppenalty: -8
       threat.pawnthreatrookpenalty: -14
@@ -80,7 +80,7 @@ population:
       kingsafety.attackweightpawn: 7
       kingsafety.attackweightknight: 19
       kingsafety.attackweightbishop: 9
-      kingsafety.attackweightrook: 34
+      kingsafety.attackweightrook: 35
       kingsafety.attackweightqueen: 24
       development.phaseThreshold: 448
       development.queenPhaseThreshold: 318
@@ -90,8 +90,8 @@ population:
       development.startPositionPenalty: 14
       development.castlingBonus: 27
       development.notCastledRookMovePenalty: 13
-      development.queenDisplacementPenalty: 64
-      development.queenUnderAttackPenalty: 67
+      development.queenDisplacementPenalty: 70
+      development.queenUnderAttackPenalty: 68
       development.queenHangingPenalty: 202
       moveordering.category.tt: 8
       moveordering.category.promotion: 6
