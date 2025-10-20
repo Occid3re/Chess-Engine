@@ -9,7 +9,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Objects;
+import java.util.Set;
+import java.util.WeakHashMap;
 
 /**
  * Evaluation module that converts the {@link EvaluationContext} into a lightweight feature tensor
@@ -18,6 +21,14 @@ import java.util.Objects;
 public final class LearningEvaluationModule implements EvaluationModule, MaterialModule.PawnChangeListener {
 
     private static final Logger LOG = LoggerFactory.getLogger(LearningEvaluationModule.class);
+
+    private static final LearningModelStore SHARED_STORE = new LearningModelStore();
+    private static final Set<LearningEvaluationModule> SHARED_INSTANCES = Collections.synchronizedSet(
+            Collections.newSetFromMap(new WeakHashMap<>()));
+
+    static {
+        Tuning.registerRefreshListener(LearningEvaluationModule::refreshSharedStore);
+    }
 
     public static final int FEATURE_VECTOR_SIZE = 19;
 
@@ -34,14 +45,31 @@ public final class LearningEvaluationModule implements EvaluationModule, Materia
     private boolean dirty = true;
 
     public LearningEvaluationModule() {
-        this(new LearningModelStore());
+        this(SHARED_STORE, true);
     }
 
     LearningEvaluationModule(LearningModelStore store) {
-        this.modelStore = Objects.requireNonNull(store, "store");
-        if (store.inputSize() != 0 && store.inputSize() != FEATURE_VECTOR_SIZE) {
+        this(store, store == SHARED_STORE);
+    }
+
+    private LearningEvaluationModule(LearningModelStore store, boolean registerShared) {
+        LearningModelStore resolved = Objects.requireNonNull(store, "store");
+        if (resolved.inputSize() != 0 && resolved.inputSize() != FEATURE_VECTOR_SIZE) {
             throw new IllegalArgumentException("Learning model expects feature length " + store.inputSize()
                     + " but module provides " + FEATURE_VECTOR_SIZE);
+        }
+        this.modelStore = resolved;
+        if (registerShared) {
+            SHARED_INSTANCES.add(this);
+        }
+    }
+
+    private static void refreshSharedStore() {
+        SHARED_STORE.reloadFromParameters();
+        synchronized (SHARED_INSTANCES) {
+            for (LearningEvaluationModule module : SHARED_INSTANCES) {
+                module.markDirty();
+            }
         }
     }
 

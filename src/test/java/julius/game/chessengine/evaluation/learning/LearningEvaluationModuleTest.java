@@ -6,12 +6,16 @@ import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.evaluation.EvaluationContext;
 import julius.game.chessengine.evaluation.MoveContext;
 import julius.game.chessengine.figures.PieceType;
+import julius.game.chessengine.tuning.NumericTuningParameters;
+import julius.game.chessengine.tuning.Tuning;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 class LearningEvaluationModuleTest {
 
@@ -105,6 +109,50 @@ class LearningEvaluationModuleTest {
             assertThat(Math.abs(midgameScore) + Math.abs(endgameScore)).as("Scaled output for FEN %s", fen)
                     .isNotZero();
         }
+    }
+
+    @Test
+    void sharedStoreReloadsWhenTuningRefreshes() throws Exception {
+        LearningEvaluationModule module = new LearningEvaluationModule();
+
+        BitBoard board = FEN.translateFENtoBitBoard(START_FEN);
+        applyMoves(board,
+                MoveHelper.createMoveInt(index("e2"), index("e4"), PieceType.PAWN, true, false,
+                        false, false, null, null, false, false, packCastlingState(board)),
+                MoveHelper.createMoveInt(index("d7"), index("d5"), PieceType.PAWN, false, false,
+                        false, false, null, null, false, false, packCastlingState(board)),
+                MoveHelper.createMoveInt(index("e4"), index("d5"), PieceType.PAWN, true, true,
+                        false, false, null, PieceType.PAWN, false, false, packCastlingState(board)));
+
+        EvaluationContext context = EvaluationContext.from(board, null);
+        module.initialize(context);
+        module.evaluate(context);
+
+        int baselineMid = module.getMidgameScore();
+        int baselineEnd = module.getEndgameScore();
+        double baselineMidScale = Tuning.learningOutputMidgameScale();
+        double baselineEndScale = Tuning.learningOutputEndgameScale();
+
+        double newMidScale = baselineMidScale * 1.5;
+        double newEndScale = baselineEndScale * 0.75;
+
+        try (AutoCloseable overrides = NumericTuningParameters.use(Map.of(
+                "learning.outputMidgameScale", newMidScale,
+                "learning.outputEndgameScale", newEndScale
+        ))) {
+            Tuning.refresh();
+            module.evaluate(context);
+            assertThat((double) module.getMidgameScore())
+                    .isCloseTo(baselineMid * (newMidScale / baselineMidScale), within(1.0));
+            assertThat((double) module.getEndgameScore())
+                    .isCloseTo(baselineEnd * (newEndScale / baselineEndScale), within(1.0));
+        } finally {
+            Tuning.refresh();
+        }
+
+        module.evaluate(context);
+        assertThat(module.getMidgameScore()).isEqualTo(baselineMid);
+        assertThat(module.getEndgameScore()).isEqualTo(baselineEnd);
     }
 
     private static LearningModelStore buildLinearStore(double midgameScale, double endgameScale) {
