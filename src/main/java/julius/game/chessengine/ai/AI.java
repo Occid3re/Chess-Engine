@@ -174,6 +174,8 @@ public class AI {
     private final double rootStaticOverrideThreshold;
     private final double rootQueenAttackBonus;
     private final double rootEarlyStopMargin;
+    private final double rootFutilityMargin;
+    private final double rootFutilityLead;
     private final double ttMainWeight;
     private final double ttCaptureWeight;
     private final boolean preferFastMate;
@@ -195,7 +197,13 @@ public class AI {
     private static final int MAX_MOVE_LIST_SIZE = 218; // maximum legal moves
     private static final double ROOT_CAPTURE_VALUE_THRESHOLD = 4.0; // pawns
     private static final double ROOT_CAPTURE_GAIN_THRESHOLD = 2.0; // pawns
-    private static final double ROOT_RUNNER_UP_MARGIN_RATIO = 0.5; // require half-margin lead over runner-up
+    private static final double ROOT_RUNNER_UP_MARGIN_PAWNS = 0.5; // require 50 cp lead over runner-up
+    private static final double ROOT_DESPAIR_MARGIN = 4.0; // bail when we're ≥4 pawns worse after enough samples
+    private static final int ROOT_DESPAIR_MIN_EVALS = 12;
+    private static final double ROOT_DESPAIR_RUNNER_RATIO = 0.6; // runner-up should also be significantly worse
+    private static final double ROOT_DESPAIR_ABS_THRESHOLD = 5.0; // bail if absolute eval hopeless (5 pawns)
+    private static final int ROOT_DESPAIR_MIN_EVALS_ABS = 12;
+    private static final double ROOT_HOPELESS_MARGIN = 0.75; // skip quiet moves that are ≥0.75 pawns worse than current best in hopeless nodes
 
     private enum MoveBucket {
         TT,
@@ -398,6 +406,8 @@ public class AI {
         this.rootQueenAttackBonus = Math.max(0.0, Tuning.searchRootQueenAttackBonusCp() / 100.0);
         log.info("Root queen attack bonus (pawns): {}", rootQueenAttackBonus);
         this.rootEarlyStopMargin = Math.max(0.0, Tuning.searchRootEarlyStopMarginCp() / 100.0);
+        this.rootFutilityMargin = Math.max(0.0, Tuning.searchRootFutilityMarginCp() / 100.0);
+        this.rootFutilityLead = Math.max(0.0, Tuning.searchRootFutilityLeadCp() / 100.0);
         this.ttMainWeight = Math.max(1e-9, Tuning.searchTtMainWeight());
         this.ttCaptureWeight = Math.max(1e-9, Tuning.searchTtCaptureWeight());
         this.preferFastMate = Tuning.searchPreferFastMate();
@@ -1080,6 +1090,20 @@ public class AI {
      */
     private double orientedMargin(double candidateScore, double referenceScore, boolean perspectiveIsWhite) {
         return perspectiveIsWhite ? (candidateScore - referenceScore) : (referenceScore - candidateScore);
+    }
+
+    private boolean shouldSkipHopeless(boolean hasBest, boolean isCapture, boolean isPromotion,
+                                       boolean givesCheck, double staticScore, double bestScore,
+                                       boolean perspectiveIsWhite) {
+        if (!hasBest) return false;
+        if (isCapture || isPromotion || givesCheck) return false;
+        if (!Double.isFinite(staticScore) || !Double.isFinite(bestScore)) return false;
+        if (ROOT_HOPELESS_MARGIN <= 0.0) return false;
+        if (ROOT_DESPAIR_ABS_THRESHOLD > 0.0 && Math.abs(bestScore) < ROOT_DESPAIR_ABS_THRESHOLD) {
+            return false;
+        }
+        double gap = orientedMargin(staticScore, bestScore, perspectiveIsWhite);
+        return gap >= ROOT_HOPELESS_MARGIN;
     }
 
     protected RootSearchResult searchRootMoves(Engine sim, SearchTask task, int depth, double alpha, double beta, SplittableRandom rng) {
@@ -2114,17 +2138,43 @@ public class AI {
             }
             double gainFromBaseline = staticScore - baselineScore;
 
+            boolean givesCheck = isSideInCheck(simulatorEngine, !isWhitesTurn);
+            boolean isPromotion = MoveHelper.isPawnPromotionMove(moveInt);
+            if (rootFutilityMargin > 0.0
+                    && rootFutilityLead > 0.0
+                    && bestMove != -1
+                    && Double.isFinite(bestScore)
+                    && !childIsMate
+                    && !isCapture
+                    && !isPromotion
+                    && !givesCheck) {
+                double leaderImprovement = orientedMargin(bestScore, baselineScore, isWhitesTurn);
+                if (leaderImprovement >= rootFutilityLead) {
+                    double staticImprovement = orientedMargin(staticScore, baselineScore, isWhitesTurn);
+                    if (staticImprovement <= -rootFutilityMargin) {
+                        simulatorEngine.undoLastMove();
+                        continue;
+                    }
+                }
+            }
+
+            boolean childTerminal = simulatorEngine.getGameState().isTerminal();
             double score;
             if (childIsMate) {
                 score = isWhitesTurn
                         ? (CHECKMATE_PAWNS - MATE_STEP_PAWNS)
                         : -(CHECKMATE_PAWNS - MATE_STEP_PAWNS);
-            } else if (simulatorEngine.getGameState().isTerminal()) { // <-- terminal only
+            } else if (childTerminal) { // <-- terminal only
                 score = evaluateStaticPosition(simulatorEngine.getGameState(), childHash, !isWhitesTurn, depth);
                 if (isWhitesTurn) {
                     score = -score;
                 }
             } else {
+                if (shouldSkipHopeless(bestMove != -1, isCapture, isPromotion, givesCheck,
+                        staticScore, bestScore, isWhitesTurn)) {
+                    simulatorEngine.undoLastMove();
+                    continue;
+                }
                 // Non-terminal (incl. insufficient material):
                 score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1, 0);
                 if (score == EXIT_FLAG || abortRequested(deadline)) {
@@ -2206,7 +2256,7 @@ public class AI {
                 double improvement = orientedMargin(bestScore, baselineScore, isWhitesTurn);
                 double runnerUpGap = orientedMargin(bestScore, runnerUpScore, isWhitesTurn);
                 if (improvement >= rootEarlyStopMargin
-                        && runnerUpGap >= rootEarlyStopMargin * ROOT_RUNNER_UP_MARGIN_RATIO) {
+                        && runnerUpGap >= ROOT_RUNNER_UP_MARGIN_PAWNS) {
                     if (log.isDebugEnabled()) {
                         log.debug("Root early-stop triggered at move {} improvement={} runnerGap={}",
                                 Move.convertIntToMove(bestMove), improvement, runnerUpGap);
@@ -2218,6 +2268,37 @@ public class AI {
                     }
                     break;
                 }
+            }
+            int evaluatedCount = idx + 1;
+            if (ROOT_DESPAIR_MARGIN > 0.0
+                    && evaluatedCount >= ROOT_DESPAIR_MIN_EVALS
+                    && bestMove != -1
+                    && Double.isFinite(bestScore)
+                    && Double.isFinite(baselineScore)) {
+                double deficit = orientedMargin(baselineScore, bestScore, isWhitesTurn);
+                if (deficit >= ROOT_DESPAIR_MARGIN) {
+                    double runnerDeficit = runnerUpMove != -1 && Double.isFinite(runnerUpScore)
+                            ? orientedMargin(baselineScore, runnerUpScore, isWhitesTurn)
+                            : deficit;
+                    if (runnerDeficit >= ROOT_DESPAIR_MARGIN * ROOT_DESPAIR_RUNNER_RATIO) {
+                        if (log.isDebugEnabled()) {
+                            log.debug("Root despair cutoff after {} moves: best={} deficit={} runnerDeficit={}",
+                                    evaluatedCount, Move.convertIntToMove(bestMove), deficit, runnerDeficit);
+                        }
+                        break;
+                    }
+                }
+            }
+            if (ROOT_DESPAIR_ABS_THRESHOLD > 0.0
+                    && evaluatedCount >= ROOT_DESPAIR_MIN_EVALS_ABS
+                    && bestMove != -1
+                    && Double.isFinite(bestScore)
+                    && Math.abs(bestScore) >= ROOT_DESPAIR_ABS_THRESHOLD) {
+                if (log.isDebugEnabled()) {
+                    log.debug("Root absolute despair cutoff after {} moves: best={} |score|={}",
+                            evaluatedCount, Move.convertIntToMove(bestMove), Math.abs(bestScore));
+                }
+                break;
             }
             if (isWhitesTurn) alpha = Math.max(alpha, score);
             else beta = Math.min(beta, score);

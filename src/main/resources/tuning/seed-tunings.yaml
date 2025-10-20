@@ -144,7 +144,9 @@ population:
       search.rootStaticBlend: 0.0
       search.rootStaticOverrideCp: 0
       search.rootQueenAttackBonusCp: 600
-      search.rootEarlyStopMarginCp: 300
+      search.rootEarlyStopMarginCp: 200
+      search.rootFutilityMarginCp: 120
+      search.rootFutilityLeadCp: 300
       search.aspMinSpanCp: 36
       search.aspMaxSpanCp: 640
       search.aspDefaultSpanCp: 160

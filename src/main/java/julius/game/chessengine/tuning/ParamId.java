@@ -198,6 +198,8 @@ public enum ParamId {
     SEARCH_ROOT_STATIC_OVERRIDE_CP("search.rootStaticOverrideCp", 160, 0.0, 4096.0),
     SEARCH_ROOT_QUEEN_ATTACK_BONUS_CP("search.rootQueenAttackBonusCp", 120, 0.0, 800.0),
     SEARCH_ROOT_EARLY_STOP_MARGIN_CP("search.rootEarlyStopMarginCp", 400, 0.0, 2000.0),
+    SEARCH_ROOT_FUTILITY_MARGIN_CP("search.rootFutilityMarginCp", 120, 0.0, 2000.0),
+    SEARCH_ROOT_FUTILITY_LEAD_CP("search.rootFutilityLeadCp", 300, 0.0, 4000.0),
     SEARCH_PREFER_FAST_MATE("search.preferFastMate", 1.0, 0.0, 1.0),
     SEARCH_TB_TIE_BREAK("search.tbTieBreak", 1.0, 0.0, 1.0),
     SEARCH_TB_DTZ_PENALTY("search.tbDtzPenalty", 12.0, 1.0, 100.0);

@@ -4,7 +4,17 @@
 
 Improve **BestMoveSearchTest** pass rates while keeping runtime within the 30 s target under the mandated Java 25 + Syzygy configuration.
 
-**Current status (2025‑10‑20):** Depth‑4 runs previously completed in **~31–33 s** with the required flags, returning **24 / 86** failures. Root early-stop now kicks in once the leader is ≥300 cp ahead of the baseline and 150 cp clear of the runner-up; this should trim root fan-out without touching fixtures. Fresh timings still pending while the local toolchain is wired up (`JAVA_HOME` is required before Maven can finish the JNI configure step). Diagnostics remain in `target/surefire-reports/` for each run.
+**Current status (2025‑10‑20):** Depth‑4 runs previously completed in **~31–33 s** with the required flags on the reference Windows host (24 / 86 failures). Under WSL with the Linux toolchain (`JAVA_HOME=/usr/lib/jvm/temurin-25-jdk-amd64`) the latest depth‑6 run now finishes in **265.1 s** with **24 / 86** failures after introducing root futility gating (command below). The prior depth‑6 baseline was **328.2 s** (24 / 86). Runtime captures live in `target/surefire-reports/`.
+
+```
+mvn -Djava.version=25 -Dmaven.compiler.release=25 -Dmaven.compiler.enablePreview=true \
+    -DargLine="--enable-preview -Xms8g -Xmx8g -XX:+UseG1GC -XX:MaxGCPauseMillis=20 -XX:+AlwaysPreTouch -XX:+UseNUMA -XX:ActiveProcessorCount=24" \
+    -Dchessengine.syzygy.nativeLibrary=/mnt/c/Development/Chess-Engine/target/classes/natives/linux-x86_64/libJSyzygy.so \
+    -Dchessengine.syzygy.paths=/mnt/c/Syzygy -Dchessengine.tt.mb=1024 -Dchessengine.searchThreads=1 \
+    -Dtest=BestMoveSearchTest test
+```
+
+Root early-stop now requires a **200 cp** improvement over baseline plus a 50 cp cushion over the runner-up before pruning the remaining root moves. Additional root futility guards skip quiet moves that sit **≥120 cp** below the baseline once the leader is **≥300 cp** ahead, trimming depth‑6 fan-out without touching fixtures. Diagnostics remain in `target/surefire-reports/` for each run.
 
 Baseline commands & stats:
 
@@ -65,6 +75,6 @@ mvn -Djava.version=25 -Dmaven.compiler.release=25 -Dmaven.compiler.enablePreview
 
 ### Next Steps
 
-- Capture a new BestMoveSearchTest run (same flags) once `JAVA_HOME` is exported so the JNI build step succeeds; record wall-clock, failure count, and root fan-out deltas after the 300 cp early-stop change.
-- If runtime still hovers above 30 s, experiment with narrowing the runner-up gap (currently 50 % of the margin) or mild aspiration tightening, and document any regression risk in the logs.
+- Profile high-cost fixtures (e.g., `Kg2/Kg3/Kg4` cluster) to confirm the futility guard isn't masking tactical saves before we consider tightening the 120 cp margin or 300 cp lead thresholds.
+- Re-run the suite after any heuristic tweaks to track whether we can claw back the baseline 24/86 failure count while keeping the new runtime gains.
 - Continue logging `cpLoss` deltas per position; use `target/surefire-reports/julius.game.chessengine.ai.BestMoveSearchTest.txt` as the working ledger for regressions.

@@ -197,6 +197,8 @@ public final class Tuning {
     private static double searchRootStaticBlend;
     private static double searchRootQueenAttackBonusCp;
     private static double searchRootEarlyStopMarginCp;
+    private static double searchRootFutilityMarginCp;
+    private static double searchRootFutilityLeadCp;
     private static boolean searchPreferFastMate;
     private static boolean searchTbTieBreak;
 
@@ -927,6 +929,14 @@ public final class Tuning {
         return searchRootEarlyStopMarginCp;
     }
 
+    public static double searchRootFutilityMarginCp() {
+        return searchRootFutilityMarginCp;
+    }
+
+    public static double searchRootFutilityLeadCp() {
+        return searchRootFutilityLeadCp;
+    }
+
     public static boolean searchPreferFastMate() {
         return searchPreferFastMate;
     }
@@ -1129,6 +1139,8 @@ public final class Tuning {
             searchRootStaticOverrideCp = loadDouble(ParamId.SEARCH_ROOT_STATIC_OVERRIDE_CP);
             searchRootQueenAttackBonusCp = loadDouble(ParamId.SEARCH_ROOT_QUEEN_ATTACK_BONUS_CP);
             searchRootEarlyStopMarginCp = loadDouble(ParamId.SEARCH_ROOT_EARLY_STOP_MARGIN_CP);
+            searchRootFutilityMarginCp = loadDouble(ParamId.SEARCH_ROOT_FUTILITY_MARGIN_CP);
+            searchRootFutilityLeadCp = loadDouble(ParamId.SEARCH_ROOT_FUTILITY_LEAD_CP);
             searchPreferFastMate = loadBoolean(ParamId.SEARCH_PREFER_FAST_MATE);
             searchTbTieBreak = loadBoolean(ParamId.SEARCH_TB_TIE_BREAK);
         }
@@ -1161,4 +1173,3 @@ public final class Tuning {
         return value;
     }
 }
-
