@@ -9,7 +9,7 @@ population:
           midgame: 1.0
           endgame: 1.0
         activitymodule:
-          midgame: 1.5
+          midgame: 1.6
           endgame: 0.9
         developmentmodule:
           midgame: 1.2
@@ -18,7 +18,7 @@ population:
           midgame: 1.2
           endgame: 0.3
         threatmodule:
-          midgame: 1.4
+          midgame: 1.5
           endgame: 3.3
     numericParameters:
       evaluation.blendscale: 768
@@ -103,19 +103,19 @@ population:
       moveordering.category.capturebad: 0
       moveordering.killermovescore: 10036
       moveordering.promotionbonus: 1600
-      moveordering.killer0bonus: 515
-      moveordering.killer1bonus: 260
+      moveordering.killer0bonus: 462
+      moveordering.killer1bonus: 309
       moveordering.countermovebonus: 525
-      moveordering.capturemvvmultiplier: 18
-      moveordering.captureseemultiplier: 136
+      moveordering.capturemvvmultiplier: 19
+      moveordering.captureseemultiplier: 144
       moveordering.promotionseemultiplier: 23
       moveordering.castlingbonus: 154
       moveordering.captureseeclamp: 518
       moveordering.promotionseeclamp: 330
-      moveordering.capturegoodbonus: 929
-      moveordering.captureequalbonus: 268
-      moveordering.capturebadbonus: -701
-      moveordering.capturelosingseepenalty: -1114
+      moveordering.capturegoodbonus: 841
+      moveordering.captureequalbonus: 248
+      moveordering.capturebadbonus: -652
+      moveordering.capturelosingseepenalty: -1138
       moveordering.quiethistorymultiplier: 3.2
       moveordering.quiethistorybonus: 1297
       moveordering.maxscore: 16408385
@@ -137,7 +137,7 @@ population:
       search.lmrHistoryWeightSlope: 0.95
       search.lmrScaleDivisor: 3.4
       search.lmrDepthLogOffset: 7.2
-      search.lmrMoveLogOffset: 7.9
+      search.lmrMoveLogOffset: 8.3
       search.maxCheckExtensionStreak: 0
       search.seePruneNearRootPly: 14
       search.historyReductionMax: 7906
@@ -159,7 +159,7 @@ population:
       search.absPlyLimitMargin: 31
       search.aspMinSpanCp: 30
       search.aspMaxSpanCp: 640
-      search.aspDefaultSpanCp: 170
+      search.aspDefaultSpanCp: 152
       search.aspHistoryBlend: 0.4
       search.aspMomentumStepCp: 5
       search.aspMomentumCap: 32
@@ -167,7 +167,7 @@ population:
       search.aspBaseOffsetCp: 0
       search.aspSwingWeight: 0.13
       search.aspVolatilityWeight: 0.7
-      search.aspDepthScale: 0.05
+      search.aspDepthScale: 0.06
       search.aspDepthPivot: 3
       search.aspFloorBaseCp: 9
       search.aspFloorVolWeight: 1.5
@@ -176,7 +176,7 @@ population:
       search.aspBumpStreakCp: 11
       search.aspBumpDepthCp: 2
       search.aspFullWindowScale: 2.00
-      search.aspLastSpanScale: 1.9
+      search.aspLastSpanScale: 2.0
       search.aspFullWindowMinMultiplier: 2.1
       search.aspBlendBaselineWeight: 0.7
       search.aspBlendCandidateWeight: 0.6
