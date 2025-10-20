@@ -18,13 +18,13 @@ public final class EvaluationParameterRegistry {
         if (!INITIALIZED.compareAndSet(false, true)) {
             return;
         }
-        initialize(MaterialModule.class);
-        initialize(PawnStructureModule.class);
-        initialize(ActivityModule.class);
-        initialize(KingSafetyModule.class);
-        initialize(ThreatModule.class);
+        //initialize(MaterialModule.class);
+        //initialize(PawnStructureModule.class);
+        //initialize(ActivityModule.class);
+        //initialize(KingSafetyModule.class);
+        //initialize(ThreatModule.class);
         initialize(julius.game.chessengine.evaluation.learning.LearningEvaluationModule.class);
-        initialize(EvaluationPipeline.class);
+        //initialize(EvaluationPipeline.class);
     }
 
     private static void initialize(Class<?> type) {

@@ -130,9 +130,9 @@ public class BestMoveSearchTest {
                         + ai.depthCoverageSummary() + System.lineSeparator()
                         + humanReadable + System.lineSeparator() + diagnostics);
 
-        double adjustedTolerance = 0.5;
+        double adjustedTolerance = 0.0;
         if (!statistics.bestMoveMatchesExpected(expectedMovesView)) {
-            adjustedTolerance += 0.5;
+            adjustedTolerance += 0.0;
         }
         boolean acceptedMove = expectedMovesView.contains(moveString)
                 || statistics.withinCpLossTolerance(adjustedTolerance);

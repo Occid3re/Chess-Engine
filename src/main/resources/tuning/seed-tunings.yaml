@@ -2,22 +2,22 @@ population:
   - name: beast
     evaluation:
       modules:
-        materialmodule:
-          midgame: 1.0
-          endgame: 1.0
-        pawnstructuremodule:
-          midgame: 1.0
-          endgame: 1.0
-        activitymodule:
-          midgame: 1.0
-          endgame: 1.0
-        kingsafetymodule:
-          midgame: 1.0
-          endgame: 1.0
-        threatmodule:
-          midgame: 1.0
-          endgame: 1.0
-        learningevaluationmodule:
+        MaterialModule:
+          midgame: 0.0
+          endgame: 0.0
+        PawnStructureModule:
+          midgame: 0.0
+          endgame: 0.0
+        ActivityModule:
+          midgame: 0.0
+          endgame: 0.0
+        KingSafetyModule:
+          midgame: 0.0
+          endgame: 0.0
+        ThreatModule:
+          midgame: 0.0
+          endgame: 0.0
+        LearningEvaluationModule:
           midgame: 1.0
           endgame: 1.0
     numericParameters:
