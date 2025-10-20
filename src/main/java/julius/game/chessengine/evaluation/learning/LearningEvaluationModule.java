@@ -199,8 +199,8 @@ public final class LearningEvaluationModule implements EvaluationModule, Materia
         if (scales.length != 2) {
             throw new IllegalStateException("Learning model must provide two output scales but returned " + scales.length);
         }
-        midgameScore = (int) Math.round(output[0] * scales[0]);
-        endgameScore = (int) Math.round(output[1] * scales[1]);
+        midgameScore = (int) Math.round(output[0] * scales[0]) * 100;
+        endgameScore = (int) Math.round(output[1] * scales[1]) * 100;
     }
 
     private double normalize(double value, double scale) {
