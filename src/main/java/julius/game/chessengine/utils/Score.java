@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.evaluation.*;
+import julius.game.chessengine.evaluation.learning.LearningEvaluationModule;
 import julius.game.chessengine.syzygy.SyzygyProbeResult;
 import julius.game.chessengine.syzygy.SyzygyTablebaseService;
 import julius.game.chessengine.syzygy.SyzygyWdl;
@@ -72,15 +73,29 @@ public class Score {
         DevelopmentModule developmentModule = new DevelopmentModule();
         KingSafetyModule kingSafetyModule = new KingSafetyModule();
         ThreatModule threatModule = new ThreatModule();
+        LearningEvaluationModule learningModule = new LearningEvaluationModule();
 
-        materialModule.setPawnChangeListener(pawnStructureModule);
+        materialModule.setPawnChangeListener(new MaterialModule.PawnChangeListener() {
+            @Override
+            public void onPawnAdded(boolean isWhite, int squareIndex) {
+                pawnStructureModule.onPawnAdded(isWhite, squareIndex);
+                learningModule.onPawnAdded(isWhite, squareIndex);
+            }
+
+            @Override
+            public void onPawnRemoved(boolean isWhite, int squareIndex) {
+                pawnStructureModule.onPawnRemoved(isWhite, squareIndex);
+                learningModule.onPawnRemoved(isWhite, squareIndex);
+            }
+        });
         this.evaluationPipeline = new EvaluationPipeline(List.of(
                 materialModule,
                 pawnStructureModule,
                 activityModule,
                 developmentModule,
                 kingSafetyModule,
-                threatModule
+                threatModule,
+                learningModule
         ), this.weights);
     }
 

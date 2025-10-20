@@ -20,6 +20,9 @@ population:
         threatmodule:
           midgame: 1.8
           endgame: 3.4
+        learningevaluationmodule:
+          midgame: 1.0
+          endgame: 1.0
     numericParameters:
       evaluation.blendscale: 731
       material.pawnvalue: 118
