@@ -185,7 +185,7 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "step": 1.0,
         "max_step": 3.0,
         "soft_min": 0.0,
-        "soft_max": 12.0,
+        "soft_max": 24.0,
         "sentinel_probe": 0.06,
         "sentinels": [0.0],
     },
@@ -193,13 +193,13 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "step": 1.0,
         "max_step": 3.0,
         "soft_min": 0.0,
-        "soft_max": 10.0,
+        "soft_max": 16.0,
     },
     "search.lmpmaxdepth": {
         "step": 1.0,
         "max_step": 3.0,
         "soft_min": 0.0,
-        "soft_max": 10.0,
+        "soft_max": 16.0,
     },
     "search.hmpminindex": {
         "step": 4.0,
@@ -265,12 +265,12 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
     "search.lmrdepthlogoffset": {
         "step": 0.1,
         "soft_min": 0.0,
-        "soft_max": 4.0,
+        "soft_max": 10.0,
     },
     "search.lmrmovelogoffset": {
         "step": 0.1,
         "soft_min": 0.0,
-        "soft_max": 4.0,
+        "soft_max": 10.0,
     },
     "search.maxcheckextensionstreak": {
         "step": 1.0,
@@ -282,13 +282,94 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "step": 1.0,
         "max_step": 2.0,
         "soft_min": 0.0,
-        "soft_max": 6.0,
+        "soft_max": 16.0,
     },
     "search.historyreductionmax": {
         "step": 200.0,
         "max_step": 600.0,
         "soft_min": 0.0,
         "soft_max": 8000.0,
+    },
+    "search.rootstaticblend": {
+        "step": 0.05,
+        "soft_min": 0.0,
+        "soft_max": 1.0,
+    },
+    "search.rootstaticoverridecp": {
+        "step": 10.0,
+        "soft_min": 0.0,
+        "soft_max": 800.0,
+        "sentinels": [0.0],
+    },
+    "search.rootqueenattackbonuscp": {
+        "step": 20.0,
+        "soft_min": 0.0,
+        "soft_max": 800.0,
+    },
+    "search.rootearlystopmargincp": {
+        "step": 20.0,
+        "soft_min": 0.0,
+        "soft_max": 640.0,
+    },
+    "search.rootfutilitymargincp": {
+        "step": 10.0,
+        "soft_min": 0.0,
+        "soft_max": 320.0,
+    },
+    "search.rootfutilityleadcp": {
+        "step": 20.0,
+        "soft_min": 0.0,
+        "soft_max": 800.0,
+    },
+    "search.rootcapturevaluethresholdcp": {
+        "step": 20.0,
+        "soft_min": 0.0,
+        "soft_max": 1024.0,
+    },
+    "search.rootcapturegainthresholdcp": {
+        "step": 10.0,
+        "soft_min": 0.0,
+        "soft_max": 512.0,
+    },
+    "search.rootrunnerupmargincp": {
+        "step": 5.0,
+        "soft_min": 0.0,
+        "soft_max": 200.0,
+    },
+    "search.rootdespairmargincp": {
+        "step": 20.0,
+        "soft_min": 0.0,
+        "soft_max": 800.0,
+    },
+    "search.rootdespairminevals": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 24.0,
+    },
+    "search.rootdespairrunnerratio": {
+        "step": 0.05,
+        "soft_min": 0.0,
+        "soft_max": 1.0,
+    },
+    "search.rootdespairabsthresholdcp": {
+        "step": 20.0,
+        "soft_min": 0.0,
+        "soft_max": 1200.0,
+    },
+    "search.rootdespairminevalsabs": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 24.0,
+    },
+    "search.roothopelessmargincp": {
+        "step": 10.0,
+        "soft_min": 0.0,
+        "soft_max": 240.0,
+    },
+    "search.absplylimitmargin": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 48.0,
     },
     "search.aspminspancp": {
         "step": 2.0,
@@ -303,7 +384,7 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
     "search.aspdefaultspancp": {
         "step": 4.0,
         "soft_min": 12.0,
-        "soft_max": 160.0,
+        "soft_max": 256.0,
     },
     "search.asphistoryblend": {
         "step": 0.05,
@@ -452,13 +533,13 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
     },
     "search.aspmaxretriesmax": {
         "step": 1.0,
-        "soft_min": 2.0,
+        "soft_min": 0.0,
         "soft_max": 12.0,
     },
     "search.nullbasereduction": {
         "step": 0.1,
         "soft_min": 0.5,
-        "soft_max": 3.0,
+        "soft_max": 8.0,
     },
     "search.nulldepthweight": {
         "step": 0.1,
@@ -538,7 +619,7 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
     "search.ttcaptureweight": {
         "step": 0.1,
         "soft_min": 0.25,
-        "soft_max": 4.0,
+        "soft_max": 6.0,
     },
     "search.drawbias": {
         "step": 0.05,
@@ -556,11 +637,6 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "soft_min": 0.0,
         "soft_max": 1.0,
         "sentinels": [0.0, 1.0],
-    },
-    "search.tbdtzpenalty": {
-        "step": 1.0,
-        "soft_min": 4.0,
-        "soft_max": 64.0,
     },
     "pawnstructure.centerpawnbonus": {
         "step": 1.0,
@@ -757,26 +833,6 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "soft_min": -120.0,
         "soft_max": 0.0,
     },
-    "kingsafety.backrankcovermidgamebonus": {
-        "step": 4.0,
-        "soft_min": -64.0,
-        "soft_max": 128.0,
-    },
-    "kingsafety.backrankcoverendgamebonus": {
-        "step": 4.0,
-        "soft_min": -64.0,
-        "soft_max": 96.0,
-    },
-    "kingsafety.backrankattackpenaltymidgame": {
-        "step": 8.0,
-        "soft_min": 0.0,
-        "soft_max": 256.0,
-    },
-    "kingsafety.backrankattackpenaltyendgame": {
-        "step": 8.0,
-        "soft_min": 0.0,
-        "soft_max": 256.0,
-    },
     "kingsafety.defenderbonus": {
         "step": 1.0,
         "soft_min": 0.0,
@@ -806,6 +862,61 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "step": 1.0,
         "soft_min": 0.0,
         "soft_max": 48.0,
+    },
+    "development.phasethreshold": {
+        "step": 8.0,
+        "soft_min": 160.0,
+        "soft_max": 512.0,
+    },
+    "development.queenphasethreshold": {
+        "step": 8.0,
+        "soft_min": 128.0,
+        "soft_max": 352.0,
+    },
+    "development.undevelopedminorpenalty": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 48.0,
+    },
+    "development.earlyqueenpenaltyperminor": {
+        "step": 10.0,
+        "soft_min": 0.0,
+        "soft_max": 400.0,
+    },
+    "development.minundevelopedminorsforqueenpenalty": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 4.0,
+    },
+    "development.startpositionpenalty": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 40.0,
+    },
+    "development.castlingbonus": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 64.0,
+    },
+    "development.notcastledrookmovepenalty": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 32.0,
+    },
+    "development.queendisplacementpenalty": {
+        "step": 2.0,
+        "soft_min": 0.0,
+        "soft_max": 160.0,
+    },
+    "development.queenunderattackpenalty": {
+        "step": 2.0,
+        "soft_min": 0.0,
+        "soft_max": 160.0,
+    },
+    "development.queenhangingpenalty": {
+        "step": 10.0,
+        "soft_min": 0.0,
+        "soft_max": 400.0,
     },
     "threat.hangingpawnpenalty": {
         "step": 2.0,
@@ -905,12 +1016,12 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
     "moveordering.killer0bonus": {
         "step": 5.0,
         "soft_min": 0.0,
-        "soft_max": 160.0,
+        "soft_max": 640.0,
     },
     "moveordering.killer1bonus": {
         "step": 5.0,
         "soft_min": 0.0,
-        "soft_max": 120.0,
+        "soft_max": 400.0,
     },
     "moveordering.countermovebonus": {
         "step": 40.0,
@@ -925,7 +1036,7 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
     "moveordering.captureseemultiplier": {
         "step": 4.0,
         "soft_min": 0.0,
-        "soft_max": 96.0,
+        "soft_max": 192.0,
     },
     "moveordering.captureseeclamp": {
         "step": 128.0,
@@ -949,7 +1060,7 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
     },
     "moveordering.capturelosingseepenalty": {
         "step": 8.0,
-        "soft_min": 0.0,
+        "soft_min": -2048.0,
         "soft_max": 256.0,
         "sentinel_probe": 0.05,
         "sentinels": [0.0],
