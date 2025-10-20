@@ -253,3 +253,39 @@ python .\scripts\auto_tuning_loop.py `
   --git-commit `
   --extra-maven-args -q
 ```
+
+```powershell
+python .\scripts\auto_tuning_loop.py `
+  --project-root C:\Development\Chess-Engine `
+  --mvn .\mvnw.cmd `
+  --test julius.game.chessengine.ai.BestMoveSearchTest `
+  --java-release 25 `
+  --preview `
+  --accept-worse `
+  --accept-temp 0.12 `
+  --temp-start 0.55 `
+  --temp-min 0.06 `
+  --temp-decay 16 `
+  --mut-frac 0.50 `
+  --mut-frac-min 0.08 `
+  --mut-frac-max 0.50 `
+  --freeze-after 40 `
+  --allow-pattern '^(learning\.)' `
+  --noimp-reheat 12 `
+  --reheat-factor 1.7 `
+  --jvm-gc zgc `
+  --tt-mb 1024 `
+  --engine-threads 1 `
+  --lazy-threads 1 `
+  --root-par-limit 48 `
+  --xms auto `
+  --xmx auto `
+  --plan-concurrent 1 `
+  --priority-duration-metric durationMsP95 `
+  --duration-bonus-threshold 0.20 `
+  --max-failure-regress 1 `
+  --max-error-regress 0 `
+  --duration-weight 1.1 `
+  --git-commit `
+  --extra-maven-args -q
+```
