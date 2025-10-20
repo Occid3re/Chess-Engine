@@ -95,6 +95,9 @@ python .\scripts\auto_tuning_loop.py `
   --mvn .\mvnw.cmd `
   --test julius.game.chessengine.ai.BestMoveSearchTest `
   --preview `
+  --engine-threads 1 `
+  --lazy-threads 1 `
+  --root-par-limit 48 `
   --mut-frac 0.15 --mut-frac-min 0.10 --mut-frac-max 0.30 `
   --freeze-after 10 `
   --allow-pattern "^(evaluation\.|pawnstructure\.|activity\.|development\.|kingsafety\.|threat\.)" `
@@ -107,7 +110,18 @@ python .\scripts\auto_tuning_loop.py `
 Great for speed/strength from pruning, LMR/LMP, aspiration windows, etc.
 
 ```powershell
---allow-pattern "^search\."
+python .\scripts\auto_tuning_loop.py `
+  --project-root C:\Development\Chess-Engine `
+  --mvn .\mvnw.cmd `
+  --test julius.game.chessengine.ai.BestMoveSearchTest `
+  --preview `
+  --engine-threads 1 `
+  --lazy-threads 1 `
+  --root-par-limit 48 `
+  --mut-frac 0.15 --mut-frac-min 0.10 --mut-frac-max 0.30 `
+  --freeze-after 10 `
+  --allow-pattern "^search\." `
+  --extra-maven-args -q
 ```
 
 Suggested conservative sweep:
