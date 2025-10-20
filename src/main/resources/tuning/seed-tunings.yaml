@@ -85,9 +85,9 @@ population:
       development.phaseThreshold: 448
       development.queenPhaseThreshold: 318
       development.undevelopedMinorPenalty: 23
-      development.earlyQueenPenaltyPerMinor: 198
+      development.earlyQueenPenaltyPerMinor: 218
       development.minUndevelopedMinorsForQueenPenalty: 2
-      development.startPositionPenalty: 16
+      development.startPositionPenalty: 15
       development.castlingBonus: 27
       development.notCastledRookMovePenalty: 13
       development.queenDisplacementPenalty: 64
