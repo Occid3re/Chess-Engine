@@ -18,7 +18,7 @@ population:
           midgame: 1.2
           endgame: 0.3
         threatmodule:
-          midgame: 1.8
+          midgame: 1.9
           endgame: 3.4
     numericParameters:
       evaluation.blendscale: 731
@@ -40,7 +40,7 @@ population:
       pawnstructure.ownkingblockspassedpawnpenalty: -77
       pawnstructure.passedpawnfreepathbonusperrank: 15
       pawnstructure.rookhalfopenfilebonus: 40
-      pawnstructure.rookopenfilebonus: 31
+      pawnstructure.rookopenfilebonus: 33
       threat.hangingpawnpenalty: -12
       threat.hangingknightpenalty: -25
       threat.hangingbishoppenalty: -15
@@ -50,7 +50,7 @@ population:
       threat.pawnthreatbishoppenalty: -8
       threat.pawnthreatrookpenalty: -14
       threat.pawnthreatqueenpenalty: -28
-      activity.midgamemobilityknight: 10
+      activity.midgamemobilityknight: 9
       activity.midgamemobilitybishop: 12
       activity.midgamemobilityrook: 12
       activity.midgamemobilityqueen: 3
@@ -69,7 +69,7 @@ population:
       activity.endgamecenterbishop: -4
       activity.endgamecenterrook: 3
       activity.endgamecenterqueen: 3
-      activity.endgamecenterking: 5
+      activity.endgamecenterking: 6
       kingsafety.missingpawnshieldpenalty: -24
       kingsafety.halfopenfilepenalty: 0
       kingsafety.openfilepenalty: -14
@@ -91,7 +91,7 @@ population:
       development.castlingBonus: 27
       development.notCastledRookMovePenalty: 13
       development.queenDisplacementPenalty: 70
-      development.queenUnderAttackPenalty: 68
+      development.queenUnderAttackPenalty: 76
       development.queenHangingPenalty: 202
       moveordering.category.tt: 8
       moveordering.category.promotion: 6
