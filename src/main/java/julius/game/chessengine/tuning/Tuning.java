@@ -80,6 +80,8 @@ public final class Tuning {
     private static int pawnThreatQueenPenalty;
 
     private static int evaluationBlendScale;
+    private static double learningOutputMidgameScale;
+    private static double learningOutputEndgameScale;
 
     private static int moveOrderingCategoryTt;
     private static int moveOrderingCategoryPromotion;
@@ -469,6 +471,14 @@ public final class Tuning {
 
     public static int evaluationBlendScale() {
         return evaluationBlendScale;
+    }
+
+    public static double learningOutputMidgameScale() {
+        return learningOutputMidgameScale;
+    }
+
+    public static double learningOutputEndgameScale() {
+        return learningOutputEndgameScale;
     }
 
     public static int moveOrderingCategoryTt() {
@@ -1017,6 +1027,8 @@ public final class Tuning {
 
 
             evaluationBlendScale = loadInt(ParamId.EVALUATION_BLEND_SCALE);
+            learningOutputMidgameScale = loadDouble(ParamId.LEARNING_OUTPUT_MIDGAME_SCALE);
+            learningOutputEndgameScale = loadDouble(ParamId.LEARNING_OUTPUT_ENDGAME_SCALE);
 
             moveOrderingCategoryTt = loadInt(ParamId.MOVE_ORDERING_CATEGORY_TT);
             moveOrderingCategoryPromotion = loadInt(ParamId.MOVE_ORDERING_CATEGORY_PROMOTION);

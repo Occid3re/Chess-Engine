@@ -190,12 +190,17 @@ public final class LearningEvaluationModule implements EvaluationModule, Materia
     }
 
     private void runInference() {
-        double[] output = modelStore.infer(features);
+        LearningModelStore.InferenceResult result = modelStore.inferWithScales(features);
+        double[] output = result.output();
+        double[] scales = result.outputScales();
         if (output.length != 2) {
             throw new IllegalStateException("Learning model must output two values but returned " + output.length);
         }
-        midgameScore = (int) Math.round(output[0]);
-        endgameScore = (int) Math.round(output[1]);
+        if (scales.length != 2) {
+            throw new IllegalStateException("Learning model must provide two output scales but returned " + scales.length);
+        }
+        midgameScore = (int) Math.round(output[0] * scales[0]);
+        endgameScore = (int) Math.round(output[1] * scales[1]);
         if (LOG.isInfoEnabled()) {
             LOG.info("Learning evaluation scores: midgame={}, endgame={}", midgameScore, endgameScore);
         }
