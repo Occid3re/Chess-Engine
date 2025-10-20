@@ -33,3 +33,7 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# Java Flight Recorder
+*.jfr
+*.jfr.gz
