@@ -8,6 +8,8 @@ package julius.game.chessengine.tuning;
 public final class Tuning {
 
     private static final Object LOCK = new Object();
+    private static final java.util.concurrent.CopyOnWriteArrayList<Runnable> REFRESH_LISTENERS =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
 
     private static int pawnValue;
     private static int knightValue;
@@ -949,6 +951,17 @@ public final class Tuning {
         return searchTbTieBreak;
     }
 
+    public static void registerRefreshListener(Runnable listener) {
+        java.util.Objects.requireNonNull(listener, "listener");
+        REFRESH_LISTENERS.addIfAbsent(listener);
+    }
+
+    public static void unregisterRefreshListener(Runnable listener) {
+        if (listener != null) {
+            REFRESH_LISTENERS.remove(listener);
+        }
+    }
+
     /**
      * Reloads all cached tuning values from the current {@link ParameterRegistry} snapshot.
      * Callers should invoke this once after applying a new parameter set (e.g. via hot reload).
@@ -1148,6 +1161,28 @@ public final class Tuning {
             absPlyLimitMargin = loadInt(ParamId.SEARCH_ABS_PLY_LIMIT_MARGIN);
             searchPreferFastMate = loadBoolean(ParamId.SEARCH_PREFER_FAST_MATE);
             searchTbTieBreak = loadBoolean(ParamId.SEARCH_TB_TIE_BREAK);
+        }
+        notifyRefreshListeners();
+    }
+
+    private static void notifyRefreshListeners() {
+        if (REFRESH_LISTENERS.isEmpty()) {
+            return;
+        }
+        RuntimeException failure = null;
+        for (Runnable listener : REFRESH_LISTENERS) {
+            try {
+                listener.run();
+            } catch (RuntimeException ex) {
+                if (failure == null) {
+                    failure = ex;
+                } else {
+                    failure.addSuppressed(ex);
+                }
+            }
+        }
+        if (failure != null) {
+            throw failure;
         }
     }
 
