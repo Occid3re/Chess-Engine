@@ -5,44 +5,32 @@ import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap;
 import julius.game.chessengine.ai.time.TimeManager;
 import julius.game.chessengine.board.BitBoard;
-import julius.game.chessengine.board.FEN;
 import julius.game.chessengine.board.Move;
 import julius.game.chessengine.board.MoveHelper;
-import julius.game.chessengine.helper.KnightHelper;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.evaluation.EvaluationContext;
-import julius.game.chessengine.syzygy.SyzygyMove;
-import julius.game.chessengine.syzygy.SyzygyProbeResult;
-import julius.game.chessengine.syzygy.SyzygyTablebaseService;
-import julius.game.chessengine.syzygy.SyzygyWdl;
-import julius.game.chessengine.syzygy.TablebaseResult;
-import julius.game.chessengine.tuning.AiTuning;
-import julius.game.chessengine.tuning.AspirationParameters;
-import julius.game.chessengine.tuning.LmrParameters;
-import julius.game.chessengine.tuning.MoveOrderingParameters;
-import julius.game.chessengine.tuning.NullMoveParameters;
-import julius.game.chessengine.tuning.SearchPruningParameters;
-import julius.game.chessengine.tuning.Tuning;
+import julius.game.chessengine.helper.KnightHelper;
+import julius.game.chessengine.syzygy.*;
+import julius.game.chessengine.tuning.*;
 import julius.game.chessengine.utils.Score;
 import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
 
+import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
-import java.util.function.IntFunction;
-
-import java.util.*;
-import java.util.concurrent.*;
 import java.util.concurrent.locks.StampedLock;
-import java.util.stream.Collectors;
+import java.util.function.IntFunction;
 
 import static julius.game.chessengine.helper.BitHelper.FileMasks;
 import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
-import static julius.game.chessengine.utils.Score.*;
+import static julius.game.chessengine.utils.Score.CHECKMATE;
+import static julius.game.chessengine.utils.Score.DRAW;
 
 @Log4j2
 public class AI {
@@ -77,8 +65,6 @@ public class AI {
     private final boolean rootFanoutStatsEnabled;
     private final double rootFanoutRatio;
     private WorkerInstrumentation workerInstrumentation;
-
-    private static final int ABS_PLY_LIMIT_MARGIN = 32;
 
     private final AtomicReference<SearchTask> activeSearch = new AtomicReference<>();
     private final ThreadLocal<SearchTask> threadSearchTask = new ThreadLocal<>();
@@ -174,12 +160,22 @@ public class AI {
     private final double rootStaticOverrideThreshold;
     private final double rootQueenAttackBonus;
     private final double rootEarlyStopMargin;
+    private final double rootCaptureValueThreshold;
+    private final double rootCaptureGainThreshold;
+    private final double rootRunnerUpMargin;
+    private final double rootDespairMargin;
+    private final int rootDespairMinEvals;
+    private final double rootDespairRunnerRatio;
+    private final double rootDespairAbsThreshold;
+    private final int rootDespairMinEvalsAbs;
+    private final double rootHopelessMargin;
     private final double rootFutilityMargin;
     private final double rootFutilityLead;
     private final double ttMainWeight;
     private final double ttCaptureWeight;
     private final boolean preferFastMate;
     private final boolean tbTieBreak;
+    private final int absPlyLimitMargin;
 
     /**
      * Per-thread heuristic state used during move ordering. The tables are
@@ -195,15 +191,6 @@ public class AI {
     // Buffers used for move ordering. Reused across calls to avoid repeated
     // allocations when ordering moves.
     private static final int MAX_MOVE_LIST_SIZE = 218; // maximum legal moves
-    private static final double ROOT_CAPTURE_VALUE_THRESHOLD = 4.0; // pawns
-    private static final double ROOT_CAPTURE_GAIN_THRESHOLD = 2.0; // pawns
-    private static final double ROOT_RUNNER_UP_MARGIN_PAWNS = 0.5; // require 50 cp lead over runner-up
-    private static final double ROOT_DESPAIR_MARGIN = 4.0; // bail when we're ≥4 pawns worse after enough samples
-    private static final int ROOT_DESPAIR_MIN_EVALS = 12;
-    private static final double ROOT_DESPAIR_RUNNER_RATIO = 0.6; // runner-up should also be significantly worse
-    private static final double ROOT_DESPAIR_ABS_THRESHOLD = 5.0; // bail if absolute eval hopeless (5 pawns)
-    private static final int ROOT_DESPAIR_MIN_EVALS_ABS = 12;
-    private static final double ROOT_HOPELESS_MARGIN = 0.75; // skip quiet moves that are ≥0.75 pawns worse than current best in hopeless nodes
 
     private enum MoveBucket {
         TT,
@@ -406,12 +393,22 @@ public class AI {
         this.rootQueenAttackBonus = Math.max(0.0, Tuning.searchRootQueenAttackBonusCp() / 100.0);
         log.info("Root queen attack bonus (pawns): {}", rootQueenAttackBonus);
         this.rootEarlyStopMargin = Math.max(0.0, Tuning.searchRootEarlyStopMarginCp() / 100.0);
+        this.rootCaptureValueThreshold = Math.max(0.0, Tuning.searchRootCaptureValueThresholdCp() / 100.0);
+        this.rootCaptureGainThreshold = Math.max(0.0, Tuning.searchRootCaptureGainThresholdCp() / 100.0);
+        this.rootRunnerUpMargin = Math.max(0.0, Tuning.searchRootRunnerUpMarginCp() / 100.0);
+        this.rootDespairMargin = Math.max(0.0, Tuning.searchRootDespairMarginCp() / 100.0);
+        this.rootDespairMinEvals = Math.max(1, Tuning.searchRootDespairMinEvals());
+        this.rootDespairRunnerRatio = Math.max(0.0, Tuning.searchRootDespairRunnerRatio());
+        this.rootDespairAbsThreshold = Math.max(0.0, Tuning.searchRootDespairAbsThresholdCp() / 100.0);
+        this.rootDespairMinEvalsAbs = Math.max(1, Tuning.searchRootDespairMinEvalsAbs());
+        this.rootHopelessMargin = Math.max(0.0, Tuning.searchRootHopelessMarginCp() / 100.0);
         this.rootFutilityMargin = Math.max(0.0, Tuning.searchRootFutilityMarginCp() / 100.0);
         this.rootFutilityLead = Math.max(0.0, Tuning.searchRootFutilityLeadCp() / 100.0);
         this.ttMainWeight = Math.max(1e-9, Tuning.searchTtMainWeight());
         this.ttCaptureWeight = Math.max(1e-9, Tuning.searchTtCaptureWeight());
         this.preferFastMate = Tuning.searchPreferFastMate();
         this.tbTieBreak = Tuning.searchTbTieBreak() && this.tablebaseService != null;
+        this.absPlyLimitMargin = Math.max(1, Tuning.searchAbsPlyLimitMargin());
         this.globalHeuristics = new Heuristics(maxDepth);
         this.threadHeuristics = ThreadLocal.withInitial(() -> new Heuristics(maxDepth));
 
@@ -1098,12 +1095,12 @@ public class AI {
         if (!hasBest) return false;
         if (isCapture || isPromotion || givesCheck) return false;
         if (!Double.isFinite(staticScore) || !Double.isFinite(bestScore)) return false;
-        if (ROOT_HOPELESS_MARGIN <= 0.0) return false;
-        if (ROOT_DESPAIR_ABS_THRESHOLD > 0.0 && Math.abs(bestScore) < ROOT_DESPAIR_ABS_THRESHOLD) {
+        if (rootHopelessMargin <= 0.0) return false;
+        if (rootDespairAbsThreshold > 0.0 && Math.abs(bestScore) < rootDespairAbsThreshold) {
             return false;
         }
         double gap = orientedMargin(staticScore, bestScore, perspectiveIsWhite);
-        return gap >= ROOT_HOPELESS_MARGIN;
+        return gap >= rootHopelessMargin;
     }
 
     protected RootSearchResult searchRootMoves(Engine sim, SearchTask task, int depth, double alpha, double beta, SplittableRandom rng) {
@@ -2227,8 +2224,8 @@ public class AI {
                 int capturedBits = MoveHelper.deriveCapturedPieceTypeBits(moveInt);
                 if (capturedBits != 0) {
                     double capturedValue = Score.getPieceValue(capturedBits) / 100.0;
-                    if (capturedValue >= ROOT_CAPTURE_VALUE_THRESHOLD
-                            && gainFromBaseline >= ROOT_CAPTURE_GAIN_THRESHOLD) {
+                    if (capturedValue >= rootCaptureValueThreshold
+                            && gainFromBaseline >= rootCaptureGainThreshold) {
                         bestCaptureGain = gainFromBaseline;
                         bestCaptureMove = moveInt;
                         bestCaptureStaticScore = staticScore;
@@ -2256,7 +2253,7 @@ public class AI {
                 double improvement = orientedMargin(bestScore, baselineScore, isWhitesTurn);
                 double runnerUpGap = orientedMargin(bestScore, runnerUpScore, isWhitesTurn);
                 if (improvement >= rootEarlyStopMargin
-                        && runnerUpGap >= ROOT_RUNNER_UP_MARGIN_PAWNS) {
+                        && runnerUpGap >= rootRunnerUpMargin) {
                     if (log.isDebugEnabled()) {
                         log.debug("Root early-stop triggered at move {} improvement={} runnerGap={}",
                                 Move.convertIntToMove(bestMove), improvement, runnerUpGap);
@@ -2270,17 +2267,17 @@ public class AI {
                 }
             }
             int evaluatedCount = idx + 1;
-            if (ROOT_DESPAIR_MARGIN > 0.0
-                    && evaluatedCount >= ROOT_DESPAIR_MIN_EVALS
+            if (rootDespairMargin > 0.0
+                    && evaluatedCount >= rootDespairMinEvals
                     && bestMove != -1
                     && Double.isFinite(bestScore)
                     && Double.isFinite(baselineScore)) {
-                double deficit = orientedMargin(baselineScore, bestScore, isWhitesTurn);
-                if (deficit >= ROOT_DESPAIR_MARGIN) {
+               double deficit = orientedMargin(baselineScore, bestScore, isWhitesTurn);
+                if (deficit >= rootDespairMargin) {
                     double runnerDeficit = runnerUpMove != -1 && Double.isFinite(runnerUpScore)
                             ? orientedMargin(baselineScore, runnerUpScore, isWhitesTurn)
                             : deficit;
-                    if (runnerDeficit >= ROOT_DESPAIR_MARGIN * ROOT_DESPAIR_RUNNER_RATIO) {
+                    if (runnerDeficit >= rootDespairMargin * rootDespairRunnerRatio) {
                         if (log.isDebugEnabled()) {
                             log.debug("Root despair cutoff after {} moves: best={} deficit={} runnerDeficit={}",
                                     evaluatedCount, Move.convertIntToMove(bestMove), deficit, runnerDeficit);
@@ -2289,11 +2286,11 @@ public class AI {
                     }
                 }
             }
-            if (ROOT_DESPAIR_ABS_THRESHOLD > 0.0
-                    && evaluatedCount >= ROOT_DESPAIR_MIN_EVALS_ABS
+            if (rootDespairAbsThreshold > 0.0
+                    && evaluatedCount >= rootDespairMinEvalsAbs
                     && bestMove != -1
                     && Double.isFinite(bestScore)
-                    && Math.abs(bestScore) >= ROOT_DESPAIR_ABS_THRESHOLD) {
+                    && Math.abs(bestScore) >= rootDespairAbsThreshold) {
                 if (log.isDebugEnabled()) {
                     log.debug("Root absolute despair cutoff after {} moves: best={} |score|={}",
                             evaluatedCount, Move.convertIntToMove(bestMove), Math.abs(bestScore));
@@ -2650,7 +2647,7 @@ public class AI {
         nodesVisited++;
         if (abortRequested(deadline)) return EXIT_FLAG;
 
-        if (plyFromRoot >= maxDepth + ABS_PLY_LIMIT_MARGIN) {
+        if (plyFromRoot >= maxDepth + absPlyLimitMargin) {
             double eval = evaluateBoard(simulatorEngine, isWhite, deadline);
             if (eval == EXIT_FLAG) return EXIT_FLAG;
             if (!isWhite) eval = -eval;

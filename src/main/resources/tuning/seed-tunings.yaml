@@ -147,6 +147,16 @@ population:
       search.rootEarlyStopMarginCp: 200
       search.rootFutilityMarginCp: 120
       search.rootFutilityLeadCp: 300
+      search.rootCaptureValueThresholdCp: 400
+      search.rootCaptureGainThresholdCp: 200
+      search.rootRunnerUpMarginCp: 50
+      search.rootDespairMarginCp: 400
+      search.rootDespairMinEvals: 12
+      search.rootDespairRunnerRatio: 0.6
+      search.rootDespairAbsThresholdCp: 500
+      search.rootDespairMinEvalsAbs: 12
+      search.rootHopelessMarginCp: 75
+      search.absPlyLimitMargin: 32
       search.aspMinSpanCp: 36
       search.aspMaxSpanCp: 640
       search.aspDefaultSpanCp: 160

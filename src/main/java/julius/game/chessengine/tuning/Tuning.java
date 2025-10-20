@@ -197,6 +197,16 @@ public final class Tuning {
     private static double searchRootStaticBlend;
     private static double searchRootQueenAttackBonusCp;
     private static double searchRootEarlyStopMarginCp;
+    private static double searchRootCaptureValueThresholdCp;
+    private static double searchRootCaptureGainThresholdCp;
+    private static double searchRootRunnerUpMarginCp;
+    private static double searchRootDespairMarginCp;
+    private static int searchRootDespairMinEvals;
+    private static double searchRootDespairRunnerRatio;
+    private static double searchRootDespairAbsThresholdCp;
+    private static int searchRootDespairMinEvalsAbs;
+    private static double searchRootHopelessMarginCp;
+    private static int absPlyLimitMargin;
     private static double searchRootFutilityMarginCp;
     private static double searchRootFutilityLeadCp;
     private static boolean searchPreferFastMate;
@@ -929,6 +939,46 @@ public final class Tuning {
         return searchRootEarlyStopMarginCp;
     }
 
+    public static double searchRootCaptureValueThresholdCp() {
+        return searchRootCaptureValueThresholdCp;
+    }
+
+    public static double searchRootCaptureGainThresholdCp() {
+        return searchRootCaptureGainThresholdCp;
+    }
+
+    public static double searchRootRunnerUpMarginCp() {
+        return searchRootRunnerUpMarginCp;
+    }
+
+    public static double searchRootDespairMarginCp() {
+        return searchRootDespairMarginCp;
+    }
+
+    public static int searchRootDespairMinEvals() {
+        return searchRootDespairMinEvals;
+    }
+
+    public static double searchRootDespairRunnerRatio() {
+        return searchRootDespairRunnerRatio;
+    }
+
+    public static double searchRootDespairAbsThresholdCp() {
+        return searchRootDespairAbsThresholdCp;
+    }
+
+    public static int searchRootDespairMinEvalsAbs() {
+        return searchRootDespairMinEvalsAbs;
+    }
+
+    public static double searchRootHopelessMarginCp() {
+        return searchRootHopelessMarginCp;
+    }
+
+    public static int searchAbsPlyLimitMargin() {
+        return absPlyLimitMargin;
+    }
+
     public static double searchRootFutilityMarginCp() {
         return searchRootFutilityMarginCp;
     }
@@ -1141,6 +1191,16 @@ public final class Tuning {
             searchRootEarlyStopMarginCp = loadDouble(ParamId.SEARCH_ROOT_EARLY_STOP_MARGIN_CP);
             searchRootFutilityMarginCp = loadDouble(ParamId.SEARCH_ROOT_FUTILITY_MARGIN_CP);
             searchRootFutilityLeadCp = loadDouble(ParamId.SEARCH_ROOT_FUTILITY_LEAD_CP);
+            searchRootCaptureValueThresholdCp = loadDouble(ParamId.SEARCH_ROOT_CAPTURE_VALUE_THRESHOLD_CP);
+            searchRootCaptureGainThresholdCp = loadDouble(ParamId.SEARCH_ROOT_CAPTURE_GAIN_THRESHOLD_CP);
+            searchRootRunnerUpMarginCp = loadDouble(ParamId.SEARCH_ROOT_RUNNER_UP_MARGIN_CP);
+            searchRootDespairMarginCp = loadDouble(ParamId.SEARCH_ROOT_DESPAIR_MARGIN_CP);
+            searchRootDespairMinEvals = loadInt(ParamId.SEARCH_ROOT_DESPAIR_MIN_EVALS);
+            searchRootDespairRunnerRatio = loadDouble(ParamId.SEARCH_ROOT_DESPAIR_RUNNER_RATIO);
+            searchRootDespairAbsThresholdCp = loadDouble(ParamId.SEARCH_ROOT_DESPAIR_ABS_THRESHOLD_CP);
+            searchRootDespairMinEvalsAbs = loadInt(ParamId.SEARCH_ROOT_DESPAIR_MIN_EVALS_ABS);
+            searchRootHopelessMarginCp = loadDouble(ParamId.SEARCH_ROOT_HOPELESS_MARGIN_CP);
+            absPlyLimitMargin = loadInt(ParamId.SEARCH_ABS_PLY_LIMIT_MARGIN);
             searchPreferFastMate = loadBoolean(ParamId.SEARCH_PREFER_FAST_MATE);
             searchTbTieBreak = loadBoolean(ParamId.SEARCH_TB_TIE_BREAK);
         }
