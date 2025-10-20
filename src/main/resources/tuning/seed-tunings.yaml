@@ -3,20 +3,20 @@ population:
     evaluation:
       modules:
         materialmodule:
-          midgame: 2.5
-          endgame: 0.9
+          midgame: 1.0
+          endgame: 1.0
         pawnstructuremodule:
-          midgame: 1.2
+          midgame: 1.0
           endgame: 1.0
         activitymodule:
-          midgame: 1.6
-          endgame: 1.2
+          midgame: 1.0
+          endgame: 1.0
         kingsafetymodule:
-          midgame: 1.2
-          endgame: 0.3
+          midgame: 1.0
+          endgame: 1.0
         threatmodule:
-          midgame: 2.2
-          endgame: 3.1
+          midgame: 1.0
+          endgame: 1.0
         learningevaluationmodule:
           midgame: 1.0
           endgame: 1.0
@@ -377,6 +377,6 @@ population:
       learning.layer1.neuron1.weight7: 0.3
       learning.layer1.neuron0.bias: 0.0
       learning.layer1.neuron1.bias: 0.0
-      learning.outputMidgameScale: 512.0
-      learning.outputEndgameScale: 512.0
+      learning.outputMidgameScale: 120.0
+      learning.outputEndgameScale: 80.0
 

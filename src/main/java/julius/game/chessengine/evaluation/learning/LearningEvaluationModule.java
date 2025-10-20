@@ -201,9 +201,6 @@ public final class LearningEvaluationModule implements EvaluationModule, Materia
         }
         midgameScore = (int) Math.round(output[0] * scales[0]);
         endgameScore = (int) Math.round(output[1] * scales[1]);
-        if (LOG.isInfoEnabled()) {
-            LOG.info("Learning evaluation scores: midgame={}, endgame={}", midgameScore, endgameScore);
-        }
     }
 
     private double normalize(double value, double scale) {
