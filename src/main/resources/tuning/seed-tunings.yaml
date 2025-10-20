@@ -10,16 +10,16 @@ population:
           endgame: 1.0
         activitymodule:
           midgame: 1.6
-          endgame: 1.0
+          endgame: 1.1
         developmentmodule:
-          midgame: 1.2
+          midgame: 1.3
           endgame: 0.8
         kingsafetymodule:
           midgame: 1.2
           endgame: 0.3
         threatmodule:
           midgame: 1.8
-          endgame: 3.6
+          endgame: 3.4
     numericParameters:
       evaluation.blendscale: 731
       material.pawnvalue: 118
@@ -95,26 +95,26 @@ population:
       development.queenHangingPenalty: 202
       moveordering.category.tt: 8
       moveordering.category.promotion: 6
-      moveordering.category.capturegood: 5
+      moveordering.category.capturegood: 6
       moveordering.category.captureequal: 4
       moveordering.category.killer0: 3
       moveordering.category.killer1: 2
       moveordering.category.quiet: 1
       moveordering.category.capturebad: 0
-      moveordering.killermovescore: 9526
+      moveordering.killermovescore: 9122
       moveordering.promotionbonus: 1600
       moveordering.killer0bonus: 616
-      moveordering.killer1bonus: 355
-      moveordering.countermovebonus: 540
+      moveordering.killer1bonus: 283
+      moveordering.countermovebonus: 466
       moveordering.capturemvvmultiplier: 19
-      moveordering.captureseemultiplier: 133
+      moveordering.captureseemultiplier: 129
       moveordering.promotionseemultiplier: 21
-      moveordering.castlingbonus: 80
+      moveordering.castlingbonus: 244
       moveordering.captureseeclamp: 583
       moveordering.promotionseeclamp: 342
-      moveordering.capturegoodbonus: 998
-      moveordering.captureequalbonus: 234
-      moveordering.capturebadbonus: -652
+      moveordering.capturegoodbonus: 1178
+      moveordering.captureequalbonus: 258
+      moveordering.capturebadbonus: -697
       moveordering.capturelosingseepenalty: 0
       moveordering.quiethistorymultiplier: 3.0
       moveordering.quiethistorybonus: 1189
@@ -132,12 +132,12 @@ population:
       search.iidReduceDepth: 0
       search.lmrProtectPlyMax: 0
       search.lmrProtectIndexMax: 2
-      search.lmrCapGoodQuiet: 28
+      search.lmrCapGoodQuiet: 26
       search.lmrHistoryBuckets: 4
       search.lmrHistoryWeightSlope: 0.94
       search.lmrScaleDivisor: 3.5
-      search.lmrDepthLogOffset: 7.1
-      search.lmrMoveLogOffset: 8.2
+      search.lmrDepthLogOffset: 6.7
+      search.lmrMoveLogOffset: 7.8
       search.maxCheckExtensionStreak: 0
       search.seePruneNearRootPly: 14
       search.historyReductionMax: 7906
@@ -157,35 +157,35 @@ population:
       search.rootDespairMinEvalsAbs: 8
       search.rootHopelessMarginCp: 98
       search.absPlyLimitMargin: 31
-      search.aspMinSpanCp: 33
+      search.aspMinSpanCp: 34
       search.aspMaxSpanCp: 583
-      search.aspDefaultSpanCp: 152
+      search.aspDefaultSpanCp: 177
       search.aspHistoryBlend: 0.4
       search.aspMomentumStepCp: 5
-      search.aspMomentumCap: 32
-      search.aspFailureRatio: 0.9
+      search.aspMomentumCap: 30
+      search.aspFailureRatio: 0.8
       search.aspBaseOffsetCp: 0
       search.aspSwingWeight: 0.16
       search.aspVolatilityWeight: 0.7
-      search.aspDepthScale: 0.05
+      search.aspDepthScale: 0.04
       search.aspDepthPivot: 3
       search.aspFloorBaseCp: 12
       search.aspFloorVolWeight: 1.5
-      search.aspFloorStreakStepCp: 30
+      search.aspFloorStreakStepCp: 28
       search.aspBumpBaseCp: 13
       search.aspBumpStreakCp: 11
       search.aspBumpDepthCp: 2
-      search.aspFullWindowScale: 1.94
+      search.aspFullWindowScale: 1.98
       search.aspLastSpanScale: 1.9
       search.aspFullWindowMinMultiplier: 2.0
       search.aspBlendBaselineWeight: 0.7
       search.aspBlendCandidateWeight: 0.6
       search.aspMaxRetriesBase: 0
-      search.aspMaxRetriesVolThresholdHigh: 103
+      search.aspMaxRetriesVolThresholdHigh: 99
       search.aspMaxRetriesVolBonusHigh: 7
-      search.aspMaxRetriesVolThresholdMed: 230
+      search.aspMaxRetriesVolThresholdMed: 241
       search.aspMaxRetriesVolBonusMed: 1
-      search.aspMaxRetriesDepthOffset: 16
+      search.aspMaxRetriesDepthOffset: 15
       search.aspMaxRetriesDepthDivisor: 1
       search.aspMaxRetriesMomentumDivisor: 3
       search.aspMaxRetriesMin: 0
