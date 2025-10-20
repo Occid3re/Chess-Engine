@@ -51,12 +51,18 @@ public final class LearningModelStore {
 
     private volatile LearningModel model;
     private volatile Definition definition;
+    private final boolean dynamicOutputScales;
 
     public LearningModelStore() {
-        applyDefinition(buildDefinitionFromParameters());
+        this(buildDefinitionFromParameters(), true);
     }
 
     LearningModelStore(Definition definition) {
+        this(definition, false);
+    }
+
+    private LearningModelStore(Definition definition, boolean dynamicOutputScales) {
+        this.dynamicOutputScales = dynamicOutputScales;
         applyDefinition(Objects.requireNonNull(definition, "definition"));
     }
 
@@ -78,7 +84,10 @@ public final class LearningModelStore {
         lock.readLock().lock();
         try {
             double[] output = local.infer(features);
-            return new InferenceResult(output, local.outputScales());
+            double[] scales = dynamicOutputScales
+                    ? resolveDynamicOutputScales(local.outputScaleFallbacks())
+                    : local.outputScaleFallbacks();
+            return new InferenceResult(output, scales);
         } finally {
             lock.readLock().unlock();
         }
@@ -117,7 +126,11 @@ public final class LearningModelStore {
             layers.add(new LayerDefinition(weights, bias, LAYER_ACTIVATIONS[layerIndex].name()));
             previousWidth = outputWidth;
         }
-        double[] outputScales = resolveOutputScales(previousWidth);
+        double[] defaultScales = new double[previousWidth];
+        for (int i = 0; i < previousWidth; i++) {
+            defaultScales[i] = DEFAULT_OUTPUT_SCALES.length > i ? DEFAULT_OUTPUT_SCALES[i] : 1.0;
+        }
+        double[] outputScales = resolveOutputScales(defaultScales);
         return new Definition(INPUT_SIZE, layers, outputScales);
     }
 
@@ -147,18 +160,21 @@ public final class LearningModelStore {
         return bias;
     }
 
-    private static double[] resolveOutputScales(int outputSize) {
-        double[] scales = new double[outputSize];
-        for (int i = 0; i < outputSize; i++) {
-            double fallback = DEFAULT_OUTPUT_SCALES.length > i ? DEFAULT_OUTPUT_SCALES[i] : 1.0;
+    private static double[] resolveOutputScales(double[] fallback) {
+        double[] scales = new double[fallback.length];
+        for (int i = 0; i < fallback.length; i++) {
             double value = switch (i) {
                 case 0 -> ParameterRegistry.get(ParamId.LEARNING_OUTPUT_MIDGAME_SCALE);
                 case 1 -> ParameterRegistry.get(ParamId.LEARNING_OUTPUT_ENDGAME_SCALE);
-                default -> ParameterRegistry.get(outputScaleKey(i), fallback);
+                default -> ParameterRegistry.get(outputScaleKey(i), fallback[i]);
             };
             scales[i] = value;
         }
         return scales;
+    }
+
+    private static double[] resolveDynamicOutputScales(double[] fallback) {
+        return resolveOutputScales(fallback);
     }
 
     private static String weightKey(int layerIndex, int neuronIndex, int inputIndex) {
@@ -173,7 +189,7 @@ public final class LearningModelStore {
         return "learning.output.scale" + outputIndex;
     }
 
-    private record LearningModel(int inputSize, List<Layer> layers, double[] outputScales) {
+    private record LearningModel(int inputSize, List<Layer> layers, double[] outputScaleFallbacks) {
 
         static LearningModel fromDefinition(Definition definition) {
             Objects.requireNonNull(definition, "definition");
@@ -200,15 +216,17 @@ public final class LearningModelStore {
             return current;
         }
 
-        public double[] outputScales() {
-            return outputScales.clone();
+        public double[] outputScaleFallbacks() {
+            return outputScaleFallbacks.clone();
         }
 
         private static double[] resolveScales(double[] candidate, int expectedLength) {
             double[] resolved;
             if (candidate == null || candidate.length == 0) {
                 resolved = new double[expectedLength];
-                Arrays.fill(resolved, 1.0);
+                for (int i = 0; i < expectedLength; i++) {
+                    resolved[i] = DEFAULT_OUTPUT_SCALES.length > i ? DEFAULT_OUTPUT_SCALES[i] : 1.0;
+                }
             } else {
                 if (candidate.length != expectedLength) {
                     throw new IllegalArgumentException("Output scales length " + candidate.length
