@@ -23,6 +23,7 @@ public final class EvaluationParameterRegistry {
         initialize(ActivityModule.class);
         initialize(KingSafetyModule.class);
         initialize(ThreatModule.class);
+        initialize(julius.game.chessengine.evaluation.learning.LearningEvaluationModule.class);
         initialize(EvaluationPipeline.class);
     }
 
