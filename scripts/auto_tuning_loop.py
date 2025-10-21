@@ -1069,6 +1069,27 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "soft_min": 1.0,
         "soft_max": 16.0,
     },
+    "moveordering.quietlearningweight": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 64.0,
+        "sentinel_probe": 0.08,
+        "sentinels": [0.0],
+    },
+    "moveordering.quietlearningclamp": {
+        "step": 32.0,
+        "soft_min": 0.0,
+        "soft_max": 2048.0,
+        "sentinel_probe": 0.08,
+        "sentinels": [0.0],
+    },
+    "moveordering.quietlearningmaxmoves": {
+        "step": 1.0,
+        "soft_min": 0.0,
+        "soft_max": 32.0,
+        "sentinel_probe": 0.08,
+        "sentinels": [0.0],
+    },
 }
 
 for layer_index, output_count, input_count in ((0, 8, 19), (1, 2, 8)):

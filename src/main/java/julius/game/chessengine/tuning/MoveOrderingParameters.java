@@ -45,7 +45,10 @@ public final class MoveOrderingParameters {
                 Tuning.moveOrderingQuietHistoryBonus(),
                 Tuning.moveOrderingMaxScore(),
                 Tuning.moveOrderingHistoryScale(),
-                Tuning.moveOrderingHistoryDecayDivisor()
+                Tuning.moveOrderingHistoryDecayDivisor(),
+                Tuning.moveOrderingQuietLearningWeight(),
+                Tuning.moveOrderingQuietLearningClamp(),
+                Tuning.moveOrderingQuietLearningMaxMoves()
         );
     }
 
@@ -91,6 +94,9 @@ public final class MoveOrderingParameters {
         defaults.put(ParamId.MOVE_ORDERING_MAX_SCORE.key(), ParamId.MOVE_ORDERING_MAX_SCORE.defaultValue());
         defaults.put(ParamId.MOVE_ORDERING_HISTORY_SCALE.key(), ParamId.MOVE_ORDERING_HISTORY_SCALE.defaultValue());
         defaults.put(ParamId.MOVE_ORDERING_HISTORY_DECAY_DIVISOR.key(), ParamId.MOVE_ORDERING_HISTORY_DECAY_DIVISOR.defaultValue());
+        defaults.put(ParamId.MOVE_ORDERING_QUIET_LEARNING_WEIGHT.key(), ParamId.MOVE_ORDERING_QUIET_LEARNING_WEIGHT.defaultValue());
+        defaults.put(ParamId.MOVE_ORDERING_QUIET_LEARNING_CLAMP.key(), ParamId.MOVE_ORDERING_QUIET_LEARNING_CLAMP.defaultValue());
+        defaults.put(ParamId.MOVE_ORDERING_QUIET_LEARNING_MAX_MOVES.key(), ParamId.MOVE_ORDERING_QUIET_LEARNING_MAX_MOVES.defaultValue());
         return Collections.unmodifiableMap(defaults);
     }
 
@@ -122,7 +128,10 @@ public final class MoveOrderingParameters {
             int quietHistoryBonus,
             int maxScore,
             double historyScale,
-            int historyDecayDivisor
+            int historyDecayDivisor,
+            int quietLearningWeight,
+            int quietLearningClamp,
+            int quietLearningMaxMoves
     ) {
         public Map<String, Number> asMap() {
             Map<String, Number> values = new LinkedHashMap<>();
@@ -154,6 +163,9 @@ public final class MoveOrderingParameters {
             values.put("moveOrdering.maxScore", maxScore);
             values.put("moveOrdering.historyScale", historyScale);
             values.put("moveOrdering.historyDecayDivisor", historyDecayDivisor);
+            values.put("moveOrdering.quietLearningWeight", quietLearningWeight);
+            values.put("moveOrdering.quietLearningClamp", quietLearningClamp);
+            values.put("moveOrdering.quietLearningMaxMoves", quietLearningMaxMoves);
             return Collections.unmodifiableMap(values);
         }
     }

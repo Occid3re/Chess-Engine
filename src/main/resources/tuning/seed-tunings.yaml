@@ -110,6 +110,9 @@ population:
       moveordering.maxscore: 16464490
       moveordering.historyscale: 3.8
       moveordering.historydecaydivisor: 2
+      moveordering.quietlearningweight: 12
+      moveordering.quietlearningclamp: 320
+      moveordering.quietlearningmaxmoves: 8
       search.fpMarginDepth1: 348
       search.fpMarginDepth2: 883
       search.lmpBase: 0

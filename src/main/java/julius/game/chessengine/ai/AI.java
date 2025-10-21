@@ -11,6 +11,7 @@ import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.evaluation.EvaluationContext;
+import julius.game.chessengine.evaluation.learning.LearningEvaluationModule;
 import julius.game.chessengine.helper.KnightHelper;
 import julius.game.chessengine.syzygy.*;
 import julius.game.chessengine.tuning.*;
@@ -219,6 +220,9 @@ public class AI {
                 map.defaultReturnValue(Double.NaN);
                 return map;
             });
+
+    private final ThreadLocal<LearningMoveOrdering> learningMoveOrdering =
+            ThreadLocal.withInitial(LearningMoveOrdering::new);
 
     /**
      * Root-split worker simulations. Each search thread reuses its own clone to avoid
@@ -3501,6 +3505,19 @@ public class AI {
         final double quietHistoryMultiplier = moveOrderingParameters.quietHistoryMultiplier();
         final int quietHistoryBonus = moveOrderingParameters.quietHistoryBonus();
         final int maxScore = Math.max(1, moveOrderingParameters.maxScore());
+        final int quietLearningWeight = moveOrderingParameters.quietLearningWeight();
+        final int quietLearningClamp = Math.max(0, moveOrderingParameters.quietLearningClamp());
+        final int quietLearningMaxMoves = Math.max(0, moveOrderingParameters.quietLearningMaxMoves());
+        final boolean learningEnabled = quietLearningWeight != 0;
+        final LearningMoveOrdering[] learningProbeRef = new LearningMoveOrdering[1];
+        final int[] learningBudgetRef = new int[]{quietLearningMaxMoves};
+        final boolean learningUnlimited = quietLearningMaxMoves <= 0;
+        if (learningEnabled) {
+            LearningMoveOrdering candidateProbe = learningMoveOrdering.get();
+            if (candidateProbe.prepare(simulatorEngine)) {
+                learningProbeRef[0] = candidateProbe;
+            }
+        }
 
         // Hash move (TT)
         TranspositionTableEntry ttEntry = transpositionTable.get(boardHash);
@@ -3577,9 +3594,15 @@ public class AI {
                 }
             } else if (moveInt == k0) {
                 score = killerMoveScore + killer0Bonus;
+                score = applyLearningContribution(score, moveInt, learningEnabled,
+                        learningProbeRef, learningBudgetRef, learningUnlimited,
+                        quietLearningClamp, quietLearningWeight);
                 targetBucket = killer0Bucket;
             } else if (moveInt == k1) {
                 score = killerMoveScore + killer1Bonus;
+                score = applyLearningContribution(score, moveInt, learningEnabled,
+                        learningProbeRef, learningBudgetRef, learningUnlimited,
+                        quietLearningClamp, quietLearningWeight);
                 targetBucket = killer1Bucket;
             } else {
                 final int from = moveInt & 0x3F;
@@ -3603,6 +3626,9 @@ public class AI {
                 if (MoveHelper.isCastlingMove(moveInt)) {
                     score += castlingBonus;
                 }
+                score = applyLearningContribution(score, moveInt, learningEnabled,
+                        learningProbeRef, learningBudgetRef, learningUnlimited,
+                        quietLearningClamp, quietLearningWeight);
                 targetBucket = quietBucket;
             }
 
@@ -4119,6 +4145,134 @@ public class AI {
             globalHeuristics.clearCounter();
         } finally {
             releaseWriteLock(stamp);
+        }
+    }
+
+    private static int applyLearningContribution(int baseScore, int move,
+                                                 boolean learningEnabled,
+                                                 LearningMoveOrdering[] probeRef,
+                                                 int[] budgetRef,
+                                                 boolean learningUnlimited,
+                                                 int clamp,
+                                                 int weight) {
+        if (!learningEnabled) {
+            return baseScore;
+        }
+        LearningMoveOrdering probe = probeRef[0];
+        if (probe == null) {
+            return baseScore;
+        }
+        if (!learningUnlimited && budgetRef[0] <= 0) {
+            return baseScore;
+        }
+        int learningDelta = probe.scoreQuietMove(move);
+        if (!learningUnlimited) {
+            budgetRef[0]--;
+        }
+        if (learningDelta == LearningMoveOrdering.NO_SCORE) {
+            probeRef[0] = null;
+            return baseScore;
+        }
+        if (clamp > 0) {
+            learningDelta = Math.max(-clamp, Math.min(clamp, learningDelta));
+        }
+        long adjusted = (long) learningDelta * (long) weight;
+        long candidateScore = (long) baseScore + adjusted;
+        if (candidateScore > Integer.MAX_VALUE) {
+            return Integer.MAX_VALUE;
+        } else if (candidateScore < Integer.MIN_VALUE) {
+            return Integer.MIN_VALUE;
+        }
+        return (int) candidateScore;
+    }
+
+    private static final class LearningMoveOrdering {
+
+        private static final int NO_SCORE = Integer.MIN_VALUE;
+
+        private final LearningEvaluationModule module = new LearningEvaluationModule();
+        private BitBoard scratchBoard;
+        private EvaluationContext baseContext;
+        private EvaluationContext workContext;
+        private int baselineScore;
+        private boolean baselineWhiteToMove;
+        private final int blendScale = Math.max(1, Tuning.evaluationBlendScale());
+        private boolean ready;
+
+        boolean prepare(Engine engine) {
+            try {
+                BitBoard source = engine.getBitBoard();
+                if (source == null) {
+                    ready = false;
+                    return false;
+                }
+                scratchBoard = new BitBoard(source);
+                GameState gameState = engine.getGameState();
+                GameStateEnum state = (gameState != null) ? gameState.getState() : null;
+                if (baseContext == null) {
+                    baseContext = EvaluationContext.from(scratchBoard, state);
+                    workContext = baseContext.copy();
+                } else {
+                    baseContext.updateFrom(scratchBoard, state);
+                    workContext.updateFrom(scratchBoard, state);
+                }
+                module.initialize(baseContext);
+                baselineScore = blend(baseContext);
+                baselineWhiteToMove = scratchBoard.isWhitesTurn();
+                ready = true;
+                return true;
+            } catch (Exception ignored) {
+                ready = false;
+                return false;
+            }
+        }
+
+        int scoreQuietMove(int move) {
+            if (!ready || scratchBoard == null || workContext == null) {
+                return NO_SCORE;
+            }
+            boolean moved = false;
+            try {
+                scratchBoard.performMove(move);
+                moved = true;
+                workContext.updateFrom(scratchBoard, null);
+                module.markDirty();
+                module.evaluate(workContext);
+                int childScore = blend(workContext);
+                return baselineWhiteToMove ? (childScore - baselineScore) : (baselineScore - childScore);
+            } catch (Exception ignored) {
+                ready = false;
+                return NO_SCORE;
+            } finally {
+                if (moved) {
+                    try {
+                        scratchBoard.undoMove(move);
+                    } catch (Exception undoFailed) {
+                        ready = false;
+                    }
+                    if (workContext != null) {
+                        try {
+                            workContext.updateFrom(scratchBoard, null);
+                        } catch (Exception ignoredUpdate) {
+                            ready = false;
+                        }
+                    }
+                }
+            }
+        }
+
+        private int blend(EvaluationContext ctx) {
+            int phase = (ctx != null) ? ctx.getPhase() : 0;
+            if (phase < 0) {
+                phase = 0;
+            } else if (phase > blendScale) {
+                phase = blendScale;
+            }
+            int midgameWeight = blendScale - phase;
+            int endgameWeight = phase;
+            long total = (long) module.getMidgameScore() * midgameWeight
+                    + (long) module.getEndgameScore() * endgameWeight;
+            return (int) (total / (long) blendScale);
         }
     }
 
