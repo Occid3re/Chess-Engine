@@ -3,20 +3,20 @@ population:
     evaluation:
       modules:
         MaterialModule:
-          midgame: 0.0
-          endgame: 0.0
+          midgame: 0.2
+          endgame: 0.2
         PawnStructureModule:
-          midgame: 0.0
-          endgame: 0.0
+          midgame: 0.2
+          endgame: 0.2
         ActivityModule:
-          midgame: 0.0
-          endgame: 0.0
+          midgame: 0.2
+          endgame: 0.2
         KingSafetyModule:
-          midgame: 0.0
-          endgame: 0.0
+          midgame: 0.2
+          endgame: 0.2
         ThreatModule:
-          midgame: 0.0
-          endgame: 0.0
+          midgame: 0.2
+          endgame: 0.2
         LearningEvaluationModule:
           midgame: 1.0
           endgame: 1.0
@@ -84,35 +84,35 @@ population:
       kingsafety.attackweightqueen: 24
       moveordering.category.tt: 8
       moveordering.category.promotion: 6
-      moveordering.category.capturegood: 6
+      moveordering.category.capturegood: 4
       moveordering.category.captureequal: 4
       moveordering.category.killer0: 3
       moveordering.category.killer1: 2
       moveordering.category.quiet: 1
       moveordering.category.capturebad: 0
-      moveordering.killermovescore: 9122
-      moveordering.promotionbonus: 1598
-      moveordering.killer0bonus: 640
-      moveordering.killer1bonus: 283
-      moveordering.countermovebonus: 466
-      moveordering.capturemvvmultiplier: 19
-      moveordering.captureseemultiplier: 129
-      moveordering.promotionseemultiplier: 21
-      moveordering.castlingbonus: 244
-      moveordering.captureseeclamp: 577
-      moveordering.promotionseeclamp: 339
-      moveordering.capturegoodbonus: 1178
-      moveordering.captureequalbonus: 258
-      moveordering.capturebadbonus: -665
+      moveordering.killermovescore: 9452
+      moveordering.promotionbonus: 1600
+      moveordering.killer0bonus: 435
+      moveordering.killer1bonus: 285
+      moveordering.countermovebonus: 512
+      moveordering.capturemvvmultiplier: 21
+      moveordering.captureseemultiplier: 155
+      moveordering.promotionseemultiplier: 27
+      moveordering.castlingbonus: 49
+      moveordering.captureseeclamp: 632
+      moveordering.promotionseeclamp: 398
+      moveordering.capturegoodbonus: 949
+      moveordering.captureequalbonus: 237
+      moveordering.capturebadbonus: -605
       moveordering.capturelosingseepenalty: 0
-      moveordering.quiethistorymultiplier: 3.0
-      moveordering.quiethistorybonus: 1189
-      moveordering.maxscore: 16464490
+      moveordering.quiethistorymultiplier: 3.5
+      moveordering.quiethistorybonus: 1982
+      moveordering.maxscore: 16777215
       moveordering.historyscale: 3.8
       moveordering.historydecaydivisor: 2
-      moveordering.quietlearningweight: 12
-      moveordering.quietlearningclamp: 320
-      moveordering.quietlearningmaxmoves: 8
+      moveordering.quietlearningweight: 11
+      moveordering.quietlearningclamp: 313
+      moveordering.quietlearningmaxmoves: 6
       search.fpMarginDepth1: 348
       search.fpMarginDepth2: 883
       search.lmpBase: 0
@@ -203,22 +203,22 @@ population:
       search.preferFastMate: 1.0
       search.tbTieBreak: 1.0
       learning.layer0.neuron0.weight0: 0.09
-      learning.layer0.neuron0.weight1: 0.05
+      learning.layer0.neuron0.weight1: 0.06
       learning.layer0.neuron0.weight2: 0.04
       learning.layer0.neuron0.weight3: 0.02
-      learning.layer0.neuron0.weight4: 0.01
+      learning.layer0.neuron0.weight4: 0.02
       learning.layer0.neuron0.weight5: 0.06
       learning.layer0.neuron0.weight6: 0.03
       learning.layer0.neuron0.weight7: 0.01
-      learning.layer0.neuron0.weight8: 0.00
+      learning.layer0.neuron0.weight8: -0.00
       learning.layer0.neuron0.weight9: 0.03
-      learning.layer0.neuron0.weight10: -0.00
+      learning.layer0.neuron0.weight10: -0.01
       learning.layer0.neuron0.weight11: 0.01
       learning.layer0.neuron0.weight12: 0.02
       learning.layer0.neuron0.weight13: 0.01
-      learning.layer0.neuron0.weight14: -0.00
+      learning.layer0.neuron0.weight14: 0.01
       learning.layer0.neuron0.weight15: 0.0
-      learning.layer0.neuron0.weight16: 0.03
+      learning.layer0.neuron0.weight16: 0.04
       learning.layer0.neuron0.weight17: -0.01
       learning.layer0.neuron0.weight18: -0.03
       learning.layer0.neuron1.weight0: 0.01
@@ -226,9 +226,9 @@ population:
       learning.layer0.neuron1.weight2: -0.0
       learning.layer0.neuron1.weight3: 0.03
       learning.layer0.neuron1.weight4: 0.03
-      learning.layer0.neuron1.weight5: 0.01
-      learning.layer0.neuron1.weight6: -0.04
-      learning.layer0.neuron1.weight7: -0.00
+      learning.layer0.neuron1.weight5: 0.02
+      learning.layer0.neuron1.weight6: -0.03
+      learning.layer0.neuron1.weight7: 0.01
       learning.layer0.neuron1.weight8: 0.0
       learning.layer0.neuron1.weight9: 0.05
       learning.layer0.neuron1.weight10: 0.01
@@ -241,60 +241,60 @@ population:
       learning.layer0.neuron1.weight17: -0.02
       learning.layer0.neuron1.weight18: -0.09
       learning.layer0.neuron2.weight0: -0.01
-      learning.layer0.neuron2.weight1: 0.01
-      learning.layer0.neuron2.weight2: 0.03
+      learning.layer0.neuron2.weight1: 0.02
+      learning.layer0.neuron2.weight2: 0.04
       learning.layer0.neuron2.weight3: 0.10
       learning.layer0.neuron2.weight4: 0.07
       learning.layer0.neuron2.weight5: 0.04
       learning.layer0.neuron2.weight6: 0.06
-      learning.layer0.neuron2.weight7: 0.05
-      learning.layer0.neuron2.weight8: 0.09
-      learning.layer0.neuron2.weight9: 0.03
-      learning.layer0.neuron2.weight10: 0.05
+      learning.layer0.neuron2.weight7: 0.06
+      learning.layer0.neuron2.weight8: 0.08
+      learning.layer0.neuron2.weight9: 0.02
+      learning.layer0.neuron2.weight10: 0.06
       learning.layer0.neuron2.weight11: 0.03
       learning.layer0.neuron2.weight12: 0.01
       learning.layer0.neuron2.weight13: 0.0
       learning.layer0.neuron2.weight14: -0.00
       learning.layer0.neuron2.weight15: -0.04
       learning.layer0.neuron2.weight16: -0.02
-      learning.layer0.neuron2.weight17: -0.04
-      learning.layer0.neuron2.weight18: -0.04
+      learning.layer0.neuron2.weight17: -0.03
+      learning.layer0.neuron2.weight18: -0.05
       learning.layer0.neuron3.weight0: 0.0
       learning.layer0.neuron3.weight1: 0.0
       learning.layer0.neuron3.weight2: 0.01
       learning.layer0.neuron3.weight3: 0.06
-      learning.layer0.neuron3.weight4: 0.01
+      learning.layer0.neuron3.weight4: 0.02
       learning.layer0.neuron3.weight5: 0.0
       learning.layer0.neuron3.weight6: 0.06
       learning.layer0.neuron3.weight7: 0.03
-      learning.layer0.neuron3.weight8: 0.04
+      learning.layer0.neuron3.weight8: 0.05
       learning.layer0.neuron3.weight9: 0.02
       learning.layer0.neuron3.weight10: 0.02
       learning.layer0.neuron3.weight11: 0.0
-      learning.layer0.neuron3.weight12: 0.03
+      learning.layer0.neuron3.weight12: 0.04
       learning.layer0.neuron3.weight13: -0.02
       learning.layer0.neuron3.weight14: -0.03
-      learning.layer0.neuron3.weight15: -0.04
+      learning.layer0.neuron3.weight15: -0.03
       learning.layer0.neuron3.weight16: -0.02
       learning.layer0.neuron3.weight17: 0.0
       learning.layer0.neuron3.weight18: 0.01
       learning.layer0.neuron4.weight0: -0.01
       learning.layer0.neuron4.weight1: -0.02
-      learning.layer0.neuron4.weight2: -0.00
+      learning.layer0.neuron4.weight2: 0.00
       learning.layer0.neuron4.weight3: 0.0
-      learning.layer0.neuron4.weight4: 0.01
+      learning.layer0.neuron4.weight4: 0.00
       learning.layer0.neuron4.weight5: -0.03
       learning.layer0.neuron4.weight6: -0.02
       learning.layer0.neuron4.weight7: -0.0
       learning.layer0.neuron4.weight8: 0.03
       learning.layer0.neuron4.weight9: 0.01
-      learning.layer0.neuron4.weight10: 0.02
+      learning.layer0.neuron4.weight10: 0.01
       learning.layer0.neuron4.weight11: 0.05
       learning.layer0.neuron4.weight12: 0.03
       learning.layer0.neuron4.weight13: -0.0
-      learning.layer0.neuron4.weight14: -0.03
+      learning.layer0.neuron4.weight14: -0.04
       learning.layer0.neuron4.weight15: -0.03
-      learning.layer0.neuron4.weight16: -0.03
+      learning.layer0.neuron4.weight16: -0.02
       learning.layer0.neuron4.weight17: -0.01
       learning.layer0.neuron4.weight18: 0.00
       learning.layer0.neuron5.weight0: -0.01
@@ -304,8 +304,8 @@ population:
       learning.layer0.neuron5.weight4: 0.00
       learning.layer0.neuron5.weight5: 0.06
       learning.layer0.neuron5.weight6: 0.02
-      learning.layer0.neuron5.weight7: 0.02
-      learning.layer0.neuron5.weight8: 0.0
+      learning.layer0.neuron5.weight7: 0.03
+      learning.layer0.neuron5.weight8: -0.0
       learning.layer0.neuron5.weight9: -0.01
       learning.layer0.neuron5.weight10: -0.00
       learning.layer0.neuron5.weight11: -0.02
@@ -320,14 +320,14 @@ population:
       learning.layer0.neuron6.weight1: 0.04
       learning.layer0.neuron6.weight2: 0.04
       learning.layer0.neuron6.weight3: 0.03
-      learning.layer0.neuron6.weight4: 0.0
+      learning.layer0.neuron6.weight4: -0.0
       learning.layer0.neuron6.weight5: 0.05
-      learning.layer0.neuron6.weight6: 0.02
+      learning.layer0.neuron6.weight6: 0.03
       learning.layer0.neuron6.weight7: -0.01
       learning.layer0.neuron6.weight8: 0.0
       learning.layer0.neuron6.weight9: 0.01
       learning.layer0.neuron6.weight10: -0.02
-      learning.layer0.neuron6.weight11: 0.00
+      learning.layer0.neuron6.weight11: -0.01
       learning.layer0.neuron6.weight12: 0.00
       learning.layer0.neuron6.weight13: -0.00
       learning.layer0.neuron6.weight14: -0.03
@@ -340,25 +340,25 @@ population:
       learning.layer0.neuron7.weight2: -0.03
       learning.layer0.neuron7.weight3: -0.04
       learning.layer0.neuron7.weight4: -0.03
-      learning.layer0.neuron7.weight5: -0.00
+      learning.layer0.neuron7.weight5: -0.01
       learning.layer0.neuron7.weight6: -0.01
       learning.layer0.neuron7.weight7: 0.00
       learning.layer0.neuron7.weight8: -0.05
-      learning.layer0.neuron7.weight9: -0.01
+      learning.layer0.neuron7.weight9: 0.01
       learning.layer0.neuron7.weight10: -0.05
-      learning.layer0.neuron7.weight11: 0.06
+      learning.layer0.neuron7.weight11: 0.07
       learning.layer0.neuron7.weight12: 0.0
       learning.layer0.neuron7.weight13: 0.04
       learning.layer0.neuron7.weight14: 0.02
-      learning.layer0.neuron7.weight15: 0.05
+      learning.layer0.neuron7.weight15: 0.06
       learning.layer0.neuron7.weight16: 0.04
       learning.layer0.neuron7.weight17: 0.04
       learning.layer0.neuron7.weight18: 0.06
-      learning.layer0.neuron0.bias: 0.02
+      learning.layer0.neuron0.bias: 0.03
       learning.layer0.neuron1.bias: -0.01
       learning.layer0.neuron2.bias: -0.0
-      learning.layer0.neuron3.bias: 0.03
-      learning.layer0.neuron4.bias: 0.00
+      learning.layer0.neuron3.bias: 0.04
+      learning.layer0.neuron4.bias: -0.00
       learning.layer0.neuron5.bias: 0.0
       learning.layer0.neuron6.bias: 0.02
       learning.layer0.neuron7.bias: 0.00
@@ -380,5 +380,5 @@ population:
       learning.layer1.neuron1.weight7: 0.4
       learning.layer1.neuron0.bias: -0.0
       learning.layer1.neuron1.bias: 0.0
-      learning.outputMidgameScale: 73.6
+      learning.outputMidgameScale: 80.9
       learning.outputEndgameScale: 89.3
