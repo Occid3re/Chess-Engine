@@ -11,6 +11,7 @@ import os
 import random
 import shlex
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -650,6 +651,25 @@ def main() -> None:
     parser.add_argument("--noimp-reheat", type=int, default=10)
     parser.add_argument("--reheat-factor", type=float, default=1.7)
 
+    parser.add_argument(
+        "--allow-pattern",
+        type=str,
+        default="",
+        help="Regex over normalized parameter names to ALLOW (case-insensitive).",
+    )
+    parser.add_argument(
+        "--deny-pattern",
+        type=str,
+        default="",
+        help="Regex over normalized parameter names to DENY (case-insensitive).",
+    )
+    parser.add_argument(
+        "--freeze-after",
+        type=int,
+        default=8,
+        help="Freeze parameters after this many non-improving mutations.",
+    )
+
     parser.add_argument("--log-jsonl", type=Path, default=Path("logs/cutechess_tuning.jsonl"))
     parser.add_argument("--iteration-config-dir", type=Path, default=Path("logs/cutechess_configs"))
     parser.add_argument("--build-jar", action="store_true", help="Run mvn package (skip tests) before starting")
@@ -668,6 +688,13 @@ def main() -> None:
     if args.build_jar:
         maybe_build_jar(project_root, args.mvn, args.mvn_extra)
 
+    if args.mut_frac_min <= 0.0 or args.mut_frac_max <= 0.0:
+        raise SystemExit("--mut-frac-min and --mut-frac-max must be positive")
+    if args.mut_frac_min > args.mut_frac_max:
+        raise SystemExit("--mut-frac-min must be <= --mut-frac-max")
+    if args.mut_frac <= 0.0:
+        raise SystemExit("--mut-frac must be positive")
+
     ensure_args(args, project_root)
 
     # If dry-run, just show one baseline command and exit early.
@@ -681,7 +708,23 @@ def main() -> None:
         return
 
     optimizer = SeedTuningOptimizer(args.tuning_path)
-    rng = random.Random(args.seed or int(time.time()))
+
+    if args.allow_pattern:
+        try:
+            optimizer._allow_re = re.compile(args.allow_pattern, re.IGNORECASE)
+        except re.error as exc:
+            print(f"[warn] Invalid --allow-pattern regex: {exc}. Ignoring.", file=sys.stderr)
+    if args.deny_pattern:
+        try:
+            optimizer._deny_re = re.compile(args.deny_pattern, re.IGNORECASE)
+        except re.error as exc:
+            print(f"[warn] Invalid --deny-pattern regex: {exc}. Ignoring.", file=sys.stderr)
+    optimizer._freeze_after = max(1, int(args.freeze_after))
+
+    if args.seed is None:
+        args.seed = time.time_ns() & 0xFFFFFFFF
+    rng = random.Random(args.seed)
+    print(f"RNG seed    : {args.seed}")
 
     base_lines, base_params = optimizer.load()
     best_content = list(base_lines)
@@ -706,9 +749,23 @@ def main() -> None:
     iteration = 0
     no_improve = 0
     temp_boost = 1.0
-    mut_frac_state = args.mut_frac
     mut_frac_floor = args.mut_frac_min
     mut_frac_ceiling = args.mut_frac_max
+    mut_frac_state = max(mut_frac_floor, min(mut_frac_ceiling, args.mut_frac))
+
+    def maybe_reheat(no_improve_count: int) -> None:
+        nonlocal temp_boost
+        if (
+                args.noimp_reheat
+                and args.noimp_reheat > 0
+                and no_improve_count > 0
+                and no_improve_count % args.noimp_reheat == 0
+        ):
+            temp_boost *= args.reheat_factor
+            print(
+                f"(Plateau) Reheating: temp_start ×= {args.reheat_factor:.2f} "
+                f"-> {args.temp_start * temp_boost:.4f}"
+            )
 
     try:
         while True:
@@ -754,7 +811,7 @@ def main() -> None:
                     },
                 )
                 no_improve += 1
-                temp_boost *= args.reheat_factor
+                maybe_reheat(no_improve)
                 continue
 
             print("Candidate:", candidate_result.summary())
@@ -800,9 +857,9 @@ def main() -> None:
                 else:
                     print(f"[keep] Accepted by annealing ({decision.info})")
                     no_improve += 1
-                    temp_boost *= args.reheat_factor
+                    maybe_reheat(no_improve)
                 mut_frac_state = _mut_frac_next(
-                    mut_frac_state,
+                    effective_mut_frac,
                     decision,
                     pseudo_cand,
                     pseudo_best,
@@ -814,9 +871,9 @@ def main() -> None:
                 print(f"[reject] {decision.reason} ({decision.info})")
                 optimizer.write(best_content)
                 no_improve += 1
-                temp_boost *= args.reheat_factor
+                maybe_reheat(no_improve)
                 mut_frac_state = _mut_frac_next(
-                    mut_frac_state,
+                    effective_mut_frac,
                     decision,
                     pseudo_cand,
                     pseudo_best,
@@ -831,6 +888,8 @@ def main() -> None:
                     "ts": timestamp(),
                     "iter": iteration,
                     "decision": dataclasses.asdict(decision),
+                    "seed": args.seed,
+                    "temp_start_effective": temp_start,
                     "candidate": {
                         "wins": candidate_result.wins,
                         "losses": candidate_result.losses,
@@ -854,6 +913,8 @@ def main() -> None:
                         "duration_s": best_result.duration_s,
                     },
                     "mut_frac_state": mut_frac_state,
+                    "mut_frac_used": effective_mut_frac,
+                    "mut_frac_bounds": [mut_frac_floor, mut_frac_ceiling],
                     "no_improve": no_improve,
                     "temp_boost": temp_boost,
                 },
