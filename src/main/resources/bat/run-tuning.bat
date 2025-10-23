@@ -41,14 +41,16 @@ REM ---------------------------------------------------------------------------
 java ^
   "-Dchessengine.syzygy.nativeLibrary=%CHESSENGINE_SYZYGY_NATIVE%" ^
   "-Dchessengine.syzygy.paths=%CHESSENGINE_SYZYGY_PATHS%" ^
+  "-Dchessengine.searchThreads=1" ^
+  "-Dchessengine.lazySmpThreads=1" ^
   "-Dloader.main=julius.game.chessengine.tuning.GeneticTuningMain" ^
   -cp "%JARFILE%" ^
   org.springframework.boot.loader.launch.PropertiesLauncher ^
   --seed "%SEED%" ^
   --generations 1 ^
   --population 16 ^
-  --matches-per-pair 2 ^
-  --move-time 5000 ^
+  --matches-per-pair 10 ^
+  --move-time 100 ^
   --match-threads 20 ^
   --matches "%MATCHES%"
 
