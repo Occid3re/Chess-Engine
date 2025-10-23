@@ -111,6 +111,9 @@ public final class Tuning {
     private static int moveOrderingMaxScore;
     private static double moveOrderingHistoryScale;
     private static int moveOrderingHistoryDecayDivisor;
+    private static int moveOrderingQuietLearningWeight;
+    private static int moveOrderingQuietLearningClamp;
+    private static int moveOrderingQuietLearningMaxMoves;
 
     private static int searchFpMarginDepth1;
     private static int searchFpMarginDepth2;
@@ -593,6 +596,18 @@ public final class Tuning {
         return moveOrderingHistoryDecayDivisor;
     }
 
+    public static int moveOrderingQuietLearningWeight() {
+        return moveOrderingQuietLearningWeight;
+    }
+
+    public static int moveOrderingQuietLearningClamp() {
+        return moveOrderingQuietLearningClamp;
+    }
+
+    public static int moveOrderingQuietLearningMaxMoves() {
+        return moveOrderingQuietLearningMaxMoves;
+    }
+
     public static int searchFpMarginDepth1() {
         return searchFpMarginDepth1;
     }
@@ -1058,6 +1073,9 @@ public final class Tuning {
             moveOrderingMaxScore = loadInt(ParamId.MOVE_ORDERING_MAX_SCORE);
             moveOrderingHistoryScale = loadDouble(ParamId.MOVE_ORDERING_HISTORY_SCALE);
             moveOrderingHistoryDecayDivisor = loadInt(ParamId.MOVE_ORDERING_HISTORY_DECAY_DIVISOR);
+            moveOrderingQuietLearningWeight = loadInt(ParamId.MOVE_ORDERING_QUIET_LEARNING_WEIGHT);
+            moveOrderingQuietLearningClamp = loadInt(ParamId.MOVE_ORDERING_QUIET_LEARNING_CLAMP);
+            moveOrderingQuietLearningMaxMoves = loadInt(ParamId.MOVE_ORDERING_QUIET_LEARNING_MAX_MOVES);
 
             searchFpMarginDepth1 = loadInt(ParamId.SEARCH_FP_MARGIN_DEPTH1);
             searchFpMarginDepth2 = loadInt(ParamId.SEARCH_FP_MARGIN_DEPTH2);
