@@ -98,7 +98,8 @@ public final class EngineTuningWriter {
             Map<String, Object> module = new LinkedHashMap<>();
             module.put("midgame", moduleConfig.midgame());
             module.put("endgame", moduleConfig.endgame());
-            serializedModules.put(name, module);
+            String displayName = tuning.displayNameFor(name);
+            serializedModules.put(displayName, module);
         });
         config.put("modules", serializedModules);
         return config;

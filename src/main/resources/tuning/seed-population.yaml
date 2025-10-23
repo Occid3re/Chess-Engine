@@ -2,22 +2,22 @@ population:
   - name: Savvy-Lion
     evaluation:
       modules:
-        materialmodule:
+        MaterialModule:
           midgame: 1.1798328529276116
           endgame: 0.6165940191277451
-        pawnstructuremodule:
+        PawnStructureModule:
           midgame: 1.0475746406658601
           endgame: 0.7489800580540192
-        learningevaluationmodule:
+        LearningEvaluationModule:
           midgame: 0.4788671287008752
           endgame: 0.9085596673841787
-        activitymodule:
+        ActivityModule:
           midgame: 1.6471300036151355
           endgame: 0.9930344606761264
-        threatmodule:
+        ThreatModule:
           midgame: 0.2809917728159336
           endgame: 2.2798483202592936
-        kingsafetymodule:
+        KingSafetyModule:
           midgame: 0.7438482133246337
           endgame: 0.4995962452655289
     numericParameters:
