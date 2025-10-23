@@ -245,21 +245,47 @@ public final class GeneticOptimizer {
     private static final class FriendlyNameGenerator {
         private static final String UUID_PATTERN = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$";
         private static final String[] ADJECTIVES = {
-                "Agile", "Brilliant", "Cheeky", "Cunning", "Daring", "Electric", "Feisty", "Gleaming",
-                "Hyper", "Inventive", "Jazzy", "Keen", "Lively", "Mischievous", "Nimble", "Oddball",
-                "Playful", "Quirky", "Radiant", "Sassy", "Tenacious", "Unruly", "Vibrant", "Whimsical",
-                "Xenial", "Yearning", "Zesty"
+                "Agile", "Alert", "Ambitious", "Arcane", "Artful", "Astute", "Balanced", "Blazing", "Bold",
+                "Brilliant", "Brisk", "Buoyant", "Clever", "Cool", "Crafty", "Curious", "Cunning", "Daring",
+                "Dazzling", "Defiant", "Determined", "Dynamic", "Electric", "Elegant", "Elusive", "Enigmatic",
+                "Feral", "Feisty", "Fiery", "Focused", "Gallant", "Gentle", "Gifted", "Glorious", "Graceful",
+                "Gritty", "Heroic", "Hyper", "Impetuous", "Ingenious", "Intrepid", "Inventive", "Jazzy",
+                "Joyful", "Keen", "Lively", "Lucid", "Majestic", "Mercurial", "Mighty", "Mischievous", "Nimble",
+                "Nocturnal", "Noble", "Oddball", "Patient", "Persistent", "Playful", "Proud", "Quick", "Quiet",
+                "Quirky", "Radiant", "Rapid", "Rebellious", "Resolute", "Ruthless", "Sassy", "Savvy", "Serene",
+                "Sharp", "Silent", "Slick", "Smart", "Sneaky", "Spirited", "Steady", "Stormy", "Strong",
+                "Tenacious", "Tactical", "Tireless", "Tricky", "Unruly", "Valiant", "Vibrant", "Vigilant",
+                "Vivid", "Wild", "Whimsical", "Wily", "Wise", "Xenial", "Yearning", "Young", "Zealous", "Zesty",
+                "Stoic", "Infernal", "Shrewd", "Unstoppable", "Fearless", "Temporal", "Spectral"
         };
+
         private static final String[] CREATURES = {
-                "Badger", "Basilisk", "Bison", "Dragon", "Falcon", "Fox", "Griffin", "Hedgehog",
-                "Kraken", "Leopard", "Lynx", "Mammoth", "Mongoose", "Octopus", "Otter", "Panther",
-                "Phoenix", "Puffin", "Raccoon", "Seahorse", "Shark", "Sphinx", "Stoat", "Tiger",
-                "Walrus", "Wolf", "Wyvern", "Yak"
+                "Albatross", "Antelope", "Ape", "Badger", "Basilisk", "Bat", "Bear", "Beetle", "Bison",
+                "Boar", "Bull", "Butterfly", "Cat", "Cobra", "Coyote", "Crane", "Crow", "Deer", "Demon",
+                "Dog", "Dolphin", "Dragon", "Eagle", "Elephant", "Falcon", "Ferret", "Fox", "Frog", "Gazelle",
+                "Gecko", "Giraffe", "Golem", "Gorilla", "Griffin", "Hawk", "Hedgehog", "Hound", "Hydra",
+                "Ibis", "Iguana", "Jackal", "Jaguar", "Kangaroo", "Kraken", "Leopard", "Lion", "Lynx",
+                "Mammoth", "Mantis", "Minotaur", "Mole", "Monkey", "Mongoose", "Narwhal", "Nighthawk", "Octopus",
+                "Orca", "Otter", "Owl", "Panther", "Pegasus", "Phoenix", "Piranha", "Puffin", "Python",
+                "Raccoon", "Ram", "Raven", "Rhino", "Salamander", "Scorpion", "Seahorse", "Shark", "Sloth",
+                "Sphinx", "Spider", "Squid", "Stag", "Stoat", "Swan", "Tiger", "Tortoise", "Unicorn",
+                "Viper", "Walrus", "Wolf", "Wolverine", "Wyvern", "Yak", "Yeti", "Zebra", "Zergling",
+                "Basilisk", "Cerberus", "Manticore", "Chimera", "Centaur", "Djinn", "Leviathan", "Hippogriff"
         };
+
         private static final String[] CHESS_TERMS = {
-                "Fork", "Gambit", "Pin", "Battery", "Skewer", "Outpost", "Storm", "Swindle",
-                "Tempo", "Thrust", "Zug", "Bind", "Clamp", "Echo", "Fianchetto", "Flurry",
-                "KingHunt", "Lifeline", "MatingNet", "Midden", "Pressure", "Sac", "Snowplow", "Squeeze"
+                "Attack", "Battery", "Bind", "Blockade", "Blunder", "Break", "Bridge", "Cage", "Capture",
+                "Center", "Chain", "Clamp", "Clearance", "Combination", "Counterplay", "Deflection", "Discovered",
+                "Dominance", "Endgame", "Exchange", "Fianchetto", "File", "Flank", "Flurry", "Fork", "Frontline",
+                "Gambit", "Grip", "Harmony", "Helm", "Initiative", "Interference", "Jail", "KingHunt", "KnightFork",
+                "Lifeline", "Line", "Lockdown", "Luft", "Maneuver", "MatingNet", "MinorityAttack", "Midden",
+                "Opposition", "Outpost", "Overload", "Pincer", "Pin", "PoisonedPawn", "Pressure", "Probe", "Push",
+                "QueenTrap", "Raze", "Recapture", "Relay", "Repetition", "Sac", "Scythe", "Shadow", "Shatter",
+                "Shield", "Simplification", "Skewer", "Smother", "Snowplow", "SpaceGain", "Squeeze", "Storm",
+                "Structure", "Study", "Sunder", "Swindle", "Switch", "Tempo", "Thrust", "Trap", "Transition",
+                "Triangulation", "Tsunami", "Twilight", "Underpromotion", "Undermining", "Vault", "Vector",
+                "Weakness", "Windmill", "Zigzag", "Zug", "Zugzwang", "Zwiebel", "Infiltration", "Counterattack",
+                "Initiation", "Anchor", "Carapace", "Throne", "Formation", "Retreat", "Defence", "TempoGain"
         };
 
         private final Random random;
