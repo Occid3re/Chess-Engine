@@ -1,384 +1,384 @@
 population:
-  - name: Savvy-Lion
+  - name: Patient-Piranha
     evaluation:
       modules:
         MaterialModule:
-          midgame: 1.1798328529276116
-          endgame: 0.6165940191277451
+          midgame: 1.6239995521488393
+          endgame: 0.5834344322800582
         PawnStructureModule:
-          midgame: 1.0475746406658601
-          endgame: 0.7489800580540192
+          midgame: 0.7396533903437057
+          endgame: 0.943198348158863
         LearningEvaluationModule:
-          midgame: 0.4788671287008752
-          endgame: 0.9085596673841787
+          midgame: 0.41342397415460264
+          endgame: 0.6696205714056597
         ActivityModule:
-          midgame: 1.6471300036151355
-          endgame: 0.9930344606761264
+          midgame: 1.2367225064239225
+          endgame: 1.2404378574812003
         ThreatModule:
-          midgame: 0.2809917728159336
-          endgame: 2.2798483202592936
+          midgame: 0.2693849099995479
+          endgame: 1.831130146495635
         KingSafetyModule:
-          midgame: 0.7438482133246337
-          endgame: 0.4995962452655289
+          midgame: 0.5078111566060541
+          endgame: 0.47631157096298876
     numericParameters:
-      search.nulllowmaterialthreshold: 5.235642588681166
-      learning.layer1.neuron0.weight7: -0.25034709555679524
-      threat.pawnthreatknightpenalty: -3.395593690047006
+      search.nulllowmaterialthreshold: 4.163218950212385
+      learning.layer1.neuron0.weight7: -0.19863480887549392
+      threat.pawnthreatknightpenalty: -6.331638096877379
       search.hmpminindex: 0.0
-      search.aspbumpstreakcp: 7.298937068889741
-      activity.endgamecenterqueen: 2.9551599456520385
-      moveordering.captureseemultiplier: 171.53537713682616
-      learning.layer1.neuron0.weight0: 0.6527819475444803
-      pawnstructure.rookhalfopenfilebonus: 33.804420363755824
-      learning.layer0.neuron0.bias: 0.004605675211394753
-      learning.layer1.neuron0.weight2: 0.05429438762672231
+      search.aspbumpstreakcp: 4.116463875047874
+      activity.endgamecenterqueen: 3.5501933879912717
+      moveordering.captureseemultiplier: 199.58202272978838
+      learning.layer1.neuron0.weight0: 1.2405224383258713
+      pawnstructure.rookhalfopenfilebonus: 30.234214537787572
+      learning.layer0.neuron0.bias: 0.00346993126876732
+      learning.layer1.neuron0.weight2: 0.0283379018406283
       moveordering.category.capturebad: 0.0
-      learning.layer1.neuron0.weight1: 0.20649332316838692
-      learning.layer1.neuron0.weight4: -0.08688354864469969
-      search.rootcapturevaluethresholdcp: 242.44459224376996
+      learning.layer1.neuron0.weight1: 0.17479060929773674
+      learning.layer1.neuron0.weight4: -0.07436993383625165
+      search.rootcapturevaluethresholdcp: 332.08173595418845
       learning.layer1.neuron0.weight3: 0.0
-      learning.layer1.neuron0.weight6: 0.2849491928666333
-      learning.layer1.neuron0.weight5: 0.23662736181218794
-      search.aspfloorbasecp: 16.027252588009826
-      search.aspfullwindowminmultiplier: 2.2823932774336746
-      search.lmpmaxdepth: 17.628830078147896
+      learning.layer1.neuron0.weight6: 0.17970242204234158
+      learning.layer1.neuron0.weight5: 0.23855132406877647
+      search.aspfloorbasecp: 14.253812277256037
+      search.aspfullwindowminmultiplier: 2.5397665409819914
+      search.lmpmaxdepth: 20.862907413526177
       search.maxcheckextensionstreak: 0.0
-      search.aspmaxretriesvolbonushigh: 8.639494510032167
-      search.ttmainweight: 5.69143542157657
-      search.nullswingguarddivisor: 263.432269294479
-      learning.layer0.neuron6.weight17: 0.04608765948526507
-      search.nulldepthcap: 2.2893473584978254
+      search.aspmaxretriesvolbonushigh: 8.65373461509991
+      search.ttmainweight: 3.893666504789093
+      search.nullswingguarddivisor: 201.90282800489382
+      learning.layer0.neuron6.weight17: 0.04718860898162239
+      search.nulldepthcap: 2.7254825564328127
       learning.layer0.neuron6.weight18: 0.0
-      activity.midgamemobilitybishop: 14.81248126775064
-      learning.layer0.neuron6.weight15: 0.06750303922319528
-      search.nullswingguardmincp: 119.45598694084202
+      activity.midgamemobilitybishop: 14.641401947035197
+      learning.layer0.neuron6.weight15: 0.08667977134990762
+      search.nullswingguardmincp: 114.64374548791955
       learning.layer0.neuron6.weight16: -0.0
-      learning.layer0.neuron6.weight13: 0.021132453842720576
-      learning.layer0.neuron6.weight14: -0.029974314221531777
-      learning.layer0.neuron6.weight11: -0.022188589602683377
-      learning.layer0.neuron6.weight12: 0.01919543804592006
-      kingsafety.openfilepenalty: -16.816794788425472
-      search.aspblendbaselineweight: 0.7346046234334247
-      learning.layer0.neuron6.weight10: -0.01400619806348344
-      moveordering.category.capturegood: 1.8082502646475958
-      pawnstructure.passedpawnfreepathbonusperrank: 9.078448226311421
-      moveordering.maxscore: 1.0459017428724477E7
-      material.bishoppairbonus: 81.38054658222146
-      search.lmrmovelogoffset: 3.948562446569382
+      learning.layer0.neuron6.weight13: 0.051510154467236995
+      learning.layer0.neuron6.weight14: -0.055198809410369594
+      learning.layer0.neuron6.weight11: -0.016073923474281538
+      learning.layer0.neuron6.weight12: 0.01621607750832496
+      kingsafety.openfilepenalty: -16.63331818186009
+      search.aspblendbaselineweight: 1.3372910072685058
+      learning.layer0.neuron6.weight10: -0.019194144009692212
+      moveordering.category.capturegood: 1.9280428354048127
+      pawnstructure.passedpawnfreepathbonusperrank: 11.198154998305089
+      moveordering.maxscore: 8684044.704263935
+      material.bishoppairbonus: 80.70856482525247
+      search.lmrmovelogoffset: 2.4670303721733418
       activity.endgamemobilityrook: 0.0
-      activity.midgamecenterrook: 2.618522377937372
+      activity.midgamecenterrook: 4.053247523732092
       moveordering.castlingbonus: 0.0
-      moveordering.quietlearningclamp: 1004.346387538651
+      moveordering.quietlearningclamp: 1217.3425029662233
       search.iidreducedepth: 0.0
-      moveordering.killer0bonus: 324.6602146319204
-      learning.layer0.neuron5.weight0: -0.020404651475006298
+      moveordering.killer0bonus: 266.8785726239099
+      learning.layer0.neuron5.weight0: -0.021305003974274817
       learning.layer0.neuron5.weight2: 0.0
-      learning.layer0.neuron5.weight1: 0.00764618664410351
-      learning.layer0.neuron1.weight18: -0.08069663549480036
+      learning.layer0.neuron5.weight1: 0.009448125994046172
+      learning.layer0.neuron1.weight18: -0.10097146211440468
       learning.layer0.neuron5.weight8: -0.0
-      learning.layer0.neuron5.weight7: 0.07014861586200215
-      learning.layer0.neuron1.weight16: -0.006214254849992778
-      learning.layer0.neuron1.weight17: -0.011885755521747622
-      learning.layer0.neuron5.weight9: 0.02664858943160449
+      learning.layer0.neuron5.weight7: 0.06724313552106481
+      learning.layer0.neuron1.weight16: -0.010479688798692837
+      learning.layer0.neuron1.weight17: -0.014628472972255937
+      learning.layer0.neuron5.weight9: 0.03824720860816923
       learning.layer0.neuron1.weight14: -0.0
-      learning.layer0.neuron5.weight4: -0.029908093582649863
-      learning.layer0.neuron1.weight15: 0.04277339896257427
-      learning.layer0.neuron5.weight3: -0.030273134313636825
-      learning.layer0.neuron1.weight12: 0.025755923440421723
-      learning.layer0.neuron5.weight6: 0.06559535633347963
-      learning.layer0.neuron1.weight13: 0.1990605164719942
-      learning.layer0.neuron5.weight5: 0.05733236495496246
+      learning.layer0.neuron5.weight4: -0.033973897675721385
+      learning.layer0.neuron1.weight15: 0.02784236576665631
+      learning.layer0.neuron5.weight3: -0.029026750149366558
+      learning.layer0.neuron1.weight12: 0.03284204495407688
+      learning.layer0.neuron5.weight6: 0.07069447085122853
+      learning.layer0.neuron1.weight13: 0.14639911216057502
+      learning.layer0.neuron5.weight5: 0.0419289630946964
       activity.midgamemobilityking: 0.0
-      learning.layer0.neuron1.weight10: 0.04090143815313996
-      learning.layer0.neuron1.weight11: -0.027373137610796593
-      threat.pawnthreatbishoppenalty: -11.183113633744595
-      search.aspvolatilityweight: 1.5591897221941313
-      search.nulllowmobilitythreshold: 5.448077213417407
-      kingsafety.queenattackedpenalty: -112.54105024086196
-      learning.outputendgamescale: 145.8945261220486
+      learning.layer0.neuron1.weight10: 0.031807302753833824
+      learning.layer0.neuron1.weight11: -0.01617788872471095
+      threat.pawnthreatbishoppenalty: -14.306747267034094
+      search.aspvolatilityweight: 1.1841503489762846
+      search.nulllowmobilitythreshold: 2.7857696184902747
+      kingsafety.queenattackedpenalty: -125.79821089193622
+      learning.outputendgamescale: 131.01396311711156
       search.aspmaxretriesmin: 0.0
-      learning.layer0.neuron2.weight6: 0.0917788176614951
-      learning.layer0.neuron2.weight7: 0.10874530041899881
-      search.aspmaxretriesdepthoffset: 14.66092459714251
-      learning.layer0.neuron2.weight8: 0.026945493589840542
-      learning.layer0.neuron2.weight9: -0.01301522160947268
-      search.nullmobilityweight: 0.05054358205479358
-      search.aspmaxspancp: 437.7660774557731
-      learning.layer0.neuron2.weight0: -0.015048717786957539
-      learning.layer0.neuron2.weight1: 0.0051868880786637055
-      learning.layer0.neuron2.weight2: 0.019902109153477558
-      moveordering.countermovebonus: 1060.6057658283505
-      learning.layer0.neuron2.weight3: 0.08476311173105575
-      learning.layer0.neuron2.weight4: 0.09171081971580097
-      learning.layer0.neuron2.weight5: 0.07664813813136931
-      pawnstructure.islandpenalty: -1.9241028048693147
-      threat.hangingpawnpenalty: -10.476271010887197
+      learning.layer0.neuron2.weight6: 0.08842883624294975
+      learning.layer0.neuron2.weight7: 0.12733098872579346
+      search.aspmaxretriesdepthoffset: 22.26663752417353
+      learning.layer0.neuron2.weight8: 0.021121455060127962
+      learning.layer0.neuron2.weight9: -0.01515834084214503
+      search.nullmobilityweight: 0.09916732451254545
+      search.aspmaxspancp: 275.25776591980355
+      learning.layer0.neuron2.weight0: -0.021491680187388753
+      learning.layer0.neuron2.weight1: 0.0032127517378276156
+      learning.layer0.neuron2.weight2: 0.01770826153022391
+      moveordering.countermovebonus: 1711.968970557007
+      learning.layer0.neuron2.weight3: 0.10977479906065594
+      learning.layer0.neuron2.weight4: 0.05416466605346176
+      learning.layer0.neuron2.weight5: 0.07416413457125605
+      pawnstructure.islandpenalty: -2.4403963604826924
+      threat.hangingpawnpenalty: -11.992502419567721
       learning.layer0.neuron2.weight13: 0.0
-      learning.layer0.neuron2.weight14: 0.10163657297735716
-      learning.layer0.neuron2.weight15: -0.03086599841118446
-      learning.outputmidgamescale: 41.35322674378251
+      learning.layer0.neuron2.weight14: 0.11291682103464598
+      learning.layer0.neuron2.weight15: -0.050121467108048205
+      learning.outputmidgamescale: 53.99396776936705
       learning.layer0.neuron2.weight16: -0.0
-      learning.layer0.neuron2.weight17: 0.006833375682670471
-      learning.layer0.neuron2.weight18: -0.057723899023243715
+      learning.layer0.neuron2.weight17: 0.003948987558670306
+      learning.layer0.neuron2.weight18: -0.041602583363733646
       search.lmpbase: 0.0
       learning.layer0.neuron5.bias: 0.0
-      moveordering.quiethistorymultiplier: 4.479098919865543
-      learning.layer0.neuron2.weight10: 0.06336025421118778
+      moveordering.quiethistorymultiplier: 3.747714241344984
+      learning.layer0.neuron2.weight10: 0.08273447035457804
       moveordering.quietlearningmaxmoves: 0.0
-      learning.layer0.neuron2.weight11: 0.0808704012052219
-      moveordering.quiethistorybonus: 1375.5320866046868
-      search.aspdepthpivot: 3.7020323550210956
+      learning.layer0.neuron2.weight11: 0.08173423027742117
+      moveordering.quiethistorybonus: 1309.9246796287148
+      search.aspdepthpivot: 3.306978470100566
       learning.layer0.neuron2.weight12: 0.0
-      search.lmrdepthlogoffset: 5.214739518365346
-      threat.hangingbishoppenalty: -15.510059126300037
-      learning.layer0.neuron6.bias: 0.0898247369207437
+      search.lmrdepthlogoffset: 4.077061974268733
+      threat.hangingbishoppenalty: -18.340941650203376
+      learning.layer0.neuron6.bias: 0.08421236781047607
       search.lmrprotectindexmax: 0.0
-      search.aspmaxretriesdepthdivisor: 0.7478264734467842
-      activity.endgamecenterking: 6.723704467423012
-      search.qsmaxdeltapawn: 5.579704297819475
-      search.rootdespairmargincp: 727.5676951261161
+      search.aspmaxretriesdepthdivisor: 1.1028062094203732
+      activity.endgamecenterking: 6.114746089230339
+      search.qsmaxdeltapawn: 5.1800455832046906
+      search.rootdespairmargincp: 553.6516286602002
       search.aspbaseoffsetcp: 0.0
       moveordering.quietlearningweight: 0.0
-      search.nullverylowmobilitypenalty: 0.8568371654362088
+      search.nullverylowmobilitypenalty: 0.9183394840589664
       learning.layer1.neuron1.bias: -0.0
-      activity.midgamemobilityqueen: 6.956996772600283
-      search.aspblendcandidateweight: 0.29321253626182087
+      activity.midgamemobilityqueen: 8.532872677655552
+      search.aspblendcandidateweight: 0.4212299677079414
       learning.layer0.neuron4.bias: -0.0
-      search.rootcapturegainthresholdcp: 449.35957510011923
-      kingsafety.attackweightqueen: 33.75455191260699
-      pawnstructure.doubledpawnpenalty: -6.013303396988572
-      search.nullmaterialweight: 1.606041825098085
-      search.rootqueenattackbonuscp: 616.1805461133945
-      moveordering.category.promotion: 6.013117787944815
-      search.rootdespairrunnerratio: 0.17871186822908366
-      search.rootdespairminevals: 3.7731692034411632
-      search.aspminspancp: 44.63566445661204
-      learning.layer1.neuron1.weight7: 0.30073549432579505
-      moveordering.captureequalbonus: 96.56644645238069
-      learning.layer1.neuron1.weight6: -0.078396763546892
-      learning.layer1.neuron1.weight3: 0.07331667187779832
+      search.rootcapturegainthresholdcp: 462.3199480472142
+      kingsafety.attackweightqueen: 41.06382160481325
+      pawnstructure.doubledpawnpenalty: -5.685801724108922
+      search.nullmaterialweight: 1.696571126435555
+      search.rootqueenattackbonuscp: 630.6166971637018
+      moveordering.category.promotion: 3.914918680241847
+      search.rootdespairrunnerratio: 0.23508691041632065
+      search.rootdespairminevals: 5.3816425346344126
+      search.aspminspancp: 45.845068883695184
+      learning.layer1.neuron1.weight7: 0.42189100600178303
+      moveordering.captureequalbonus: 64.48355506544853
+      learning.layer1.neuron1.weight6: -0.11108361398043781
+      learning.layer1.neuron1.weight3: 0.07411499749496285
       learning.layer1.neuron1.weight2: 0.0
       learning.layer1.neuron0.bias: -0.0
-      learning.layer1.neuron1.weight5: -0.21205697787359334
-      learning.layer1.neuron1.weight4: 0.33569193094670097
-      threat.hangingrookpenalty: -92.63909637971268
-      search.nullmobilitycap: 8.140952395493807
-      learning.layer1.neuron1.weight1: -0.08425873254290524
-      moveordering.category.quiet: 0.4455684625707671
-      learning.layer1.neuron1.weight0: -0.25250124544094726
-      pawnstructure.rookopenfilebonus: 32.568240845528
-      search.rootrunnerupmargincp: 107.8418383149289
+      learning.layer1.neuron1.weight5: -0.22077916116682642
+      learning.layer1.neuron1.weight4: 0.325625654486747
+      threat.hangingrookpenalty: -50.345082406988155
+      search.nullmobilitycap: 8.021628420681948
+      learning.layer1.neuron1.weight1: -0.09487909397708769
+      moveordering.category.quiet: 0.2711171509956045
+      learning.layer1.neuron1.weight0: -0.3936079315867022
+      pawnstructure.rookopenfilebonus: 25.31695894311093
+      search.rootrunnerupmargincp: 79.17400782795157
       search.aspmaxretriesbase: 0.0
-      kingsafety.backrankweaknessendgamepenalty: -89.69282107595086
-      search.asplastspanscale: 1.344388194808341
-      learning.layer0.neuron0.weight7: 0.0479547424529048
-      learning.layer0.neuron0.weight6: 0.026395361321807077
-      learning.layer0.neuron0.weight5: 0.012159791338768544
-      learning.layer0.neuron0.weight4: 0.027050897350414955
-      material.rookvalue: 296.8936731115644
+      kingsafety.backrankweaknessendgamepenalty: -53.54185175407304
+      search.asplastspanscale: 1.825100100403676
+      learning.layer0.neuron0.weight7: 0.03608911945369278
+      learning.layer0.neuron0.weight6: 0.02710066615726056
+      learning.layer0.neuron0.weight5: 0.013736016502851296
+      learning.layer0.neuron0.weight4: 0.019816971247694513
+      material.rookvalue: 110.32662229675057
       learning.layer0.neuron0.weight3: -0.0
-      learning.layer0.neuron0.weight2: 0.019782748125395863
-      learning.layer0.neuron0.weight1: 0.01572127793498921
-      search.rootearlystopmargincp: 381.30928350099146
-      learning.layer0.neuron0.weight0: 0.056207083916068455
-      pawnstructure.isolatedpawnpenalty: -7.673839085036152
-      moveordering.promotionbonus: 2319.3094171612697
-      moveordering.capturemvvmultiplier: 57.75786337207584
-      moveordering.capturelosingseepenalty: 0.6388586639779495
-      search.asphistoryblend: 0.35728776909110704
-      learning.layer0.neuron0.weight9: 0.03944799050199676
-      learning.layer0.neuron0.weight8: 0.002491240154474365
-      learning.layer0.neuron5.weight12: -0.06423585043147899
-      material.knightvalue: 156.40925513563877
-      search.roothopelessmargincp: 405.35049665051406
-      learning.layer0.neuron5.weight13: 0.007409989178032907
+      learning.layer0.neuron0.weight2: 0.00762839901217509
+      learning.layer0.neuron0.weight1: 0.02318597552534494
+      search.rootearlystopmargincp: 521.3166958996152
+      learning.layer0.neuron0.weight0: 0.05747173794364657
+      pawnstructure.isolatedpawnpenalty: -7.561588774368032
+      moveordering.promotionbonus: 2490.218974043729
+      moveordering.capturemvvmultiplier: 42.05269319761265
+      moveordering.capturelosingseepenalty: 0.3590268049804684
+      search.asphistoryblend: 0.7197360557537402
+      learning.layer0.neuron0.weight9: 0.03161841118049263
+      learning.layer0.neuron0.weight8: 0.0027130235752102745
+      learning.layer0.neuron5.weight12: -0.1151412214944683
+      material.knightvalue: 155.53457453564528
+      search.roothopelessmargincp: 471.71209463887294
+      learning.layer0.neuron5.weight13: 0.005626002396740034
       learning.layer0.neuron5.weight14: -0.0
-      moveordering.promotionseemultiplier: 37.054126885058835
-      learning.layer0.neuron5.weight15: 0.10022489936232971
-      search.rootfutilityleadcp: 298.4655865446278
-      learning.layer0.neuron5.weight10: 0.042671223603271906
-      learning.layer0.neuron6.weight1: 0.140574888748282
-      learning.layer0.neuron5.weight11: -0.0045083592479099955
-      learning.layer0.neuron6.weight0: 0.1710408485332797
-      search.lmrhistoryweightslope: 1.8769923568972489
-      learning.layer0.neuron5.weight16: -0.006216576890878159
-      learning.layer0.neuron5.weight17: 0.028125197059888966
-      learning.layer0.neuron5.weight18: 0.18455112432310888
-      pawnstructure.ownkingblockspassedpawnpenalty: -66.9700461923318
-      activity.midgamemobilityrook: 14.40556035481966
-      moveordering.category.tt: 4.239202133296665
-      learning.layer0.neuron6.weight3: -0.023054018762605613
+      moveordering.promotionseemultiplier: 32.044461555401256
+      learning.layer0.neuron5.weight15: 0.08354141356139579
+      search.rootfutilityleadcp: 335.4657400331697
+      learning.layer0.neuron5.weight10: 0.022833961351886322
+      learning.layer0.neuron6.weight1: 0.11989693930060835
+      learning.layer0.neuron5.weight11: -0.005436863176863708
+      learning.layer0.neuron6.weight0: 0.14106510858912805
+      search.lmrhistoryweightslope: 1.4205404560910517
+      learning.layer0.neuron5.weight16: -0.015904089374077956
+      learning.layer0.neuron5.weight17: 0.01642282827506159
+      learning.layer0.neuron5.weight18: 0.15624695500392896
+      pawnstructure.ownkingblockspassedpawnpenalty: -46.30282299962542
+      activity.midgamemobilityrook: 14.683905866125595
+      moveordering.category.tt: 2.819525569730966
+      learning.layer0.neuron6.weight3: -0.027320081767328985
       kingsafety.halfopenfilepenalty: 0.0
       learning.layer0.neuron6.weight2: 0.0
-      activity.midgamemobilityknight: 21.160257024843002
-      learning.layer0.neuron6.weight5: 0.04374834771354837
-      search.nullverylowmobilitythreshold: 3.803467206818962
+      activity.midgamemobilityknight: 21.356060157366667
+      learning.layer0.neuron6.weight5: 0.058155226864340485
+      search.nullverylowmobilitythreshold: 5.445394717248427
       learning.layer0.neuron6.weight4: 0.0
-      learning.layer0.neuron6.weight7: -0.03607621173767416
-      learning.layer0.neuron6.weight6: 0.032717797317123855
-      learning.layer0.neuron6.weight9: -0.007726111987036009
-      search.aspmaxretriesmomentumdivisor: 2.245124438866814
+      learning.layer0.neuron6.weight7: -0.06247682513109317
+      learning.layer0.neuron6.weight6: 0.018614846042305875
+      learning.layer0.neuron6.weight9: -0.008232511985390217
+      search.aspmaxretriesmomentumdivisor: 2.212276807407384
       learning.layer0.neuron6.weight8: -0.0
-      activity.endgamemobilityqueen: 0.38843819335838103
-      learning.layer0.neuron3.weight9: 0.07976328175397149
-      pawnstructure.blockedpawnpenalty: -7.655277777997131
-      search.aspfloorvolweight: 0.9734657516612634
+      activity.endgamemobilityqueen: 0.4559845164118133
+      learning.layer0.neuron3.weight9: 0.051302075082806264
+      pawnstructure.blockedpawnpenalty: -7.458223074832036
+      search.aspfloorvolweight: 1.0224641961919403
       learning.layer0.neuron3.weight5: -0.0
-      search.absplylimitmargin: 31.882163021578833
-      learning.layer0.neuron3.weight6: 0.06584098876721642
-      learning.layer0.neuron3.weight7: 0.026806898491382018
-      learning.layer0.neuron3.weight8: 0.042126250532600266
+      search.absplylimitmargin: 42.950983101153156
+      learning.layer0.neuron3.weight6: 0.054315488817707626
+      learning.layer0.neuron3.weight7: 0.02507593862862146
+      learning.layer0.neuron3.weight8: 0.05096667115628132
       learning.layer0.neuron3.weight1: 0.0
-      search.preferfastmate: 1.9882642224071374
-      learning.layer0.neuron3.weight2: 0.014344366001494562
-      learning.layer0.neuron0.weight10: -0.028631602009992842
-      learning.layer0.neuron3.weight3: 0.13095983665362862
+      search.preferfastmate: 1.9230547679542693
+      learning.layer0.neuron3.weight2: 0.011000761330815028
+      learning.layer0.neuron0.weight10: -0.015582335269902506
+      learning.layer0.neuron3.weight3: 0.11121338096453436
       learning.layer0.neuron3.weight4: -0.0
       learning.layer0.neuron3.weight0: 0.0
-      learning.layer0.neuron0.weight16: 0.08260273422732901
-      learning.layer0.neuron1.bias: -0.08148459630551827
-      search.lmpperdepth: 28.186875494687694
+      learning.layer0.neuron0.weight16: 0.06944205550540873
+      learning.layer0.neuron1.bias: -0.11859369797678543
+      search.lmpperdepth: 31.924008119729613
       learning.layer0.neuron0.weight15: 0.0
-      search.aspfloorstreakstepcp: 11.41421337986542
-      learning.layer0.neuron0.weight18: -0.0287602474136641
+      search.aspfloorstreakstepcp: 13.884098686971807
+      learning.layer0.neuron0.weight18: -0.028341799712472866
       learning.layer0.neuron0.weight17: -0.0
-      learning.layer0.neuron0.weight12: 0.012558015686474338
+      learning.layer0.neuron0.weight12: 0.015758085888051193
       learning.layer0.neuron0.weight11: 0.0
-      learning.layer0.neuron0.weight14: 0.07363709702800249
+      learning.layer0.neuron0.weight14: 0.08939210358283418
       learning.layer0.neuron0.weight13: -0.0
-      search.lmrhistorybuckets: 2.916970213658239
-      kingsafety.attackweightbishop: 14.484112213487958
-      search.nullbasereduction: 5.426956822230674
-      kingsafety.attackweightpawn: 7.7938647468894064
-      search.rootdespairminevalsabs: 5.02503794675594
-      activity.endgamecenterknight: 7.117719534306396
-      learning.layer0.neuron3.bias: 0.06556360364699172
-      activity.endgamecenterrook: 1.4987403631772944
+      search.lmrhistorybuckets: 1.4925017984817148
+      kingsafety.attackweightbishop: 23.92386425923795
+      search.nullbasereduction: 4.6406131693500585
+      kingsafety.attackweightpawn: 8.028974685430493
+      search.rootdespairminevalsabs: 4.796365718984859
+      activity.endgamecenterknight: 9.021567105671302
+      learning.layer0.neuron3.bias: 0.08498948880319422
+      activity.endgamecenterrook: 0.8696525594654164
       search.rootstaticblend: 0.0
-      search.aspbumpbasecp: 6.296821635087212
-      pawnstructure.backwardpawnpenalty: -22.058397911520395
-      search.aspmomentumstepcp: 4.882150662671619
-      moveordering.killermovescore: 6974.012452899692
-      search.nulldepthweight: 0.4155568560123971
-      search.lmrscaledivisor: 3.223372114717794
+      search.aspbumpbasecp: 4.758351566434545
+      pawnstructure.backwardpawnpenalty: -15.860761254561963
+      search.aspmomentumstepcp: 3.8907800151322824
+      moveordering.killermovescore: 8979.707212662599
+      search.nulldepthweight: 0.26287469984973677
+      search.lmrscaledivisor: 4.426637713672343
       learning.layer0.neuron3.weight11: 0.0
-      learning.layer0.neuron3.weight10: 0.04555630385099093
-      search.tbtiebreak: 0.7094058353394339
-      learning.layer0.neuron3.weight13: 0.08502920256532122
+      learning.layer0.neuron3.weight10: 0.03931751294535899
+      search.tbtiebreak: 1.199038595754903
+      learning.layer0.neuron3.weight13: 0.08867636380954672
       activity.midgamecenterking: 0.0
-      search.lmrcapgoodquiet: 29.29402197638459
-      learning.layer0.neuron3.weight12: 0.13861457186480622
-      search.nullmaterialcap: 16.084548356467376
-      learning.layer0.neuron3.weight15: -0.10592628231742447
-      moveordering.category.captureequal: 2.1271704824614095
-      learning.layer0.neuron3.weight14: -0.028570408453809835
+      search.lmrcapgoodquiet: 45.80874128041699
+      learning.layer0.neuron3.weight12: 0.1250972281875957
+      search.nullmaterialcap: 9.18593857204443
+      learning.layer0.neuron3.weight15: -0.09108102988133451
+      moveordering.category.captureequal: 0.9320796107050634
+      learning.layer0.neuron3.weight14: -0.021507699129041026
       learning.layer0.neuron3.weight17: -0.0
-      learning.layer0.neuron3.weight16: -0.04430237445659033
-      activity.endgamemobilityking: 1.419885403570744
+      learning.layer0.neuron3.weight16: -0.02828485386256416
+      activity.endgamemobilityking: 2.2255425055283657
       learning.layer0.neuron3.weight18: -0.0
-      moveordering.capturegoodbonus: 977.627577393807
-      search.aspdefaultspancp: 59.5776067902753
-      search.aspswingweight: 0.06884272741014429
-      activity.endgamemobilityknight: 3.309114770703551
-      learning.layer0.neuron4.weight0: 0.04588548588845073
-      learning.layer0.neuron4.weight1: -0.0667525218167421
-      activity.midgamecenterbishop: 2.2124309247483724
-      learning.layer0.neuron4.weight2: -0.016371172107926896
-      kingsafety.attackweightknight: 24.717475033515633
+      moveordering.capturegoodbonus: 828.399505041409
+      search.aspdefaultspancp: 42.14764784045311
+      search.aspswingweight: 0.04182145204579894
+      activity.endgamemobilityknight: 2.6240069157268953
+      learning.layer0.neuron4.weight0: 0.06922822347709072
+      learning.layer0.neuron4.weight1: -0.07098271249764024
+      activity.midgamecenterbishop: 2.903906779914088
+      learning.layer0.neuron4.weight2: -0.011997922178483757
+      kingsafety.attackweightknight: 35.592993940918866
       learning.layer0.neuron4.weight3: 0.0
-      moveordering.captureseeclamp: 518.0888591414744
+      moveordering.captureseeclamp: 355.3094066506705
       learning.layer0.neuron4.weight4: 0.0
-      learning.layer0.neuron4.weight5: -0.03531777934519221
-      learning.layer0.neuron4.weight6: -0.09375313137392695
+      learning.layer0.neuron4.weight5: -0.03168749920177355
+      learning.layer0.neuron4.weight6: -0.05138146487382576
       learning.layer0.neuron4.weight7: -0.0
-      search.aspmaxretriesvolbonusmed: 0.7611582854134923
+      search.aspmaxretriesvolbonusmed: 0.4011485430797678
       search.aspmaxretriesmax: 0.0
-      learning.layer0.neuron4.weight8: 0.032479679759511784
-      learning.layer0.neuron4.weight9: 0.07344111085237356
-      search.historyreductionmax: 5818.7100500955075
-      kingsafety.attackweightrook: 19.011026985193073
-      search.rootfutilitymargincp: 98.1459180043977
-      search.rootdespairabsthresholdcp: 1054.1649824743683
-      search.hmphistorymax: -1.1911306826630752
+      learning.layer0.neuron4.weight8: 0.029322963761314536
+      learning.layer0.neuron4.weight9: 0.06707793910928453
+      search.historyreductionmax: 5910.034228847784
+      kingsafety.attackweightrook: 10.592952979630265
+      search.rootfutilitymargincp: 92.22174858853684
+      search.rootdespairabsthresholdcp: 576.3990560981626
+      search.hmphistorymax: -0.7537048054126866
       search.drawbias: 0.0
-      learning.layer0.neuron1.weight9: 0.36103805062118827
+      learning.layer0.neuron1.weight9: 0.20574025584652547
       learning.layer0.neuron1.weight8: -0.0
-      learning.layer0.neuron1.weight7: 0.02127697984128012
-      search.fpmargindepth1: 34.09743520409733
-      search.fpmargindepth2: 40.40501582388455
-      material.pawnvalue: 48.2233595164968
-      learning.layer0.neuron7.bias: 0.020039737520281854
-      moveordering.capturebadbonus: -708.0452309094921
-      search.seeprunenearrootply: 10.009661831398153
-      moveordering.historydecaydivisor: 1.113700435242254
-      pawnstructure.passedpawnbonus: 29.682583253659583
+      learning.layer0.neuron1.weight7: 0.012407410664007633
+      search.fpmargindepth1: 37.44512892336232
+      search.fpmargindepth2: 49.23755283306383
+      material.pawnvalue: 45.911384893757834
+      learning.layer0.neuron7.bias: 0.017298304119090762
+      moveordering.capturebadbonus: -754.8710804343901
+      search.seeprunenearrootply: 7.271989670778306
+      moveordering.historydecaydivisor: 0.9427136573528849
+      pawnstructure.passedpawnbonus: 19.023473216808014
       search.rootstaticoverridecp: 0.0
       learning.layer0.neuron1.weight2: -0.0
-      learning.layer0.neuron1.weight1: -0.0077263274917211975
-      learning.layer0.neuron1.weight0: 0.04359588650213591
+      learning.layer0.neuron1.weight1: -0.007121620015665419
+      learning.layer0.neuron1.weight0: 0.05008802559575451
       learning.layer0.neuron1.weight6: -0.0
-      activity.midgamecenterknight: 5.017565961938091
-      activity.midgamecenterqueen: 2.401864710852932
-      learning.layer0.neuron1.weight5: 0.03781596186221989
-      learning.layer0.neuron1.weight4: 0.017942406398577672
-      learning.layer0.neuron1.weight3: 0.0660839860914192
-      learning.layer0.neuron7.weight0: -0.0034801805400332705
-      search.aspbumpdepthcp: 4.118158053943196
+      activity.midgamecenterknight: 5.697486055322857
+      activity.midgamecenterqueen: 2.0463671430923287
+      learning.layer0.neuron1.weight5: 0.053751908972790106
+      learning.layer0.neuron1.weight4: 0.017997555310766095
+      learning.layer0.neuron1.weight3: 0.03306639479728018
+      learning.layer0.neuron7.weight0: -0.004106201825823999
+      search.aspbumpdepthcp: 5.187145327981357
       learning.layer0.neuron2.bias: 0.0
-      search.nulllowmaterialpenalty: 0.31092255304208066
-      material.bishopvalue: 649.9637107443609
-      threat.hangingknightpenalty: -14.225144019982325
-      kingsafety.backrankweaknessmidgamepenalty: -35.40699446022612
-      search.aspmomentumcap: 58.2980631743701
-      threat.pawnthreatrookpenalty: -10.015261632530192
-      pawnstructure.connectedpawnbonus: 4.139177165100844
-      moveordering.promotionseeclamp: 273.13139153547723
-      learning.layer0.neuron4.weight18: 0.05465363491167309
-      learning.layer0.neuron7.weight17: 0.03560311400902018
+      search.nulllowmaterialpenalty: 0.253290051414225
+      material.bishopvalue: 873.6823442920224
+      threat.hangingknightpenalty: -23.800065923810244
+      kingsafety.backrankweaknessmidgamepenalty: -31.68951248409145
+      search.aspmomentumcap: 51.40619230643048
+      threat.pawnthreatrookpenalty: -6.816466636988404
+      pawnstructure.connectedpawnbonus: 2.7079230700874106
+      moveordering.promotionseeclamp: 225.89361823386722
+      learning.layer0.neuron4.weight18: 0.06600438194530954
+      learning.layer0.neuron7.weight17: 0.027750687330117405
       learning.layer0.neuron4.weight17: 0.0
       learning.layer0.neuron7.weight16: 0.0
-      learning.layer0.neuron4.weight16: -0.05107050470811748
-      learning.layer0.neuron7.weight15: 0.008755545291637655
-      learning.layer0.neuron4.weight15: -0.040503339596369384
-      learning.layer0.neuron7.weight14: 0.023421130363194945
-      pawnstructure.centerpawnbonus: 27.942039657850625
-      learning.layer0.neuron7.weight13: 0.04482861587283693
+      learning.layer0.neuron4.weight16: -0.036889807068940406
+      learning.layer0.neuron7.weight15: 0.012285236915546484
+      learning.layer0.neuron4.weight15: -0.08441006934481753
+      learning.layer0.neuron7.weight14: 0.015290556220399164
+      pawnstructure.centerpawnbonus: 24.364311467628095
+      learning.layer0.neuron7.weight13: 0.05940462557955406
       learning.layer0.neuron7.weight12: -0.0
-      learning.layer0.neuron7.weight9: 0.07916958349539231
-      learning.layer0.neuron7.weight11: 0.3108682458522835
-      kingsafety.defenderbonus: 15.524128264079042
-      search.ttcaptureweight: 2.6145062842037787
-      learning.layer0.neuron7.weight10: -0.03456711263356843
-      search.fpmaxdepth: 10.703930430318916
+      learning.layer0.neuron7.weight9: 0.07779750792823946
+      learning.layer0.neuron7.weight11: 0.30785131315753395
+      kingsafety.defenderbonus: 12.618734699135828
+      search.ttcaptureweight: 3.58685518779213
+      learning.layer0.neuron7.weight10: -0.03077743740351252
+      search.fpmaxdepth: 14.548688092839825
       learning.layer0.neuron4.weight10: -0.0
-      learning.layer0.neuron7.weight7: -0.052796065116244836
-      threat.pawnthreatqueenpenalty: -17.42956408659287
-      learning.layer0.neuron7.weight8: -0.11872078953686875
-      learning.layer0.neuron7.weight5: -0.017952490646270677
+      learning.layer0.neuron7.weight7: -0.0849583624506098
+      threat.pawnthreatqueenpenalty: -21.904907268830286
+      learning.layer0.neuron7.weight8: -0.10699827312963099
+      learning.layer0.neuron7.weight5: -0.018079876918714547
       activity.endgamemobilitybishop: 0.0
-      learning.layer0.neuron7.weight6: -0.006180199165345647
-      moveordering.category.killer0: 2.785985242303415
-      moveordering.historyscale: 3.6729825283065956
-      learning.layer0.neuron4.weight14: -0.03314466598889058
-      learning.layer0.neuron7.weight3: -0.026663707460653496
-      material.queenvalue: 969.5925890581117
-      moveordering.category.killer1: 1.4263941604784283
-      search.aspmaxretriesvolthresholdmed: 215.42746160079813
+      learning.layer0.neuron7.weight6: -0.005929330253698475
+      moveordering.category.killer0: 3.338301272788539
+      moveordering.historyscale: 4.286391768365043
+      learning.layer0.neuron4.weight14: -0.03071726007937657
+      learning.layer0.neuron7.weight3: -0.02117672486756279
+      material.queenvalue: 1231.147252985748
+      moveordering.category.killer1: 1.4407090678400902
+      search.aspmaxretriesvolthresholdmed: 169.08391466321268
       learning.layer0.neuron4.weight13: -0.0
-      learning.layer0.neuron7.weight4: 0.021855134254476986
-      learning.layer0.neuron4.weight12: 0.02819512628820022
-      learning.layer0.neuron7.weight1: -0.04243569683461516
-      search.aspdepthscale: 0.10318972515519924
-      learning.layer0.neuron4.weight11: 0.041957650835374075
+      learning.layer0.neuron7.weight4: 0.0336384718417011
+      learning.layer0.neuron4.weight12: 0.027446458668927615
+      learning.layer0.neuron7.weight1: -0.050906871242856054
+      search.aspdepthscale: 0.09937877674521016
+      learning.layer0.neuron4.weight11: 0.05468244574726739
       learning.layer0.neuron7.weight2: -0.0
-      learning.layer0.neuron7.weight18: 0.12449045710010369
-      moveordering.killer1bonus: 185.74340939302863
-      kingsafety.missingpawnshieldpenalty: -13.291400028548647
-      activity.endgamecenterbishop: -2.5393860213886894
+      learning.layer0.neuron7.weight18: 0.0803500638326934
+      moveordering.killer1bonus: 192.63435262642818
+      kingsafety.missingpawnshieldpenalty: -18.71970418977432
+      activity.endgamecenterbishop: -2.2922293284991593
       search.lmrprotectplymax: 0.0
-      threat.hangingqueenpenalty: -82.82467956205875
-      search.aspmaxretriesvolthresholdhigh: 122.94131831570591
-      search.aspfullwindowscale: 1.7517591807317185
-      evaluation.blendscale: 575.3059125161737
-      pawnstructure.advancedpawnbonus: 8.805088034549552
-      search.aspfailureratio: 0.4916638950475119
+      threat.hangingqueenpenalty: -74.48611247819197
+      search.aspmaxretriesvolthresholdhigh: 110.92140451178717
+      search.aspfullwindowscale: 2.3895139518340227
+      evaluation.blendscale: 536.3068136476537
+      pawnstructure.advancedpawnbonus: 5.35592334336837
+      search.aspfailureratio: 0.37699074599636023
