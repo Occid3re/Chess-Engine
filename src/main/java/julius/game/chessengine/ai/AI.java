@@ -371,7 +371,7 @@ public class AI {
                 ? new WorkerInstrumentation(this.lazySmpThreads)
                 : null;
 
-        log.info("### SearchThreads = {}, LazySmpThreads = {}", searchThreads, lazySmpThreads);
+        log.debug("### SearchThreads = {}, LazySmpThreads = {}", searchThreads, lazySmpThreads);
 
         this.moveOrderingParameters = MoveOrderingParameters.snapshot();
         this.moveBucketOrder = buildMoveBucketOrder(this.moveOrderingParameters);
