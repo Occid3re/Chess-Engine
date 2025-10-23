@@ -23,6 +23,8 @@ import lombok.extern.log4j.Log4j2;
 @Log4j2
 public final class GeneticOptimizer {
 
+    private static final int STANDINGS_PROGRESS_LOG_INTERVAL = 100;
+
     private final MatchRunner matchRunner;
     private final Random random;
 
@@ -121,6 +123,14 @@ public final class GeneticOptimizer {
                                 String.format(Locale.ROOT, "%.2f", result.blackScore()),
                                 result.finalState(),
                                 result.plies());
+                    }
+                    if (log.isInfoEnabled()
+                            && STANDINGS_PROGRESS_LOG_INTERVAL > 0
+                            && stats.totalMatches() % STANDINGS_PROGRESS_LOG_INTERVAL == 0) {
+                        log.info("Generation {} interim standings after {} matches:\n{}",
+                                generationIndex,
+                                stats.totalMatches(),
+                                stats.formatTable(8));
                     }
                 }
 
