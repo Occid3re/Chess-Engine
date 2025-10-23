@@ -2,22 +2,22 @@ population:
   - name: BlackKingSafetyFocus
     evaluation:
       modules:
-        materialmodule:
+        MaterialModule:
           midgame: 1.0314324365479237
           endgame: 0.8146668764295991
-        pawnstructuremodule:
+        PawnStructureModule:
           midgame: 1.0722065841300916
           endgame: 0.7534380842328654
-        learningevaluationmodule:
+        LearningEvaluationModule:
           midgame: 1.0002747607801374
           endgame: 0.7828844159704904
-        activitymodule:
+        ActivityModule:
           midgame: 1.1128477838456594
           endgame: 0.8784594397828086
-        threatmodule:
+        ThreatModule:
           midgame: 0.8014576935626078
           endgame: 1.6217167466224227
-        kingsafetymodule:
+        KingSafetyModule:
           midgame: 0.8468382695161973
           endgame: 0.5419087610696045
     numericParameters:

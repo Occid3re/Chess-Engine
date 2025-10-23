@@ -11,6 +11,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -120,11 +121,13 @@ public final class EngineTuningLoader {
         if (config == null || config.modules == null || config.modules.isEmpty()) {
             return EvaluationTuning.identity();
         }
-        Map<String, EvaluationTuning.ModuleConfig> modules = config.modules.entrySet().stream()
-                .collect(Collectors.toMap(
-                        entry -> entry.getKey().toLowerCase(Locale.ROOT),
-                        entry -> new EvaluationTuning.ModuleConfig(entry.getValue().midgame, entry.getValue().endgame)
-                ));
+        Map<String, EvaluationTuning.ModuleConfig> modules = new LinkedHashMap<>();
+        config.modules.forEach((name, moduleConfig) -> {
+            if (name == null || name.isBlank() || moduleConfig == null) {
+                return;
+            }
+            modules.put(name, new EvaluationTuning.ModuleConfig(moduleConfig.midgame, moduleConfig.endgame));
+        });
         return EvaluationTuning.of(modules);
     }
 
