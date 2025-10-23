@@ -3,23 +3,23 @@ population:
     evaluation:
       modules:
         MaterialModule:
-          midgame: 1
-          endgame: 1
+          midgame: 1.0
+          endgame: 1.0
         PawnStructureModule:
-          midgame: 1
-          endgame: 1
+          midgame: 1.0
+          endgame: 1.0
         ActivityModule:
-          midgame: 1
-          endgame: 1
+          midgame: 1.0
+          endgame: 1.0
         KingSafetyModule:
-          midgame: 1
-          endgame: 1
+          midgame: 1.0
+          endgame: 1.0
         ThreatModule:
-          midgame: 1
-          endgame: 1
+          midgame: 1.0
+          endgame: 1.0
         LearningEvaluationModule:
-          midgame: 1
-          endgame: 1
+          midgame: 1.0
+          endgame: 1.0
     numericParameters:
       evaluation.blendscale: 765
       material.pawnvalue: 154
