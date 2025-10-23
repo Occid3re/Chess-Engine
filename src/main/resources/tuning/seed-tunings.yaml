@@ -25,14 +25,14 @@ population:
       material.pawnvalue: 154
       material.knightvalue: 287
       material.bishopvalue: 411
-      material.rookvalue: 609
-      material.queenvalue: 1083
+      material.rookvalue: 640
+      material.queenvalue: 1120
       material.bishoppairbonus: 55
-      pawnstructure.centerpawnbonus: 32
+      pawnstructure.centerpawnbonus: 40
       pawnstructure.passedpawnbonus: 47
       pawnstructure.connectedpawnbonus: 9
       pawnstructure.islandpenalty: -6
-      pawnstructure.doubledpawnpenalty: -11
+      pawnstructure.doubledpawnpenalty: -9
       pawnstructure.isolatedpawnpenalty: -6
       pawnstructure.advancedpawnbonus: 9
       pawnstructure.blockedpawnpenalty: -4
@@ -59,7 +59,7 @@ population:
       activity.endgamemobilitybishop: 0
       activity.endgamemobilityrook: 0
       activity.endgamemobilityqueen: 1
-      activity.endgamemobilityking: 2
+      activity.endgamemobilityking: 3
       activity.midgamecenterknight: 4
       activity.midgamecenterbishop: 4
       activity.midgamecenterrook: 3
@@ -74,7 +74,7 @@ population:
       kingsafety.halfopenfilepenalty: 0
       kingsafety.openfilepenalty: -18
       kingsafety.defenderbonus: 13
-      kingsafety.queenattackedpenalty: -76
+      kingsafety.queenattackedpenalty: -72
       kingsafety.backrankweaknessmidgamepenalty: -49
       kingsafety.backrankweaknessendgamepenalty: -40
       kingsafety.attackweightpawn: 9
@@ -93,8 +93,8 @@ population:
       moveordering.killermovescore: 14495
       moveordering.promotionbonus: 1589
       moveordering.killer0bonus: 174
-      moveordering.killer1bonus: 334
-      moveordering.countermovebonus: 624
+      moveordering.killer1bonus: 400
+      moveordering.countermovebonus: 903
       moveordering.capturemvvmultiplier: 31
       moveordering.captureseemultiplier: 186
       moveordering.promotionseemultiplier: 43
@@ -111,10 +111,10 @@ population:
       moveordering.historyscale: 4.0
       moveordering.historydecaydivisor: 2
       moveordering.quietlearningweight: 0
-      moveordering.quietlearningclamp: 608
+      moveordering.quietlearningclamp: 739
       moveordering.quietlearningmaxmoves: 0
       search.fpMarginDepth1: 44
-      search.fpMarginDepth2: 30
+      search.fpMarginDepth2: 35
       search.lmpBase: 0
       search.lmpPerDepth: 20
       search.fpMaxDepth: 14
@@ -124,18 +124,18 @@ population:
       search.iidReduceDepth: 0
       search.lmrProtectPlyMax: 0
       search.lmrProtectIndexMax: 0
-      search.lmrCapGoodQuiet: 44
+      search.lmrCapGoodQuiet: 51
       search.lmrHistoryBuckets: 3
-      search.lmrHistoryWeightSlope: 1.48
+      search.lmrHistoryWeightSlope: 1.50
       search.lmrScaleDivisor: 4.0
       search.lmrDepthLogOffset: 7.3
       search.lmrMoveLogOffset: 8.4
       search.maxCheckExtensionStreak: 0
       search.seePruneNearRootPly: 15
-      search.historyReductionMax: 7434
+      search.historyReductionMax: 8000
       search.rootStaticBlend: 0.0
       search.rootStaticOverrideCp: 0
-      search.rootQueenAttackBonusCp: 567
+      search.rootQueenAttackBonusCp: 722
       search.rootEarlyStopMarginCp: 215
       search.rootFutilityMarginCp: 282
       search.rootFutilityLeadCp: 357
@@ -147,11 +147,11 @@ population:
       search.rootDespairRunnerRatio: 0.5
       search.rootDespairAbsThresholdCp: 820
       search.rootDespairMinEvalsAbs: 6
-      search.rootHopelessMarginCp: 193
+      search.rootHopelessMarginCp: 240
       search.absPlyLimitMargin: 44
       search.aspMinSpanCp: 32
       search.aspMaxSpanCp: 492
-      search.aspDefaultSpanCp: 128
+      search.aspDefaultSpanCp: 103
       search.aspHistoryBlend: 0.3
       search.aspMomentumStepCp: 7
       search.aspMomentumCap: 28
@@ -165,7 +165,7 @@ population:
       search.aspFloorVolWeight: 1.5
       search.aspFloorStreakStepCp: 26
       search.aspBumpBaseCp: 13
-      search.aspBumpStreakCp: 11
+      search.aspBumpStreakCp: 9
       search.aspBumpDepthCp: 2
       search.aspFullWindowScale: 1.88
       search.aspLastSpanScale: 2.0
@@ -182,7 +182,7 @@ population:
       search.aspMaxRetriesMomentumDivisor: 3
       search.aspMaxRetriesMin: 0
       search.aspMaxRetriesMax: 0
-      search.nullBaseReduction: 7.5
+      search.nullBaseReduction: 8.0
       search.nullDepthWeight: 0.7
       search.nullMaterialWeight: 2.00
       search.nullMobilityWeight: 0.14
