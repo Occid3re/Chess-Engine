@@ -252,15 +252,15 @@ public final class GeneticOptimizer {
                 "Gritty", "Heroic", "Hyper", "Impetuous", "Ingenious", "Intrepid", "Inventive", "Jazzy",
                 "Joyful", "Keen", "Lively", "Lucid", "Majestic", "Mercurial", "Mighty", "Mischievous", "Nimble",
                 "Nocturnal", "Noble", "Oddball", "Patient", "Persistent", "Playful", "Proud", "Quick", "Quiet",
-                "Quirky", "Radiant", "Rapid", "Rebellious", "Resolute", "Ruthless", "Sassy", "Savvy", "Serene",
+                "Quirky", "Radiant", "Raging", "Rapid", "Rebellious", "Resolute", "Ruthless", "Sassy", "Savvy", "Serene",
                 "Sharp", "Silent", "Slick", "Smart", "Sneaky", "Spirited", "Steady", "Stormy", "Strong",
                 "Tenacious", "Tactical", "Tireless", "Tricky", "Unruly", "Valiant", "Vibrant", "Vigilant",
                 "Vivid", "Wild", "Whimsical", "Wily", "Wise", "Xenial", "Yearning", "Young", "Zealous", "Zesty",
-                "Stoic", "Infernal", "Shrewd", "Unstoppable", "Fearless", "Temporal", "Spectral"
+                "Stoic", "Infernal", "Shrewd", "Unstoppable", "Fearless", "Temporal", "Spectral", "Unnatural", "Mysterious"
         };
 
         private static final String[] CREATURES = {
-                "Albatross", "Antelope", "Ape", "Badger", "Basilisk", "Bat", "Bear", "Beetle", "Bison",
+                "Albatross", "Alien", "Antelope", "Ape", "Badger", "Basilisk", "Bat", "Bear", "Beetle", "Bison",
                 "Boar", "Bull", "Butterfly", "Cat", "Cobra", "Coyote", "Crane", "Crow", "Deer", "Demon",
                 "Dog", "Dolphin", "Dragon", "Eagle", "Elephant", "Falcon", "Ferret", "Fox", "Frog", "Gazelle",
                 "Gecko", "Giraffe", "Golem", "Gorilla", "Griffin", "Hawk", "Hedgehog", "Hound", "Hydra",
