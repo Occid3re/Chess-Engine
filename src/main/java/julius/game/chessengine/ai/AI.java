@@ -1031,11 +1031,19 @@ public class AI {
     private double resolveScoreDifference(GameState gameState, long boardHash, boolean whiteToMove) {
         Long2DoubleOpenHashMap cache = staticEvalCache.get();
         Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
-        if (tablebase.isPresent() && isExactWdl(tablebase.get())) {
-            double exact = clampTablebaseEval(Score.tablebaseToEvaluation(tablebase.get(), whiteToMove,
-                    gameState.getHalfmoveClock()));
-            cache.put(boardHash, exact);
-            return exact;
+        if (tablebase.isPresent()) {
+            int halfmoveClock = gameState.getHalfmoveClock();
+            long cacheKey = mixBoardHashWithHalfmove(boardHash, halfmoveClock);
+            double cached = cache.get(cacheKey);
+            if (!Double.isNaN(cached)) {
+                return cached;
+            }
+            TablebaseResult result = tablebase.get();
+            double evaluation = isExactWdl(result)
+                    ? clampTablebaseEval(Score.tablebaseToEvaluation(result, whiteToMove, halfmoveClock))
+                    : gameState.getScore().getScoreDifference();
+            cache.put(cacheKey, evaluation);
+            return evaluation;
         }
         double cached = cache.get(boardHash);
         if (!Double.isNaN(cached)) {
@@ -1044,6 +1052,12 @@ public class AI {
         double computed = gameState.getScore().getScoreDifference();
         cache.put(boardHash, computed);
         return computed;
+    }
+
+    private static long mixBoardHashWithHalfmove(long boardHash, int halfmoveClock) {
+        long clock = Integer.toUnsignedLong(halfmoveClock);
+        long rotated = Long.rotateLeft(clock, 32);
+        return boardHash ^ rotated ^ (clock << 1);
     }
 
     protected RootSearchResult searchRootMoves(Engine sim, SearchTask task, int depth, double alpha, double beta, SplittableRandom rng) {
