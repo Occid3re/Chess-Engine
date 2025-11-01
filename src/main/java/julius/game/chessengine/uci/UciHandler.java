@@ -360,9 +360,9 @@ public class UciHandler {
     }
 
     public void stop() {
-        ai.stopCalculation();
         Thread runningThread = searchThread;
         if (runningThread != null) {
+            ai.requestStop();
             if (runningThread != Thread.currentThread()) {
                 if (runningThread.isAlive()) {
                     runningThread.interrupt();
@@ -378,6 +378,8 @@ public class UciHandler {
             if (!runningThread.isAlive() || runningThread == Thread.currentThread()) {
                 searchThread = null;
             }
+        } else {
+            ai.stopCalculation();
         }
     }
 

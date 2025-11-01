@@ -1142,14 +1142,23 @@ public class AI {
         clearHistoryTable();
     }
 
-    public void stopCalculation() {
+    public void requestStop() {
         SearchTask task = activeSearch.get();
+        requestStop(task);
+    }
+
+    private void requestStop(SearchTask task) {
         if (task != null) {
             task.requestStop();
         }
 
         keepCalculating = false;
         calculationRequests.clear();
+    }
+
+    public void stopCalculation() {
+        SearchTask task = activeSearch.get();
+        requestStop(task);
 
         if (task != null) {
             task.awaitCompletion();
