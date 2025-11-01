@@ -1,8 +1,11 @@
 package julius.game.chessengine.tablebase;
 
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.FEN;
+import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.GameStateEnum;
+import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.syzygy.SyzygyProbeResult;
 import julius.game.chessengine.syzygy.SyzygyTablebaseService;
 import julius.game.chessengine.syzygy.SyzygyWdl;
@@ -149,5 +152,70 @@ class ScoreTablebaseIntegrationTest {
         }
 
         assertThat(service.getProbedFens()).containsExactly(fen);
+    }
+
+    @Test
+    void evaluationPipelineStaysAlignedAfterTablebaseBypassEnds() {
+        String initialFen = "6rk/6pP/8/8/8/8/4B3/1N4K1 w - - 0 1";
+        String tablebaseFen = "6Qk/6p1/8/8/8/8/4B3/1N4K1 b - - 0 1";
+
+        BitBoard board = FEN.translateFENtoBitBoard(initialFen);
+
+        SyzygyProbeResult probe = new SyzygyProbeResult(
+                SyzygyWdl.WIN,
+                OptionalInt.of(5),
+                OptionalInt.empty(),
+                Optional.empty());
+        TestSyzygyTablebaseService service = TestSyzygyTablebaseService.fromResponses(Map.of(tablebaseFen, probe));
+
+        try (TablebaseTestSupport.TablebaseServiceRestorer ignored = TablebaseTestSupport.overrideScoreTablebase(service)) {
+            Score score = Score.initializeScore(board);
+            score.refresh(board, GameStateEnum.PLAY);
+
+            assertThat(score.getTablebaseResult()).isEmpty();
+
+            int promotionCapture = findMove(board, "h7", "g8", PieceType.QUEEN);
+            board.performMove(promotionCapture);
+            score.applyMove(board, promotionCapture, GameStateEnum.PLAY);
+
+            TablebaseResult expected = TablebaseResult.from(probe);
+            int expectedCentipawn = Score.tablebaseToCentipawn(expected, board.isWhitesTurn(), board.getHalfmoveClock());
+            assertThat(score.getTablebaseResult()).contains(expected);
+            assertThat(score.getTablebaseCentipawnScore()).hasValue(expectedCentipawn);
+
+            int kingCapture = findMove(board, "h8", "g8", null);
+            board.performMove(kingCapture);
+            score.applyMove(board, kingCapture, GameStateEnum.PLAY);
+
+            assertThat(score.getTablebaseResult()).isEmpty();
+            assertThat(score.getTablebaseCentipawnScore()).isEmpty();
+
+            Score baseline = Score.initializeScore(board);
+            baseline.refresh(board, GameStateEnum.PLAY);
+
+            assertThat(score.getMidgameScore()).isEqualTo(baseline.getMidgameScore());
+            assertThat(score.getEndgameScore()).isEqualTo(baseline.getEndgameScore());
+            assertThat(score.getBlendedScore()).isEqualTo(baseline.getBlendedScore());
+        }
+    }
+
+    private static int findMove(BitBoard board, String from, String to, PieceType promotion) {
+        int fromIndex = MoveHelper.convertStringToIndex(from);
+        int toIndex = MoveHelper.convertStringToIndex(to);
+        IntArrayList moves = board.getAllCurrentPossibleMoves();
+        for (int i = 0; i < moves.size(); i++) {
+            int candidate = moves.getInt(i);
+            if (MoveHelper.deriveFromIndex(candidate) != fromIndex || MoveHelper.deriveToIndex(candidate) != toIndex) {
+                continue;
+            }
+            int promotionBits = MoveHelper.derivePromotionPieceTypeBits(candidate);
+            if (promotion == null && promotionBits == 0) {
+                return candidate;
+            }
+            if (promotion != null && promotionBits == MoveHelper.pieceTypeToInt(promotion)) {
+                return candidate;
+            }
+        }
+        throw new IllegalStateException("Move " + from + to + (promotion != null ? "=" + promotion : "") + " not found");
     }
 }

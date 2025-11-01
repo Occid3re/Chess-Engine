@@ -220,10 +220,8 @@ public class Score {
         }
 
         synchronizePipeline(next);
-        if (!bypass) {
-            MoveContext moveContext = new MoveContext(move, previous, next);
-            evaluationPipeline.applyMove(moveContext);
-        }
+        MoveContext moveContext = new MoveContext(move, previous, next);
+        evaluationPipeline.applyMove(moveContext);
     }
 
     public void undoMove(BitBoard bitBoard, int move, GameStateEnum state) {
@@ -249,10 +247,8 @@ public class Score {
         }
 
         synchronizePipeline(next);
-        if (!bypass) {
-            MoveContext moveContext = new MoveContext(move, previous, next);
-            evaluationPipeline.undoMove(moveContext);
-        }
+        MoveContext moveContext = new MoveContext(move, previous, next);
+        evaluationPipeline.undoMove(moveContext);
     }
 
     private void synchronizePipeline(EvaluationContext context) {
