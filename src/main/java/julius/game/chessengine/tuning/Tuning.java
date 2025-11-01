@@ -58,11 +58,16 @@ public final class Tuning {
     private static int queenAttackedPenalty;
     private static int backrankWeaknessMidgamePenalty;
     private static int backrankWeaknessEndgamePenalty;
+    private static int backrankCoverMidgameBonus;
+    private static int backrankCoverEndgameBonus;
+    private static int backrankAttackPenaltyMidgame;
+    private static int backrankAttackPenaltyEndgame;
     private static int kingSafetyPawnAttackWeight;
     private static int kingSafetyKnightAttackWeight;
     private static int kingSafetyBishopAttackWeight;
     private static int kingSafetyRookAttackWeight;
     private static int kingSafetyQueenAttackWeight;
+    private static int kingSafetyAttackQuadraticScale;
 
     private static int hangingPawnPenalty;
     private static int hangingKnightPenalty;
@@ -371,6 +376,22 @@ public final class Tuning {
         return backrankWeaknessEndgamePenalty;
     }
 
+    public static int backrankCoverMidgameBonus() {
+        return backrankCoverMidgameBonus;
+    }
+
+    public static int backrankCoverEndgameBonus() {
+        return backrankCoverEndgameBonus;
+    }
+
+    public static int backrankAttackPenaltyMidgame() {
+        return backrankAttackPenaltyMidgame;
+    }
+
+    public static int backrankAttackPenaltyEndgame() {
+        return backrankAttackPenaltyEndgame;
+    }
+
     public static int kingSafetyPawnAttackWeight() {
         return kingSafetyPawnAttackWeight;
     }
@@ -389,6 +410,10 @@ public final class Tuning {
 
     public static int kingSafetyQueenAttackWeight() {
         return kingSafetyQueenAttackWeight;
+    }
+
+    public static int kingSafetyAttackQuadraticScale() {
+        return kingSafetyAttackQuadraticScale;
     }
 
     public static int hangingPawnPenalty() {
@@ -1011,6 +1036,10 @@ public final class Tuning {
 
     private static double loadDouble(ParamId id) {
         return applyBounds(ParameterRegistry.get(id), id);
+    }
+
+    private static boolean loadBoolean(ParamId id) {
+        return loadDouble(id) != 0.0;
     }
 
     private static double applyBounds(double value, ParamId id) {

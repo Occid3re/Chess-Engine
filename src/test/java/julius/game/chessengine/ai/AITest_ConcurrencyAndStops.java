@@ -34,11 +34,20 @@ import static org.junit.jupiter.api.Assertions.*;
 @ExtendWith(TestLoggingExtension.class)
 class AITest_ConcurrencyAndStops {
 
+    private static AiTuning singleThreadTuning() {
+        return AiTuning.builder()
+                .searchThreads(1)
+                .lazySmpThreads(1)
+                .rootParallelLimit(24)
+                .hashSizeMb(64)
+                .build();
+    }
+
     @Test
     @DisplayName("Stale best move is discarded without performing it")
     void staleBestMoveIsDropped() throws Exception {
         Engine engine = new Engine();
-        AI ai = new AI(engine, AiTuning.defaults());
+        AI ai = new AI(engine, singleThreadTuning());
 
         IntArrayList moves = engine.getAllLegalMoves();
         int candidate = moves.getInt(0);
@@ -61,7 +70,7 @@ class AITest_ConcurrencyAndStops {
     @DisplayName("stopCalculation interrupts workers and clears queues")
     void stopCalculationResetsState() throws Exception {
         Engine engine = new Engine();
-        AI ai = new AI(engine, AiTuning.defaults());
+        AI ai = new AI(engine, singleThreadTuning());
 
         Method start = AI.class.getDeclaredMethod("startCalculationThread");
         start.setAccessible(true);
@@ -78,8 +87,21 @@ class AITest_ConcurrencyAndStops {
         assertTrue(requests.isEmpty(), "Calculation request queue should be empty after stop");
         assertTrue(jobs.isEmpty(), "Search job queue should be empty after stop");
         assertEquals(-1, TestUtils.readField(ai, "currentBestMove"));
-        assertNull(TestUtils.readField(ai, "calculationThreads"));
-        assertNull(TestUtils.readField(ai, "calculationCoordinator"));
+
+        Thread[] workers = (Thread[]) TestUtils.readField(ai, "calculationThreads");
+        assertNotNull(workers, "Worker threads should remain allocated for reuse");
+        for (Thread worker : workers) {
+            assertNotNull(worker, "Each worker slot should retain a thread instance");
+            assertTrue(worker.isAlive(), () -> "Worker " + worker.getName() + " must stay alive for reuse");
+            Thread.State state = worker.getState();
+            assertTrue(
+                    state == Thread.State.WAITING || state == Thread.State.TIMED_WAITING || state == Thread.State.BLOCKED,
+                    () -> "Worker should be idle after stop, observed state=" + state);
+        }
+
+        Thread coordinator = (Thread) TestUtils.readField(ai, "calculationCoordinator");
+        assertNotNull(coordinator, "Dispatcher thread should still exist for reuse");
+        assertTrue(coordinator.isAlive(), "Dispatcher should remain alive after stop");
     }
 
     @Test
@@ -87,7 +109,7 @@ class AITest_ConcurrencyAndStops {
     @DisplayName("Updating Threads option rebuilds parallel infrastructure")
     void switchingThreadsReconfiguresExecutorAndTables() throws Exception {
         Engine engine = new Engine();
-        AI ai = new AI(engine, AiTuning.defaults());
+        AI ai = new AI(engine, singleThreadTuning());
         ai.setMaxDepth(4);
         ai.setTimeLimit(300);
 
@@ -136,7 +158,7 @@ class AITest_ConcurrencyAndStops {
     @DisplayName("Follower threads skip the heuristics write lock")
     void prepareIterationStateSkipsWriteLockForFollowers() throws Exception {
         Engine engine = new Engine();
-        AI ai = new AI(engine, AiTuning.defaults());
+        AI ai = new AI(engine, singleThreadTuning());
 
         Engine sim = engine.createSimulation();
         SearchTask task = new SearchTask(
@@ -242,7 +264,7 @@ class AITest_ConcurrencyAndStops {
     @DisplayName("Auto-play only executes moves for the configured side")
     void autoplayRespectsSideToMove() throws Exception {
         Engine engine = new Engine();
-        FakeAutoAI ai = new FakeAutoAI(engine, AiTuning.defaults());
+        FakeAutoAI ai = new FakeAutoAI(engine, singleThreadTuning());
 
         IntArrayList moves = engine.getAllLegalMoves();
         int candidate = moves.getInt(0);
@@ -332,9 +354,7 @@ class AITest_ConcurrencyAndStops {
         BarrierExecutor barrierExecutor = new BarrierExecutor(parallelAi.getSearchThreads());
         TestUtils.writeField(parallelAi, "searchPool", barrierExecutor);
 
-        Field rootLimitField = AI.class.getDeclaredField("ROOT_PARALLEL_LIMIT");
-        rootLimitField.setAccessible(true);
-        int rootLimit = rootLimitField.getInt(null);
+        int rootLimit = parallelAi.getRootParallelLimit();
 
         @SuppressWarnings("unchecked")
         ThreadLocal<SearchTask> parallelThreadLocal = (ThreadLocal<SearchTask>) TestUtils.readField(parallelAi, "threadSearchTask");
@@ -413,9 +433,7 @@ class AITest_ConcurrencyAndStops {
         BarrierExecutor barrierExecutor = new BarrierExecutor(ai.getSearchThreads());
         TestUtils.writeField(ai, "searchPool", barrierExecutor);
 
-        Field rootLimitField = AI.class.getDeclaredField("ROOT_PARALLEL_LIMIT");
-        rootLimitField.setAccessible(true);
-        int rootLimit = rootLimitField.getInt(null);
+        int rootLimit = ai.getRootParallelLimit();
 
         @SuppressWarnings("unchecked")
         ThreadLocal<SearchTask> threadLocal = (ThreadLocal<SearchTask>) TestUtils.readField(ai, "threadSearchTask");

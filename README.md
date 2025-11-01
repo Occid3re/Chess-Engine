@@ -110,6 +110,50 @@ example via `file://`). Keep the Spring Boot application running in the
 background: the page automatically connects to `ws://localhost:8080/ws/uci` when
 it is not served by the app itself.
 
+## Runtime flags for single-thread vs. parallel diagnostics
+
+The production engine honours a few JVM system properties that determine how
+many threads participate in the search and whether additional instrumentation is
+enabled. The table below lists the most common combinations.
+
+| Scenario | Command-line flags | Notes |
+|----------|-------------------|-------|
+| **Single-threaded baseline** | `-Dchessengine.searchThreads=1 -Dchessengine.lazySmpThreads=1 -Dchessengine.rootParallelLimit=24 -Dchessengine.tt.mb=64` | Matches the original 3 s depth‑8 reference run. |
+| **Multi-threaded production run** | `-Dchessengine.searchThreads=<N> -Dchessengine.lazySmpThreads=<M> -Dchessengine.rootParallelLimit=<limit> -Dchessengine.tt.mb=<MB>` | Replace `<N>`, `<M>`, and `<limit>` with the desired concurrency. With 16 threads we currently use `N=16`, `M=8`, `limit=72`, `tt=256`. |
+| **Parallel diagnostics (optional)** | add `-Dchessengine.diagnostics.useParallelRoot=true` | Forces `BestMoveSearchTest` to exercise the production root-split path (instead of the sequential diagnostic harness). |
+| **Worker/fanout instrumentation (optional)** | add `-Dchessengine.diagnostics.workerStats=true -Dchessengine.diagnostics.rootFanout=true` | Logs Lazy SMP utilisation and root fanout events to help analyse scaling. |
+| **Fanout cap (optional)** | add `-Dchessengine.rootFanoutRatio=<0.0–1.0>` | Clamps the parallel root fanout to `ratio × searchThreads` (defaults to 1.0). Useful when experimenting with smaller fanout to reduce overhead. |
+
+Example single-thread run:
+
+```bash
+java \
+  -Dchessengine.searchThreads=1 \
+  -Dchessengine.lazySmpThreads=1 \
+  -Dchessengine.rootParallelLimit=24 \
+  -Dchessengine.tt.mb=64 \
+  -jar target/chess-engine-<version>-uci.jar
+```
+
+Example parallel diagnostic run (16/8 threads with instrumentation):
+
+```bash
+java \
+  -Dchessengine.searchThreads=16 \
+  -Dchessengine.lazySmpThreads=8 \
+  -Dchessengine.rootParallelLimit=72 \
+  -Dchessengine.tt.mb=256 \
+  -Dchessengine.diagnostics.useParallelRoot=true \
+  -Dchessengine.diagnostics.workerStats=true \
+  -Dchessengine.diagnostics.rootFanout=true \
+  -Dchessengine.rootFanoutRatio=0.75 \
+  -jar target/chess-engine-<version>-uci.jar
+```
+
+Adjust the ratios and cache sizes to match the hardware available in your
+production environment; the values above correspond to the current multi-thread
+diagnostic runs in `Tasks.md`.
+
 ## Engine tuning and self-play
 
 The engine can now load search and evaluation parameters from an external YAML
@@ -157,3 +201,36 @@ same time when you have spare CPU cores. The tuner defaults to the number of
 available processors so you can fully utilise the machine without additional
 arguments.
 
+## Syzygy Tablebases
+
+The engine understands Syzygy endgame tablebases and uses them to bypass static evaluation
+whenever six or fewer pieces remain on the board. Follow these steps to get the probes running:
+
+1. Download the five- and six-piece archives from a trusted mirror (for example
+   https://tablebase.sesse.net/syzygy/). Keep the `.rtbw` and `.rtbz` files together and extract
+   them to a local directory (e.g. `C:\tb\syzygy`).
+2. Point the engine at the directory via the `chessengine.syzygy.path` system property (use
+   `chessengine.syzygy.paths` when you want to provide several locations separated by the platform
+   path separator). The engine expands directories that merely group tablebases (for example a
+   parent folder containing `3-4-5-wdl/`, `3-4-5-dtz/`, etc.) so you only have to point at the
+   root once.
+   * UCI: `setoption name SyzygyPath value C:\tb\syzygy`
+   * CLI: `java -Dchessengine.syzygy.path=C:\tb\syzygy -jar target/chess-engine-<version>-uci.jar`
+   * Spring Boot: update `application.yaml` (see the example in this repository) or export the
+     `CHESSENGINE_SYZYGY_PATH` environment variable.
+   * Native override: when you do not bundle `JSyzygy` inside the application JAR, set the
+     `chessengine.syzygy.nativeLibrary` system property (or `CHESSENGINE_SYZYGY_NATIVE` environment
+     variable) to the full path of the native library (`JSyzygy.dll`, `libJSyzygy.so`, ...).
+3. Restart the engine so the service warms up the table metadata. When a probe succeeds the console
+   starts emitting `info string tablebase ...` lines (including `dtz` updates), and the search score
+   snaps to the exact WDL converted from the tablebase answer.
+
+For stress tests you can cap the tablebase usage with `-Dchessengine.syzygy.maxPieces=<n>` and adjust
+`-Dchessengine.syzygy.cacheSize=<entries>` to tune the in-process probe cache.
+
+### Credits
+
+This project vendors MIT-licensed code from [Laurens Winkelhagen's syzygy-bridge project](https://github.com/ljgw/syzygy-bridge).
+The Java classes `julius.game.chessengine.syzygy.bridge.SyzygyBridge` and `julius.game.chessengine.syzygy.bridge.SyzygyConstants`,
+along with the JNI shim in `src/main/native`, originate from that repository and are used under the terms of the MIT License.
+Place the corresponding native binaries in `src/main/resources/natives/<platform>/` before packaging the engine.

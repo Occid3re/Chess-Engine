@@ -3,22 +3,16 @@ package julius.game.chessengine.utils;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.engine.GameStateEnum;
-import julius.game.chessengine.evaluation.ActivityModule;
-import julius.game.chessengine.evaluation.EvaluationContext;
-import julius.game.chessengine.evaluation.EvaluationPipeline;
-import julius.game.chessengine.evaluation.EvaluationWeights;
-import julius.game.chessengine.evaluation.KingSafetyModule;
-import julius.game.chessengine.evaluation.MaterialModule;
-import julius.game.chessengine.evaluation.MoveContext;
-import julius.game.chessengine.evaluation.PawnStructureModule;
-import julius.game.chessengine.evaluation.ThreatModule;
+import julius.game.chessengine.evaluation.*;
+import julius.game.chessengine.syzygy.SyzygyProbeResult;
+import julius.game.chessengine.syzygy.SyzygyTablebaseService;
+import julius.game.chessengine.syzygy.SyzygyWdl;
+import julius.game.chessengine.syzygy.TablebaseResult;
 import julius.game.chessengine.tuning.EngineTuningBootstrap;
 import julius.game.chessengine.tuning.MoveOrderingParameters;
 import julius.game.chessengine.tuning.NumericTuningParameters;
 
-import java.util.List;
-import java.util.Objects;
-import java.util.Map;
+import java.util.*;
 
 /**
  * Central entry point for the evaluation pipeline.  The legacy score bookkeeping previously
@@ -30,6 +24,10 @@ public class Score {
 
     private static final ThreadLocal<ScoreFactory> THREAD_FACTORY = new ThreadLocal<>();
     private static volatile ScoreFactory GLOBAL_FACTORY = bitBoard -> new Score(bitBoard, EvaluationWeights.identity());
+    private static volatile SyzygyTablebaseService TABLEBASE_SERVICE;
+
+    private static final int DEFAULT_TABLEBASE_PIECE_LIMIT = 6;
+    private static volatile int tablebasePieceLimit = DEFAULT_TABLEBASE_PIECE_LIMIT;
 
     static {
         EngineTuningBootstrap.ensureDefaultTuning();
@@ -39,6 +37,12 @@ public class Score {
     public static final int CHECK = 50;
     public static final int DRAW = 0;
 
+    private static final int UNSPECIFIED_HALFMOVE_CLOCK = -1;
+    private static final int FIFTY_MOVE_LIMIT = 100; // measured in plies
+    private static final int FIFTY_SENSITIVE_MIN_CP = 75;
+    private static final int FIFTY_SENSITIVE_MAX_CP = CHECKMATE / 8;
+    private static final int FIFTY_SENSITIVE_UNKNOWN_CP = 200;
+
     @JsonIgnore
     private final EvaluationWeights weights;
     private final EvaluationPipeline evaluationPipeline;
@@ -46,6 +50,14 @@ public class Score {
     private EvaluationContext evaluationContext;
     @JsonIgnore
     private EvaluationContext spareEvaluationContext;
+    @JsonIgnore
+    private TablebaseResult tablebaseResult;
+    @JsonIgnore
+    private Integer tablebaseCentipawn;
+    @JsonIgnore
+    private boolean tablebaseBypassesEvaluation;
+    @JsonIgnore
+    private long tablebaseResultBoardHash = Long.MIN_VALUE;
 
     public Score() {
         this(EvaluationWeights.identity());
@@ -85,6 +97,9 @@ public class Score {
             if (other.evaluationPipeline.isInitialized()) {
                 evaluationPipeline.initialize(this.evaluationContext);
             }
+            this.tablebaseResult = other.tablebaseResult;
+            this.tablebaseCentipawn = other.tablebaseCentipawn;
+            this.tablebaseBypassesEvaluation = other.tablebaseBypassesEvaluation;
         }
     }
 
@@ -140,6 +155,25 @@ public class Score {
         GLOBAL_FACTORY = Objects.requireNonNull(factory, "factory");
     }
 
+    public static synchronized void setTablebaseService(SyzygyTablebaseService service) {
+        Objects.requireNonNull(service, "service");
+        TABLEBASE_SERVICE = service;
+        tablebasePieceLimit = normalizePieceLimit(service.getEffectiveMaxPieces());
+    }
+
+    public static synchronized void clearTablebaseService() {
+        TABLEBASE_SERVICE = null;
+        tablebasePieceLimit = DEFAULT_TABLEBASE_PIECE_LIMIT;
+    }
+
+    public static synchronized SyzygyTablebaseService getTablebaseService() {
+        return TABLEBASE_SERVICE;
+    }
+
+    private static int normalizePieceLimit(int limit) {
+        return limit > 0 ? limit : DEFAULT_TABLEBASE_PIECE_LIMIT;
+    }
+
     public void refresh(BitBoard bitBoard, GameStateEnum state) {
         Objects.requireNonNull(bitBoard, "bitBoard");
         if (evaluationContext == null) {
@@ -149,6 +183,8 @@ public class Score {
         }
         EvaluationContext updated = evaluationContext;
 
+        boolean bypass = updateTablebaseState(bitBoard, updated);
+
         if (!evaluationPipeline.isInitialized()) {
             evaluationPipeline.initialize(updated);
         } else {
@@ -156,7 +192,9 @@ public class Score {
         }
 
         // Prime the aggregate totals so subsequent lookups observe the refreshed context immediately.
-        evaluationPipeline.getBlendedScore();
+        if (!bypass) {
+            evaluationPipeline.getBlendedScore();
+        }
     }
 
     public void applyMove(BitBoard bitBoard, int move, GameStateEnum state) {
@@ -171,14 +209,21 @@ public class Score {
         this.evaluationContext = next;
         this.spareEvaluationContext = previous;
 
-        if (next == null || !evaluationPipeline.isInitialized()) {
+        boolean bypass = updateTablebaseState(bitBoard, next);
+
+        if (!evaluationPipeline.isInitialized()) {
             evaluationPipeline.initialize(next);
+            if (!bypass) {
+                evaluationPipeline.getBlendedScore();
+            }
             return;
         }
 
         synchronizePipeline(next);
-        MoveContext moveContext = new MoveContext(move, previous, next);
-        evaluationPipeline.applyMove(moveContext);
+        if (!bypass) {
+            MoveContext moveContext = new MoveContext(move, previous, next);
+            evaluationPipeline.applyMove(moveContext);
+        }
     }
 
     public void undoMove(BitBoard bitBoard, int move, GameStateEnum state) {
@@ -193,14 +238,21 @@ public class Score {
         this.evaluationContext = next;
         this.spareEvaluationContext = previous;
 
-        if (next == null || !evaluationPipeline.isInitialized()) {
+        boolean bypass = updateTablebaseState(bitBoard, next);
+
+        if (!evaluationPipeline.isInitialized()) {
             evaluationPipeline.initialize(next);
+            if (!bypass) {
+                evaluationPipeline.getBlendedScore();
+            }
             return;
         }
 
         synchronizePipeline(next);
-        MoveContext moveContext = new MoveContext(move, previous, next);
-        evaluationPipeline.undoMove(moveContext);
+        if (!bypass) {
+            MoveContext moveContext = new MoveContext(move, previous, next);
+            evaluationPipeline.undoMove(moveContext);
+        }
     }
 
     private void synchronizePipeline(EvaluationContext context) {
@@ -212,6 +264,9 @@ public class Score {
     }
 
     public double getScoreDifference() {
+        if (tablebaseBypassesEvaluation && tablebaseCentipawn != null) {
+            return tablebaseCentipawn / 100.0;
+        }
         if (!evaluationPipeline.isInitialized()) {
             return 0.0;
         }
@@ -219,6 +274,9 @@ public class Score {
     }
 
     public int getMidgameScore() {
+        if (tablebaseBypassesEvaluation && tablebaseCentipawn != null) {
+            return tablebaseCentipawn;
+        }
         if (!evaluationPipeline.isInitialized()) {
             return 0;
         }
@@ -226,6 +284,9 @@ public class Score {
     }
 
     public int getEndgameScore() {
+        if (tablebaseBypassesEvaluation && tablebaseCentipawn != null) {
+            return tablebaseCentipawn;
+        }
         if (!evaluationPipeline.isInitialized()) {
             return 0;
         }
@@ -233,6 +294,9 @@ public class Score {
     }
 
     public int getBlendedScore() {
+        if (tablebaseBypassesEvaluation && tablebaseCentipawn != null) {
+            return tablebaseCentipawn;
+        }
         if (!evaluationPipeline.isInitialized()) {
             return 0;
         }
@@ -259,5 +323,132 @@ public class Score {
     @JsonIgnore
     public EvaluationPipeline getEvaluationPipeline() {
         return evaluationPipeline;
+    }
+
+    public Optional<TablebaseResult> getTablebaseResult() {
+        return Optional.ofNullable(tablebaseResult);
+    }
+
+    public OptionalInt getTablebaseCentipawnScore() {
+        return tablebaseCentipawn != null ? OptionalInt.of(tablebaseCentipawn) : OptionalInt.empty();
+    }
+
+    private boolean updateTablebaseState(BitBoard bitBoard, EvaluationContext context) {
+        SyzygyTablebaseService service = TABLEBASE_SERVICE;
+        if (service == null || context == null) {
+            clearTablebaseState();
+            return false;
+        }
+        int limit = tablebasePieceLimit;
+        long occupancy = context.getAllPieces();
+        if (Long.bitCount(occupancy) > limit) {
+            clearTablebaseState();
+            return false;
+        }
+        Optional<SyzygyProbeResult> probe = service.probe(bitBoard);
+        if (probe.isEmpty()) {
+            clearTablebaseState();
+            return false;
+        }
+        TablebaseResult resolved = TablebaseResult.from(probe.get());
+        this.tablebaseResult = resolved;
+        this.tablebaseCentipawn = computeTablebaseCentipawn(resolved, bitBoard.isWhitesTurn(),
+                context.getHalfmoveClock());
+        this.tablebaseBypassesEvaluation = true;
+        this.tablebaseResultBoardHash = bitBoard.getBoardStateHash();
+        return true;
+    }
+
+    private void clearTablebaseState() {
+        this.tablebaseResult = null;
+        this.tablebaseCentipawn = null;
+        this.tablebaseBypassesEvaluation = false;
+        this.tablebaseResultBoardHash = Long.MIN_VALUE;
+    }
+
+    public static int tablebaseToCentipawn(TablebaseResult result, boolean whiteToMove) {
+        return tablebaseToCentipawn(result, whiteToMove, UNSPECIFIED_HALFMOVE_CLOCK);
+    }
+
+    public static int tablebaseToCentipawn(TablebaseResult result, boolean whiteToMove, int halfmoveClock) {
+        if (result == null) {
+            return DRAW;
+        }
+
+        SyzygyWdl wdl = result.wdl();
+        int wdlScore = wdl.score();
+        if (wdlScore == 0 || wdlScore == Integer.MIN_VALUE) {
+            return DRAW;
+        }
+
+        int magnitude;
+        if (wdl == SyzygyWdl.CURSED_WIN || wdl == SyzygyWdl.BLESSED_LOSS) {
+            magnitude = evaluateFiftyMoveSensitiveMagnitude(result, halfmoveClock);
+            if (magnitude == DRAW) {
+                return DRAW;
+            }
+        } else if (wdl == SyzygyWdl.WIN || wdl == SyzygyWdl.LOSS) {
+            magnitude = CHECKMATE - 1;
+        } else {
+            magnitude = CHECKMATE - 1;
+        }
+
+        int sign = whiteToMove ? Integer.signum(wdlScore) : -Integer.signum(wdlScore);
+        return sign * magnitude;
+    }
+
+    public static double tablebaseToEvaluation(TablebaseResult result, boolean whiteToMove) {
+        return tablebaseToEvaluation(result, whiteToMove, UNSPECIFIED_HALFMOVE_CLOCK);
+    }
+
+    public static double tablebaseToEvaluation(TablebaseResult result, boolean whiteToMove, int halfmoveClock) {
+        return tablebaseToCentipawn(result, whiteToMove, halfmoveClock) / 100.0;
+    }
+
+    private int computeTablebaseCentipawn(TablebaseResult result, boolean whiteToMove, int halfmoveClock) {
+        return tablebaseToCentipawn(result, whiteToMove, halfmoveClock);
+    }
+
+    private static int evaluateFiftyMoveSensitiveMagnitude(TablebaseResult result, int halfmoveClock) {
+        int budget = remainingFiftyMoveBudget(halfmoveClock);
+        if (budget <= 0) {
+            return DRAW;
+        }
+
+        OptionalInt dtzOpt = result.dtz();
+        if (dtzOpt.isEmpty()) {
+            return FIFTY_SENSITIVE_UNKNOWN_CP;
+        }
+
+        int dtz = dtzOpt.getAsInt();
+        if (dtz <= 0) {
+            return FIFTY_SENSITIVE_MAX_CP;
+        }
+
+        if (dtz >= budget) {
+            return FIFTY_SENSITIVE_MIN_CP;
+        }
+
+        int slack = Math.max(0, budget - dtz);
+        double slackRatio = (double) slack / budget;
+
+        double dtmFactor = 0.0;
+        OptionalInt dtmOpt = result.dtm();
+        if (dtmOpt.isPresent()) {
+            int dtm = Math.max(1, dtmOpt.getAsInt());
+            dtmFactor = Math.min(1.0, 6.0 / dtm);
+        }
+
+        double blend = Math.max(slackRatio, dtmFactor);
+        int span = FIFTY_SENSITIVE_MAX_CP - FIFTY_SENSITIVE_MIN_CP;
+        int scaled = FIFTY_SENSITIVE_MIN_CP + (int) Math.round(span * blend);
+        return Math.max(FIFTY_SENSITIVE_MIN_CP, Math.min(FIFTY_SENSITIVE_MAX_CP, scaled));
+    }
+
+    private static int remainingFiftyMoveBudget(int halfmoveClock) {
+        if (halfmoveClock < 0) {
+            return FIFTY_MOVE_LIMIT;
+        }
+        return Math.max(0, FIFTY_MOVE_LIMIT - halfmoveClock);
     }
 }

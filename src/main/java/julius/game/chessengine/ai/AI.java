@@ -1,5 +1,6 @@
 package julius.game.chessengine.ai;
 
+import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap;
 import julius.game.chessengine.ai.time.TimeManager;
@@ -9,6 +10,12 @@ import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
+import julius.game.chessengine.evaluation.EvaluationContext;
+import julius.game.chessengine.syzygy.SyzygyMove;
+import julius.game.chessengine.syzygy.SyzygyProbeResult;
+import julius.game.chessengine.syzygy.SyzygyTablebaseService;
+import julius.game.chessengine.syzygy.SyzygyWdl;
+import julius.game.chessengine.syzygy.TablebaseResult;
 import julius.game.chessengine.tuning.AiTuning;
 import julius.game.chessengine.tuning.AspirationParameters;
 import julius.game.chessengine.tuning.LmrParameters;
@@ -19,7 +26,6 @@ import julius.game.chessengine.tuning.Tuning;
 import julius.game.chessengine.utils.Score;
 import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
-import org.springframework.stereotype.Component;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -36,7 +42,6 @@ import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
 import static julius.game.chessengine.utils.Score.*;
 
 @Log4j2
-@Component
 public class AI {
 
     @Getter
@@ -44,6 +49,8 @@ public class AI {
 
     @Getter
     private final AiTuning tuning;
+
+    private final SyzygyTablebaseService tablebaseService;
 
     /**
      * Number of threads used for searching. Defaults to single-threaded search but
@@ -58,6 +65,15 @@ public class AI {
 
     private Thread calculationCoordinator;
     private Thread[] calculationThreads;
+    private final Object workerLifecycleLock = new Object();
+    private volatile boolean workerShutdown;
+    private static final String WORKER_STATS_PROPERTY = "chessengine.diagnostics.workerStats";
+    private static final String ROOT_FANOUT_PROPERTY = "chessengine.diagnostics.rootFanout";
+    private static final String ROOT_FANOUT_RATIO_PROPERTY = "chessengine.rootFanoutRatio";
+    private final boolean workerStatsEnabled;
+    private final boolean rootFanoutStatsEnabled;
+    private final double rootFanoutRatio;
+    private WorkerInstrumentation workerInstrumentation;
 
     private static final int ABS_PLY_LIMIT_MARGIN = 32;
 
@@ -105,9 +121,6 @@ public class AI {
     /**
      * Limit how many root moves we fan out in parallel to avoid oversubscription.
      */
-    private static final int ROOT_PARALLEL_LIMIT =
-            Integer.getInteger("chessengine.rootParallelLimit", 24);
-
     public static final double EXIT_FLAG = Double.MAX_VALUE;
 
     /**
@@ -128,6 +141,9 @@ public class AI {
     private int captureTranspositionTableCapacity;
 
     private static final int NUM_KILLER_MOVES = 2;
+
+    @Getter
+    private int rootParallelLimit;
 
     /**
      * Global heuristic tables shared across searches. Search threads work with
@@ -199,8 +215,22 @@ public class AI {
     private final ThreadLocal<Deque<Engine>> workerSimulationPool =
             ThreadLocal.withInitial(ArrayDeque::new);
 
+    private record TablebaseHit(double score, int bestMove, TablebaseResult result) {
+    }
+
+    private record TablebaseContinuation(int move, double evaluation, TablebaseResult result,
+                                         boolean zeroingMove) {
+    }
+
+    private record TablebaseInfo(int dtz, int dtm, int whiteWdlSign) {
+        boolean hasDtz() { return dtz >= 0; }
+    }
+
     private static final int LMR_MAX_DEPTH = 64;
     private static final int LMR_MAX_MOVES = MAX_MOVE_LIST_SIZE;
+    private static final double MATE_SCORE_MARGIN = 2048.0;
+    private static final double TB_TIE_EPSILON = 0.01;
+    private static final double TABLEBASE_CLAMP = 2000.0 / 100.0;
 
     private ScheduledExecutorService scheduler;
 
@@ -208,6 +238,13 @@ public class AI {
     private final BlockingQueue<SearchJob> searchJobs = new LinkedBlockingQueue<>();
 
     private record CalculationRequest(long boardHash, boolean stop) {
+        static CalculationRequest work(long boardHash) {
+            return new CalculationRequest(boardHash, false);
+        }
+
+        static CalculationRequest stopSignal() {
+            return new CalculationRequest(0L, true);
+        }
     }
 
     private static final class CalculationQueue extends LinkedBlockingQueue<CalculationRequest> {
@@ -272,18 +309,48 @@ public class AI {
     private long nullMoveCount = 0;
 
     public AI(Engine mainEngine) {
-        this(mainEngine, AiTuning.defaults());
+        this(mainEngine, AiTuning.defaults(), null);
+    }
+
+    public AI(Engine mainEngine, SyzygyTablebaseService tablebaseService) {
+        this(mainEngine, AiTuning.defaults(), tablebaseService);
     }
 
     public AI(Engine mainEngine, AiTuning tuning) {
+        this(mainEngine, tuning, null);
+    }
+
+    public AI(Engine mainEngine, AiTuning tuning, SyzygyTablebaseService tablebaseService) {
         this.mainEngine = Objects.requireNonNull(mainEngine, "mainEngine");
         this.tuning = tuning != null ? tuning : AiTuning.defaults();
+        this.tablebaseService = tablebaseService;
+        if (tablebaseService != null) {
+            Score.setTablebaseService(tablebaseService);
+        }
         this.searchThreads = this.tuning.searchThreads();
         this.lazySmpThreads = Math.max(1, this.tuning.lazySmpThreads());
         this.hashSizeMb = this.tuning.hashSizeMb();
         this.maxDepth = this.tuning.maxDepth();
         this.timeManager = new TimeManager(this.tuning.timeLimitMillis());
         this.useNullMovePruning = this.tuning.nullMovePruning();
+        this.rootParallelLimit = Math.max(1, this.tuning.rootParallelLimit());
+        this.workerStatsEnabled = Boolean.parseBoolean(System.getProperty(WORKER_STATS_PROPERTY, "false"));
+        this.rootFanoutStatsEnabled = Boolean.parseBoolean(System.getProperty(ROOT_FANOUT_PROPERTY, "false"));
+        double ratioCandidate;
+        try {
+            ratioCandidate = Double.parseDouble(System.getProperty(ROOT_FANOUT_RATIO_PROPERTY, "1.0"));
+        } catch (NumberFormatException ex) {
+            ratioCandidate = 1.0d;
+        }
+        if (Double.isNaN(ratioCandidate) || ratioCandidate <= 0d) {
+            ratioCandidate = 1.0d;
+        } else if (ratioCandidate > 1.0d) {
+            ratioCandidate = 1.0d;
+        }
+        this.rootFanoutRatio = ratioCandidate;
+        this.workerInstrumentation = workerStatsEnabled && this.lazySmpThreads > 0
+                ? new WorkerInstrumentation(this.lazySmpThreads)
+                : null;
 
         log.info("### SearchThreads = {}, LazySmpThreads = {}", searchThreads, lazySmpThreads);
 
@@ -379,10 +446,6 @@ public class AI {
         }
         long mainBudget = Math.max(1L, (long) (totalBytes * (ttMainWeight / totalWeight)));
         long captureBudget = Math.max(1L, totalBytes - mainBudget);
-        if (captureBudget <= 0) {
-            captureBudget = 1L;
-            mainBudget = Math.max(1L, totalBytes - captureBudget);
-        }
 
         int mainCapacity = computeTableCapacity(mainBudget, MAIN_TT_ENTRY_BYTES,
                 MIN_MAIN_TT_ENTRIES, MAX_MAIN_TT_ENTRIES);
@@ -607,29 +670,57 @@ public class AI {
 
     private void startCalculationThread() {
         keepCalculating = true;
-
-        if (calculationCoordinator != null && calculationCoordinator.isAlive()) {
-            enqueueCalculationRequestIfNeeded();
-            return;
-        }
-
-        calculationRequests.clear();
-        searchJobs.clear();
-
-        calculationCoordinator = new Thread(this::calculateLine, "Simulator-Dispatcher");
-        calculationCoordinator.setDaemon(true);
-        calculationCoordinator.start();
-
-        calculationThreads = new Thread[lazySmpThreads];
-        for (int i = 0; i < lazySmpThreads; i++) {
-            final int workerIndex = i;
-            Thread worker = new Thread(() -> searchWorkerLoop(workerIndex), "Simulator-" + workerIndex);
-            worker.setDaemon(true);
-            worker.start();
-            calculationThreads[i] = worker;
-        }
-
+        ensureCalculationThreadsRunning();
         enqueueCalculationRequestIfNeeded();
+    }
+
+    private void ensureCalculationThreadsRunning() {
+        synchronized (workerLifecycleLock) {
+            if (workerShutdown) {
+                workerShutdown = false;
+            }
+
+            if (calculationCoordinator == null || !calculationCoordinator.isAlive()) {
+                calculationRequests.clear();
+                searchJobs.clear();
+                calculationCoordinator = createCoordinatorThread();
+                calculationCoordinator.start();
+            }
+
+            if (calculationThreads == null) {
+                calculationThreads = new Thread[lazySmpThreads];
+            } else if (calculationThreads.length < lazySmpThreads) {
+                calculationThreads = Arrays.copyOf(calculationThreads, lazySmpThreads);
+            }
+            if (workerStatsEnabled) {
+                if (workerInstrumentation == null) {
+                    workerInstrumentation = new WorkerInstrumentation(lazySmpThreads);
+                } else {
+                    workerInstrumentation.ensureCapacity(lazySmpThreads);
+                }
+            }
+
+            for (int i = 0; i < lazySmpThreads; i++) {
+                Thread worker = calculationThreads[i];
+                if (worker == null || !worker.isAlive()) {
+                    Thread newWorker = createWorkerThread(i);
+                    newWorker.start();
+                    calculationThreads[i] = newWorker;
+                }
+            }
+        }
+    }
+
+    private Thread createCoordinatorThread() {
+        Thread dispatcher = new Thread(this::calculateLine, "Simulator-Dispatcher");
+        dispatcher.setDaemon(true);
+        return dispatcher;
+    }
+
+    private Thread createWorkerThread(int workerIndex) {
+        Thread worker = new Thread(() -> searchWorkerLoop(workerIndex), "Simulator-" + workerIndex);
+        worker.setDaemon(true);
+        return worker;
     }
 
     private void enqueueCalculationRequestIfNeeded() {
@@ -652,6 +743,11 @@ public class AI {
         }
 
         while (!Thread.currentThread().isInterrupted()) {
+            if (workerShutdown) {
+                break;
+            }
+            WorkerInstrumentation instrumentation = workerStatsEnabled ? workerInstrumentation : null;
+            long idleStart = instrumentation != null ? System.nanoTime() : 0L;
             SearchJob job;
             try {
                 job = searchJobs.take();
@@ -660,7 +756,11 @@ public class AI {
                 break;
             }
 
-            if (job.stop || !keepCalculating) {
+            if (instrumentation != null) {
+                instrumentation.recordIdle(workerIndex, System.nanoTime() - idleStart);
+            }
+
+            if (job.stop || workerShutdown) {
                 break;
             }
 
@@ -669,11 +769,27 @@ public class AI {
                 continue;
             }
 
+            if (!keepCalculating) {
+                task.requestStop();
+                task.workerDone();
+                if (instrumentation != null) {
+                    instrumentation.recordActive(workerIndex, 0L);
+                    instrumentation.incrementJobs(workerIndex);
+                }
+                continue;
+            }
+
+            long activeStart = instrumentation != null ? System.nanoTime() : 0L;
+
             try {
                 simulator.copyFrom(task.getRootSnapshot());
             } catch (RuntimeException e) {
                 log.error("Failed to sync simulation for worker {}", workerIndex, e);
                 task.workerDone();
+                if (instrumentation != null) {
+                    instrumentation.recordActive(workerIndex, System.nanoTime() - activeStart);
+                    instrumentation.incrementJobs(workerIndex);
+                }
                 continue;
             }
 
@@ -687,6 +803,10 @@ public class AI {
             } finally {
                 threadSearchTask.remove();
                 task.workerDone();
+                if (instrumentation != null) {
+                    instrumentation.recordActive(workerIndex, System.nanoTime() - activeStart);
+                    instrumentation.incrementJobs(workerIndex);
+                }
             }
         }
     }
@@ -709,12 +829,13 @@ public class AI {
         long hash = mainEngine.getBoardStateHash();
         currentBoardState = hash;
         calculationRequests.clear();
-        calculationRequests.offer(new CalculationRequest(hash, false));
+        calculationRequests.offer(CalculationRequest.work(hash));
     }
 
     private void iterativeDeepening(SearchTask task, Engine simulatorEngine, SplittableRandom rng) {
         clearStaticEvalCache();
         Double lastIterScore = null;
+        boolean lastIterTablebaseExact = false;
         Heuristics heuristics = threadHeuristics.get();
         AspirationController aspirationController = new AspirationController(aspirationParameters);
 
@@ -728,7 +849,7 @@ public class AI {
             boolean usedFullWindow = false;
             boolean attemptedAspiration = false;
 
-            if (lastIterScore != null && currentDepth >= 3) {
+            if (lastIterScore != null && currentDepth >= 3 && !lastIterTablebaseExact) {
                 attemptedAspiration = true;
                 AspirationController.State aspirationState =
                         aspirationController.beginDepth(currentDepth, lastIterScore, rng);
@@ -784,6 +905,7 @@ public class AI {
             }
 
             if (!result.hasCandidate()) {
+                lastIterTablebaseExact = false;
                 if (heuristics.hasUpdates()) mergeThreadHeuristics(heuristics);
                 if (!result.isCompleted() && currentDepth == 1) {
                     // Depth-1 special-case still requires a candidate; none here.
@@ -802,6 +924,7 @@ public class AI {
             }
 
             lastIterScore = sealed.score;
+            lastIterTablebaseExact = sealed.isTablebaseExact();
             aspirationController.finishIteration(sealed.score, attemptedAspiration, usedFullWindow);
             task.publishBest(sealed, currentDepth, simulatorEngine);
 
@@ -832,6 +955,9 @@ public class AI {
     }
 
     private void mergeThreadHeuristics(Heuristics heuristics) {
+        if (!heuristics.hasPendingUpdates()) {
+            return;
+        }
         long stamp = acquireWriteLock();
         try {
             heuristics.mergeInto(globalHeuristics);
@@ -902,8 +1028,15 @@ public class AI {
         staticEvalCache.get().clear();
     }
 
-    private double resolveScoreDifference(GameState gameState, long boardHash) {
+    private double resolveScoreDifference(GameState gameState, long boardHash, boolean whiteToMove) {
         Long2DoubleOpenHashMap cache = staticEvalCache.get();
+        Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
+        if (tablebase.isPresent() && isExactWdl(tablebase.get())) {
+            double exact = clampTablebaseEval(Score.tablebaseToEvaluation(tablebase.get(), whiteToMove,
+                    gameState.getHalfmoveClock()));
+            cache.put(boardHash, exact);
+            return exact;
+        }
         double cached = cache.get(boardHash);
         if (!Double.isNaN(cached)) {
             return cached;
@@ -975,7 +1108,7 @@ public class AI {
             task.requestStop();
 
             if (searchResultReady && currentBestMove != -1 && bestMoveForHash == boardStateHash) {
-                return new MoveAndScore(currentBestMove, task.getBest().score);
+                return new MoveAndScore(currentBestMove, task.getBest().score, task.getBest().tablebaseExact);
             }
             return null;
         } catch (RuntimeException ex) {
@@ -1010,30 +1143,58 @@ public class AI {
     }
 
     public void stopCalculation() {
-        keepCalculating = false;
-
         SearchTask task = activeSearch.get();
-        if (task != null) task.requestStop();
-
-        calculationRequests.clear();
-        searchJobs.clear();
-        calculationRequests.offer(new CalculationRequest(0L, true));
-        for (int i = 0; i < lazySmpThreads; i++) {
-            searchJobs.offer(SearchJob.stopSignal());
+        if (task != null) {
+            task.requestStop();
         }
 
-        if (calculationThreads != null) {
-            for (Thread worker : calculationThreads) {
-                if (worker != null && worker.isAlive()) worker.interrupt();
+        keepCalculating = false;
+        calculationRequests.clear();
+
+        if (task != null) {
+            task.awaitCompletion();
+            while (activeSearch.get() == task && !activeSearch.compareAndSet(task, null)) {
+                Thread.yield();
+            }
+        } else {
+            activeSearch.set(null);
+        }
+
+        calculatedLine = Collections.synchronizedList(new ArrayList<>());
+        currentBestMove = -1;
+        bestMoveForHash = -1;
+        previousBestMove = -1;
+        previousBestMoveHash = -1;
+        searchResultReady = false;
+    }
+
+    private void shutdownWorkerThreads() {
+        Thread coordinatorSnapshot;
+        Thread[] workersSnapshot;
+
+        synchronized (workerLifecycleLock) {
+            workerShutdown = true;
+            calculationRequests.clear();
+            calculationRequests.offer(CalculationRequest.stopSignal());
+            searchJobs.clear();
+
+            coordinatorSnapshot = calculationCoordinator;
+            workersSnapshot = calculationThreads != null ? calculationThreads.clone() : null;
+
+            if (workersSnapshot != null) {
+                for (Thread worker : workersSnapshot) {
+                    if (worker != null && worker.isAlive()) {
+                        searchJobs.offer(SearchJob.stopSignal());
+                    }
+                }
             }
         }
-        if (calculationCoordinator != null && calculationCoordinator.isAlive()) {
-            calculationCoordinator.interrupt();
-        }
 
-        if (calculationThreads != null) {
-            for (Thread worker : calculationThreads) {
-                if (worker == null) continue;
+        if (workersSnapshot != null) {
+            for (Thread worker : workersSnapshot) {
+                if (worker == null) {
+                    continue;
+                }
                 try {
                     worker.join();
                 } catch (InterruptedException e) {
@@ -1041,26 +1202,21 @@ public class AI {
                     log.error("Thread interruption error", e);
                 }
             }
-            calculationThreads = null;
         }
 
-        if (calculationCoordinator != null) {
+        if (coordinatorSnapshot != null) {
             try {
-                calculationCoordinator.join();
+                coordinatorSnapshot.join();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 log.error("Thread interruption error", e);
             }
-            calculationCoordinator = null;
         }
 
-        activeSearch.set(null);
-        calculatedLine = Collections.synchronizedList(new ArrayList<>());
-        currentBestMove = -1;
-        bestMoveForHash = -1;
-        previousBestMove = -1;
-        previousBestMoveHash = -1;
-        searchResultReady = false;
+        synchronized (workerLifecycleLock) {
+            calculationThreads = null;
+            calculationCoordinator = null;
+        }
     }
 
 
@@ -1089,6 +1245,7 @@ public class AI {
 
     public void shutdown() {
         stopCalculation();
+        shutdownWorkerThreads();
 
         if (scheduler != null && !scheduler.isShutdown()) {
             scheduler.shutdownNow();
@@ -1155,8 +1312,16 @@ public class AI {
 
             calculationRequests.markProcessingStart();
             try {
-                if (request.stop || !keepCalculating) {
-                    break;
+                if (request.stop) {
+                    if (workerShutdown) {
+                        break;
+                    }
+                    continue;
+                }
+
+                if (!keepCalculating) {
+                    lastObservedHash = Long.MIN_VALUE;
+                    continue;
                 }
 
                 long targetHash = request.boardHash;
@@ -1258,8 +1423,14 @@ public class AI {
 
     void completeSearchTask(SearchTask task, Engine simulatorEngine) {
         clearStaticEvalCache();
-        if (task == null) return;
-        if (currentBoardState != task.getBoardHash()) return;
+        if (task == null) {
+            logAndResetWorkerInstrumentation();
+            return;
+        }
+        if (currentBoardState != task.getBoardHash()) {
+            logAndResetWorkerInstrumentation();
+            return;
+        }
 
         BestMoveDepth best = task.getBest();
         int move = best.move;
@@ -1277,6 +1448,7 @@ public class AI {
             } else {
                 this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
             }
+            logAndResetWorkerInstrumentation();
             return;
         }
 
@@ -1287,6 +1459,7 @@ public class AI {
             previousBestMoveHash = task.getBoardHash();
             searchResultReady = true;
             fillCalculatedLine(simulatorEngine);
+            logAndResetWorkerInstrumentation();
             return;
         }
 
@@ -1296,12 +1469,23 @@ public class AI {
         previousBestMoveHash = -1;
         searchResultReady = false;
         this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
+        logAndResetWorkerInstrumentation();
     }
 
     private boolean isMoveStillLegal(Engine simulatorEngine, int move) {
         if (simulatorEngine.getGameState().isTerminal()) return false;
         IntArrayList legalMoves = simulatorEngine.getAllLegalMoves();
         return MoveContainerUtils.contains(legalMoves, move);
+    }
+
+    private void logAndResetWorkerInstrumentation() {
+        if (!workerStatsEnabled || workerInstrumentation == null) {
+            return;
+        }
+        String summary = workerInstrumentation.buildSummaryAndReset(lazySmpThreads);
+        if (!summary.isEmpty()) {
+            log.info("Lazy SMP worker diagnostics: {}", summary);
+        }
     }
 
     private void maybeRotateRootMoves(IntArrayList moves, SplittableRandom rng) {
@@ -1352,11 +1536,11 @@ public class AI {
         IntArrayList orderedMoves = sortMovesByEfficiency(legal, depth, simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
         if (orderedMoves.isEmpty()) return RootSearchResult.completed(null);
 
-        int baseFanout = Math.min(ROOT_PARALLEL_LIMIT, orderedMoves.size() - 1);
+        int baseFanout = Math.min(rootParallelLimit, Math.max(0, orderedMoves.size() - 1));
         ExecutorService pool = this.searchPool;
         int helperCapacity = 0;
-        if (pool instanceof ThreadPoolExecutor) {
-            helperCapacity = ((ThreadPoolExecutor) pool).getMaximumPoolSize();
+        if (pool instanceof ThreadPoolExecutor executor) {
+            helperCapacity = executor.getMaximumPoolSize();
         } else if (searchThreads > 0) {
             helperCapacity = searchThreads;
         }
@@ -1365,7 +1549,14 @@ public class AI {
             return getBestMove(simulatorEngine, isWhitesTurn, depth, deadline, alpha, beta, rng);
         }
 
-        final int fanout = helperCapacity > 0 ? Math.min(baseFanout, helperCapacity) : baseFanout;
+        int helperFanoutCap = helperCapacity > 0
+                ? Math.max(1, (int) Math.round(helperCapacity * rootFanoutRatio))
+                : baseFanout;
+
+        final int fanout = helperCapacity > 0
+                ? Math.min(baseFanout, helperFanoutCap)
+                : baseFanout;
+        final boolean logFanout = rootFanoutStatsEnabled && log.isInfoEnabled();
 
         maybeRotateRootMoves(orderedMoves, rng);
 
@@ -1374,6 +1565,7 @@ public class AI {
         double bestScore;
 
         boolean aborted = false;
+        boolean bestFromTablebase = false;
 
         if (abortRequested(deadline)) {
             return RootSearchResult.aborted(null);
@@ -1382,33 +1574,48 @@ public class AI {
         simulatorEngine.performMove(firstMove);
         long firstMoveHash = simulatorEngine.getBoardStateHash();
         double firstScore;
+        boolean firstTablebaseExact = false;
         if (simulatorEngine.getGameState().isInStateCheckMate()) {
             firstScore = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
         } else if (simulatorEngine.getGameState().isTerminal()) { // <-- terminal only (stalemate/50/3fold)
             firstScore = evaluateStaticPosition(simulatorEngine.getGameState(), firstMoveHash, !isWhitesTurn, depth);
             if (isWhitesTurn) firstScore = -firstScore;
         } else {
-            // Non-terminal (incl. insufficient material): keep searching
-            firstScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, firstMove, 1, 0);
-            if (firstScore == EXIT_FLAG || abortRequested(deadline)) {
-                simulatorEngine.undoLastMove();
-                return RootSearchResult.aborted(null);
+            Optional<TablebaseResult> firstTablebase = resolveExactTablebaseResult(simulatorEngine);
+            if (firstTablebase.isPresent()) {
+                firstTablebaseExact = true;
+                firstScore = evaluateStaticPosition(simulatorEngine.getGameState(), firstMoveHash, !isWhitesTurn, depth);
+                if (isWhitesTurn) firstScore = -firstScore;
+            } else {
+                // Non-terminal (incl. insufficient material): keep searching
+                firstScore = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, firstMove, 1, 0);
+                if (firstScore == EXIT_FLAG || abortRequested(deadline)) {
+                    simulatorEngine.undoLastMove();
+                    return RootSearchResult.aborted(null);
+                }
             }
         }
         simulatorEngine.undoLastMove();
 
         bestMove = firstMove;
         bestScore = firstScore;
+        bestFromTablebase = firstTablebaseExact;
+
+        if (logFanout) {
+            log.info("Root fanout diag start: task={}, depth={}, legalMoves={}, helperCapacity={}, baseFanout={}, fanout={}, firstMove={}",
+                    task.getId(), depth, orderedMoves.size(), helperCapacity, baseFanout, fanout,
+                    Move.convertIntToMove(firstMove));
+        }
 
         if (isWhitesTurn) alpha = Math.max(alpha, firstScore);
         else beta = Math.min(beta, firstScore);
         if (alpha >= beta) {
-            MoveAndScore candidate = createCandidate(bestMove, bestScore);
+            MoveAndScore candidate = createCandidate(bestMove, bestScore, bestFromTablebase);
             return RootSearchResult.completed(candidate);
         }
 
         if (fanout <= 0) {
-            MoveAndScore candidate = createCandidate(bestMove, bestScore);
+            MoveAndScore candidate = createCandidate(bestMove, bestScore, bestFromTablebase);
             return RootSearchResult.completed(candidate);
         }
 
@@ -1416,10 +1623,13 @@ public class AI {
         final List<Future<MoveAndScore>> futures = new ArrayList<>();
 
         final AtomicReference<RootSearchState> stateRef = new AtomicReference<>(
-                new RootSearchState(alpha, beta, new MoveAndScore(bestMove, bestScore))
+                new RootSearchState(alpha, beta, new MoveAndScore(bestMove, bestScore, bestFromTablebase))
         );
         final AtomicBoolean stopRef = new AtomicBoolean(false);
         final java.util.concurrent.locks.ReentrantLock fullResLock = new java.util.concurrent.locks.ReentrantLock();
+        int submittedParallel = 0;
+        int completedParallel = 0;
+        int sequentialProcessed = 0;
 
         IntFunction<Callable<MoveAndScore>> taskFactory = (moveInt) -> () -> {
             Long2DoubleOpenHashMap evalCache = staticEvalCache.get();
@@ -1448,18 +1658,28 @@ public class AI {
                     }
 
                     double probe;
+                    boolean workerTablebaseExact = false;
                     if (workerEngine.getGameState().isInStateCheckMate()) {
                         probe = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
                     } else if (workerEngine.getGameState().isTerminal()) { // <-- terminal only
                         probe = evaluateStaticPosition(workerEngine.getGameState(), workerHash, !isWhitesTurn, depth);
                         if (isWhitesTurn) probe = -probe;
                     } else {
-                        probe = alphaBeta(workerEngine, depth - 1, pAlpha, pBeta, !isWhitesTurn, deadline, moveInt, 1, 0);
-                        if (probe == EXIT_FLAG || abortRequested(deadline)) return null;
+                        Optional<TablebaseResult> workerTablebase = resolveExactTablebaseResult(workerEngine);
+                        if (workerTablebase.isPresent()) {
+                            workerTablebaseExact = true;
+                            probe = evaluateStaticPosition(workerEngine.getGameState(), workerHash, !isWhitesTurn, depth);
+                            if (isWhitesTurn) probe = -probe;
+                        } else {
+                            probe = alphaBeta(workerEngine, depth - 1, pAlpha, pBeta, !isWhitesTurn, deadline, moveInt, 1, 0);
+                            if (probe == EXIT_FLAG || abortRequested(deadline)) return null;
+                        }
                     }
 
-                    boolean needsFull = isWhitesTurn ? (probe > snapshot.alpha()) : (probe < snapshot.beta());
+                    boolean needsFull = !workerTablebaseExact
+                            && (isWhitesTurn ? (probe > snapshot.alpha()) : (probe < snapshot.beta()));
                     double finalScore = probe;
+                    boolean finalTablebaseExact = workerTablebaseExact;
 
                     if (needsFull && !stopRef.get()) {
                         fullResLock.lock();
@@ -1471,17 +1691,18 @@ public class AI {
                                 double full = alphaBeta(workerEngine, depth - 1, aNow, bNow, !isWhitesTurn, deadline, moveInt, 1, 0);
                                 if (full != EXIT_FLAG) {
                                     finalScore = full;
-                                    updateRootState(stateRef, isWhitesTurn, moveInt, full, stopRef);
+                                    finalTablebaseExact = workerTablebaseExact;
+                                    updateRootState(stateRef, isWhitesTurn, moveInt, full, finalTablebaseExact, stopRef);
                                 }
                             }
                         } finally {
                             fullResLock.unlock();
                         }
                     } else {
-                        updateRootState(stateRef, isWhitesTurn, moveInt, finalScore, stopRef);
+                        updateRootState(stateRef, isWhitesTurn, moveInt, finalScore, finalTablebaseExact, stopRef);
                     }
 
-                    return new MoveAndScore(moveInt, finalScore);
+                    return new MoveAndScore(moveInt, finalScore, finalTablebaseExact);
                 } finally {
                     evalCache.clear();
                     releaseWorkerSimulation(workerEngine, task.getRootSnapshot());
@@ -1509,6 +1730,7 @@ public class AI {
                 int moveInt = orderedMoves.getInt(nextMoveIndex++);
                 Future<MoveAndScore> submitted = ecs.submit(taskFactory.apply(moveInt));
                 futures.add(submitted);
+                submittedParallel++;
                 active++;
             }
 
@@ -1530,7 +1752,9 @@ public class AI {
                         if (best != null) {
                             bestMove = best.move;
                             bestScore = best.score;
+                            bestFromTablebase = best.tablebaseExact;
                         }
+                        completedParallel++;
                     }
                 } catch (ExecutionException ex) {
                     log.warn("Parallel root worker failed", ex.getCause());
@@ -1548,6 +1772,7 @@ public class AI {
                     int moveInt = orderedMoves.getInt(nextMoveIndex++);
                     Future<MoveAndScore> submitted = ecs.submit(taskFactory.apply(moveInt));
                     futures.add(submitted);
+                    submittedParallel++;
                     active++;
                 }
             }
@@ -1577,9 +1802,11 @@ public class AI {
                 }
 
                 int moveInt = orderedMoves.getInt(i);
+                sequentialProcessed++;
                 simulatorEngine.performMove(moveInt);
 
                 double score;
+                boolean moveTablebaseExact = false;
                 if (simulatorEngine.getGameState().isInStateCheckMate()) {
                     score = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
                 } else if (simulatorEngine.getGameState().isTerminal()) {
@@ -1589,11 +1816,21 @@ public class AI {
                         score = -score;
                     }
                 } else {
-                    score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1, 0);
-                    if (score == EXIT_FLAG || abortRequested(deadline)) {
-                        simulatorEngine.undoLastMove();
-                        aborted = true;
-                        break;
+                    Optional<TablebaseResult> childTablebase = resolveExactTablebaseResult(simulatorEngine);
+                    if (childTablebase.isPresent()) {
+                        moveTablebaseExact = true;
+                        long childHash = simulatorEngine.getBoardStateHash();
+                        score = evaluateStaticPosition(simulatorEngine.getGameState(), childHash, !isWhitesTurn, depth);
+                        if (isWhitesTurn) {
+                            score = -score;
+                        }
+                    } else {
+                        score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1, 0);
+                        if (score == EXIT_FLAG || abortRequested(deadline)) {
+                            simulatorEngine.undoLastMove();
+                            aborted = true;
+                            break;
+                        }
                     }
                 }
                 simulatorEngine.undoLastMove();
@@ -1601,6 +1838,7 @@ public class AI {
                 if (isBetterScore(isWhitesTurn, score, bestScore)) {
                     bestScore = score;
                     bestMove = moveInt;
+                    bestFromTablebase = moveTablebaseExact;
                 }
 
                 if (isWhitesTurn) {
@@ -1613,14 +1851,20 @@ public class AI {
                     stopRef.set(true);
                     break;
                 }
-            }
+        }
 
-            MoveAndScore updatedBest = createCandidate(bestMove, bestScore);
+        if (logFanout) {
+            int remainingCandidates = Math.max(0, (orderedMoves.size() - 1) - submittedParallel - sequentialProcessed);
+            log.info("Root fanout diag end: task={}, depth={}, parallelSubmitted={}, parallelCompleted={}, sequentialFallback={}, remainingCandidates={}, aborted={}",
+                    task.getId(), depth, submittedParallel, completedParallel, sequentialProcessed, remainingCandidates, aborted);
+        }
+
+        MoveAndScore updatedBest = createCandidate(bestMove, bestScore, bestFromTablebase);
             if (updatedBest != null) {
                 stateRef.set(new RootSearchState(alpha, beta, updatedBest));
             }
         }
-        MoveAndScore candidate = bestMove != -1 ? createCandidate(bestMove, bestScore) : null;
+        MoveAndScore candidate = bestMove != -1 ? createCandidate(bestMove, bestScore, bestFromTablebase) : null;
         if (abortRequested(deadline)) {
             aborted = true;
         }
@@ -1632,6 +1876,7 @@ public class AI {
                                  boolean isWhiteToMove,
                                  int move,
                                  double score,
+                                 boolean tablebaseExact,
                                  AtomicBoolean stopRef) {
         while (true) {
             RootSearchState current = stateRef.get();
@@ -1654,8 +1899,9 @@ public class AI {
 
             MoveAndScore nextBest = currentBest;
             if (currentBest == null || isBetterScore(isWhiteToMove, score, currentBest.score)) {
-                if (currentBest == null || currentBest.move != move || Double.compare(currentBest.score, score) != 0) {
-                    nextBest = new MoveAndScore(move, score);
+                if (currentBest == null || currentBest.move != move || Double.compare(currentBest.score, score) != 0
+                        || currentBest.tablebaseExact != tablebaseExact) {
+                    nextBest = new MoveAndScore(move, score, tablebaseExact);
                     changed = true;
                 }
             }
@@ -1764,6 +2010,7 @@ public class AI {
 
         long curHash = simulation.getBoardStateHash();
 
+
         while (true) {
             if (!seen.add(curHash)) break;
             if (simulation.getGameState().isTerminal()) break;
@@ -1797,10 +2044,21 @@ public class AI {
         double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
 
         boolean aborted = false;
+        boolean bestFromTablebase = false;
 
         IntArrayList sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth,
                 simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
         maybeRotateRootMoves(sortedMoves, rng);
+        promoteTablebaseMove(sortedMoves, simulatorEngine);
+
+        Optional<TablebaseHit> rootTablebase = resolveTablebaseHit(simulatorEngine, isWhitesTurn);
+        if (rootTablebase.isPresent()) {
+            TablebaseHit hit = rootTablebase.get();
+            int candidateMove = hit.bestMove();
+            if (candidateMove >= 0 && MoveContainerUtils.contains(sortedMoves, candidateMove)) {
+                return RootSearchResult.completed(createCandidate(candidateMove, hit.score(), true));
+            }
+        }
 
         for (int idx = 0; idx < sortedMoves.size(); idx++) {
             int moveInt = sortedMoves.getInt(idx);
@@ -1812,6 +2070,7 @@ public class AI {
             simulatorEngine.performMove(moveInt);
             long childHash = simulatorEngine.getBoardStateHash();
             double score;
+            boolean moveTablebaseExact = false;
             if (simulatorEngine.getGameState().isInStateCheckMate()) {
                 score = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
             } else if (simulatorEngine.getGameState().isTerminal()) { // <-- terminal only
@@ -1821,11 +2080,20 @@ public class AI {
                 }
             } else {
                 // Non-terminal (incl. insufficient material):
-                score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1, 0);
-                if (score == EXIT_FLAG || abortRequested(deadline)) {
-                    simulatorEngine.undoLastMove();
-                    aborted = true;
-                    break;
+                Optional<TablebaseResult> childTablebase = resolveExactTablebaseResult(simulatorEngine);
+                if (childTablebase.isPresent()) {
+                    moveTablebaseExact = true;
+                    score = evaluateStaticPosition(simulatorEngine.getGameState(), childHash, !isWhitesTurn, depth);
+                    if (isWhitesTurn) {
+                        score = -score;
+                    }
+                } else {
+                    score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1, 0);
+                    if (score == EXIT_FLAG || abortRequested(deadline)) {
+                        simulatorEngine.undoLastMove();
+                        aborted = true;
+                        break;
+                    }
                 }
             }
             simulatorEngine.undoLastMove();
@@ -1833,19 +2101,24 @@ public class AI {
             if (isBetterScore(isWhitesTurn, score, bestScore)) {
                 bestScore = score;
                 bestMove = moveInt;
+                bestFromTablebase = moveTablebaseExact;
             }
             if (isWhitesTurn) alpha = Math.max(alpha, score);
             else beta = Math.min(beta, score);
             if (alpha >= beta) break;
         }
-        MoveAndScore candidate = bestMove != -1 ? createCandidate(bestMove, bestScore) : null;
+        MoveAndScore candidate = bestMove != -1 ? createCandidate(bestMove, bestScore, bestFromTablebase) : null;
         return aborted ? RootSearchResult.aborted(candidate) : RootSearchResult.completed(candidate);
     }
 
     private MoveAndScore createCandidate(int move, double score) {
+        return createCandidate(move, score, false);
+    }
+
+    private MoveAndScore createCandidate(int move, double score, boolean tablebaseExact) {
         if (move == -1) return null;
         if (!Double.isFinite(score)) return null;
-        return new MoveAndScore(move, score);
+        return new MoveAndScore(move, score, tablebaseExact);
     }
 
     /**
@@ -1853,7 +2126,295 @@ public class AI {
      * 5rkr/pp2Rp2/1b1p1Pb1/3P2Q1/2n3P1/2p5/P4P2/4R1K1 w - - 1 0
      * *
      */
-    // AI.java
+    private Optional<TablebaseHit> resolveTablebaseHit(Engine engine, boolean isWhite) {
+        // Fetch any cached TB result from GameState
+        TablebaseResult result = engine.getGameState().getLastTablebaseResult().orElse(null);
+
+        // Always try probing the Syzygy tablebase if service is available
+        if (tablebaseService != null) {
+            Optional<SyzygyProbeResult> probe = tablebaseService.probe(engine.getBitBoard());
+            if (probe.isPresent()) {
+                result = TablebaseResult.from(probe.get());
+                engine.getGameState().setLastTablebaseResult(result);
+            }
+        }
+
+        // No usable WDL (unknown or incomplete probe)
+        if (!isExactWdl(result)) {
+            return Optional.empty();
+        }
+
+        // Stable evaluation: compute from White's perspective and keep the white-oriented
+        // value so all callers reason about tablebase scores consistently.
+        double whitePerspective = clampTablebaseEval(Score.tablebaseToEvaluation(result, engine.whitesTurn(),
+                engine.getGameState().getHalfmoveClock()));
+        double eval = whitePerspective;
+
+        // Determine best move via TB guidance (if available)
+        int bestMove = determineTablebaseBestMove(engine, result, isWhite);
+
+        return Optional.of(new TablebaseHit(eval, bestMove, result));
+    }
+
+
+
+    private int determineTablebaseBestMove(Engine simulatorEngine, TablebaseResult parentResult, boolean parentIsWhite) {
+        IntArrayList legal = simulatorEngine.getAllLegalMoves();
+        if (legal.isEmpty()) {
+            return -1;
+        }
+
+        int suggestedMove = -1;
+        TablebaseContinuation bestContinuation = null;
+
+        if (parentResult != null) {
+            Optional<SyzygyMove> suggestion = parentResult.recommendedMove();
+            if (suggestion.isPresent()) {
+                suggestedMove = findSuggestedMove(legal, suggestion.get());
+                if (suggestedMove != -1) {
+                    Optional<TablebaseContinuation> continuation = evaluateTablebaseContinuation(simulatorEngine, suggestedMove);
+                    if (continuation.isPresent()) {
+                        TablebaseContinuation candidate = continuation.get();
+                        if (isContinuationConsistent(parentResult, candidate)) {
+                            return candidate.move();
+                        }
+                        bestContinuation = candidate;
+                    }
+                }
+            }
+        }
+
+        for (int i = 0; i < legal.size(); i++) {
+            int move = legal.getInt(i);
+            if (move == suggestedMove) {
+                continue;
+            }
+            Optional<TablebaseContinuation> continuation = evaluateTablebaseContinuation(simulatorEngine, move);
+            if (continuation.isEmpty()) {
+                continue;
+            }
+            TablebaseContinuation candidate = continuation.get();
+            if (bestContinuation == null
+                    || isContinuationBetter(parentIsWhite, candidate, bestContinuation, parentResult)) {
+                bestContinuation = candidate;
+            }
+        }
+        return bestContinuation != null ? bestContinuation.move() : -1;
+    }
+
+    private Optional<TablebaseContinuation> evaluateTablebaseContinuation(Engine simulatorEngine, int move) {
+        boolean zeroing = MoveHelper.isCapture(move) || MoveHelper.derivePieceTypeBits(move) == 1;
+        simulatorEngine.performMove(move);
+        try {
+            Optional<TablebaseResult> childResult = resolveExactTablebaseResult(simulatorEngine);
+            if (childResult.isEmpty()) {
+                return Optional.empty();
+            }
+            TablebaseResult result = childResult.get();
+            double evaluation = clampTablebaseEval(Score.tablebaseToEvaluation(result, simulatorEngine.whitesTurn(),
+                    simulatorEngine.getGameState().getHalfmoveClock()));
+            return Optional.of(new TablebaseContinuation(move, evaluation, result, zeroing));
+        } finally {
+            simulatorEngine.undoLastMove();
+        }
+    }
+
+    private Optional<TablebaseResult> resolveExactTablebaseResult(Engine engine) {
+        TablebaseResult result = engine.getGameState().getLastTablebaseResult().orElse(null);
+        if (tablebaseService != null) {
+            Optional<SyzygyProbeResult> probe = tablebaseService.probe(engine.getBitBoard());
+            if (probe.isPresent()) {
+                result = TablebaseResult.from(probe.get());
+                engine.getGameState().setLastTablebaseResult(result);
+            }
+        }
+        if (!isExactWdl(result)) {
+            return Optional.empty();
+        }
+        return Optional.of(result);
+    }
+
+    private boolean isContinuationConsistent(TablebaseResult parentResult, TablebaseContinuation continuation) {
+        if (parentResult == null || continuation == null) {
+            return false;
+        }
+        int parentSign = Integer.signum(parentResult.wdl().score());
+        int childSign = Integer.signum(continuation.result().wdl().score());
+        if (parentSign == 0) {
+            return childSign == 0;
+        }
+        return parentSign == -childSign;
+    }
+
+    private boolean isContinuationBetter(boolean parentIsWhite,
+                                         TablebaseContinuation candidate,
+                                         TablebaseContinuation incumbent,
+                                         TablebaseResult parentResult) {
+        if (incumbent == null) {
+            return true;
+        }
+        if (candidate == null) {
+            return false;
+        }
+
+        double candidateEval = candidate.evaluation();
+        double incumbentEval = incumbent.evaluation();
+        if (!Double.isFinite(candidateEval)) {
+            return false;
+        }
+        if (!Double.isFinite(incumbentEval)) {
+            return true;
+        }
+
+        double diff = candidateEval - incumbentEval;
+        if (Math.abs(diff) > TB_TIE_EPSILON) {
+            return parentIsWhite ? diff > 0 : diff < 0;
+        }
+
+        int outcome = parentResult != null ? Integer.signum(parentResult.wdl().score()) : 0;
+        return switch (outcome) {
+            case 1 -> preferWinningContinuation(candidate, incumbent);
+            case -1 -> preferDefensiveContinuation(candidate, incumbent);
+            case 0 -> preferDrawingContinuation(candidate, incumbent);
+            default -> false;
+        };
+    }
+
+    private boolean preferWinningContinuation(TablebaseContinuation candidate, TablebaseContinuation incumbent) {
+        int candidateDtz = normaliseDistance(candidate.result().dtz(), Integer.MAX_VALUE);
+        int incumbentDtz = normaliseDistance(incumbent.result().dtz(), Integer.MAX_VALUE);
+        if (candidateDtz != incumbentDtz) {
+            return candidateDtz < incumbentDtz;
+        }
+
+        int candidateDtm = normaliseDistance(candidate.result().dtm(), Integer.MAX_VALUE);
+        int incumbentDtm = normaliseDistance(incumbent.result().dtm(), Integer.MAX_VALUE);
+        if (candidateDtm != incumbentDtm) {
+            return candidateDtm < incumbentDtm;
+        }
+
+        if (candidate.zeroingMove() != incumbent.zeroingMove()) {
+            return candidate.zeroingMove();
+        }
+        return false;
+    }
+
+    private boolean preferDefensiveContinuation(TablebaseContinuation candidate, TablebaseContinuation incumbent) {
+        int candidateDtz = normaliseDistance(candidate.result().dtz(), Integer.MIN_VALUE);
+        int incumbentDtz = normaliseDistance(incumbent.result().dtz(), Integer.MIN_VALUE);
+        if (candidateDtz != incumbentDtz) {
+            return candidateDtz > incumbentDtz;
+        }
+
+        int candidateDtm = normaliseDistance(candidate.result().dtm(), Integer.MIN_VALUE);
+        int incumbentDtm = normaliseDistance(incumbent.result().dtm(), Integer.MIN_VALUE);
+        if (candidateDtm != incumbentDtm) {
+            return candidateDtm > incumbentDtm;
+        }
+
+        if (candidate.zeroingMove() != incumbent.zeroingMove()) {
+            return !candidate.zeroingMove();
+        }
+        return false;
+    }
+
+    private boolean preferDrawingContinuation(TablebaseContinuation candidate, TablebaseContinuation incumbent) {
+        int candidateDtz = normaliseDistance(candidate.result().dtz(), Integer.MAX_VALUE);
+        int incumbentDtz = normaliseDistance(incumbent.result().dtz(), Integer.MAX_VALUE);
+        if (candidateDtz != incumbentDtz) {
+            return candidateDtz < incumbentDtz;
+        }
+        if (candidate.zeroingMove() != incumbent.zeroingMove()) {
+            return candidate.zeroingMove();
+        }
+        int candidateDtm = normaliseDistance(candidate.result().dtm(), Integer.MAX_VALUE);
+        int incumbentDtm = normaliseDistance(incumbent.result().dtm(), Integer.MAX_VALUE);
+        if (candidateDtm != incumbentDtm) {
+            return candidateDtm < incumbentDtm;
+        }
+        return false;
+    }
+
+    private int normaliseDistance(OptionalInt value, int fallback) {
+        if (value.isEmpty()) {
+            return fallback;
+        }
+        return Math.abs(value.getAsInt());
+    }
+
+    private int findSuggestedMove(IntArrayList legal, SyzygyMove suggestion) {
+        int fromIndex = suggestion.fromIndex();
+        int toIndex = suggestion.toIndex();
+        int promotionBits = suggestion.promotionPieceTypeBits();
+        for (int i = 0; i < legal.size(); i++) {
+            int move = legal.getInt(i);
+            if (MoveHelper.deriveFromIndex(move) != fromIndex) {
+                continue;
+            }
+            if (MoveHelper.deriveToIndex(move) != toIndex) {
+                continue;
+            }
+            int movePromotion = MoveHelper.derivePromotionPieceTypeBits(move);
+            if (promotionBits == 0) {
+                if (movePromotion != 0) {
+                    continue;
+                }
+            } else if (movePromotion != promotionBits) {
+                continue;
+            }
+
+            return move;
+        }
+        return -1;
+    }
+
+    private void promoteTablebaseMove(IntArrayList moves, Engine engine) {
+        if (moves == null || moves.isEmpty()) {
+            return;
+        }
+        TablebaseResult result = engine.getGameState().getLastTablebaseResult().orElse(null);
+        if (result == null) {
+            return;
+        }
+        Optional<SyzygyMove> suggestion = result.recommendedMove();
+        if (suggestion.isEmpty()) {
+            return;
+        }
+        int matchedMove = findSuggestedMove(moves, suggestion.get());
+        if (matchedMove == -1) {
+            return;
+        }
+        int index = moves.indexOf(matchedMove);
+        if (index <= 0) {
+            return;
+        }
+        int first = moves.getInt(0);
+        moves.set(0, matchedMove);
+        moves.set(index, first);
+    }
+
+    private boolean isExactWdl(TablebaseResult result) {
+        if (result == null) {
+            return false;
+        }
+        SyzygyWdl wdl = result.wdl();
+        return wdl == SyzygyWdl.WIN || wdl == SyzygyWdl.LOSS || wdl == SyzygyWdl.DRAW;
+    }
+
+    private double clampTablebaseEval(double eval) {
+        if (!Double.isFinite(eval)) {
+            return eval;
+        }
+        double mateThreshold = (CHECKMATE - MATE_SCORE_MARGIN) / 100.0;
+        if (Math.abs(eval) >= mateThreshold) {
+            return eval;
+        }
+        if (eval > TABLEBASE_CLAMP) {
+            return TABLEBASE_CLAMP;
+        }
+        return Math.max(eval, -TABLEBASE_CLAMP);
+    }
+
     private double alphaBeta(Engine simulatorEngine, int depth, double alpha, double beta,
                              boolean isWhite, long deadline, int prevMove, int plyFromRoot,
                              int extStreak) {
@@ -1879,6 +2440,16 @@ public class AI {
             return evaluateStaticPosition(simulatorEngine.getGameState(), boardHash, isWhite, plyFromRoot);
         }
 
+        Optional<TablebaseHit> tablebaseHit = resolveTablebaseHit(simulatorEngine, isWhite);
+        if (tablebaseHit.isPresent()) {
+            TablebaseHit hit = tablebaseHit.get();
+            int bestMove = hit.bestMove() >= 0 ? hit.bestMove() : -1;
+            double storedScore = toStoredMateScore(hit.score(), plyFromRoot);
+            transpositionTable.put(boardHash,
+                    new TranspositionTableEntry(storedScore, depth, NodeType.EXACT, bestMove), depth);
+            return hit.score();
+        }
+
         if (depth <= 0) {
             double eval = evaluateBoard(simulatorEngine, isWhite, deadline);
             if (eval == EXIT_FLAG) return EXIT_FLAG;
@@ -1889,10 +2460,11 @@ public class AI {
         // Transposition table lookup
         TranspositionTableEntry entry = transpositionTable.get(boardHash);
         if (entry != null && entry.depth >= depth) {
-            if (entry.nodeType == NodeType.EXACT) return entry.score;
-            if (entry.nodeType == NodeType.LOWERBOUND && entry.score > alpha) alpha = entry.score;
-            else if (entry.nodeType == NodeType.UPPERBOUND && entry.score < beta) beta = entry.score;
-            if (alpha >= beta) return entry.score;
+            double ttScore = fromStoredMateScore(entry.score, plyFromRoot);
+            if (entry.nodeType == NodeType.EXACT) return ttScore;
+            if (entry.nodeType == NodeType.LOWERBOUND && ttScore > alpha) alpha = ttScore;
+            else if (entry.nodeType == NodeType.UPPERBOUND && ttScore < beta) beta = ttScore;
+            if (alpha >= beta) return ttScore;
         }
 
         // -------- Safer Null-move pruning (same as before, but use depthHere) --------
@@ -2055,7 +2627,7 @@ public class AI {
             return 0;
         }
 
-        int clampedDepth = Math.max(1, Math.min(depth, LMR_MAX_DEPTH));
+        int clampedDepth = Math.min(depth, LMR_MAX_DEPTH);
         int clampedMoveIndex = Math.max(0, Math.min(moveIndex, LMR_MAX_MOVES - 1));
 
         int historyReductionMax = Math.max(0, searchPruningParameters.historyReductionMax());
@@ -2103,6 +2675,8 @@ public class AI {
                              int extStreak) {
         double maxEval = Double.NEGATIVE_INFINITY;
         int bestMoveAtThisNode = -1;
+        boolean bestZeroing = false;
+        boolean tablebaseBestExact = false;
 
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, true);
         final Heuristics heuristics = threadHeuristics.get();
@@ -2134,7 +2708,8 @@ public class AI {
                 || (baseRemainingDepth == 2 && pruning.fpMarginDepth2() > 0));
         double staticEvalWhite = Double.NaN;
         if (futilityPossible) {
-            staticEvalWhite = resolveScoreDifference(simulatorEngine.getGameState(), boardHash);
+            staticEvalWhite = resolveScoreDifference(simulatorEngine.getGameState(), boardHash,
+                    simulatorEngine.whitesTurn());
             if (!Double.isFinite(staticEvalWhite)) {
                 futilityPossible = false;
             }
@@ -2210,125 +2785,125 @@ public class AI {
             simulatorEngine.performMove(move);
             long newBoardHash = simulatorEngine.getBoardStateHash();
 
-            boolean givesCheck = isSideInCheck(simulatorEngine, false);
-            boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, true);
-            boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, true);
-            boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
-
-            if (futilityPossible && isQuiet && !givesCheck && !attacksQueen && !attacksKingZone
-                    && !opensKingFile && !seeWinsMaterial) {
-                int futilityMargin = futilityMarginForRemainingDepth(baseRemainingDepth);
-                if (futilityMargin > 0 && staticEvalWhite + futilityMargin <= alpha) {
-                    simulatorEngine.undoLastMove();
-                    continue;
-                }
-            }
-
-            int nextDepth = depth - 1;
-            boolean forcing = givesCheck || attacksQueen;
-            boolean allowExtend = forcing && extStreak < maxCheckExtensionStreak;
-            if (allowExtend) nextDepth++;
-            int nextExtStreak = allowExtend ? extStreak + 1 : 0;
+            Optional<TablebaseResult> childTablebase = resolveExactTablebaseResult(simulatorEngine);
+            boolean childExact = childTablebase.isPresent();
 
             double eval;
-            TranspositionTableEntry entry = transpositionTable.get(newBoardHash);
-            boolean ttExactHit = entry != null
-                    && entry.nodeType == NodeType.EXACT
-                    && entry.depth >= nextDepth;
-
-            if (ttExactHit) {
-                eval = entry.score;
+            if (childExact) {
+                eval = evaluateStaticPosition(simulatorEngine.getGameState(), newBoardHash, false, plyFromRoot + 1);
             } else {
-                if (!inCheckAtNode
-                        && !isTactical
-                        && !givesCheck
-                        && !attacksQueen
-                        && !attacksKingZone
-                        && !opensKingFile
-                        && iidReduceDepth > 0
-                        && nextDepth - iidReduceDepth >= 1) {
-                    double iidScore = alphaBeta(simulatorEngine, nextDepth - iidReduceDepth, alpha, beta,
-                            false, deadline, move, plyFromRoot + 1, 0);
-                    if (iidScore == EXIT_FLAG || positionChanged()) {
+                boolean givesCheck = isSideInCheck(simulatorEngine, false);
+                boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, true);
+                boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, true);
+                boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
+
+                if (futilityPossible && isQuiet && !givesCheck && !attacksQueen && !attacksKingZone
+                        && !opensKingFile && !seeWinsMaterial) {
+                    int futilityMargin = futilityMarginForRemainingDepth(baseRemainingDepth);
+                    if (futilityMargin > 0 && staticEvalWhite + futilityMargin <= alpha) {
                         simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
-                    }
-                    entry = transpositionTable.get(newBoardHash);
-                    ttExactHit = entry != null
-                            && entry.nodeType == NodeType.EXACT
-                            && entry.depth >= nextDepth;
-                    if (ttExactHit) {
-                        eval = entry.score;
-                        simulatorEngine.undoLastMove();
-                        if (eval > maxEval) {
-                            maxEval = eval;
-                            bestMoveAtThisNode = move;
-                        }
-                        alpha = Math.max(alpha, eval);
-                        if (beta <= alpha) {
-                            updateKillerMoves(depth, move);
-                            incrementHistory(move, depth);
-                            heuristics.recordCounterMove(prevMove, move);
-                            break;
-                        }
                         continue;
                     }
                 }
 
-                boolean canReduce = !inCheckAtNode
-                        && !isTactical
-                        && !givesCheck
-                        && !attacksQueen
-                        && !attacksKingZone
-                        && !opensKingFile
-                        && !seeWinsMaterial
-                        && nextDepth >= 2
-                        && index > lmrProtectIndexMax;
+                int nextDepth = depth - 1;
+                boolean forcing = givesCheck || attacksQueen;
+                boolean allowExtend = forcing && extStreak < maxCheckExtensionStreak;
+                if (allowExtend) nextDepth++;
+                int nextExtStreak = allowExtend ? extStreak + 1 : 0;
 
-                if (plyFromRoot <= lmrProtectPlyMax) {
-                    canReduce = false;
-                }
+                eval = Double.NEGATIVE_INFINITY;
+                TranspositionTableEntry entry = transpositionTable.get(newBoardHash);
+                boolean ttExactHit = entry != null
+                        && entry.nodeType == NodeType.EXACT
+                        && entry.depth >= nextDepth;
 
-                boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
-                double pBeta = usePvs ? (alpha + 1) : beta;
-
-                int reduction = 0;
-                if (canReduce) {
-                    reduction = lmrReduction(nextDepth, index, historyScore);
-                    if (reduction > 0 && isQuiet && historyScore > 0 && lmrCapGoodQuiet >= 0) {
-                        reduction = Math.min(reduction, lmrCapGoodQuiet);
-                    }
-                    if (reduction <= 0) canReduce = false;
-                }
-
-                if (canReduce) {
-                    int reduced = Math.max(1, nextDepth - reduction);
-                    eval = alphaBeta(simulatorEngine, reduced, alpha, pBeta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
-                    if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
-                    }
-
-                    boolean promising = eval > alpha;
-                    if (promising) {
-                        eval = alphaBeta(simulatorEngine, nextDepth, alpha, usePvs ? beta : pBeta,
-                                false, deadline, move, plyFromRoot + 1, nextExtStreak);
-                        if (eval == EXIT_FLAG || positionChanged()) {
+                boolean usedTranspositionEval = false;
+                if (ttExactHit) {
+                    eval = fromStoredMateScore(entry.score, plyFromRoot + 1);
+                    usedTranspositionEval = true;
+                } else {
+                    if (!inCheckAtNode
+                            && !isTactical
+                            && !givesCheck
+                            && !attacksQueen
+                            && !attacksKingZone
+                            && !opensKingFile
+                            && iidReduceDepth > 0
+                            && nextDepth - iidReduceDepth >= 1) {
+                        double iidScore = alphaBeta(simulatorEngine, nextDepth - iidReduceDepth, alpha, beta,
+                                false, deadline, move, plyFromRoot + 1, 0);
+                        if (iidScore == EXIT_FLAG || positionChanged()) {
                             simulatorEngine.undoLastMove();
                             return EXIT_FLAG;
                         }
+                        entry = transpositionTable.get(newBoardHash);
+                        ttExactHit = entry != null
+                                && entry.nodeType == NodeType.EXACT
+                                && entry.depth >= nextDepth;
+                        if (ttExactHit) {
+                            eval = fromStoredMateScore(entry.score, plyFromRoot + 1);
+                            usedTranspositionEval = true;
+                        }
                     }
-                } else {
-                    eval = alphaBeta(simulatorEngine, nextDepth, alpha, pBeta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
-                    if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
-                    }
-                    if (usePvs && eval > alpha && eval < beta) {
-                        eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
-                        if (eval == EXIT_FLAG || positionChanged()) {
-                            simulatorEngine.undoLastMove();
-                            return EXIT_FLAG;
+
+                    if (!usedTranspositionEval) {
+                        boolean canReduce = !inCheckAtNode
+                                && !isTactical
+                                && !givesCheck
+                                && !attacksQueen
+                                && !attacksKingZone
+                                && !opensKingFile
+                                && !seeWinsMaterial
+                                && nextDepth >= 2
+                                && index > lmrProtectIndexMax;
+
+                        if (plyFromRoot <= lmrProtectPlyMax) {
+                            canReduce = false;
+                        }
+
+                        boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
+                        double pBeta = usePvs ? (alpha + 1) : beta;
+
+                        int reduction = 0;
+                        if (canReduce) {
+                            reduction = lmrReduction(nextDepth, index, historyScore);
+                            if (reduction > 0 && isQuiet && historyScore > 0 && lmrCapGoodQuiet >= 0) {
+                                reduction = Math.min(reduction, lmrCapGoodQuiet);
+                            }
+                            if (reduction <= 0) canReduce = false;
+                        }
+
+                        if (canReduce) {
+                            int reduced = Math.max(1, nextDepth - reduction);
+                            eval = alphaBeta(simulatorEngine, reduced, alpha, pBeta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
+                            if (eval == EXIT_FLAG || positionChanged()) {
+                                simulatorEngine.undoLastMove();
+                                return EXIT_FLAG;
+                            }
+
+                            boolean promising = eval > alpha;
+                            if (promising) {
+                                eval = alphaBeta(simulatorEngine, nextDepth, alpha, usePvs ? beta : pBeta,
+                                        false, deadline, move, plyFromRoot + 1, nextExtStreak);
+                                if (eval == EXIT_FLAG || positionChanged()) {
+                                    simulatorEngine.undoLastMove();
+                                    return EXIT_FLAG;
+                                }
+                            }
+                        } else {
+                            eval = alphaBeta(simulatorEngine, nextDepth, alpha, pBeta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
+                            if (eval == EXIT_FLAG || positionChanged()) {
+                                simulatorEngine.undoLastMove();
+                                return EXIT_FLAG;
+                            }
+                            if (usePvs && eval > alpha && eval < beta) {
+                                eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, false, deadline, move, plyFromRoot + 1, nextExtStreak);
+                                if (eval == EXIT_FLAG || positionChanged()) {
+                                    simulatorEngine.undoLastMove();
+                                    return EXIT_FLAG;
+                                }
+                            }
                         }
                     }
                 }
@@ -2336,9 +2911,21 @@ public class AI {
 
             simulatorEngine.undoLastMove();
 
+            eval = adjustMateFromChild(eval);
+            boolean zeroing = isZeroingMove(move);
+
             if (eval > maxEval) {
                 maxEval = eval;
                 bestMoveAtThisNode = move;
+                bestZeroing = zeroing;
+                tablebaseBestExact = childExact;
+            } else if (bestMoveAtThisNode != -1
+                    && shouldUseTablebaseTieBreak(eval, maxEval)
+                    && preferCandidateByTablebase(simulatorEngine, move, eval, zeroing, bestMoveAtThisNode, bestZeroing)) {
+                maxEval = eval;
+                bestMoveAtThisNode = move;
+                bestZeroing = zeroing;
+                tablebaseBestExact = childExact;
             }
 
             alpha = Math.max(alpha, eval);
@@ -2353,12 +2940,19 @@ public class AI {
         TranspositionTableEntry existingEntry = transpositionTable.get(boardHash);
         boolean shouldUpdate = existingEntry == null || existingEntry.depth < depth;
 
-        if (maxEval <= alphaOriginal && shouldUpdate) {
-            transpositionTable.put(boardHash, new TranspositionTableEntry(maxEval, depth, NodeType.UPPERBOUND, bestMoveAtThisNode), depth);
-        } else if (maxEval >= betaOriginal && shouldUpdate) {
-            transpositionTable.put(boardHash, new TranspositionTableEntry(maxEval, depth, NodeType.LOWERBOUND, bestMoveAtThisNode), depth);
-        } else if (shouldUpdate) {
-            transpositionTable.put(boardHash, new TranspositionTableEntry(maxEval, depth, NodeType.EXACT, bestMoveAtThisNode), depth);
+        double storedScore = toStoredMateScore(maxEval, plyFromRoot);
+        if (shouldUpdate) {
+            NodeType nodeType;
+            if (tablebaseBestExact) {
+                nodeType = NodeType.EXACT;
+            } else if (maxEval <= alphaOriginal) {
+                nodeType = NodeType.UPPERBOUND;
+            } else if (maxEval >= betaOriginal) {
+                nodeType = NodeType.LOWERBOUND;
+            } else {
+                nodeType = NodeType.EXACT;
+            }
+            transpositionTable.put(boardHash, new TranspositionTableEntry(storedScore, depth, nodeType, bestMoveAtThisNode), depth);
         }
 
         return maxEval;
@@ -2373,6 +2967,8 @@ public class AI {
         long start = log.isDebugEnabled() ? System.nanoTime() : 0L;
         double minEval = Double.POSITIVE_INFINITY;
         int bestMoveAtThisNode = -1;
+        boolean bestZeroing = false;
+        boolean tablebaseBestExact = false;
 
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, false);
         final Heuristics heuristics = threadHeuristics.get();
@@ -2404,7 +3000,8 @@ public class AI {
                 || (baseRemainingDepth == 2 && pruning.fpMarginDepth2() > 0));
         double staticEvalWhite = Double.NaN;
         if (futilityPossible) {
-            staticEvalWhite = resolveScoreDifference(simulatorEngine.getGameState(), boardHash);
+            staticEvalWhite = resolveScoreDifference(simulatorEngine.getGameState(), boardHash,
+                    simulatorEngine.whitesTurn());
             if (!Double.isFinite(staticEvalWhite)) {
                 futilityPossible = false;
             }
@@ -2472,126 +3069,126 @@ public class AI {
             simulatorEngine.performMove(move);
             long newBoardHash = simulatorEngine.getBoardStateHash();
 
-            boolean givesCheck = isSideInCheck(simulatorEngine, true);
-            boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, false);
-            boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, false);
-            boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
-
-            if (futilityPossible && isQuiet && !givesCheck && !attacksQueen && !attacksKingZone
-                    && !opensKingFile && !seeWinsMaterial) {
-                int futilityMargin = futilityMarginForRemainingDepth(baseRemainingDepth);
-                if (futilityMargin > 0 && staticEvalWhite - futilityMargin >= beta) {
-                    simulatorEngine.undoLastMove();
-                    continue;
-                }
-            }
-
-            int nextDepth = depth - 1;
-            boolean forcing = givesCheck || attacksQueen;
-            boolean allowExtend = forcing && extStreak < maxCheckExtensionStreak;
-            if (allowExtend) nextDepth++;
-            int nextExtStreak = allowExtend ? extStreak + 1 : 0;
+            Optional<TablebaseResult> childTablebase = resolveExactTablebaseResult(simulatorEngine);
+            boolean childExact = childTablebase.isPresent();
 
             double eval;
-            TranspositionTableEntry entry = transpositionTable.get(newBoardHash);
-            boolean ttExactHit = entry != null
-                    && entry.nodeType == NodeType.EXACT
-                    && entry.depth >= nextDepth;
-
-            if (ttExactHit) {
-                eval = entry.score;
+            if (childExact) {
+                eval = evaluateStaticPosition(simulatorEngine.getGameState(), newBoardHash, true, plyFromRoot + 1);
             } else {
-                if (!inCheckAtNode
-                        && !isTactical
-                        && !givesCheck
-                        && !attacksQueen
-                        && !attacksKingZone
-                        && !opensKingFile
-                        && iidReduceDepth > 0
-                        && nextDepth - iidReduceDepth >= 1) {
-                    double iidScore = alphaBeta(simulatorEngine, nextDepth - iidReduceDepth, alpha, beta,
-                            true, deadline, move, plyFromRoot + 1, 0);
-                    if (iidScore == EXIT_FLAG || positionChanged()) {
+                boolean givesCheck = isSideInCheck(simulatorEngine, true);
+                boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, false);
+                boolean attacksKingZone = attacksOpponentKingZone(simulatorEngine, false);
+                boolean opensKingFile = openedFileTowardKing(simulatorEngine.getBitBoard(), kingFileMask, pawnsOnFileBefore, affectsKingFilePawns);
+
+                if (futilityPossible && isQuiet && !givesCheck && !attacksQueen && !attacksKingZone
+                        && !opensKingFile && !seeWinsMaterial) {
+                    int futilityMargin = futilityMarginForRemainingDepth(baseRemainingDepth);
+                    if (futilityMargin > 0 && staticEvalWhite - futilityMargin >= beta) {
                         simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
-                    }
-                    entry = transpositionTable.get(newBoardHash);
-                    ttExactHit = entry != null
-                            && entry.nodeType == NodeType.EXACT
-                            && entry.depth >= nextDepth;
-                    if (ttExactHit) {
-                        eval = entry.score;
-                        simulatorEngine.undoLastMove();
-                        if (eval < minEval) {
-                            minEval = eval;
-                            bestMoveAtThisNode = move;
-                        }
-                        beta = Math.min(beta, eval);
-                        if (alpha >= beta) {
-                            updateKillerMoves(depth, move);
-                            incrementHistory(move, depth);
-                            heuristics.recordCounterMove(prevMove, move);
-                            break;
-                        }
                         continue;
                     }
                 }
 
-                boolean canReduce = !inCheckAtNode
-                        && !isTactical
-                        && !givesCheck
-                        && !attacksQueen
-                        && !attacksKingZone
-                        && !opensKingFile
-                        && !seeWinsMaterial
-                        && nextDepth >= 2
-                        && index > lmrProtectIndexMax;
+                int nextDepth = depth - 1;
+                boolean forcing = givesCheck || attacksQueen;
+                boolean allowExtend = forcing && extStreak < maxCheckExtensionStreak;
+                if (allowExtend) nextDepth++;
+                int nextExtStreak = allowExtend ? extStreak + 1 : 0;
 
-                if (plyFromRoot <= lmrProtectPlyMax) {
-                    canReduce = false;
-                }
+                eval = Double.POSITIVE_INFINITY;
+                TranspositionTableEntry entry = transpositionTable.get(newBoardHash);
+                boolean ttExactHit = entry != null
+                        && entry.nodeType == NodeType.EXACT
+                        && entry.depth >= nextDepth;
 
-                boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
-                double pAlpha = usePvs ? (beta - 1) : alpha;
-
-                int reduction = 0;
-                if (canReduce) {
-                    reduction = lmrReduction(nextDepth, index, historyScore);
-                    if (reduction > 0 && isQuiet && historyScore > 0 && lmrCapGoodQuiet >= 0) {
-                        reduction = Math.min(reduction, lmrCapGoodQuiet);
-                    }
-                    if (reduction <= 0) canReduce = false;
-                }
-
-                if (canReduce) {
-                    int reduced = Math.max(1, nextDepth - reduction);
-                    eval = alphaBeta(simulatorEngine, reduced, pAlpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
-                    if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
-                    }
-
-                    boolean promising = eval < beta;
-                    if (promising) {
-                        eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, beta,
-                                true, deadline, move, plyFromRoot + 1, nextExtStreak);
-                        if (eval == EXIT_FLAG || positionChanged()) {
+                boolean usedTranspositionEval = false;
+                if (ttExactHit) {
+                    eval = fromStoredMateScore(entry.score, plyFromRoot + 1);
+                    usedTranspositionEval = true;
+                } else {
+                    if (!inCheckAtNode
+                            && !isTactical
+                            && !givesCheck
+                            && !attacksQueen
+                            && !attacksKingZone
+                            && !opensKingFile
+                            && iidReduceDepth > 0
+                            && nextDepth - iidReduceDepth >= 1) {
+                        double iidScore = alphaBeta(simulatorEngine, nextDepth - iidReduceDepth, alpha, beta,
+                                true, deadline, move, plyFromRoot + 1, 0);
+                        if (iidScore == EXIT_FLAG || positionChanged()) {
                             simulatorEngine.undoLastMove();
                             return EXIT_FLAG;
                         }
-                    }
-                } else {
-                    eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
-                    if (eval == EXIT_FLAG || positionChanged()) {
-                        simulatorEngine.undoLastMove();
-                        return EXIT_FLAG;
+                        entry = transpositionTable.get(newBoardHash);
+                        ttExactHit = entry != null
+                                && entry.nodeType == NodeType.EXACT
+                                && entry.depth >= nextDepth;
+                        if (ttExactHit) {
+                            eval = fromStoredMateScore(entry.score, plyFromRoot + 1);
+                            usedTranspositionEval = true;
+                        }
                     }
 
-                    if (usePvs && eval > alpha && eval < beta) {
-                        eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
-                        if (eval == EXIT_FLAG || positionChanged()) {
-                            simulatorEngine.undoLastMove();
-                            return EXIT_FLAG;
+                    if (!usedTranspositionEval) {
+                        boolean canReduce = !inCheckAtNode
+                                && !isTactical
+                                && !givesCheck
+                                && !attacksQueen
+                                && !attacksKingZone
+                                && !opensKingFile
+                                && !seeWinsMaterial
+                                && nextDepth >= 2
+                                && index > lmrProtectIndexMax;
+
+                        if (plyFromRoot <= lmrProtectPlyMax) {
+                            canReduce = false;
+                        }
+
+                        boolean usePvs = index > 0 && alpha != Double.NEGATIVE_INFINITY && beta != Double.POSITIVE_INFINITY;
+                        double pAlpha = usePvs ? (beta - 1) : alpha;
+
+                        int reduction = 0;
+                        if (canReduce) {
+                            reduction = lmrReduction(nextDepth, index, historyScore);
+                            if (reduction > 0 && isQuiet && historyScore > 0 && lmrCapGoodQuiet >= 0) {
+                                reduction = Math.min(reduction, lmrCapGoodQuiet);
+                            }
+                            if (reduction <= 0) canReduce = false;
+                        }
+
+                        if (canReduce) {
+                            int reduced = Math.max(1, nextDepth - reduction);
+                            eval = alphaBeta(simulatorEngine, reduced, pAlpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
+                            if (eval == EXIT_FLAG || positionChanged()) {
+                                simulatorEngine.undoLastMove();
+                                return EXIT_FLAG;
+                            }
+
+                            boolean promising = eval < beta;
+                            if (promising) {
+                                eval = alphaBeta(simulatorEngine, nextDepth, usePvs ? alpha : pAlpha, beta,
+                                        true, deadline, move, plyFromRoot + 1, nextExtStreak);
+                                if (eval == EXIT_FLAG || positionChanged()) {
+                                    simulatorEngine.undoLastMove();
+                                    return EXIT_FLAG;
+                                }
+                            }
+                        } else {
+                            eval = alphaBeta(simulatorEngine, nextDepth, pAlpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
+                            if (eval == EXIT_FLAG || positionChanged()) {
+                                simulatorEngine.undoLastMove();
+                                return EXIT_FLAG;
+                            }
+
+                            if (usePvs && eval > alpha && eval < beta) {
+                                eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
+                                if (eval == EXIT_FLAG || positionChanged()) {
+                                    simulatorEngine.undoLastMove();
+                                    return EXIT_FLAG;
+                                }
+                            }
                         }
                     }
                 }
@@ -2605,9 +3202,21 @@ public class AI {
 
             simulatorEngine.undoLastMove();
 
+            eval = adjustMateFromChild(eval);
+            boolean zeroing = isZeroingMove(move);
+
             if (eval < minEval) {
                 minEval = eval;
                 bestMoveAtThisNode = move;
+                bestZeroing = zeroing;
+                tablebaseBestExact = childExact;
+            } else if (bestMoveAtThisNode != -1
+                    && shouldUseTablebaseTieBreak(eval, minEval)
+                    && preferCandidateByTablebase(simulatorEngine, move, eval, zeroing, bestMoveAtThisNode, bestZeroing)) {
+                minEval = eval;
+                bestMoveAtThisNode = move;
+                bestZeroing = zeroing;
+                tablebaseBestExact = childExact;
             }
 
             beta = Math.min(beta, eval);
@@ -2622,12 +3231,19 @@ public class AI {
         TranspositionTableEntry existingEntry = transpositionTable.get(boardHash);
         boolean shouldUpdate = existingEntry == null || existingEntry.depth < depth;
 
-        if (minEval >= betaOriginal && shouldUpdate) {
-            transpositionTable.put(boardHash, new TranspositionTableEntry(minEval, depth, NodeType.LOWERBOUND, bestMoveAtThisNode), depth);
-        } else if (minEval <= alphaOriginal && shouldUpdate) {
-            transpositionTable.put(boardHash, new TranspositionTableEntry(minEval, depth, NodeType.UPPERBOUND, bestMoveAtThisNode), depth);
-        } else if (shouldUpdate) {
-            transpositionTable.put(boardHash, new TranspositionTableEntry(minEval, depth, NodeType.EXACT, bestMoveAtThisNode), depth);
+        double storedScore = toStoredMateScore(minEval, plyFromRoot);
+        if (shouldUpdate) {
+            NodeType nodeType;
+            if (tablebaseBestExact) {
+                nodeType = NodeType.EXACT;
+            } else if (minEval >= betaOriginal) {
+                nodeType = NodeType.LOWERBOUND;
+            } else if (minEval <= alphaOriginal) {
+                nodeType = NodeType.UPPERBOUND;
+            } else {
+                nodeType = NodeType.EXACT;
+            }
+            transpositionTable.put(boardHash, new TranspositionTableEntry(storedScore, depth, nodeType, bestMoveAtThisNode), depth);
         }
 
         return minEval;
@@ -2794,7 +3410,8 @@ public class AI {
 
         // Treat both terminal draws and insufficient-material as draw for evaluation
         if (simulatorEngine.getGameState().isDrawForUIOrEval()) {
-            double scoreDiff = resolveScoreDifference(simulatorEngine.getGameState(), boardStateHash);
+            double scoreDiff = resolveScoreDifference(simulatorEngine.getGameState(), boardStateHash,
+                    simulatorEngine.whitesTurn());
             if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
                 return DRAW - drawBias;
             } else if ((isWhitesTurn && scoreDiff < 0) || (!isWhitesTurn && scoreDiff > 0)) {
@@ -2843,16 +3460,23 @@ public class AI {
             return AI.EXIT_FLAG;
         }
 
-        // Never expand terminal nodes in qsearch: just evaluate
-        if (simulatorEngine.getGameState().isTerminal()) {
+        GameState gameState = simulatorEngine.getGameState();
+        Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
+        if (tablebase.isPresent() && isExactWdl(tablebase.get())) {
             long boardHash = simulatorEngine.getBoardStateHash();
-            return evaluateStaticPosition(simulatorEngine.getGameState(), boardHash, isWhitesTurn, depth);
+            return evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depth);
+        }
+
+        // Never expand terminal nodes in qsearch: just evaluate
+        if (gameState.isTerminal()) {
+            long boardHash = simulatorEngine.getBoardStateHash();
+            return evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depth);
         }
 
         final boolean inCheck = isSideInCheck(simulatorEngine, isWhitesTurn);
 
         long boardHash = simulatorEngine.getBoardStateHash();
-        double standPat = evaluateStaticPosition(simulatorEngine.getGameState(), boardHash, isWhitesTurn, depth);
+        double standPat = evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depth);
 
         double alphaBeforeStandPat = alpha;
 
@@ -2927,7 +3551,14 @@ public class AI {
             }
 
             simulatorEngine.performMove(m);
-            double child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
+            Optional<TablebaseResult> childTablebase = resolveExactTablebaseResult(simulatorEngine);
+            double child;
+            if (childTablebase.isPresent()) {
+                long childHash = simulatorEngine.getBoardStateHash();
+                child = evaluateStaticPosition(simulatorEngine.getGameState(), childHash, !isWhitesTurn, depth + 1);
+            } else {
+                child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
+            }
             simulatorEngine.undoLastMove();
 
             if (child == EXIT_FLAG) {
@@ -2935,6 +3566,7 @@ public class AI {
             }
 
             double score = -child;
+            score = adjustMateFromChild(score);
 
             // Fail-hard beta cutoff
             if (score >= beta) {
@@ -2954,9 +3586,17 @@ public class AI {
         if (gameState.isInStateCheckMate()) {
             return -(CHECKMATE - depthOrPly);
         }
+        EvaluationContext context = gameState.getScore().getEvaluationContext();
+        boolean whiteToMove = context != null && context.isWhiteToMove();
+        Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
+        if (tablebase.isPresent() && isExactWdl(tablebase.get())) {
+            double whitePerspective = clampTablebaseEval(Score.tablebaseToEvaluation(tablebase.get(), whiteToMove,
+                    gameState.getHalfmoveClock()));
+            return isWhitesTurn ? whitePerspective : -whitePerspective;
+        }
         if (gameState.isDrawForUIOrEval()) { // <-- include insufficient material for eval/UI
             if (log.isDebugEnabled()) log.debug("DRAW");
-            double scoreDiff = resolveScoreDifference(gameState, boardHash);
+            double scoreDiff = resolveScoreDifference(gameState, boardHash, whiteToMove);
             if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
                 return DRAW - drawBias;
             } else if ((isWhitesTurn && scoreDiff < 0) || (!isWhitesTurn && scoreDiff > 0)) {
@@ -2964,7 +3604,7 @@ public class AI {
             }
             return DRAW;
         }
-        double scoreDifference = resolveScoreDifference(gameState, boardHash);
+        double scoreDifference = resolveScoreDifference(gameState, boardHash, whiteToMove);
         return isWhitesTurn ? scoreDifference : -scoreDifference;
     }
 
@@ -3017,6 +3657,180 @@ public class AI {
         }
 
         return Math.min(bestSwing, quiescenceMaxDeltaPawn);
+    }
+
+    private boolean isMateValue(double score) {
+        return Double.isFinite(score) && Math.abs(score) >= (CHECKMATE - MATE_SCORE_MARGIN);
+    }
+
+    private double adjustMateFromChild(double score) {
+        if (!Double.isFinite(score)) {
+            return score;
+        }
+        if (score >= CHECKMATE - MATE_SCORE_MARGIN) {
+            return score - 1;
+        }
+        if (score <= -CHECKMATE + MATE_SCORE_MARGIN) {
+            return score + 1;
+        }
+        return score;
+    }
+
+    private double toStoredMateScore(double score, int plyFromRoot) {
+        if (!Double.isFinite(score)) {
+            return score;
+        }
+        if (score >= CHECKMATE - MATE_SCORE_MARGIN) {
+            return score + plyFromRoot;
+        }
+        if (score <= -CHECKMATE + MATE_SCORE_MARGIN) {
+            return score - plyFromRoot;
+        }
+        return score;
+    }
+
+    private double fromStoredMateScore(double score, int plyFromRoot) {
+        if (!Double.isFinite(score)) {
+            return score;
+        }
+        if (score >= CHECKMATE - MATE_SCORE_MARGIN) {
+            return score - plyFromRoot;
+        }
+        if (score <= -CHECKMATE + MATE_SCORE_MARGIN) {
+            return score + plyFromRoot;
+        }
+        return score;
+    }
+
+    private boolean isZeroingMove(int move) {
+        if (move < 0) {
+            return false;
+        }
+        if (MoveHelper.isCapture(move)) {
+            return true;
+        }
+        int pieceBits = MoveHelper.derivePieceTypeBits(move);
+        return pieceBits == 1;
+    }
+
+    private boolean shouldUseTablebaseTieBreak(double candidateEval, double bestEval) {
+        if (!Double.isFinite(candidateEval) || !Double.isFinite(bestEval)) {
+            return false;
+        }
+        if (Math.abs(candidateEval - bestEval) > TB_TIE_EPSILON) {
+            return false;
+        }
+        if (isMateValue(candidateEval) || isMateValue(bestEval)) {
+            return false;
+        }
+        double candidateSign = Math.signum(candidateEval);
+        double bestSign = Math.signum(bestEval);
+        if (candidateSign == 0.0 || bestSign == 0.0) {
+            return false;
+        }
+        return candidateSign == bestSign;
+    }
+
+    private TablebaseInfo probeMoveTablebase(Engine engine, int move) {
+        if (tablebaseService == null || move < 0) {
+            return null;
+        }
+        engine.performMove(move);
+        try {
+            TablebaseResult result = engine.getGameState().getLastTablebaseResult().orElse(null);
+            if (!isExactWdl(result)) {
+                Optional<SyzygyProbeResult> probe = tablebaseService.probe(engine.getBitBoard());
+                if (probe.isEmpty()) {
+                    return null;
+                }
+                result = TablebaseResult.from(probe.get());
+                if (!isExactWdl(result)) {
+                    return null;
+                }
+                engine.getGameState().setLastTablebaseResult(result);
+            }
+            int dtz = result.dtz().isPresent() ? Math.abs(result.dtz().getAsInt()) : -1;
+            int dtm = result.dtm().isPresent() ? Math.abs(result.dtm().getAsInt()) : -1;
+            boolean childIsWhite = engine.whitesTurn();
+            int wdlScore = result.wdl().score();
+            int whiteWdlSign = childIsWhite ? wdlScore : -wdlScore;
+            return new TablebaseInfo(dtz, dtm, whiteWdlSign);
+        } finally {
+            engine.undoLastMove();
+        }
+    }
+
+    private boolean preferCandidateByTablebase(Engine engine,
+                                               int candidateMove,
+                                               double candidateEval,
+                                               boolean candidateZeroing,
+                                               int bestMove,
+                                               boolean bestZeroing) {
+        TablebaseInfo candidateInfo = probeMoveTablebase(engine, candidateMove);
+        TablebaseInfo bestInfo = probeMoveTablebase(engine, bestMove);
+        if (candidateInfo == null && bestInfo == null) {
+            return false;
+        }
+
+        int candidateSign = candidateInfo != null ? Integer.signum(candidateInfo.whiteWdlSign()) : 0;
+        int bestSign = bestInfo != null ? Integer.signum(bestInfo.whiteWdlSign()) : 0;
+
+        if (candidateSign > 0 && bestSign > 0) {
+            int candidateDtz = candidateInfo.hasDtz() ? candidateInfo.dtz() : Integer.MAX_VALUE;
+            int bestDtz = bestInfo.hasDtz() ? bestInfo.dtz() : Integer.MAX_VALUE;
+            if (candidateDtz < bestDtz) {
+                return true;
+            }
+            if (candidateDtz > bestDtz) {
+                return false;
+            }
+            if (candidateZeroing != bestZeroing) {
+                return candidateZeroing;
+            }
+            return false;
+        }
+
+        if (candidateSign < 0 && bestSign < 0) {
+            int candidateDtz = candidateInfo.hasDtz() ? candidateInfo.dtz() : -1;
+            int bestDtz = bestInfo.hasDtz() ? bestInfo.dtz() : -1;
+            if (candidateDtz > bestDtz) {
+                return true;
+            }
+            if (candidateDtz < bestDtz) {
+                return false;
+            }
+            if (candidateZeroing != bestZeroing) {
+                return !candidateZeroing;
+            }
+            return false;
+        }
+
+        if (candidateInfo != null && bestInfo == null) {
+            if (candidateSign > 0 && candidateInfo.hasDtz()) {
+                return true;
+            }
+            if (candidateSign > 0 && candidateZeroing != bestZeroing) {
+                return candidateZeroing;
+            }
+            return false;
+        }
+
+        if (candidateInfo == null) {
+            if (bestSign > 0 && bestInfo.hasDtz()) {
+                return false;
+            }
+            if (bestSign < 0 && bestInfo.hasDtz()) {
+                return false;
+            }
+            if (bestSign > 0 && candidateZeroing != bestZeroing) {
+                return candidateZeroing;
+            }
+            if (bestSign < 0 && candidateZeroing != bestZeroing) {
+                return !candidateZeroing;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -3124,6 +3938,107 @@ public class AI {
         int victimValue = Score.getPieceValue(MoveHelper.deriveCapturedPieceTypeBits(move));
         int attackerValue = Score.getPieceValue(MoveHelper.derivePieceTypeBits(move));
         return victimValue - attackerValue;
+    }
+
+    private static final class WorkerInstrumentation {
+        private LongAdder[] idleNanos;
+        private LongAdder[] activeNanos;
+        private LongAdder[] jobCounters;
+
+        WorkerInstrumentation(int threads) {
+            ensureCapacityInternal(Math.max(1, threads));
+        }
+
+        synchronized void ensureCapacity(int threads) {
+            ensureCapacityInternal(Math.max(1, threads));
+        }
+
+        void recordIdle(int workerIndex, long nanos) {
+            if (idleNanos == null || workerIndex < 0 || workerIndex >= idleNanos.length || nanos <= 0L) {
+                return;
+            }
+            idleNanos[workerIndex].add(nanos);
+        }
+
+        void recordActive(int workerIndex, long nanos) {
+            if (activeNanos == null || workerIndex < 0 || workerIndex >= activeNanos.length || nanos <= 0L) {
+                return;
+            }
+            activeNanos[workerIndex].add(nanos);
+        }
+
+        void incrementJobs(int workerIndex) {
+            if (jobCounters == null || workerIndex < 0 || workerIndex >= jobCounters.length) {
+                return;
+            }
+            jobCounters[workerIndex].increment();
+        }
+
+        synchronized String buildSummaryAndReset(int workers) {
+            if (workers <= 0) {
+                resetAll();
+                return "";
+            }
+            ensureCapacityInternal(workers);
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < workers; i++) {
+                long active = activeNanos[i].sum();
+                long idle = idleNanos[i].sum();
+                long jobs = jobCounters[i].sum();
+                long total = active + idle;
+                double utilisation = total > 0 ? (active * 100.0) / total : 0.0;
+                if (i > 0) {
+                    sb.append("; ");
+                }
+                sb.append("worker=").append(i)
+                        .append(" jobs=").append(jobs)
+                        .append(" activeMs=").append(TimeUnit.NANOSECONDS.toMillis(active))
+                        .append(" idleMs=").append(TimeUnit.NANOSECONDS.toMillis(idle))
+                        .append(" util=").append(String.format(Locale.ROOT, "%.1f%%", utilisation));
+            }
+            resetAll();
+            return sb.toString();
+        }
+
+        private void resetAll() {
+            if (idleNanos != null) {
+                for (LongAdder adder : idleNanos) {
+                    adder.reset();
+                }
+            }
+            if (activeNanos != null) {
+                for (LongAdder adder : activeNanos) {
+                    adder.reset();
+                }
+            }
+            if (jobCounters != null) {
+                for (LongAdder adder : jobCounters) {
+                    adder.reset();
+                }
+            }
+        }
+
+        private void ensureCapacityInternal(int threads) {
+            if (idleNanos != null && idleNanos.length >= threads) {
+                return;
+            }
+            idleNanos = grow(idleNanos, threads);
+            activeNanos = grow(activeNanos, threads);
+            jobCounters = grow(jobCounters, threads);
+        }
+
+        private static LongAdder[] grow(LongAdder[] original, int newLength) {
+            LongAdder[] expanded = new LongAdder[newLength];
+            int existing = original != null ? original.length : 0;
+            for (int i = 0; i < newLength; i++) {
+                if (i < existing && original[i] != null) {
+                    expanded[i] = original[i];
+                } else {
+                    expanded[i] = new LongAdder();
+                }
+            }
+            return expanded;
+        }
     }
 
     private static final class LockMetrics {
@@ -3340,6 +4255,10 @@ public class AI {
                 counterDirtyList[counterDirtyCount++] = idx;
             }
             counterUpdates[idx] = move;
+        }
+
+        boolean hasPendingUpdates() {
+            return killerDirtyCount > 0 || historyDirtyCount > 0 || counterDirtyCount > 0;
         }
 
         void mergeInto(Heuristics target) {

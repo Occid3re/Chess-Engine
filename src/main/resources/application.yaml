@@ -2,3 +2,10 @@ server:
   servlet:
     context-path: /
   port: 8080
+# Syzygy tablebase configuration (uncomment to enable probing in Spring Boot deployments)
+# chessengine:
+#   syzygy:
+#     path: "C:/tb/syzygy"      # Directory with .rtbw/.rtbz files; accepts the platform path separator for multiples
+#     nativeLibrary: "C:/native/JSyzygy.dll"  # Optional: absolute path to the JNI library when it is not bundled
+#     maxPieces: 6              # Highest piece-count to load (6 uses ~150 GB on disk)
+#     cacheSize: 65536          # Entries to keep in the in-memory probe cache

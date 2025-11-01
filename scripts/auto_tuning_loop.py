@@ -29,6 +29,11 @@ JVM & Engine parity with lichess_bot
     -Dchessengine.rootParallelLimit, -Dchessengine.tt.mb, -Dchessengine.tuning.file, etc.
 - All of the above are placed into Surefire's forked JVM via -DargLine="...".
 
+Tablebase awareness
+--------------------
+- The loop inherits tablebase settings from `chessengine.syzygy.path`/`paths` and forwards them to the Surefire JVM.
+- When tuning evaluation weights, keep the setting constant (or clear it) so Syzygy probes do not hide score deltas between candidates.
+
 Typical usage (PowerShell)
 --------------------------
 python .\scripts\auto_tuning_loop.py `
@@ -80,6 +85,21 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import DefaultDict, Dict, List, Optional, Set, Tuple
+
+
+DEFAULT_SYZYGY_NATIVE = r"C:\\Development\\Chess-Engine\\target\\classes\\natives\\win-x86_64\\Release\\JSyzygy.dll"
+DEFAULT_SYZYGY_PATHS = r"C:\\Syzygy"
+
+
+def resolve_syzygy_from_env(env: Optional[Dict[str, str]] = None) -> Tuple[str, str]:
+    source = env if env is not None else os.environ
+    native = source.get("CHESSENGINE_SYZYGY_NATIVE") or DEFAULT_SYZYGY_NATIVE
+    paths = (
+        source.get("CHESSENGINE_SYZYGY_PATHS")
+        or source.get("CHESSENGINE_SYZYGY_PATH")
+        or DEFAULT_SYZYGY_PATHS
+    )
+    return native, paths
 
 # ----------------------------
 # Patterns
@@ -719,6 +739,26 @@ PARAM_MUTATION_HINTS: Dict[str, Dict[str, object]] = {
         "step": 8.0,
         "soft_min": -120.0,
         "soft_max": 0.0,
+    },
+    "kingsafety.backrankcovermidgamebonus": {
+        "step": 4.0,
+        "soft_min": -64.0,
+        "soft_max": 128.0,
+    },
+    "kingsafety.backrankcoverendgamebonus": {
+        "step": 4.0,
+        "soft_min": -64.0,
+        "soft_max": 96.0,
+    },
+    "kingsafety.backrankattackpenaltymidgame": {
+        "step": 8.0,
+        "soft_min": 0.0,
+        "soft_max": 256.0,
+    },
+    "kingsafety.backrankattackpenaltyendgame": {
+        "step": 8.0,
+        "soft_min": 0.0,
+        "soft_max": 256.0,
     },
     "kingsafety.defenderbonus": {
         "step": 1.0,
@@ -2255,6 +2295,12 @@ def main() -> None:
         "chessengine.uci.info.minIntervalMs": "200",
         "chessengine.uci.info.maxPvLen": "10",
     }
+
+    syzygy_native, syzygy_paths = resolve_syzygy_from_env()
+    if syzygy_native:
+        engine_sysprops["chessengine.syzygy.nativeLibrary"] = syzygy_native
+    if syzygy_paths:
+        engine_sysprops["chessengine.syzygy.paths"] = syzygy_paths
     if args.tuning_file:
         override_path = Path(args.tuning_file)
         if not override_path.is_absolute():

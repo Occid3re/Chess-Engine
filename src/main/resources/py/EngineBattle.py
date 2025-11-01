@@ -3,10 +3,38 @@ import os
 import re
 import subprocess
 import time
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 import shlex
 
 import requests
+
+# Shared Syzygy defaults for all engine JVM launches
+DEFAULT_SYZYGY_NATIVE = r"C:\\Development\\Chess-Engine\\target\\classes\\natives\\win-x86_64\\Release\\JSyzygy.dll"
+DEFAULT_SYZYGY_PATHS = r"C:\\Syzygy"
+
+
+def resolve_syzygy_from_env() -> Tuple[str, str]:
+    native = os.environ.get("CHESSENGINE_SYZYGY_NATIVE") or DEFAULT_SYZYGY_NATIVE
+    paths = (
+        os.environ.get("CHESSENGINE_SYZYGY_PATHS")
+        or os.environ.get("CHESSENGINE_SYZYGY_PATH")
+        or DEFAULT_SYZYGY_PATHS
+    )
+    return native, paths
+
+
+def ensure_syzygy_args(jvm_args: Optional[List[str]]) -> List[str]:
+    args = list(jvm_args) if jvm_args else []
+    native, paths = resolve_syzygy_from_env()
+
+    def has_prefix(prefix: str) -> bool:
+        return any(item.startswith(prefix) for item in args)
+
+    if native and not has_prefix("-Dchessengine.syzygy.nativeLibrary"):
+        args.append(f"-Dchessengine.syzygy.nativeLibrary={native}")
+    if paths and not has_prefix("-Dchessengine.syzygy.paths"):
+        args.append(f"-Dchessengine.syzygy.paths={paths}")
+    return args
 
 #py -3 EngineBattle.py --jar1 "E:\ChessEngines\chess-engine-3.0.4.jar" --jar2 "E:\ChessEngines\chess-engine-3.0.6.jar" --jvm1 "-Xms4g -Xmx8g -XX:+UseG1GC"  --jvm2 "-Xms4g -Xmx8g -XX:+UseG1GC -Dchessengine.searchThreads=8 -Dchessengine.rootParallelLimit=128" --games 100 --engine-time-limit 1000
 
@@ -42,7 +70,7 @@ def start_java_process(jar_path: str, port: int, jvm_args=None) -> subprocess.Po
     """
     if not os.path.isfile(jar_path):
         raise FileNotFoundError(f"JAR not found: {jar_path}")
-    cmd = ['java'] + (jvm_args or []) + ['-jar', jar_path, f'--server.port={port}']
+    cmd = ['java'] + ensure_syzygy_args(jvm_args) + ['-jar', jar_path, f'--server.port={port}']
     with open(os.devnull, 'w') as devnull:
         return subprocess.Popen(cmd, stdout=devnull, stderr=devnull)
 
@@ -590,7 +618,7 @@ def start_java_process(jar_path: str, port: int, jvm_args=None) -> subprocess.Po
     """
     if not os.path.isfile(jar_path):
         raise FileNotFoundError(f"JAR not found: {jar_path}")
-    cmd = ['java'] + (jvm_args or []) + ['-jar', jar_path, f'--server.port={port}']
+    cmd = ['java'] + ensure_syzygy_args(jvm_args) + ['-jar', jar_path, f'--server.port={port}']
     with open(os.devnull, 'w') as devnull:
         return subprocess.Popen(cmd, stdout=devnull, stderr=devnull)
 

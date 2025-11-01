@@ -7,6 +7,7 @@ import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.tuning.AiTuning;
 import julius.game.chessengine.utils.Score;
+import julius.game.chessengine.syzygy.TestSyzygySupport;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.TestInstance;
@@ -71,6 +72,18 @@ class AITest_MateThreatDiagnostics {
                 new Object[]{
                         "4k2r/1R3R2/p3p1pp/4b3/1BnNr3/8/P1P5/5K2 w - - 1 1",
                         List.of("Re7")
+                },
+                new Object[]{
+                        "3k4/pp6/8/8/8/8/P3N3/3K4 w - - 0 1",
+                        List.of("Nd4")
+                },
+                new Object[]{
+                        "3kQ3/p7/8/8/8/8/PP2N3/4K3 b - - 0 1",
+                        List.of("Kxe8")
+                },
+                new Object[]{
+                        "8/6k1/5R2/p2BP1P1/1P1K3r/8/8/8 w - - 0 68",
+                        List.of("Be4")
                 }
         );
     }
@@ -91,8 +104,8 @@ class AITest_MateThreatDiagnostics {
                 .searchThreads(1)
                 .lazySmpThreads(1)
                 .hashSizeMb(64)
-                .maxDepth(14)
-                .timeLimitMillis(1000)
+                .maxDepth(22)
+                .timeLimitMillis(10000)
                 .nullMovePruning(true)
                 .build();
 
@@ -142,7 +155,8 @@ class AITest_MateThreatDiagnostics {
         private final List<DepthTrace> depthTraces = Collections.synchronizedList(new ArrayList<>());
 
         DiagnosticAI(Engine engine, AiTuning tuning) {
-            super(engine, tuning);
+            super(engine, tuning, TestSyzygySupport.maybeCreateServiceFromConfiguration()
+                    .orElse(null));
             try {
                 sortMovesMethod = AI.class.getDeclaredMethod("sortMovesByEfficiency", IntArrayList.class,
                         int.class, long.class, int.class, Engine.class);

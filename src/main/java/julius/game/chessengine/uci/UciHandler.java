@@ -7,6 +7,8 @@ import julius.game.chessengine.ai.time.TimeManager;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
+import julius.game.chessengine.syzygy.SyzygyTablebaseService;
+import julius.game.chessengine.syzygy.TablebaseResult;
 import julius.game.chessengine.utils.Score;
 import julius.game.chessengine.utils.VersionInfo;
 
@@ -32,21 +34,39 @@ public class UciHandler {
     private final AI ai;
     private final Consumer<String> output;
     private final Supplier<Boolean> running;
+    private final SyzygyTablebaseService tablebaseService;
     private Thread searchThread;
     private final Map<String, UciOption> options = new LinkedHashMap<>();
     private int moveOverheadMs = 0;
     private final AtomicLong lastInfoNanos = new AtomicLong(0L);
+    private Integer lastBroadcastedDtz = null;
 
     public UciHandler() {
         this(System.out::println, () -> true);
     }
 
     public UciHandler(Consumer<String> output, Supplier<Boolean> running) {
-        this.engine = new Engine();
-        this.ai = new AI(engine);
+        this(createTablebaseService(), new Engine(), null, output, running);
+    }
+
+    UciHandler(SyzygyTablebaseService tablebaseService, Engine engine, AI ai,
+            Consumer<String> output, Supplier<Boolean> running) {
+        this.tablebaseService = Objects.requireNonNull(tablebaseService, "tablebaseService");
+        Score.setTablebaseService(this.tablebaseService);
+
+        this.engine = Objects.requireNonNull(engine, "engine");
+        this.ai = ai == null ? new AI(this.engine, this.tablebaseService) : ai;
         this.output = Objects.requireNonNull(output, "output");
         this.running = Objects.requireNonNull(running, "running");
         registerOptions();
+    }
+
+    private static SyzygyTablebaseService createTablebaseService() {
+        String syzygyPaths = System.getProperty("chessengine.syzygy.paths",
+                System.getProperty("chessengine.syzygy.path", ""));
+        int syzygyMaxPieces = Integer.getInteger("chessengine.syzygy.maxPieces", 6);
+        int syzygyCacheSize = Integer.getInteger("chessengine.syzygy.cacheSize", 65536);
+        return new SyzygyTablebaseService(syzygyPaths, syzygyMaxPieces, syzygyCacheSize);
     }
 
     /**
@@ -63,6 +83,7 @@ public class UciHandler {
             case "uci" -> sendId();
             case "isready" -> {
                 stop();
+                tablebaseService.ensureReady();
                 output.accept("readyok");
             }
             case "ucinewgame" -> newGame();
@@ -86,11 +107,17 @@ public class UciHandler {
     }
 
     private void sendId() {
+        tablebaseService.ensureReady();
         output.accept("id name Alieknek " + VersionInfo.getVersion());
         output.accept("id author Julius");
         for (UciOption opt : options.values()) {
-            output.accept(String.format("option name %s type %s default %s min %d max %d",
-                    opt.name, opt.type, opt.defaultValue, opt.min, opt.max));
+            if ("string".equals(opt.type)) {
+                output.accept(String.format("option name %s type %s default %s",
+                        opt.name, opt.type, opt.defaultValue));
+            } else {
+                output.accept(String.format("option name %s type %s default %s min %d max %d",
+                        opt.name, opt.type, opt.defaultValue, opt.min, opt.max));
+            }
         }
         output.accept("uciok");
     }
@@ -103,6 +130,17 @@ public class UciHandler {
                 v -> ai.setHashSizeMb(Integer.parseInt(v))));
         options.put("Move Overhead", new UciOption("Move Overhead", "spin", "0", 0, 5000,
                 v -> moveOverheadMs = Integer.parseInt(v)));
+        String syzygyDefault = tablebaseService.getConfiguredDirectories();
+        options.put("SyzygyPath", new UciOption("SyzygyPath", "string",
+                syzygyDefault == null ? "" : syzygyDefault, 0, 0, this::configureSyzygyPath));
+    }
+
+    private void configureSyzygyPath(String raw) {
+        String trimmed = raw == null ? "" : raw.trim();
+        tablebaseService.configure(trimmed);
+        Score.setTablebaseService(tablebaseService);
+        tablebaseService.ensureReady();
+        lastBroadcastedDtz = null;
     }
 
     private void setOption(String[] tokens) {
@@ -279,6 +317,7 @@ public class UciHandler {
         }
 
         lastInfoNanos.set(0L);
+        lastBroadcastedDtz = null;
         searchThread = new Thread(() -> {
             ai.startAutoPlay(false, false); // start calculation without auto-move
             try {
@@ -373,6 +412,15 @@ public class UciHandler {
         if (gameState != null && gameState.getState() != null) {
             output.accept("info string gamestate " + gameState.getState());
         }
+        engine.getLastTablebaseResult().ifPresent(result -> {
+            if (result.dtz().isPresent()) {
+                int dtz = result.dtz().getAsInt();
+                if (!Objects.equals(lastBroadcastedDtz, dtz)) {
+                    lastBroadcastedDtz = dtz;
+                    output.accept("info string tablebase dtz " + dtz);
+                }
+            }
+        });
     }
 
     private void respondWithMoveOrTerminal(int move, String reason) {
@@ -404,7 +452,7 @@ public class UciHandler {
             if (moveAndScore == null) {
                 continue;
             }
-            if (pv.length() > 0) {
+            if (!pv.isEmpty()) {
                 pv.append(' ');
             }
             pv.append(toUci(moveAndScore.getMove()));

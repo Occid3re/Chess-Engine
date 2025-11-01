@@ -4,6 +4,9 @@ setlocal
 REM --- project root ---
 cd /d "C:\Development\Chess-Engine"
 
+set "CHESSENGINE_SYZYGY_NATIVE=C:\Development\Chess-Engine\target\classes\natives\win-x86_64\Release\JSyzygy.dll"
+set "CHESSENGINE_SYZYGY_PATHS=C:\Syzygy"
+
 REM --- newest chess-engine-*-uci.jar ---
 set "JARFILE="
 for /f "usebackq delims=" %%F in (`dir /b /a:-d /o:-d "target\chess-engine-*-uci.jar" 2^>nul`) do (
@@ -36,6 +39,8 @@ REM PropertiesLauncher explicitly. Then -Dloader.main=<FQN> is honored.
 REM ---------------------------------------------------------------------------
 
 java ^
+  "-Dchessengine.syzygy.nativeLibrary=%CHESSENGINE_SYZYGY_NATIVE%" ^
+  "-Dchessengine.syzygy.paths=%CHESSENGINE_SYZYGY_PATHS%" ^
   "-Dloader.main=julius.game.chessengine.tuning.GeneticTuningMain" ^
   -cp "%JARFILE%" ^
   org.springframework.boot.loader.launch.PropertiesLauncher ^

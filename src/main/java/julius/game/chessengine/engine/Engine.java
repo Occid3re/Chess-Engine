@@ -6,6 +6,7 @@ import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.FEN;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.figures.PieceType;
+import julius.game.chessengine.syzygy.TablebaseResult;
 import julius.game.chessengine.utils.Color;
 import julius.game.chessengine.utils.MoveStack;
 import lombok.Getter;
@@ -15,6 +16,7 @@ import org.springframework.stereotype.Service;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.LongConsumer;
 
 import static julius.game.chessengine.board.MoveHelper.convertIndexToString;
@@ -32,7 +34,7 @@ public class Engine {
 
     private boolean legalMovesNeedUpdate = true;
     private long cachedLegalMovesHash = Long.MIN_VALUE;
-    private int[] cachedLegalMoves = new int[0];
+    private int[] cachedLegalMoves = new int[MOVE_BUFFER_CAPACITY];
     private int cachedLegalMoveCount = 0;
 
     private static final int MOVE_BUFFER_CAPACITY = 256;
@@ -54,6 +56,7 @@ public class Engine {
     private GameState gameState = new GameState(bitBoard);
 
     private volatile LongConsumer onPositionChanged = _ -> {};
+    private volatile TablebaseResult lastTablebaseResult;
 
     public Engine() {
         startNewGame();
@@ -75,6 +78,7 @@ public class Engine {
             // Intentionally DO NOT copy the onPositionChanged observer; clones are silent by default.
             // Users can opt in via setOnPositionChanged on the clone.
         }
+        updateLastTablebaseResult();
     }
 
     public void setOnPositionChanged(LongConsumer cb) {
@@ -83,6 +87,7 @@ public class Engine {
 
     /** Invoke observer outside boardLock. */
     private void notifyPositionChanged(long hash) {
+        updateLastTablebaseResult();
         LongConsumer cb = this.onPositionChanged; // read volatile once
         try {
             cb.accept(hash);
@@ -113,7 +118,7 @@ public class Engine {
                 // Gate on terminality only (checkmate, stalemate, 50-move, threefold).
                 if (gameState.isTerminal()) {
                     IntArrayList empty = new IntArrayList(0);
-                    cacheLegalMoves(boardHash, legalMoveScratch, 0);
+                    cacheLegalMoves(boardHash, 0);
                     return empty;
                 }
                 return generateLegalMoves();
@@ -165,6 +170,8 @@ public class Engine {
             gameState.pushHalfmoveClock();
             gameState.update(bitBoard, legalMoves, move, isOpeningMove);
             gameState.getScore().applyMove(bitBoard, move, gameState.getState());
+            gameState.captureTablebaseState();
+            updateLastTablebaseResult();
 
             // 5) Line/history
             line.push(move);
@@ -194,7 +201,7 @@ public class Engine {
 
             // If you auto-claim 50-move / threefold, these are terminal draws.
             if (gameState.isFiftyMoveRule() || gameState.isThreefoldRepetition()) {
-                cacheLegalMoves(getBoardStateHash(), legalMoveScratch, 0);
+                cacheLegalMoves(getBoardStateHash(), 0);
                 gameState.setState(GameStateEnum.DRAW);
                 // Still surface the UI/eval hint if material is insufficient.
                 gameState.setDrawByInsufficientMaterial(bitBoard.hasInsufficientMaterial());
@@ -203,6 +210,9 @@ public class Engine {
                 IntArrayList legalMoves = generateLegalMoves();
                 gameState.updateState(bitBoard, legalMoves, false);
             }
+
+            gameState.captureTablebaseState();
+            updateLastTablebaseResult();
 
             notifyHash = getBoardStateHash();
         }
@@ -253,6 +263,7 @@ public class Engine {
             gameState.getHashHistory().clear();
             gameState.getRepetition().clear();
             gameState.recordHash(getBoardStateHash());
+            updateLastTablebaseResult();
 
             notifyHash = getBoardStateHash();
         }
@@ -314,15 +325,13 @@ public class Engine {
                 }
             }
 
-            // 3) cache (steal a copy once)
-            // copy exactly w ints into the cache; then return a wrap of that copy (no double-copy)
+            // 3) cache (reuse double-buffered arrays via swap)
             ensureLegalMoveScratchCapacity(w);
             System.arraycopy(a, 0, legalMoveScratch, 0, w);
-            int[] cached = java.util.Arrays.copyOf(legalMoveScratch, w);
-            cacheLegalMoves(boardStateHash, cached, w);
+            cacheLegalMoves(boardStateHash, w);
 
-            // 4) return a list backed by the already-copied array (no new copy here)
-            return IntArrayList.wrap(cached, w);
+            // 4) return a defensive copy for callers (cache retains reusable buffers)
+            return copyCachedLegalMoves();
         }
     }
 
@@ -333,30 +342,44 @@ public class Engine {
         cachedLegalMovesHash = Long.MIN_VALUE;
     }
 
-    private void cacheLegalMoves(long boardHash, int[] legalMoves, int legalMoveCount) {
+    private void cacheLegalMoves(long boardHash, int legalMoveCount) {
+        ensureCachedLegalMoveCapacity(legalMoveCount);
+
+        int[] previousCached = this.cachedLegalMoves;
+        this.cachedLegalMoves = this.legalMoveScratch;
+        this.legalMoveScratch = previousCached;
+
         this.cachedLegalMovesHash = boardHash;
         this.cachedLegalMoveCount = legalMoveCount;
-        // legalMoves must be a fresh array that we won’t mutate later
-        this.cachedLegalMoves = legalMoves;
         this.legalMovesNeedUpdate = false;
     }
 
 
     private void ensureLegalMoveScratchCapacity(int requiredSize) {
         if (legalMoveScratch.length < requiredSize) {
-            int newSize = Math.max(requiredSize, legalMoveScratch.length << 1);
+            int base = (legalMoveScratch.length == 0 ? MOVE_BUFFER_CAPACITY : legalMoveScratch.length << 1);
+            int newSize = Math.max(requiredSize, base);
             legalMoveScratch = java.util.Arrays.copyOf(legalMoveScratch, newSize);
         }
     }
 
+    private void ensureCachedLegalMoveCapacity(int requiredSize) {
+        if (cachedLegalMoves.length < requiredSize) {
+            int base = (cachedLegalMoves.length == 0 ? MOVE_BUFFER_CAPACITY : cachedLegalMoves.length << 1);
+            int newSize = Math.max(requiredSize, base);
+            cachedLegalMoves = java.util.Arrays.copyOf(cachedLegalMoves, newSize);
+        }
+    }
+
     private IntArrayList copyCachedLegalMoves() {
-        // cachedLegalMoves is *already* an exact-sized array that won’t be mutated
-        return IntArrayList.wrap(cachedLegalMoves, cachedLegalMoveCount);
+        int[] snapshot = java.util.Arrays.copyOf(cachedLegalMoves, cachedLegalMoveCount);
+        return new IntArrayList(snapshot);
     }
 
 
     private void resetCachedLegalMoves() {
-        cachedLegalMoves = new int[0];
+        cachedLegalMoves = new int[MOVE_BUFFER_CAPACITY];
+        legalMoveScratch = new int[MOVE_BUFFER_CAPACITY];
         cachedLegalMoveCount = 0;
         cachedLegalMovesHash = Long.MIN_VALUE;
         legalMovesNeedUpdate = true;
@@ -442,6 +465,7 @@ public class Engine {
             markLegalMovesStale();
 
             gameState.refreshScore(bitBoard);
+            updateLastTablebaseResult();
 
             return previousDoubleStep;
         }
@@ -460,6 +484,7 @@ public class Engine {
             markLegalMovesStale();
 
             gameState.refreshScore(bitBoard);
+            updateLastTablebaseResult();
         }
     }
 
@@ -482,6 +507,8 @@ public class Engine {
             gameState.popHalfmoveClock(bitBoard);
             gameState.updateState(bitBoard, legalMoves, false);
             gameState.getScore().undoMove(bitBoard, undoMove, gameState.getState());
+            gameState.captureTablebaseState();
+            updateLastTablebaseResult();
 
             // 3) Bookkeeping
             redoLine.push(undoMove);
@@ -555,6 +582,17 @@ public class Engine {
         synchronized (boardLock) {
             return bitBoard.isEndgame();
         }
+    }
+
+    public Optional<TablebaseResult> getLastTablebaseResult() {
+        return Optional.ofNullable(lastTablebaseResult);
+    }
+
+    private void updateLastTablebaseResult() {
+        GameState currentState = this.gameState;
+        this.lastTablebaseResult = (currentState != null)
+                ? currentState.getLastTablebaseResult().orElse(null)
+                : null;
     }
 }
 

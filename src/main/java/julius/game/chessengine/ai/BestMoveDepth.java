@@ -4,9 +4,12 @@ public final class BestMoveDepth {
     final int move;
     final double score;
     final int depth;
-    BestMoveDepth(int move, double score, int depth) {
+    final boolean tablebaseExact;
+
+    BestMoveDepth(int move, double score, int depth, boolean tablebaseExact) {
         this.move = move;
         this.score = score;
         this.depth = depth;
+        this.tablebaseExact = tablebaseExact;
     }
 }
