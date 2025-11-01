@@ -83,7 +83,7 @@ public final class EngineTuningLoader {
         }
         List<EngineTuning> tunings = document.population.stream()
                 .map(EngineTuningLoader::toEngineTuning)
-                .collect(Collectors.toUnmodifiableList());
+                .toList();
         return new EngineTuningSet(tunings);
     }
 

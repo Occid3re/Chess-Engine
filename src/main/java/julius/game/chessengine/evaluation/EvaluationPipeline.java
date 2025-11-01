@@ -3,6 +3,7 @@ package julius.game.chessengine.evaluation;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.utils.Score;
 import julius.game.chessengine.tuning.Tuning;
+import lombok.Getter;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -30,9 +31,10 @@ public final class EvaluationPipeline {
     }
 
     private final List<ModuleState> modules;
-    private final EvaluationWeights weights;
     private final int blendScale;
+    @Getter
     private EvaluationContext context;
+    @Getter
     private boolean initialized;
     private boolean aggregateDirty = true;
     private int midgameTotal;
@@ -46,11 +48,11 @@ public final class EvaluationPipeline {
         if (modules == null || modules.isEmpty()) {
             throw new IllegalArgumentException("At least one evaluation module is required");
         }
-        this.weights = (weights != null ? weights : EvaluationWeights.identity());
+        EvaluationWeights weights1 = (weights != null ? weights : EvaluationWeights.identity());
         this.blendScale = Tuning.evaluationBlendScale();
         List<ModuleState> moduleStates = new ArrayList<>(modules.size());
         for (EvaluationModule module : modules) {
-            EvaluationWeights.ModuleWeight weight = this.weights.weightFor(module.getClass());
+            EvaluationWeights.ModuleWeight weight = weights1.weightFor(module.getClass());
             moduleStates.add(new ModuleState(module, weight));
         }
         this.modules = Collections.unmodifiableList(moduleStates);
@@ -118,14 +120,6 @@ public final class EvaluationPipeline {
         return getBlendedScore() / 100.0;
     }
 
-    public boolean isInitialized() {
-        return initialized;
-    }
-
-    public EvaluationContext getContext() {
-        return context;
-    }
-
     private void refreshTotals() {
         ensureInitialized();
         if (!aggregateDirty) {
@@ -167,10 +161,7 @@ public final class EvaluationPipeline {
         if (phase < 0) {
             return 0;
         }
-        if (phase > blendScale) {
-            return blendScale;
-        }
-        return phase;
+        return Math.min(phase, blendScale);
     }
 
     private int computeCheckAdjustment() {
