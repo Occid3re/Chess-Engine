@@ -6,8 +6,6 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -55,11 +53,12 @@ public final class GeneticTuningMain {
         GeneticOptimizer.GeneticResult result = optimizer.evolve(seed, options);
         Duration duration = Duration.between(start, Instant.now());
 
+        MatchStatisticsCollector overallStats = MatchStatisticsCollector.fromMatches(result.matches());
         // Build leaderboard and persist only the top performer
-        List<Map.Entry<EngineTuning, Double>> leaderboard = buildLeaderboard(result.matches());
+        List<Map.Entry<EngineTuning, Double>> leaderboard = overallStats.toPointRanking();
         EngineTuningSet evolvedPopulation = result.population();
         if (!leaderboard.isEmpty()) {
-            evolvedPopulation = new EngineTuningSet(List.of(leaderboard.get(0).getKey()));
+            evolvedPopulation = new EngineTuningSet(List.of(leaderboard.getFirst().getKey()));
         }
 
         try {
@@ -79,30 +78,24 @@ public final class GeneticTuningMain {
 
         System.out.printf("Evolution completed in %d seconds.%n", Math.max(1, duration.getSeconds()));
         System.out.printf("Saved %d configurations to %s%n", evolvedPopulation.population().size(), cli.outputFile.toAbsolutePath());
-        printLeaderboard(leaderboard);
+        printLeaderboard(overallStats);
     }
 
-    private static List<Map.Entry<EngineTuning, Double>> buildLeaderboard(List<MatchRunner.MatchResult> matches) {
-        Map<EngineTuning, Double> scoreboard = new HashMap<>();
-        matches.forEach(match -> {
-            scoreboard.merge(match.whiteTuning(), match.whiteScore(), Double::sum);
-            scoreboard.merge(match.blackTuning(), match.blackScore(), Double::sum);
-        });
-        return scoreboard.entrySet().stream()
-                .sorted(Map.Entry.<EngineTuning, Double>comparingByValue(Comparator.reverseOrder()))
-                .toList();
-    }
-
-    private static void printLeaderboard(List<Map.Entry<EngineTuning, Double>> leaderboard) {
-        if (leaderboard.isEmpty()) {
+    private static void printLeaderboard(MatchStatisticsCollector stats) {
+        if (stats == null || stats.isEmpty()) {
             System.out.println("No matches were played.");
             return;
         }
 
+        String decisive = String.format(Locale.ROOT, "%.1f%%", stats.decisiveRate());
+        System.out.printf("Matches played: %d (decisive %s — white wins %d, black wins %d, draws %d).%n",
+                stats.totalMatches(), decisive, stats.whiteWins(), stats.blackWins(), stats.draws());
+        if (stats.totalMatches() > 0) {
+            System.out.printf(Locale.ROOT, "Average plies %.1f (min %d, max %d).%n",
+                    stats.averagePlies(), stats.minPlies(), stats.maxPlies());
+        }
         System.out.println("Top performers (higher score is better):");
-        leaderboard.stream()
-                .limit(10)
-                .forEach(entry -> System.out.printf("  %-24s %.2f%n", entry.getKey().name(), entry.getValue()));
+        System.out.print(stats.formatTable(10));
     }
 
     private static void writeMatchLog(List<MatchRunner.MatchResult> matches, Path destination) throws IOException {
@@ -123,19 +116,21 @@ public final class GeneticTuningMain {
     }
 
     private static void printUsage() {
-        System.out.println("Usage: GeneticTuningMain --seed <file> [options]\n" +
-                "Options:\n" +
-                "  --output <file>        Destination YAML file (defaults to <seed>-evolved.yaml).\n" +
-                "  --matches <file>       Optional CSV log of every self-play match.\n" +
-                "  --generations <n>      Number of generations to simulate (default 5).\n" +
-                "  --retain <n>           Top performers carried over to the next generation (default 4).\n" +
-                "  --population <n>       Number of configurations in each generation (default 8).\n" +
-                "  --matches-per-pair <n> Matches played between every pair per generation (default 2).\n" +
-                "  --mutation <value>     Mutation strength in the [0, 1] range (default 0.15).\n" +
-                "  --move-time <ms>       Move time in milliseconds for each search (default 50).\n" +
-                "  --max-plies <n>        Hard cap on plies per game (default 512).\n" +
-                "  --match-threads <n>    Concurrent self-play games during evaluation (default available processors).\n" +
-                "  -h, --help             Display this help message.\n");
+        System.out.println("""
+                Usage: GeneticTuningMain --seed <file> [options]
+                Options:
+                  --output <file>        Destination YAML file (defaults to <seed>-evolved.yaml).
+                  --matches <file>       Optional CSV log of every self-play match.
+                  --generations <n>      Number of generations to simulate (default 5).
+                  --retain <n>           Top performers carried over to the next generation (default 4).
+                  --population <n>       Number of configurations in each generation (default 8).
+                  --matches-per-pair <n> Matches played between every pair per generation (default 2).
+                  --mutation <value>     Mutation strength in the [0, 1] range (default 0.15).
+                  --move-time <ms>       Move time in milliseconds for each search (default 50).
+                  --max-plies <n>        Hard cap on plies per game (default 512).
+                  --match-threads <n>    Concurrent self-play games during evaluation (default available processors).
+                  -h, --help             Display this help message.
+                """);
     }
 
     private static final class CliArguments {

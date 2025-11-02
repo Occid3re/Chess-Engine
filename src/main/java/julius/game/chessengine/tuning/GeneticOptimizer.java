@@ -1,19 +1,18 @@
 package julius.game.chessengine.tuning;
 
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
-import java.util.UUID;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
+import java.util.stream.Collectors;
 
 import lombok.extern.log4j.Log4j2;
 
@@ -36,10 +35,6 @@ public final class GeneticOptimizer {
         this.random = Objects.requireNonNull(random, "random");
     }
 
-    private static String newName() {
-        return UUID.randomUUID().toString();
-    }
-
     public GeneticResult evolve(EngineTuningSet seedPopulation, GeneticOptions options) {
         Objects.requireNonNull(seedPopulation, "seedPopulation");
         Objects.requireNonNull(options, "options");
@@ -47,7 +42,18 @@ public final class GeneticOptimizer {
             throw new IllegalArgumentException("Seed population must contain at least one tuning");
         }
 
-        List<EngineTuning> population = new ArrayList<>(seedPopulation.population());
+        FriendlyNameGenerator names = new FriendlyNameGenerator(random);
+        List<EngineTuning> population = new ArrayList<>(seedPopulation.population().size());
+        for (EngineTuning tuning : seedPopulation.population()) {
+            EngineTuning participant = tuning;
+            if (names.isBoringName(participant.name())) {
+                participant = participant.rename(names.next());
+            } else {
+                names.registerName(participant.name());
+            }
+            population.add(participant);
+        }
+
         log.info("Starting genetic evolution with {} seed configurations (target population {}, generations {}, retain {}, mutation strength {}, matches per pair {}, match threads {}).",
                 seedPopulation.population().size(),
                 options.populationSize(),
@@ -61,7 +67,7 @@ public final class GeneticOptimizer {
         }
         while (population.size() < options.populationSize()) {
             EngineTuning parent = population.get(random.nextInt(population.size()));
-            population.add(parent.mutate(random, options.mutationStrength()).rename(newName()));
+            population.add(parent.mutate(random, options.mutationStrength()).rename(names.next()));
         }
         if (log.isDebugEnabled()) {
             log.debug("Expanded initial population to {} entries: {}", population.size(),
@@ -77,7 +83,8 @@ public final class GeneticOptimizer {
         try {
             for (int generation = 0; generation < options.generations(); generation++) {
                 int generationIndex = generation + 1;
-                Map<EngineTuning, Double> scoreboard = new HashMap<>();
+                MatchStatisticsCollector stats = new MatchStatisticsCollector();
+                stats.registerParticipants(population);
                 List<ScheduledMatch> scheduledMatches = new ArrayList<>();
 
                 for (int i = 0; i < population.size(); i++) {
@@ -101,14 +108,10 @@ public final class GeneticOptimizer {
                     allMatches.add(completed.result());
                     EngineTuning a = completed.assignment().first();
                     EngineTuning b = completed.assignment().second();
+                    EngineTuning white = completed.assignment().swapped() ? b : a;
+                    EngineTuning black = completed.assignment().swapped() ? a : b;
                     MatchRunner.MatchResult result = completed.result();
-                    if (completed.assignment().swapped()) {
-                        scoreboard.merge(a, result.blackScore(), Double::sum);
-                        scoreboard.merge(b, result.whiteScore(), Double::sum);
-                    } else {
-                        scoreboard.merge(a, result.whiteScore(), Double::sum);
-                        scoreboard.merge(b, result.blackScore(), Double::sum);
-                    }
+                    stats.recordMatch(white, black, result);
                     if (log.isDebugEnabled()) {
                         log.debug("Generation {} match: {} vs {} => {}-{} ({}, {} plies)",
                                 generationIndex,
@@ -121,36 +124,32 @@ public final class GeneticOptimizer {
                     }
                 }
 
-                if (scoreboard.isEmpty()) {
-                    for (EngineTuning tuning : population) {
-                        scoreboard.putIfAbsent(tuning, 0.0);
-                    }
-                }
-
-                List<Map.Entry<EngineTuning, Double>> leaderboard = scoreboard.entrySet().stream()
-                        .sorted(Map.Entry.<EngineTuning, Double>comparingByValue(Comparator.reverseOrder()))
-                        .toList();
+                List<MatchStatisticsCollector.ScoreCard> leaderboard = stats.leaderboard();
 
                 if (log.isInfoEnabled()) {
-                    log.info("Generation {} leaderboard:", generationIndex);
-                    leaderboard.stream()
-                            .limit(Math.min(5, leaderboard.size()))
-                            .forEach(entry -> log.info("  {} -> {}", entry.getKey().name(),
-                                    String.format(Locale.ROOT, "%.2f", entry.getValue())));
+                    String decisive = String.format(Locale.ROOT, "%.1f%%", stats.decisiveRate());
+                    log.info("Generation {} summary: {} games | decisive {} | white wins {} | black wins {} | draws {} | avg plies {} (min {} max {})",
+                            generationIndex,
+                            stats.totalMatches(),
+                            decisive,
+                            stats.whiteWins(),
+                            stats.blackWins(),
+                            stats.draws(),
+                            stats.averagePlies(),
+                            stats.minPlies(),
+                            stats.maxPlies());
+                    log.info("Generation {} standings:\n{}", generationIndex, stats.formatTable(8));
                 }
 
-                List<EngineTuning> retained = leaderboard.stream()
+                population = leaderboard.stream()
                         .limit(Math.max(options.retainCount(), 2))
-                        .map(Map.Entry::getKey)
-                        .collect(ArrayList::new, ArrayList::add, ArrayList::addAll);
-
-                population = new ArrayList<>(retained);
+                        .map(MatchStatisticsCollector.ScoreCard::tuning).collect(Collectors.toList());
                 int retainedCount = population.size();
 
                 while (population.size() < options.populationSize()) {
                     EngineTuning parent = population.get(random.nextInt(population.size()));
                     EngineTuning offspring = parent.mutate(random, options.mutationStrength())
-                            .rename(newName());
+                            .rename(names.next());
                     population.add(offspring);
                     if (log.isDebugEnabled()) {
                         log.debug("Generation {}: created offspring {} from parent {}", generationIndex,
@@ -238,5 +237,110 @@ public final class GeneticOptimizer {
     }
 
     private record CompletedMatch(ScheduledMatch assignment, MatchRunner.MatchResult result) {
+    }
+
+    private static final class FriendlyNameGenerator {
+        private static final String UUID_PATTERN = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$";
+        private static final String[] ADJECTIVES = {
+                "Agile", "Alert", "Ambitious", "Arcane", "Artful", "Astute", "Balanced", "Blazing", "Bold",
+                "Brilliant", "Brisk", "Buoyant", "Clever", "Cool", "Crafty", "Curious", "Cunning", "Daring",
+                "Dazzling", "Defiant", "Determined", "Dynamic", "Electric", "Elegant", "Elusive", "Enigmatic",
+                "Feral", "Feisty", "Fiery", "Focused", "Gallant", "Gentle", "Gifted", "Glorious", "Graceful",
+                "Gritty", "Heroic", "Hyper", "Impetuous", "Ingenious", "Intrepid", "Inventive", "Jazzy",
+                "Joyful", "Keen", "Lively", "Lucid", "Majestic", "Mercurial", "Mighty", "Mischievous", "Nimble",
+                "Nocturnal", "Noble", "Oddball", "Patient", "Persistent", "Playful", "Proud", "Quick", "Quiet",
+                "Quirky", "Radiant", "Raging", "Rapid", "Rebellious", "Resolute", "Ruthless", "Sassy", "Savvy", "Serene",
+                "Sharp", "Silent", "Slick", "Smart", "Sneaky", "Spirited", "Steady", "Stormy", "Strong",
+                "Tenacious", "Tactical", "Tireless", "Tricky", "Unruly", "Valiant", "Vibrant", "Vigilant",
+                "Vivid", "Wild", "Whimsical", "Wily", "Wise", "Xenial", "Yearning", "Young", "Zealous", "Zesty",
+                "Stoic", "Infernal", "Shrewd", "Unstoppable", "Fearless", "Temporal", "Spectral", "Unnatural", "Mysterious"
+        };
+
+        private static final String[] CREATURES = {
+                "Albatross", "Alien", "Antelope", "Ape", "Badger", "Basilisk", "Bat", "Bear", "Beetle", "Bison",
+                "Boar", "Bull", "Butterfly", "Cat", "Cobra", "Coyote", "Crane", "Crow", "Deer", "Demon",
+                "Dog", "Dolphin", "Dragon", "Eagle", "Elephant", "Falcon", "Ferret", "Fox", "Frog", "Gazelle",
+                "Gecko", "Giraffe", "Golem", "Gorilla", "Griffin", "Hawk", "Hedgehog", "Hound", "Hydra",
+                "Ibis", "Iguana", "Jackal", "Jaguar", "Kangaroo", "Kraken", "Leopard", "Lion", "Lynx",
+                "Mammoth", "Mantis", "Minotaur", "Mole", "Monkey", "Mongoose", "Narwhal", "Nighthawk", "Octopus",
+                "Orca", "Otter", "Owl", "Panther", "Pegasus", "Phoenix", "Piranha", "Puffin", "Python",
+                "Raccoon", "Ram", "Raven", "Rhino", "Salamander", "Scorpion", "Seahorse", "Shark", "Sloth",
+                "Sphinx", "Spider", "Squid", "Stag", "Stoat", "Swan", "Tiger", "Tortoise", "Unicorn",
+                "Viper", "Walrus", "Wolf", "Wolverine", "Wyvern", "Yak", "Yeti", "Zebra", "Zergling",
+                "Basilisk", "Cerberus", "Manticore", "Chimera", "Centaur", "Djinn", "Leviathan", "Hippogriff"
+        };
+
+        private static final String[] CHESS_TERMS = {
+                "Attack", "Battery", "Bind", "Blockade", "Blunder", "Break", "Bridge", "Cage", "Capture",
+                "Center", "Chain", "Clamp", "Clearance", "Combination", "Counterplay", "Deflection", "Discovered",
+                "Dominance", "Endgame", "Exchange", "Fianchetto", "File", "Flank", "Flurry", "Fork", "Frontline",
+                "Gambit", "Grip", "Harmony", "Helm", "Initiative", "Interference", "Jail", "KingHunt", "KnightFork",
+                "Lifeline", "Line", "Lockdown", "Luft", "Maneuver", "MatingNet", "MinorityAttack", "Midden",
+                "Opposition", "Outpost", "Overload", "Pincer", "Pin", "PoisonedPawn", "Pressure", "Probe", "Push",
+                "QueenTrap", "Raze", "Recapture", "Relay", "Repetition", "Sac", "Scythe", "Shadow", "Shatter",
+                "Shield", "Simplification", "Skewer", "Smother", "Snowplow", "SpaceGain", "Squeeze", "Storm",
+                "Structure", "Study", "Sunder", "Swindle", "Switch", "Tempo", "Thrust", "Trap", "Transition",
+                "Triangulation", "Tsunami", "Twilight", "Underpromotion", "Undermining", "Vault", "Vector",
+                "Weakness", "Windmill", "Zigzag", "Zug", "Zugzwang", "Zwiebel", "Infiltration", "Counterattack",
+                "Initiation", "Anchor", "Carapace", "Throne", "Formation", "Retreat", "Defence", "TempoGain"
+        };
+
+        private final Random random;
+        private final Set<String> usedNames = new HashSet<>();
+
+        private FriendlyNameGenerator(Random random) {
+            this.random = Objects.requireNonNull(random, "random");
+        }
+
+        boolean isBoringName(String name) {
+            if (name == null || name.isBlank()) {
+                return true;
+            }
+            if (name.endsWith("_mut")) {
+                return true;
+            }
+            return name.matches(UUID_PATTERN);
+        }
+
+        void registerName(String name) {
+            if (name != null && !name.isBlank()) {
+                usedNames.add(name);
+            }
+        }
+
+        String next() {
+            for (int attempt = 0; attempt < 64; attempt++) {
+                String candidate = buildCandidate(false);
+                if (usedNames.add(candidate)) {
+                    return candidate;
+                }
+            }
+            for (int attempt = 0; attempt < 128; attempt++) {
+                String candidate = buildCandidate(true);
+                if (usedNames.add(candidate)) {
+                    return candidate;
+                }
+            }
+            String fallback = String.format(Locale.ROOT, "Tuning-%04d", random.nextInt(10_000));
+            if (usedNames.add(fallback)) {
+                return fallback;
+            }
+            return fallback + "-" + Integer.toHexString(random.nextInt()).toUpperCase(Locale.ROOT);
+        }
+
+        private String buildCandidate(boolean allowSuffix) {
+            String adjective = ADJECTIVES[random.nextInt(ADJECTIVES.length)];
+            String creature = CREATURES[random.nextInt(CREATURES.length)];
+            String base = adjective + "-" + creature;
+            if (random.nextDouble() < 0.55) {
+                String tactic = CHESS_TERMS[random.nextInt(CHESS_TERMS.length)];
+                base = base + "-" + tactic;
+            }
+            if (allowSuffix) {
+                int suffix = 10 + random.nextInt(90);
+                base = base + "-" + suffix;
+            }
+            return base;
+        }
     }
 }
