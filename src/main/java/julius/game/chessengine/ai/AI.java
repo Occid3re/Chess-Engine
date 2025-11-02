@@ -2813,7 +2813,7 @@ public class AI {
 
             double eval;
             if (childExact) {
-                eval = evaluateStaticPosition(simulatorEngine.getGameState(), newBoardHash, false, plyFromRoot + 1);
+                eval = evaluateStaticPosition(simulatorEngine.getGameState(), newBoardHash, true, plyFromRoot + 1);
             } else {
                 boolean givesCheck = isSideInCheck(simulatorEngine, false);
                 boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, true);
