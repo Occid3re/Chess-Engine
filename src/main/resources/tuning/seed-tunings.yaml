@@ -1,5 +1,5 @@
 population:
-  - name: tuned_v1
+  - name: v369
     evaluation:
       modules:
         materialmodule:
