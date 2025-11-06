@@ -2813,7 +2813,15 @@ public class AI {
 
             double eval;
             if (childExact) {
-                eval = evaluateStaticPosition(simulatorEngine.getGameState(), newBoardHash, true, plyFromRoot + 1);
+                // After a white move the child position has black to move, so evaluate from the
+                // opponent's perspective and negate to keep a white-oriented score at this node.
+                double opponentPerspectiveEval = evaluateStaticPosition(simulatorEngine.getGameState(), newBoardHash,
+                        false, plyFromRoot + 1);
+                eval = -opponentPerspectiveEval;
+                if (childTablebase.get().dtm().isPresent() && isMateValue(eval)) {
+                    assert Math.signum(eval) == -Math.signum(opponentPerspectiveEval)
+                            : "Tablebase mate orientation flipped after depth increment";
+                }
             } else {
                 boolean givesCheck = isSideInCheck(simulatorEngine, false);
                 boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, true);
