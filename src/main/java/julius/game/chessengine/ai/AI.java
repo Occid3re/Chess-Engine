@@ -219,7 +219,7 @@ public class AI {
     }
 
     private record TablebaseContinuation(int move, double evaluation, TablebaseResult result,
-                                         boolean zeroingMove) {
+                                         boolean zeroingMove, boolean forcesImmediateDraw) {
     }
 
     private record TablebaseInfo(int dtz, int dtm, int whiteWdlSign) {
@@ -2236,7 +2236,12 @@ public class AI {
             TablebaseResult result = childResult.get();
             double evaluation = clampTablebaseEval(Score.tablebaseToEvaluation(result, simulatorEngine.whitesTurn(),
                     simulatorEngine.getGameState().getHalfmoveClock()));
-            return Optional.of(new TablebaseContinuation(move, evaluation, result, zeroing));
+            GameState state = simulatorEngine.getGameState();
+            boolean forcesImmediateDraw = state.isThreefoldRepetition() || state.isFiftyMoveRule();
+            if (forcesImmediateDraw) {
+                evaluation = 0.0;
+            }
+            return Optional.of(new TablebaseContinuation(move, evaluation, result, zeroing, forcesImmediateDraw));
         } finally {
             simulatorEngine.undoLastMove();
         }
@@ -2262,6 +2267,9 @@ public class AI {
             return false;
         }
         int parentSign = Integer.signum(parentResult.wdl().score());
+        if (parentSign > 0 && continuation.forcesImmediateDraw()) {
+            return false;
+        }
         int childSign = Integer.signum(continuation.result().wdl().score());
         if (parentSign == 0) {
             return childSign == 0;
@@ -2304,6 +2312,9 @@ public class AI {
     }
 
     private boolean preferWinningContinuation(TablebaseContinuation candidate, TablebaseContinuation incumbent) {
+        if (candidate.forcesImmediateDraw() != incumbent.forcesImmediateDraw()) {
+            return !candidate.forcesImmediateDraw();
+        }
         int candidateDtz = normaliseDistance(candidate.result().dtz(), Integer.MAX_VALUE);
         int incumbentDtz = normaliseDistance(incumbent.result().dtz(), Integer.MAX_VALUE);
         if (candidateDtz != incumbentDtz) {
@@ -2323,6 +2334,9 @@ public class AI {
     }
 
     private boolean preferDefensiveContinuation(TablebaseContinuation candidate, TablebaseContinuation incumbent) {
+        if (candidate.forcesImmediateDraw() != incumbent.forcesImmediateDraw()) {
+            return candidate.forcesImmediateDraw();
+        }
         int candidateDtz = normaliseDistance(candidate.result().dtz(), Integer.MIN_VALUE);
         int incumbentDtz = normaliseDistance(incumbent.result().dtz(), Integer.MIN_VALUE);
         if (candidateDtz != incumbentDtz) {
@@ -2342,6 +2356,9 @@ public class AI {
     }
 
     private boolean preferDrawingContinuation(TablebaseContinuation candidate, TablebaseContinuation incumbent) {
+        if (candidate.forcesImmediateDraw() != incumbent.forcesImmediateDraw()) {
+            return candidate.forcesImmediateDraw();
+        }
         int candidateDtz = normaliseDistance(candidate.result().dtz(), Integer.MAX_VALUE);
         int incumbentDtz = normaliseDistance(incumbent.result().dtz(), Integer.MAX_VALUE);
         if (candidateDtz != incumbentDtz) {
