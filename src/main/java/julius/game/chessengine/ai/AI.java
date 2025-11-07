@@ -2229,17 +2229,38 @@ public class AI {
         boolean zeroing = MoveHelper.isCapture(move) || MoveHelper.derivePieceTypeBits(move) == 1;
         simulatorEngine.performMove(move);
         try {
+            GameState childState = simulatorEngine.getGameState();
             Optional<TablebaseResult> childResult = resolveExactTablebaseResult(simulatorEngine);
             if (childResult.isEmpty()) {
                 return Optional.empty();
             }
             TablebaseResult result = childResult.get();
             double evaluation = clampTablebaseEval(Score.tablebaseToEvaluation(result, simulatorEngine.whitesTurn(),
-                    simulatorEngine.getGameState().getHalfmoveClock()));
+                    childState.getHalfmoveClock()));
+            if (shouldTreatAsTablebaseDraw(childState, zeroing)) {
+                evaluation = 0.0;
+            }
             return Optional.of(new TablebaseContinuation(move, evaluation, result, zeroing));
         } finally {
             simulatorEngine.undoLastMove();
         }
+    }
+
+    static boolean shouldTreatAsTablebaseDraw(GameState state, boolean zeroingMove) {
+        if (state == null) {
+            return false;
+        }
+        if (state.isTerminal() && !state.isInStateCheckMate()) {
+            return true;
+        }
+        if (zeroingMove) {
+            return false;
+        }
+        long zobrist = state.getLastZobrist();
+        if (zobrist == 0L) {
+            return false;
+        }
+        return state.getRepetition().get(zobrist) >= 2;
     }
 
     private Optional<TablebaseResult> resolveExactTablebaseResult(Engine engine) {
