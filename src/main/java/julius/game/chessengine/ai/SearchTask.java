@@ -118,6 +118,23 @@ public final class SearchTask {
         }
     }
 
+    void overrideBest(MoveAndScore ms) {
+        if (ms == null || ms.move == -1) {
+            return;
+        }
+
+        while (true) {
+            BestMoveDepth cur = best.get();
+            BestMoveDepth next = new BestMoveDepth(ms.move, ms.score, cur.depth, ms.tablebaseExact);
+            if (best.compareAndSet(cur, next)) {
+                if (Math.abs(ms.score) >= CHECKMATE - 50) {
+                    requestStop();
+                }
+                return;
+            }
+        }
+    }
+
     // --- Local helpers (no dependency on AI) ---
     private static boolean isBetterScore(boolean whiteToMove, double score, double bestScore) {
         return whiteToMove ? score > bestScore : score < bestScore;

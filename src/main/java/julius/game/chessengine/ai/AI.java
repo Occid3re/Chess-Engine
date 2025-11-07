@@ -218,8 +218,11 @@ public class AI {
     private record TablebaseHit(double score, int bestMove, TablebaseResult result) {
     }
 
-    private record TablebaseContinuation(int move, double evaluation, TablebaseResult result,
-                                         boolean zeroingMove) {
+    private record TablebaseContinuation(int move,
+                                         double evaluation,
+                                         TablebaseResult result,
+                                         boolean zeroingMove,
+                                         boolean claimableDraw) {
     }
 
     private record TablebaseInfo(int dtz, int dtm, int whiteWdlSign) {
@@ -1122,7 +1125,9 @@ public class AI {
             task.requestStop();
 
             if (searchResultReady && currentBestMove != -1 && bestMoveForHash == boardStateHash) {
-                return new MoveAndScore(currentBestMove, task.getBest().score, task.getBest().tablebaseExact);
+                MoveAndScore candidate = new MoveAndScore(currentBestMove, task.getBest().score, task.getBest().tablebaseExact);
+                MoveAndScore adjusted = adjustForClaimableDraw(task, boardStateHash, candidate);
+                return adjusted;
             }
             return null;
         } catch (RuntimeException ex) {
@@ -1131,6 +1136,89 @@ public class AI {
         } finally {
             activeSearch.set(null);
         }
+    }
+
+    private MoveAndScore adjustForClaimableDraw(SearchTask task, long boardHash, MoveAndScore candidate) {
+        if (candidate == null || candidate.getMove() < 0) {
+            return candidate;
+        }
+
+        Engine rootSnapshot = (task != null && task.getRootSnapshot() != null)
+                ? task.getRootSnapshot().createSimulation()
+                : mainEngine.createSimulation();
+
+        rootSnapshot.performMove(candidate.getMove());
+        boolean claimableDraw = isClaimableDraw(rootSnapshot);
+        rootSnapshot.undoLastMove();
+        if (!claimableDraw) {
+            return candidate;
+        }
+        if (log.isDebugEnabled()) {
+            log.debug("Tablebase candidate {}{} triggers claimable draw, searching fallback",
+                    MoveHelper.convertIndexToString(MoveHelper.deriveFromIndex(candidate.getMove())),
+                    MoveHelper.convertIndexToString(MoveHelper.deriveToIndex(candidate.getMove())));
+        }
+        if (tablebaseService == null) {
+            return candidate;
+        }
+
+        Engine tbEngine = (task != null && task.getRootSnapshot() != null)
+                ? task.getRootSnapshot().createSimulation()
+                : mainEngine.createSimulation();
+        Optional<TablebaseHit> fallback = resolveTablebaseHit(tbEngine, tbEngine.whitesTurn());
+        if (fallback.isEmpty()) {
+            return candidate;
+        }
+
+        TablebaseHit hit = fallback.get();
+        int move = hit.bestMove();
+        if (move < 0 || move == candidate.getMove()) {
+            return candidate;
+        }
+
+        tbEngine.performMove(move);
+        boolean fallbackDraw = isClaimableDraw(tbEngine);
+        tbEngine.undoLastMove();
+        if (fallbackDraw) {
+            return candidate;
+        }
+
+        MoveAndScore adjusted = new MoveAndScore(move, hit.score(), true);
+        if (log.isDebugEnabled()) {
+            log.debug("Fallback tablebase move {}{} selected to avoid claimable draw",
+                    MoveHelper.convertIndexToString(MoveHelper.deriveFromIndex(move)),
+                    MoveHelper.convertIndexToString(MoveHelper.deriveToIndex(move)));
+        }
+        currentBestMove = move;
+        bestMoveForHash = boardHash;
+        previousBestMove = move;
+        previousBestMoveHash = boardHash;
+        searchResultReady = true;
+
+        if (task != null) {
+            task.overrideBest(adjusted);
+            Engine pvEngine = task.getRootSnapshot() != null
+                    ? task.getRootSnapshot().createSimulation()
+                    : null;
+            if (pvEngine != null) {
+                fillCalculatedLine(pvEngine);
+            }
+        }
+
+        return adjusted;
+    }
+
+    private boolean isClaimableDraw(Engine engine) {
+        GameState gameState = engine.getGameState();
+        if (gameState.getState() == GameStateEnum.DRAW) {
+            return true;
+        }
+        if (gameState.isThreefoldRepetition() || gameState.isFiftyMoveRule()) {
+            return true;
+        }
+        long hash = engine.getBoardStateHash();
+        int repetitionCount = gameState.getRepetition().get(hash);
+        return repetitionCount >= 3;
     }
 
     private SplittableRandom createLazyWorkerRng(SearchTask task, int workerIndex) {
@@ -2189,6 +2277,7 @@ public class AI {
 
         int suggestedMove = -1;
         TablebaseContinuation bestContinuation = null;
+        boolean parentWinning = parentResult != null && parentResult.wdl().score() > 0;
 
         if (parentResult != null) {
             Optional<SyzygyMove> suggestion = parentResult.recommendedMove();
@@ -2199,9 +2288,15 @@ public class AI {
                     if (continuation.isPresent()) {
                         TablebaseContinuation candidate = continuation.get();
                         if (isContinuationConsistent(parentResult, candidate)) {
-                            return candidate.move();
+                            if (!candidate.claimableDraw() || !parentWinning) {
+                                return candidate.move();
+                            }
                         }
-                        bestContinuation = candidate;
+                        if (!parentWinning || !candidate.claimableDraw()) {
+                            bestContinuation = candidate;
+                        } else if (bestContinuation == null || bestContinuation.claimableDraw()) {
+                            bestContinuation = candidate;
+                        }
                     }
                 }
             }
@@ -2217,6 +2312,12 @@ public class AI {
                 continue;
             }
             TablebaseContinuation candidate = continuation.get();
+            if (parentWinning && candidate.claimableDraw()) {
+                if (bestContinuation == null || bestContinuation.claimableDraw()) {
+                    bestContinuation = candidate;
+                }
+                continue;
+            }
             if (bestContinuation == null
                     || isContinuationBetter(parentIsWhite, candidate, bestContinuation, parentResult)) {
                 bestContinuation = candidate;
@@ -2234,9 +2335,17 @@ public class AI {
                 return Optional.empty();
             }
             TablebaseResult result = childResult.get();
+            long childHash = simulatorEngine.getBoardStateHash();
+            int repetitionCount = simulatorEngine.getGameState().getRepetition().get(childHash);
+            boolean claimableDraw = simulatorEngine.getGameState().isThreefoldRepetition()
+                    || simulatorEngine.getGameState().isFiftyMoveRule()
+                    || repetitionCount >= 3;
             double evaluation = clampTablebaseEval(Score.tablebaseToEvaluation(result, simulatorEngine.whitesTurn(),
                     simulatorEngine.getGameState().getHalfmoveClock()));
-            return Optional.of(new TablebaseContinuation(move, evaluation, result, zeroing));
+            if (claimableDraw) {
+                evaluation = DRAW;
+            }
+            return Optional.of(new TablebaseContinuation(move, evaluation, result, zeroing, claimableDraw));
         } finally {
             simulatorEngine.undoLastMove();
         }
@@ -2280,6 +2389,18 @@ public class AI {
             return false;
         }
 
+        if (parentResult != null) {
+            int outcome = Integer.signum(parentResult.wdl().score());
+            if (candidate.claimableDraw() != incumbent.claimableDraw()) {
+                return switch (outcome) {
+                    case 1 -> !candidate.claimableDraw();
+                    case -1 -> candidate.claimableDraw();
+                    case 0 -> candidate.claimableDraw();
+                    default -> !candidate.claimableDraw();
+                };
+            }
+        }
+
         double candidateEval = candidate.evaluation();
         double incumbentEval = incumbent.evaluation();
         if (!Double.isFinite(candidateEval)) {
@@ -2304,6 +2425,9 @@ public class AI {
     }
 
     private boolean preferWinningContinuation(TablebaseContinuation candidate, TablebaseContinuation incumbent) {
+        if (candidate.claimableDraw() != incumbent.claimableDraw()) {
+            return !candidate.claimableDraw();
+        }
         int candidateDtz = normaliseDistance(candidate.result().dtz(), Integer.MAX_VALUE);
         int incumbentDtz = normaliseDistance(incumbent.result().dtz(), Integer.MAX_VALUE);
         if (candidateDtz != incumbentDtz) {
@@ -2323,6 +2447,9 @@ public class AI {
     }
 
     private boolean preferDefensiveContinuation(TablebaseContinuation candidate, TablebaseContinuation incumbent) {
+        if (candidate.claimableDraw() != incumbent.claimableDraw()) {
+            return candidate.claimableDraw();
+        }
         int candidateDtz = normaliseDistance(candidate.result().dtz(), Integer.MIN_VALUE);
         int incumbentDtz = normaliseDistance(incumbent.result().dtz(), Integer.MIN_VALUE);
         if (candidateDtz != incumbentDtz) {
@@ -2342,6 +2469,9 @@ public class AI {
     }
 
     private boolean preferDrawingContinuation(TablebaseContinuation candidate, TablebaseContinuation incumbent) {
+        if (candidate.claimableDraw() != incumbent.claimableDraw()) {
+            return candidate.claimableDraw();
+        }
         int candidateDtz = normaliseDistance(candidate.result().dtz(), Integer.MAX_VALUE);
         int incumbentDtz = normaliseDistance(incumbent.result().dtz(), Integer.MAX_VALUE);
         if (candidateDtz != incumbentDtz) {
