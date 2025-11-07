@@ -2267,6 +2267,9 @@ public class AI {
             return false;
         }
         int parentSign = Integer.signum(parentResult.wdl().score());
+        if (parentSign > 0 && continuation.forcesImmediateDraw()) {
+            return false;
+        }
         int childSign = Integer.signum(continuation.result().wdl().score());
         if (parentSign == 0) {
             return childSign == 0;
