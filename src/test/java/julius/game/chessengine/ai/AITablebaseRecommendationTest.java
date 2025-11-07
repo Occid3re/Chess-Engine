@@ -73,6 +73,73 @@ class AITablebaseRecommendationTest {
         assertThat(MoveHelper.convertIndexToString(MoveHelper.deriveToIndex(best.getMove()))).isEqualTo("b6");
     }
 
+    @Test
+    void avoidsImmediateThreefoldRepetitionWhenWinning() {
+        Engine engine = new Engine();
+        engine.importBoardFromFen("6K1/8/4B3/6P1/4P3/3P4/8/k7 w - - 19 69");
+
+        int kh8 = findMatchingMove(engine,
+                MoveHelper.convertStringToIndex("g8"), MoveHelper.convertStringToIndex("h8"));
+        int g6 = findMatchingMove(engine,
+                MoveHelper.convertStringToIndex("g5"), MoveHelper.convertStringToIndex("g6"));
+
+        String parentFen = engine.translateBoardToFen().getRenderBoard();
+
+        Engine simulation = engine.createSimulation();
+        simulation.performMove(kh8);
+        String kh8Fen = simulation.translateBoardToFen().getRenderBoard();
+        long kh8Hash = simulation.getBoardStateHash();
+        simulation.undoLastMove();
+
+        simulation.performMove(g6);
+        String g6Fen = simulation.translateBoardToFen().getRenderBoard();
+        simulation.undoLastMove();
+
+        engine.getGameState().getRepetition().put(kh8Hash, 2);
+
+        SyzygyProbeResult parentProbe = new SyzygyProbeResult(
+                SyzygyWdl.WIN,
+                OptionalInt.of(4),
+                OptionalInt.empty(),
+                Optional.empty()
+        );
+        SyzygyProbeResult kh8Probe = new SyzygyProbeResult(
+                SyzygyWdl.LOSS,
+                OptionalInt.of(3),
+                OptionalInt.empty(),
+                Optional.empty()
+        );
+        SyzygyProbeResult g6Probe = new SyzygyProbeResult(
+                SyzygyWdl.LOSS,
+                OptionalInt.of(3),
+                OptionalInt.empty(),
+                Optional.empty()
+        );
+
+        TestSyzygyTablebaseService service = TestSyzygyTablebaseService.fromResponses(Map.of(
+                parentFen, parentProbe,
+                kh8Fen, kh8Probe,
+                g6Fen, g6Probe
+        ));
+
+        engine.getGameState().setLastTablebaseResult(TablebaseResult.from(parentProbe));
+
+        AiTuning tuning = AiTuning.builder()
+                .searchThreads(1)
+                .lazySmpThreads(1)
+                .hashSizeMb(16)
+                .maxDepth(6)
+                .timeLimitMillis(200)
+                .build();
+
+        AI ai = new AI(engine, tuning, service);
+        int chosen = invokeDetermineTablebaseBestMove(ai, engine, TablebaseResult.from(parentProbe));
+        ai.shutdown();
+
+        assertThat(MoveHelper.convertIndexToString(MoveHelper.deriveFromIndex(chosen))).isEqualTo("g5");
+        assertThat(MoveHelper.convertIndexToString(MoveHelper.deriveToIndex(chosen))).isEqualTo("g6");
+    }
+
     private int invokeDetermineTablebaseBestMove(AI ai, Engine engine, TablebaseResult result) {
         try {
             var method = AI.class.getDeclaredMethod("determineTablebaseBestMove", Engine.class, TablebaseResult.class, boolean.class);
