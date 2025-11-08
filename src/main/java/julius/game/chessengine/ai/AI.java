@@ -2227,17 +2227,38 @@ public class AI {
         boolean zeroing = MoveHelper.isCapture(move) || MoveHelper.derivePieceTypeBits(move) == 1;
         simulatorEngine.performMove(move);
         try {
+            GameState childState = simulatorEngine.getGameState();
             Optional<TablebaseResult> childResult = resolveExactTablebaseResult(simulatorEngine);
             if (childResult.isEmpty()) {
                 return Optional.empty();
             }
             TablebaseResult result = childResult.get();
             double evaluation = clampTablebaseEval(Score.tablebaseToEvaluation(result, simulatorEngine.whitesTurn(),
-                    simulatorEngine.getGameState().getHalfmoveClock()));
+                    childState.getHalfmoveClock()));
+            if (shouldTreatAsTablebaseDraw(childState, zeroing)) {
+                evaluation = 0.0;
+            }
             return Optional.of(new TablebaseContinuation(move, evaluation, result, zeroing));
         } finally {
             simulatorEngine.undoLastMove();
         }
+    }
+
+    static boolean shouldTreatAsTablebaseDraw(GameState state, boolean zeroingMove) {
+        if (state == null) {
+            return false;
+        }
+        if (state.isTerminal() && !state.isInStateCheckMate()) {
+            return true;
+        }
+        if (zeroingMove) {
+            return false;
+        }
+        long zobrist = state.getLastZobrist();
+        if (zobrist == 0L) {
+            return false;
+        }
+        return state.getRepetition().get(zobrist) >= 2;
     }
 
     private Optional<TablebaseResult> resolveExactTablebaseResult(Engine engine) {
@@ -2811,7 +2832,15 @@ public class AI {
 
             double eval;
             if (childExact) {
-                eval = evaluateStaticPosition(simulatorEngine.getGameState(), newBoardHash, true, plyFromRoot + 1);
+                // After a white move the child position has black to move, so evaluate from the
+                // opponent's perspective and negate to keep a white-oriented score at this node.
+                double opponentPerspectiveEval = evaluateStaticPosition(simulatorEngine.getGameState(), newBoardHash,
+                        false, plyFromRoot + 1);
+                eval = -opponentPerspectiveEval;
+                if (childTablebase.get().dtm().isPresent() && isMateValue(eval)) {
+                    assert Math.signum(eval) == -Math.signum(opponentPerspectiveEval)
+                            : "Tablebase mate orientation flipped after depth increment";
+                }
             } else {
                 boolean givesCheck = isSideInCheck(simulatorEngine, false);
                 boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, true);
