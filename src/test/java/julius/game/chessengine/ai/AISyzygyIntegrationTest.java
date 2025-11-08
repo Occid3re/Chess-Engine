@@ -216,6 +216,43 @@ class AISyzygyIntegrationTest {
     }
 
     @Test
+    void determineTablebaseBestMoveFallsBackWhenOnlyDrawingContinuations() throws Exception {
+        Engine engine = new Engine();
+        String fen = "6k1/8/8/8/8/8/5Q2/6K1 w - - 0 1";
+        engine.importBoardFromFen(fen);
+
+        IntArrayList legalMoves = engine.getAllLegalMoves();
+        Map<String, SyzygyProbeResult> responses = new HashMap<>();
+        responses.put(fen, new SyzygyProbeResult(SyzygyWdl.WIN, OptionalInt.of(5), OptionalInt.empty(), Optional.empty()));
+
+        for (int i = 0; i < legalMoves.size(); i++) {
+            int move = legalMoves.getInt(i);
+            engine.performMove(move);
+            String childFen = FEN.translateBoardToFEN(engine.getBitBoard(), engine.getGameState()).getRenderBoard();
+            responses.put(childFen, new SyzygyProbeResult(SyzygyWdl.DRAW, OptionalInt.of(1), OptionalInt.empty(), Optional.empty()));
+            engine.undoLastMove();
+        }
+
+        TestSyzygyTablebaseService service = TestSyzygyTablebaseService.fromResponses(responses);
+
+        try (AutoCloseable restorer = overrideScoreTablebase(service)) {
+            AI ai = new AI(engine, service);
+            Engine simulation = engine.createSimulation();
+
+            Method determine = AI.class.getDeclaredMethod("determineTablebaseBestMove", Engine.class, TablebaseResult.class,
+                    boolean.class);
+            determine.setAccessible(true);
+
+            TablebaseResult parentResult = TablebaseResult.from(responses.get(fen));
+            int bestMove = (int) determine.invoke(ai, simulation, parentResult, simulation.whitesTurn());
+
+            assertThat(bestMove).isEqualTo(-1);
+
+            ai.shutdown();
+        }
+    }
+
+    @Test
     void resolveTablebaseHitReturnsWhitePerspectiveForBlackCaller() throws Exception {
         Engine engine = new Engine();
         String fen = "6k1/8/8/8/8/8/5Q2/6K1 b - - 0 1";
@@ -281,10 +318,19 @@ class AISyzygyIntegrationTest {
             simulation.performMove(targetMove);
 
             try {
-                Method evaluator = AI.class.getDeclaredMethod("evaluateTablebaseChild", Engine.class, boolean.class);
-                evaluator.setAccessible(true);
+                Method resolver = AI.class.getDeclaredMethod("resolveTablebaseHit", Engine.class, boolean.class);
+                resolver.setAccessible(true);
 
-                double eval = (double) evaluator.invoke(ai, simulation, false);
+                Object raw = resolver.invoke(ai, simulation, simulation.whitesTurn());
+                assertThat(raw).isInstanceOf(Optional.class);
+
+                Optional<?> hitOptional = (Optional<?>) raw;
+                assertThat(hitOptional).isPresent();
+
+                Object hit = hitOptional.orElseThrow();
+                Method scoreAccessor = hit.getClass().getDeclaredMethod("score");
+                scoreAccessor.setAccessible(true);
+                double eval = (double) scoreAccessor.invoke(hit);
 
                 TablebaseResult expectedResult = TablebaseResult.from(childProbe);
                 double expected = Score.tablebaseToEvaluation(expectedResult, simulation.whitesTurn(),
