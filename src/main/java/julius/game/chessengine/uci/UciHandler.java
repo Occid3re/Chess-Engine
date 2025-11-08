@@ -8,16 +8,11 @@ import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.syzygy.SyzygyTablebaseService;
-import julius.game.chessengine.syzygy.TablebaseResult;
 import julius.game.chessengine.utils.Score;
 import julius.game.chessengine.utils.VersionInfo;
 
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Supplier;

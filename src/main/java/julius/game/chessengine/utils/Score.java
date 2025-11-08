@@ -372,21 +372,30 @@ public class Score {
         }
 
         SyzygyWdl wdl = result.wdl();
+        OptionalInt dtz = result.dtz();
         int wdlScore = wdl.score();
         if (wdlScore == 0 || wdlScore == Integer.MIN_VALUE) {
             return DRAW;
         }
 
         int magnitude;
-        if (wdl == SyzygyWdl.CURSED_WIN || wdl == SyzygyWdl.BLESSED_LOSS) {
-            magnitude = evaluateFiftyMoveSensitiveMagnitude(result, halfmoveClock);
-            if (magnitude == DRAW) {
-                return DRAW;
+        switch (wdl) {
+            case CURSED_WIN, BLESSED_LOSS -> {
+                magnitude = evaluateFiftyMoveSensitiveMagnitude(result, halfmoveClock);
+                if (magnitude == DRAW) {
+                    return DRAW;
+                }
             }
-        } else if (wdl == SyzygyWdl.WIN || wdl == SyzygyWdl.LOSS) {
-            magnitude = CHECKMATE - 1;
-        } else {
-            magnitude = CHECKMATE - 1;
+            case WIN, LOSS -> magnitude = CHECKMATE - 1;
+            default -> magnitude = CHECKMATE - 1; // should be unreachable due to early return, keep as fallback
+        }
+
+        // Prefer smaller DTZ by subtracting it from the magnitude (only if DTZ > 0).
+        if (dtz.isPresent()) {
+            int d = dtz.getAsInt();
+            if (d > 0) {
+                magnitude = Math.max(1, magnitude - d);
+            }
         }
 
         int sign = whiteToMove ? Integer.signum(wdlScore) : -Integer.signum(wdlScore);

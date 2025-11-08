@@ -1,6 +1,5 @@
 package julius.game.chessengine.ai;
 
-import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap;
 import julius.game.chessengine.ai.time.TimeManager;
@@ -88,7 +87,7 @@ public class AI {
      * tracked so that future improvements can honour it.
      */
     @Getter
-    private int hashSizeMb = 16;
+    private int hashSizeMb;
 
     /**
      * Estimated footprint per stored entry in the main and capture transposition tables.
@@ -2171,12 +2170,11 @@ public class AI {
         // value so all callers reason about tablebase scores consistently.
         double whitePerspective = clampTablebaseEval(Score.tablebaseToEvaluation(result, engine.whitesTurn(),
                 engine.getGameState().getHalfmoveClock()));
-        double eval = whitePerspective;
 
         // Determine best move via TB guidance (if available)
         int bestMove = determineTablebaseBestMove(engine, result, isWhite);
 
-        return Optional.of(new TablebaseHit(eval, bestMove, result));
+        return Optional.of(new TablebaseHit(whitePerspective, bestMove, result));
     }
 
 
