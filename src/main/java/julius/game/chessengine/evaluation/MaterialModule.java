@@ -6,18 +6,13 @@ import java.util.Objects;
 import julius.game.chessengine.board.MoveHelper;
 import julius.game.chessengine.figures.PieceType;
 import julius.game.chessengine.tuning.Tuning;
+import lombok.Setter;
+
 /**
  * Tracks per-side material using incremental updates so the evaluation pipeline can
  * access midgame and endgame material totals without rescanning the board.
  */
 public final class MaterialModule implements EvaluationModule {
-
-    public static final int DEFAULT_PAWN_VALUE = 100;
-    public static final int DEFAULT_KNIGHT_VALUE = 320;
-    public static final int DEFAULT_BISHOP_VALUE = 330;
-    public static final int DEFAULT_ROOK_VALUE = 500;
-    public static final int DEFAULT_QUEEN_VALUE = 900;
-    public static final int DEFAULT_BISHOP_PAIR_BONUS = 40;
 
     public interface PawnChangeListener {
         void onPawnAdded(boolean isWhite, int squareIndex);
@@ -42,6 +37,7 @@ public final class MaterialModule implements EvaluationModule {
     private final int[] bishopCounts = new int[2];
     private final int bishopPairBonus;
 
+    @Setter
     private PawnChangeListener pawnChangeListener;
     private boolean dirty = true;
     private int midgameScoreCache;
@@ -110,10 +106,6 @@ public final class MaterialModule implements EvaluationModule {
     public void undoMove(MoveContext moveContext) {
         boolean forward = isForwardMove(moveContext);
         updateMaterial(moveContext.getMove(), !forward);
-    }
-
-    public void setPawnChangeListener(PawnChangeListener listener) {
-        this.pawnChangeListener = listener;
     }
 
     @Override
