@@ -9,7 +9,6 @@ import julius.game.chessengine.syzygy.SyzygyTablebaseService;
 import julius.game.chessengine.syzygy.SyzygyWdl;
 import julius.game.chessengine.syzygy.TablebaseResult;
 import julius.game.chessengine.tuning.EngineTuningBootstrap;
-import julius.game.chessengine.tuning.MoveOrderingParameters;
 import julius.game.chessengine.tuning.NumericTuningParameters;
 
 import java.util.*;
@@ -140,10 +139,6 @@ public class Score {
 
     public static AutoCloseable useNumericParameters(Map<String, Double> parameters) {
         return NumericTuningParameters.use(parameters);
-    }
-
-    public static int killerMoveScore() {
-        return MoveOrderingParameters.killerMoveScore();
     }
 
     public static ScoreFactory forEvaluationWeights(EvaluationWeights weights) {
@@ -361,6 +356,7 @@ public class Score {
         this.tablebaseBypassesEvaluation = false;
         this.tablebaseResultBoardHash = Long.MIN_VALUE;
     }
+
 
     public static int tablebaseToCentipawn(TablebaseResult result, boolean whiteToMove) {
         return tablebaseToCentipawn(result, whiteToMove, UNSPECIFIED_HALFMOVE_CLOCK);
