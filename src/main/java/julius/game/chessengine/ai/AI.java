@@ -2201,7 +2201,6 @@ public class AI {
                         if (isContinuationConsistent(parentResult, candidate)) {
                             return candidate.move();
                         }
-                        bestContinuation = candidate;
                     }
                 }
             }
@@ -2217,6 +2216,9 @@ public class AI {
                 continue;
             }
             TablebaseContinuation candidate = continuation.get();
+            if (parentResult != null && !isContinuationConsistent(parentResult, candidate)) {
+                continue;
+            }
             if (bestContinuation == null
                     || isContinuationBetter(parentIsWhite, candidate, bestContinuation, parentResult)) {
                 bestContinuation = candidate;
