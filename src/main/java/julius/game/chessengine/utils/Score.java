@@ -385,7 +385,7 @@ public class Score {
                     return DRAW;
                 }
             }
-            case WIN, LOSS -> magnitude = CHECKMATE - 1;
+            case WIN, LOSS -> magnitude = evaluateDecisiveMagnitude(result);
             default -> magnitude = CHECKMATE - 1; // should be unreachable due to early return, keep as fallback
         }
 
@@ -403,6 +403,22 @@ public class Score {
 
     private int computeTablebaseCentipawn(TablebaseResult result, boolean whiteToMove, int halfmoveClock) {
         return tablebaseToCentipawn(result, whiteToMove, halfmoveClock);
+    }
+
+    private static int evaluateDecisiveMagnitude(TablebaseResult result) {
+        OptionalInt dtzOpt = result.dtz();
+        if (dtzOpt.isEmpty()) {
+            return CHECKMATE - 1;
+        }
+
+        int raw = dtzOpt.getAsInt();
+        if (raw == Integer.MIN_VALUE) {
+            return CHECKMATE - 1;
+        }
+
+        int dtz = Math.abs(raw);
+        int penalty = Math.max(1, Math.min(dtz, CHECKMATE - 1));
+        return Math.max(1, CHECKMATE - penalty);
     }
 
     private static int evaluateFiftyMoveSensitiveMagnitude(TablebaseResult result, int halfmoveClock) {

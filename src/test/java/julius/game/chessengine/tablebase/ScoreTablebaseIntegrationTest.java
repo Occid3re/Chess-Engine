@@ -109,6 +109,34 @@ class ScoreTablebaseIntegrationTest {
     }
 
     @Test
+    void decisiveWinPrefersSmallerDtz() {
+        TablebaseResult fastWin = new TablebaseResult(SyzygyWdl.WIN, OptionalInt.of(3), OptionalInt.empty(), Optional.empty());
+        TablebaseResult slowWin = new TablebaseResult(SyzygyWdl.WIN, OptionalInt.of(7), OptionalInt.empty(), Optional.empty());
+
+        int fastWhite = Score.tablebaseToCentipawn(fastWin, true);
+        int slowWhite = Score.tablebaseToCentipawn(slowWin, true);
+        assertThat(fastWhite).isGreaterThan(slowWhite);
+
+        int fastBlack = Score.tablebaseToCentipawn(fastWin, false);
+        int slowBlack = Score.tablebaseToCentipawn(slowWin, false);
+        assertThat(fastBlack).isLessThan(slowBlack);
+    }
+
+    @Test
+    void decisiveLossPrefersLargerDtzForDefender() {
+        TablebaseResult fastLoss = new TablebaseResult(SyzygyWdl.LOSS, OptionalInt.of(-3), OptionalInt.empty(), Optional.empty());
+        TablebaseResult slowLoss = new TablebaseResult(SyzygyWdl.LOSS, OptionalInt.of(-9), OptionalInt.empty(), Optional.empty());
+
+        int fastWhite = Score.tablebaseToCentipawn(fastLoss, true);
+        int slowWhite = Score.tablebaseToCentipawn(slowLoss, true);
+        assertThat(fastWhite).isLessThan(slowWhite);
+
+        int fastBlack = Score.tablebaseToCentipawn(fastLoss, false);
+        int slowBlack = Score.tablebaseToCentipawn(slowLoss, false);
+        assertThat(fastBlack).isGreaterThan(slowBlack);
+    }
+
+    @Test
     void cursedWinEvaluationShrinksAsFiftyMoveClockExpires() {
         TablebaseResult earlyReset = new TablebaseResult(
                 SyzygyWdl.CURSED_WIN, OptionalInt.of(4), OptionalInt.empty(), Optional.empty());
