@@ -1408,15 +1408,13 @@ public class BitBoard {
     public long getAttackBitboard(boolean colorWhite) {
         if (colorWhite) {
             if (whiteAttackDirty) {
-                recomputeWhiteAttackMap();
+                recomputeAllAttacksForSide(true);   // this must set whiteAttackMap and clear whiteAttackDirty
             }
-            whiteAttackMap = aggregateAttackMap(attackScratchWhite);
             return whiteAttackMap;
         } else {
             if (blackAttackDirty) {
-                recomputeBlackAttackMap();
+                recomputeAllAttacksForSide(false);  // this must set blackAttackMap and clear blackAttackDirty
             }
-            blackAttackMap = aggregateAttackMap(attackScratchBlack);
             return blackAttackMap;
         }
     }

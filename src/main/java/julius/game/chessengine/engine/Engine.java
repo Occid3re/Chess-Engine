@@ -1,6 +1,7 @@
 package julius.game.chessengine.engine;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntArrays;
 import julius.game.chessengine.ai.OpeningBook;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.board.FEN;
@@ -111,15 +112,18 @@ public class Engine {
         }
     }
 
+    /**
+     * Returns a defensive copy of the legal moves (legacy behavior).
+     */
     public IntArrayList getAllLegalMoves() {
         synchronized (boardLock) {
             long boardHash = getBoardStateHash();
             if (legalMovesNeedUpdate || cachedLegalMovesHash != boardHash) {
                 // Gate on terminality only (checkmate, stalemate, 50-move, threefold).
                 if (gameState.isTerminal()) {
-                    IntArrayList empty = new IntArrayList(0);
                     cacheLegalMoves(boardHash, 0);
-                    return empty;
+                    // Return an empty list without allocating a new backing array
+                    return new IntArrayList(IntArrays.EMPTY_ARRAY);
                 }
                 return generateLegalMoves();
             }
@@ -219,7 +223,6 @@ public class Engine {
 
         notifyPositionChanged(notifyHash);
     }
-
 
     public Engine createSimulation() {
         synchronized (boardLock) {
@@ -335,8 +338,6 @@ public class Engine {
         }
     }
 
-
-
     private void markLegalMovesStale() {
         legalMovesNeedUpdate = true;
         cachedLegalMovesHash = Long.MIN_VALUE;
@@ -353,7 +354,6 @@ public class Engine {
         this.cachedLegalMoveCount = legalMoveCount;
         this.legalMovesNeedUpdate = false;
     }
-
 
     private void ensureLegalMoveScratchCapacity(int requiredSize) {
         if (legalMoveScratch.length < requiredSize) {
@@ -372,10 +372,11 @@ public class Engine {
     }
 
     private IntArrayList copyCachedLegalMoves() {
+        // Defensive copy of the used range only
         int[] snapshot = java.util.Arrays.copyOf(cachedLegalMoves, cachedLegalMoveCount);
+        // IntArrayList(int[]) wraps the provided array without copying again
         return new IntArrayList(snapshot);
     }
-
 
     private void resetCachedLegalMoves() {
         cachedLegalMoves = new int[MOVE_BUFFER_CAPACITY];
@@ -418,7 +419,6 @@ public class Engine {
         }
         performMove(move); // reuse the computed move
     }
-
 
     private int getMove(int fromIndex, int toIndex, int promotionPiece) {
         IntArrayList legalMoves = getAllLegalMoves();
@@ -595,4 +595,3 @@ public class Engine {
                 : null;
     }
 }
-
