@@ -17,8 +17,24 @@ public final class BestMoveFixtures {
 
     private static final List<BestMoveTestCase> CASES = List.of(
             new BestMoveTestCase(
+                    "4k3/8/4K3/6Q1/8/8/8/8 w - - 0 1",
+                    List.of("Qe7", "Qg8")
+            ),
+            new BestMoveTestCase(
                     "1K6/8/1P1k4/7R/8/8/8/r7 w - - 27 135",
                     List.of("b7")
+            ),
+            new BestMoveTestCase(
+                    "1K6/1P6/3k4/7R/8/8/8/r7 b - - 0 1",
+                    List.of("Ra2", "Ra3", "Kd7", "Ra4")
+            ),
+            new BestMoveTestCase(
+                    "8/R7/3K4/7r/8/8/1p6/1k6 b - - 0 1",
+                    List.of("Rb5", "Rh3")
+            ),
+            new BestMoveTestCase(
+                    "8/R7/3K4/1r6/8/8/1p6/1k6 w - - 0 1",
+                    List.of("Rg7", "Rh7", "Rc7", "Re7", "Rf7", "Ra3", "Ra4", "Ra8", "Ke6", "Ra6", "Rd7", "Kd7", "Ke7")
             ),
             new BestMoveTestCase(
                     "r3k2r/pppq1ppp/n1nb4/3p4/8/P1N5/1P2BPPP/R1BQK2R w KQkq - 0 15",

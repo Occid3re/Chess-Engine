@@ -367,31 +367,31 @@ public class Score {
     }
 
     public static int tablebaseToCentipawn(TablebaseResult result, boolean whiteToMove, int halfmoveClock) {
-        if (result == null) {
-            return DRAW;
-        }
+        if (result == null) return DRAW;
 
         SyzygyWdl wdl = result.wdl();
         int wdlScore = wdl.score();
-        if (wdlScore == 0 || wdlScore == Integer.MIN_VALUE) {
-            return DRAW;
-        }
+        if (wdlScore == 0 || wdlScore == Integer.MIN_VALUE) return DRAW;
 
-        int magnitude;
         switch (wdl) {
-            case CURSED_WIN, BLESSED_LOSS -> {
-                magnitude = evaluateFiftyMoveSensitiveMagnitude(result, halfmoveClock);
-                if (magnitude == DRAW) {
-                    return DRAW;
-                }
+            case CURSED_WIN: {
+                int m = evaluateFiftyMoveSensitiveMagnitude(result, halfmoveClock);
+                if (m == DRAW) return DRAW;
+                return whiteToMove ?  m : -m;
             }
-            case WIN, LOSS -> magnitude = evaluateDecisiveMagnitude(result);
-            default -> magnitude = CHECKMATE - 1; // should be unreachable due to early return, keep as fallback
+            case BLESSED_LOSS: {
+                int m = evaluateFiftyMoveSensitiveMagnitude(result, halfmoveClock);
+                if (m == DRAW) return DRAW;
+                return whiteToMove ? -m :  m;
+            }
+            case WIN:
+            case LOSS:
+                return evaluateDecisiveMagnitude(result, wdl, whiteToMove, halfmoveClock);
+            default:
+                return CHECKMATE - 1;
         }
-
-        int sign = whiteToMove ? Integer.signum(wdlScore) : -Integer.signum(wdlScore);
-        return sign * magnitude;
     }
+
 
     public static double tablebaseToEvaluation(TablebaseResult result, boolean whiteToMove) {
         return tablebaseToEvaluation(result, whiteToMove, UNSPECIFIED_HALFMOVE_CLOCK);
@@ -405,20 +405,36 @@ public class Score {
         return tablebaseToCentipawn(result, whiteToMove, halfmoveClock);
     }
 
-    private static int evaluateDecisiveMagnitude(TablebaseResult result) {
+    private static int evaluateDecisiveMagnitude(TablebaseResult result, SyzygyWdl wdl, boolean whiteToMove, int halfmoveClock) {
+        final int base = CHECKMATE - 1;
+
+        // If this node has just reset the 50-move clock (pawn move/capture), reward with max magnitude.
+        if (halfmoveClock == 0) {
+            return (wdl == SyzygyWdl.WIN)
+                    ? (whiteToMove ?  base : -base)
+                    : (whiteToMove ? -base :  base);
+        }
+
         OptionalInt dtzOpt = result.dtz();
-        if (dtzOpt.isEmpty()) {
-            return CHECKMATE - 1;
+        // No DTZ → near-mate fallback to keep ordering stable.
+        if (dtzOpt.isEmpty() || dtzOpt.getAsInt() == Integer.MIN_VALUE) {
+            int value = base - 1;
+            return (wdl == SyzygyWdl.WIN)
+                    ? (whiteToMove ?  value : -value)
+                    : (whiteToMove ? -value :  value);
         }
 
-        int raw = dtzOpt.getAsInt();
-        if (raw == Integer.MIN_VALUE) {
-            return CHECKMATE - 1;
-        }
+        int steps = Math.abs(dtzOpt.getAsInt());
+        if (steps < 1) steps = 1;
+        if (steps > base - 1) steps = base - 1;
 
-        int dtz = Math.abs(raw);
-        int penalty = Math.max(1, Math.min(dtz, CHECKMATE - 1));
-        return Math.max(1, CHECKMATE - penalty);
+        int value = base - steps; // smaller DTZ ⇒ larger value
+
+        if (wdl == SyzygyWdl.WIN) {
+            return whiteToMove ?  value : -value;
+        } else { // LOSS
+            return whiteToMove ? -value :  value;
+        }
     }
 
     private static int evaluateFiftyMoveSensitiveMagnitude(TablebaseResult result, int halfmoveClock) {
