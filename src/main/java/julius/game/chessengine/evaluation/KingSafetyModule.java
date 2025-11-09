@@ -12,6 +12,7 @@ import java.util.Arrays;
 import java.util.Objects;
 
 import static julius.game.chessengine.helper.BitHelper.FileMasks;
+import static julius.game.chessengine.helper.BitHelper.RankMasks;
 import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
 import static julius.game.chessengine.helper.KnightHelper.knightMoveTable;
 import static julius.game.chessengine.helper.PawnMoveTables.PAWN_ATTACKS;
@@ -46,6 +47,8 @@ public final class KingSafetyModule implements EvaluationModule {
     private final int queenAttackedPenalty;
     private final int backrankWeaknessMidgamePenalty;
     private final int backrankWeaknessEndgamePenalty;
+    private final int pawnStormMidgamePenalty;
+    private final int pawnStormEndgamePenalty;
     private final int[] attackWeights = new int[7];
 
     private final SideState[] sideStates = {new SideState(), new SideState()};
@@ -63,6 +66,8 @@ public final class KingSafetyModule implements EvaluationModule {
         this.queenAttackedPenalty = Tuning.queenAttackedPenalty();
         this.backrankWeaknessMidgamePenalty = Tuning.backrankWeaknessMidgamePenalty();
         this.backrankWeaknessEndgamePenalty = Tuning.backrankWeaknessEndgamePenalty();
+        this.pawnStormMidgamePenalty = Tuning.kingSafetyPawnStormMidgamePenalty();
+        this.pawnStormEndgamePenalty = Tuning.kingSafetyPawnStormEndgamePenalty();
         attackWeights[PAWN] = Tuning.kingSafetyPawnAttackWeight();
         attackWeights[KNIGHT] = Tuning.kingSafetyKnightAttackWeight();
         attackWeights[BISHOP] = Tuning.kingSafetyBishopAttackWeight();
@@ -295,10 +300,13 @@ public final class KingSafetyModule implements EvaluationModule {
         int shieldPenalty = state.missingShield * missingPawnShieldPenalty;
         int attackPenalty = -state.totalAttackWeight;
         int defenderBonus = state.defenderCount * this.defenderBonus;
+        int stormCount = countPawnStormPawns(enemyPawns, kingSquare, isWhite);
+        int stormMidgame = stormCount * pawnStormMidgamePenalty;
+        int stormEndgame = stormCount * pawnStormEndgamePenalty;
         computeBackrankWeaknessPenalty(state, board, isWhite);
         int baseMidgame = shieldPenalty + state.filePenalty + attackPenalty + defenderBonus;
-        state.midgameKingSafety = baseMidgame + state.backrankWeaknessMidgame;
-        state.endgameKingSafety = baseMidgame / 2 + state.backrankWeaknessEndgame;
+        state.midgameKingSafety = baseMidgame + stormMidgame + state.backrankWeaknessMidgame;
+        state.endgameKingSafety = baseMidgame / 2 + stormEndgame + state.backrankWeaknessEndgame;
 
         long queens = isWhite ? board.getWhiteQueens() : board.getBlackQueens();
         int queenMid = 0;
@@ -314,6 +322,24 @@ public final class KingSafetyModule implements EvaluationModule {
         }
         state.midgameQueenPenalty = queenMid;
         state.endgameQueenPenalty = queenEnd;
+    }
+
+    private int countPawnStormPawns(long enemyPawns, int kingSquare, boolean defendingWhite) {
+        if (kingSquare < 0 || enemyPawns == 0) {
+            return 0;
+        }
+        int kingFile = kingSquare & 7;
+        int minFile = Math.max(0, kingFile - 1);
+        int maxFile = Math.min(7, kingFile + 1);
+        long fileMask = 0L;
+        for (int file = minFile; file <= maxFile; file++) {
+            fileMask |= FileMasks[file];
+        }
+        long rankMask = defendingWhite
+                ? (RankMasks[2] | RankMasks[3] | RankMasks[4])
+                : (RankMasks[3] | RankMasks[4] | RankMasks[5]);
+        long storm = enemyPawns & fileMask & rankMask;
+        return Long.bitCount(storm);
     }
 
     private void computeBackrankWeaknessPenalty(SideState state, ImmutableBoardView board, boolean isWhite) {

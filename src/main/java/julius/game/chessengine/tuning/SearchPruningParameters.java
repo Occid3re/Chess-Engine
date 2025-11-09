@@ -18,6 +18,15 @@ public final class SearchPruningParameters {
         return new Snapshot(
                 Tuning.searchFpMarginDepth1(),
                 Tuning.searchFpMarginDepth2(),
+                Tuning.searchFpMarginDepth3(),
+                Tuning.searchSnmpMarginDepth1(),
+                Tuning.searchSnmpMarginDepth2(),
+                Tuning.searchSnmpMarginDepth3(),
+                Tuning.searchRazorMarginDepth1(),
+                Tuning.searchRazorMarginDepth2(),
+                Tuning.searchProbCutEnableDepth(),
+                Tuning.searchProbCutMargin(),
+                Tuning.searchProbCutSeeMin(),
                 Tuning.searchLmpBase(),
                 Tuning.searchLmpPerDepth(),
                 Tuning.searchHmpMinIndex(),
@@ -28,7 +37,11 @@ public final class SearchPruningParameters {
                 Tuning.searchLmrCapGoodQuiet(),
                 Tuning.searchMaxCheckExtensionStreak(),
                 Tuning.searchSeePruneNearRootPly(),
-                Tuning.searchHistoryReductionMax()
+                Tuning.searchHistoryReductionMax(),
+                Tuning.searchLqpMaxDepth(),
+                Tuning.searchLqpMoveIndexThreshold(),
+                Tuning.searchLqpHistoryThreshold(),
+                Tuning.searchLqpButterflyThreshold()
         );
     }
 
@@ -36,6 +49,15 @@ public final class SearchPruningParameters {
         Map<String, Double> defaults = new LinkedHashMap<>();
         defaults.put(ParamId.SEARCH_FP_MARGIN_DEPTH1.key(), ParamId.SEARCH_FP_MARGIN_DEPTH1.defaultValue());
         defaults.put(ParamId.SEARCH_FP_MARGIN_DEPTH2.key(), ParamId.SEARCH_FP_MARGIN_DEPTH2.defaultValue());
+        defaults.put(ParamId.SEARCH_FP_MARGIN_DEPTH3.key(), ParamId.SEARCH_FP_MARGIN_DEPTH3.defaultValue());
+        defaults.put(ParamId.SEARCH_SNMP_MARGIN_DEPTH1.key(), ParamId.SEARCH_SNMP_MARGIN_DEPTH1.defaultValue());
+        defaults.put(ParamId.SEARCH_SNMP_MARGIN_DEPTH2.key(), ParamId.SEARCH_SNMP_MARGIN_DEPTH2.defaultValue());
+        defaults.put(ParamId.SEARCH_SNMP_MARGIN_DEPTH3.key(), ParamId.SEARCH_SNMP_MARGIN_DEPTH3.defaultValue());
+        defaults.put(ParamId.SEARCH_RAZOR_MARGIN_DEPTH1.key(), ParamId.SEARCH_RAZOR_MARGIN_DEPTH1.defaultValue());
+        defaults.put(ParamId.SEARCH_RAZOR_MARGIN_DEPTH2.key(), ParamId.SEARCH_RAZOR_MARGIN_DEPTH2.defaultValue());
+        defaults.put(ParamId.SEARCH_PROB_CUT_ENABLE_DEPTH.key(), ParamId.SEARCH_PROB_CUT_ENABLE_DEPTH.defaultValue());
+        defaults.put(ParamId.SEARCH_PROB_CUT_MARGIN.key(), ParamId.SEARCH_PROB_CUT_MARGIN.defaultValue());
+        defaults.put(ParamId.SEARCH_PROB_CUT_SEE_MIN.key(), ParamId.SEARCH_PROB_CUT_SEE_MIN.defaultValue());
         defaults.put(ParamId.SEARCH_LMP_BASE.key(), ParamId.SEARCH_LMP_BASE.defaultValue());
         defaults.put(ParamId.SEARCH_LMP_PER_DEPTH.key(), ParamId.SEARCH_LMP_PER_DEPTH.defaultValue());
         defaults.put(ParamId.SEARCH_HMP_MIN_INDEX.key(), ParamId.SEARCH_HMP_MIN_INDEX.defaultValue());
@@ -47,12 +69,25 @@ public final class SearchPruningParameters {
         defaults.put(ParamId.SEARCH_MAX_CHECK_EXTENSION_STREAK.key(), ParamId.SEARCH_MAX_CHECK_EXTENSION_STREAK.defaultValue());
         defaults.put(ParamId.SEARCH_SEE_PRUNE_NEAR_ROOT_PLY.key(), ParamId.SEARCH_SEE_PRUNE_NEAR_ROOT_PLY.defaultValue());
         defaults.put(ParamId.SEARCH_HISTORY_REDUCTION_MAX.key(), ParamId.SEARCH_HISTORY_REDUCTION_MAX.defaultValue());
+        defaults.put(ParamId.SEARCH_LQP_MAX_DEPTH.key(), ParamId.SEARCH_LQP_MAX_DEPTH.defaultValue());
+        defaults.put(ParamId.SEARCH_LQP_MOVE_INDEX_THRESHOLD.key(), ParamId.SEARCH_LQP_MOVE_INDEX_THRESHOLD.defaultValue());
+        defaults.put(ParamId.SEARCH_LQP_HISTORY_THRESHOLD.key(), ParamId.SEARCH_LQP_HISTORY_THRESHOLD.defaultValue());
+        defaults.put(ParamId.SEARCH_LQP_BUTTERFLY_THRESHOLD.key(), ParamId.SEARCH_LQP_BUTTERFLY_THRESHOLD.defaultValue());
         return Collections.unmodifiableMap(defaults);
     }
 
     public record Snapshot(
             int fpMarginDepth1,
             int fpMarginDepth2,
+            int fpMarginDepth3,
+            int snmpMarginDepth1,
+            int snmpMarginDepth2,
+            int snmpMarginDepth3,
+            int razorMarginDepth1,
+            int razorMarginDepth2,
+            int probCutEnableDepth,
+            int probCutMargin,
+            int probCutSeeMin,
             int lmpBase,
             int lmpPerDepth,
             int hmpMinIndex,
@@ -63,7 +98,11 @@ public final class SearchPruningParameters {
             int lmrCapForGoodQuiet,
             int maxCheckExtensionStreak,
             int seePruneNearRootPly,
-            int historyReductionMax
+            int historyReductionMax,
+            int lqpMaxDepth,
+            int lqpMoveIndexThreshold,
+            int lqpHistoryThreshold,
+            int lqpButterflyThreshold
     ) {
     }
 }

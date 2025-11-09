@@ -10,6 +10,7 @@ import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.evaluation.EvaluationContext;
+import julius.game.chessengine.search.SearchPruning;
 import julius.game.chessengine.syzygy.SyzygyMove;
 import julius.game.chessengine.syzygy.SyzygyProbeResult;
 import julius.game.chessengine.syzygy.SyzygyTablebaseService;
@@ -2456,6 +2457,34 @@ public class AI {
         IntArrayList moves = simulatorEngine.getAllLegalMoves();
         int mobility = moves.size();
         BitBoard bitBoard = simulatorEngine.getBitBoard();
+
+        double staticEvalWhite = resolveScoreDifference(simulatorEngine.getGameState(), boardHash,
+                simulatorEngine.whitesTurn());
+        boolean staticEvalFinite = Double.isFinite(staticEvalWhite);
+        boolean isPvNode = beta - alpha > 1.0;
+
+        int alphaSideCp = lowerBoundForSide(alpha, beta, isWhite);
+        int betaSideCp = upperBoundForSide(alpha, beta, isWhite);
+        int staticEvalSideCp = staticEvalFinite
+                ? toCentipawnScore(isWhite ? staticEvalWhite : -staticEvalWhite)
+                : 0;
+
+        if (staticEvalFinite) {
+            boolean snmpPruned = SearchPruning.tryStaticNullMovePrune(
+                    depth, inCheck, isPvNode, staticEvalSideCp, alphaSideCp, betaSideCp, score -> {
+                    });
+            if (snmpPruned) {
+                return isWhite ? beta : alpha;
+            }
+
+            boolean razorPruned = SearchPruning.tryRazoring(
+                    depth, inCheck, isPvNode, staticEvalSideCp, alphaSideCp, betaSideCp,
+                    (a, b) -> runRazoringQuiescence(simulatorEngine, isWhite, a, b, deadline), score -> {
+                    });
+            if (razorPruned) {
+                return isWhite ? alpha : beta;
+            }
+        }
         final int NULL_MOVE_SENTINEL = -1;
         boolean previousMoveWasNull = prevMove == NULL_MOVE_SENTINEL;
         if (previousMoveWasNull && plyFromRoot == 0) previousMoveWasNull = false;
@@ -2496,12 +2525,34 @@ public class AI {
             if (nullFailHigh) return isWhite ? beta : alpha;
         }
 
+        if (!isPvNode && !inCheck && depth >= SearchPruning.probCutEnableDepth()) {
+            final int[] moveArray = moves.toIntArray();
+            boolean probCutPruned = SearchPruning.tryProbCut(
+                    depth, inCheck, isPvNode,
+                    alphaSideCp, betaSideCp,
+                    () -> moveArray,
+                    move -> MoveHelper.isCapture(move) || MoveHelper.isPawnPromotionMove(move),
+                    move -> simulatorEngine.see(move, 0),
+                    simulatorEngine::performMove,
+                    simulatorEngine::undoLastMove,
+                    (reducedDepth, a, b) -> runProbCutVerification(simulatorEngine, reducedDepth, a, b,
+                            isWhite, deadline, plyFromRoot),
+                    score -> {
+                    });
+            if (probCutPruned) {
+                if (positionChanged()) {
+                    return EXIT_FLAG;
+                }
+                return isWhite ? beta : alpha;
+            }
+        }
+
         double alphaOriginal = alpha;
         double betaOriginal = beta;
         if (isWhite) {
-            return maximizer(simulatorEngine, depth, alpha, beta, boardHash, alphaOriginal, betaOriginal, moves, deadline, prevMove, plyFromRoot, extStreak);
+            return maximizer(simulatorEngine, depth, alpha, beta, boardHash, alphaOriginal, betaOriginal, moves, deadline, prevMove, plyFromRoot, extStreak, staticEvalWhite);
         } else {
-            return minimizer(simulatorEngine, depth, alpha, beta, boardHash, alphaOriginal, betaOriginal, moves, deadline, prevMove, plyFromRoot, extStreak);
+            return minimizer(simulatorEngine, depth, alpha, beta, boardHash, alphaOriginal, betaOriginal, moves, deadline, prevMove, plyFromRoot, extStreak, staticEvalWhite);
         }
     }
 
@@ -2634,19 +2685,115 @@ public class AI {
         if (remainingDepth == 2) {
             return searchPruningParameters.fpMarginDepth2();
         }
+        if (remainingDepth >= 3) {
+            return searchPruningParameters.fpMarginDepth3();
+        }
         return 0;
+    }
+
+    private int extendedFutilityMargin(int depth) {
+        if (depth <= 1) {
+            return searchPruningParameters.fpMarginDepth1();
+        }
+        if (depth == 2) {
+            return searchPruningParameters.fpMarginDepth2();
+        }
+        if (depth >= 3) {
+            return searchPruningParameters.fpMarginDepth3();
+        }
+        return 0;
+    }
+
+    private static int toCentipawnScore(double value) {
+        if (value >= CHECKMATE) {
+            return CHECKMATE;
+        }
+        if (value <= -CHECKMATE) {
+            return -CHECKMATE;
+        }
+        return (int) Math.round(value);
+    }
+
+    private static int toWindowBound(double value, boolean upper) {
+        if (Double.isInfinite(value)) {
+            return upper ? CHECKMATE : -CHECKMATE;
+        }
+        double clipped = Math.max(-CHECKMATE, Math.min(CHECKMATE, value));
+        return (int) (upper ? Math.ceil(clipped) : Math.floor(clipped));
+    }
+
+    private static int lowerBoundForSide(double alpha, double beta, boolean isWhite) {
+        double bound = isWhite ? alpha : -beta;
+        return toWindowBound(bound, false);
+    }
+
+    private static int upperBoundForSide(double alpha, double beta, boolean isWhite) {
+        double bound = isWhite ? beta : -alpha;
+        return toWindowBound(bound, true);
+    }
+
+    private static double toWhiteLowerBound(int alphaSide, int betaSide, boolean isWhite) {
+        return isWhite ? alphaSide : -betaSide;
+    }
+
+    private static double toWhiteUpperBound(int alphaSide, int betaSide, boolean isWhite) {
+        return isWhite ? betaSide : -alphaSide;
+    }
+
+    private static int toSideScore(double whiteScore, boolean isWhite) {
+        double sideScore = isWhite ? whiteScore : -whiteScore;
+        return toCentipawnScore(sideScore);
+    }
+
+    private int runRazoringQuiescence(Engine simulatorEngine, boolean isWhite, int alphaSide, int betaSide, long deadline) {
+        double alphaWhite = toWhiteLowerBound(alphaSide, betaSide, isWhite);
+        double betaWhite = toWhiteUpperBound(alphaSide, betaSide, isWhite);
+        double score = quiescenceSearch(simulatorEngine, isWhite, alphaWhite, betaWhite, deadline, 0);
+        if (score == EXIT_FLAG) {
+            return alphaSide;
+        }
+        return toSideScore(score, isWhite);
+    }
+
+    private int runProbCutVerification(Engine simulatorEngine, int reducedDepth, int alphaSide, int betaSide,
+                                       boolean parentIsWhite, long deadline, int plyFromRoot) {
+        double alphaWhite = toWhiteLowerBound(alphaSide, betaSide, parentIsWhite);
+        double betaWhite = toWhiteUpperBound(alphaSide, betaSide, parentIsWhite);
+        int lastMove = simulatorEngine.getLastMove();
+        double eval = alphaBeta(simulatorEngine, reducedDepth, alphaWhite, betaWhite, !parentIsWhite,
+                deadline, lastMove, plyFromRoot + 1, 0);
+        if (eval == EXIT_FLAG || positionChanged()) {
+            return alphaSide;
+        }
+        return toSideScore(eval, parentIsWhite);
     }
 
     private double maximizer(Engine simulatorEngine, int depth, double alpha, double beta,
                              long boardHash, double alphaOriginal, double betaOriginal,
                              IntArrayList moves, long deadline, int prevMove, int plyFromRoot,
-                             int extStreak) {
+                             int extStreak, double staticEvalWhite) {
         double maxEval = Double.NEGATIVE_INFINITY;
         int bestMoveAtThisNode = -1;
         boolean bestZeroing = false;
         boolean tablebaseBestExact = false;
 
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, true);
+        final boolean isPvNodeLocal = beta - alpha > 1.0;
+        final boolean staticEvalAvailable = Double.isFinite(staticEvalWhite);
+        final int staticEvalCp = staticEvalAvailable ? toCentipawnScore(staticEvalWhite) : 0;
+        final int betaCp = upperBoundForSide(alpha, beta, true);
+        final int efpDepthLimit = Math.min(3, futilityMaxDepth);
+        final boolean prevMoveTactical = prevMove >= 0
+                && (MoveHelper.isCapture(prevMove) || MoveHelper.isPawnPromotionMove(prevMove));
+        final boolean gaveCheckLastMove = inCheckAtNode;
+        if (!isPvNodeLocal && !inCheckAtNode && depth <= efpDepthLimit && !prevMoveTactical && !gaveCheckLastMove
+                && staticEvalAvailable && Double.isFinite(beta)) {
+            int margin = extendedFutilityMargin(depth);
+            if (margin > 0 && staticEvalCp - margin >= betaCp) {
+                return beta;
+            }
+        }
+
         final Heuristics heuristics = threadHeuristics.get();
         final int[][] historyTable = heuristics.history;
 
@@ -2664,6 +2811,10 @@ public class AI {
         final int lmrCapGoodQuiet = pruning.lmrCapForGoodQuiet();
         final int maxCheckExtensionStreak = Math.max(0, pruning.maxCheckExtensionStreak());
         final int seePruneNearRootPly = Math.max(0, pruning.seePruneNearRootPly());
+        final int lqpMaxDepth = Math.max(0, pruning.lqpMaxDepth());
+        final int lqpMoveIndexThreshold = Math.max(0, pruning.lqpMoveIndexThreshold());
+        final int lqpHistoryThreshold = pruning.lqpHistoryThreshold();
+        final int lqpButterflyThreshold = pruning.lqpButterflyThreshold();
 
         int baseRemainingDepth = Math.max(0, depth - 1);
         boolean futilityEligible = !inCheckAtNode
@@ -2673,14 +2824,11 @@ public class AI {
                 && Double.isFinite(alpha);
         boolean futilityPossible = futilityEligible
                 && ((baseRemainingDepth <= 1 && pruning.fpMarginDepth1() > 0)
-                || (baseRemainingDepth == 2 && pruning.fpMarginDepth2() > 0));
-        double staticEvalWhite = Double.NaN;
-        if (futilityPossible) {
-            staticEvalWhite = resolveScoreDifference(simulatorEngine.getGameState(), boardHash,
-                    simulatorEngine.whitesTurn());
-            if (!Double.isFinite(staticEvalWhite)) {
-                futilityPossible = false;
-            }
+                || (baseRemainingDepth == 2 && pruning.fpMarginDepth2() > 0)
+                || (baseRemainingDepth >= 3 && pruning.fpMarginDepth3() > 0));
+        double nodeStaticEvalWhite = staticEvalWhite;
+        if (futilityPossible && !Double.isFinite(nodeStaticEvalWhite)) {
+            futilityPossible = false;
         }
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (abortRequested(deadline)) {
@@ -2696,6 +2844,15 @@ public class AI {
             boolean isPromotion = MoveHelper.isPawnPromotionMove(move);
             boolean isQuiet = !isCapture && !isPromotion;
             int historyScore = historyTable[from][to];
+
+            if (!inCheckAtNode && isQuiet && depth <= lqpMaxDepth
+                    && lqpMoveIndexThreshold >= 0 && index > lqpMoveIndexThreshold
+                    && lqpHistoryThreshold >= 0 && lqpButterflyThreshold >= 0) {
+                int butterflyScore = heuristics.getButterflyScore(move);
+                if (historyScore <= lqpHistoryThreshold && butterflyScore <= lqpButterflyThreshold) {
+                    continue;
+                }
+            }
 
             if (!inCheckAtNode
                     && isQuiet
@@ -2768,7 +2925,7 @@ public class AI {
                 if (futilityPossible && isQuiet && !givesCheck && !attacksQueen && !attacksKingZone
                         && !opensKingFile && !seeWinsMaterial) {
                     int futilityMargin = futilityMarginForRemainingDepth(baseRemainingDepth);
-                    if (futilityMargin > 0 && staticEvalWhite + futilityMargin <= alpha) {
+                    if (futilityMargin > 0 && nodeStaticEvalWhite + futilityMargin <= alpha) {
                         simulatorEngine.undoLastMove();
                         continue;
                     }
@@ -2930,7 +3087,7 @@ public class AI {
     private double minimizer(Engine simulatorEngine, int depth, double alpha, double beta,
                              long boardHash, double alphaOriginal, double betaOriginal,
                              IntArrayList moves, long deadline, int prevMove, int plyFromRoot,
-                             int extStreak) {
+                             int extStreak, double staticEvalWhite) {
 
         long start = log.isDebugEnabled() ? System.nanoTime() : 0L;
         double minEval = Double.POSITIVE_INFINITY;
@@ -2939,6 +3096,22 @@ public class AI {
         boolean tablebaseBestExact = false;
 
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, false);
+        final boolean isPvNodeLocal = beta - alpha > 1.0;
+        final boolean staticEvalAvailable = Double.isFinite(staticEvalWhite);
+        final int staticEvalCpSide = staticEvalAvailable ? toCentipawnScore(-staticEvalWhite) : 0;
+        final int betaCpSide = upperBoundForSide(alpha, beta, false);
+        final int efpDepthLimit = Math.min(3, futilityMaxDepth);
+        final boolean prevMoveTactical = prevMove >= 0
+                && (MoveHelper.isCapture(prevMove) || MoveHelper.isPawnPromotionMove(prevMove));
+        final boolean gaveCheckLastMove = inCheckAtNode;
+        if (!isPvNodeLocal && !inCheckAtNode && depth <= efpDepthLimit && !prevMoveTactical && !gaveCheckLastMove
+                && staticEvalAvailable && Double.isFinite(alpha)) {
+            int margin = extendedFutilityMargin(depth);
+            if (margin > 0 && staticEvalCpSide - margin >= betaCpSide) {
+                return alpha;
+            }
+        }
+
         final Heuristics heuristics = threadHeuristics.get();
         final int[][] historyTable = heuristics.history;
 
@@ -2956,6 +3129,10 @@ public class AI {
         final int lmrCapGoodQuiet = pruning.lmrCapForGoodQuiet();
         final int maxCheckExtensionStreak = Math.max(0, pruning.maxCheckExtensionStreak());
         final int seePruneNearRootPly = Math.max(0, pruning.seePruneNearRootPly());
+        final int lqpMaxDepth = Math.max(0, pruning.lqpMaxDepth());
+        final int lqpMoveIndexThreshold = Math.max(0, pruning.lqpMoveIndexThreshold());
+        final int lqpHistoryThreshold = pruning.lqpHistoryThreshold();
+        final int lqpButterflyThreshold = pruning.lqpButterflyThreshold();
 
         int baseRemainingDepth = Math.max(0, depth - 1);
         boolean futilityEligible = !inCheckAtNode
@@ -2965,14 +3142,11 @@ public class AI {
                 && Double.isFinite(beta);
         boolean futilityPossible = futilityEligible
                 && ((baseRemainingDepth <= 1 && pruning.fpMarginDepth1() > 0)
-                || (baseRemainingDepth == 2 && pruning.fpMarginDepth2() > 0));
-        double staticEvalWhite = Double.NaN;
-        if (futilityPossible) {
-            staticEvalWhite = resolveScoreDifference(simulatorEngine.getGameState(), boardHash,
-                    simulatorEngine.whitesTurn());
-            if (!Double.isFinite(staticEvalWhite)) {
-                futilityPossible = false;
-            }
+                || (baseRemainingDepth == 2 && pruning.fpMarginDepth2() > 0)
+                || (baseRemainingDepth >= 3 && pruning.fpMarginDepth3() > 0));
+        double nodeStaticEvalWhite = staticEvalWhite;
+        if (futilityPossible && !Double.isFinite(nodeStaticEvalWhite)) {
+            futilityPossible = false;
         }
 
         for (int index = 0; index < orderedMoves.size(); index++) {
@@ -2990,6 +3164,15 @@ public class AI {
             boolean isPromotion = MoveHelper.isPawnPromotionMove(move);
             boolean isQuiet = !isCapture && !isPromotion;
             int historyScore = historyTable[from][to];
+
+            if (!inCheckAtNode && isQuiet && depth <= lqpMaxDepth
+                    && lqpMoveIndexThreshold >= 0 && index > lqpMoveIndexThreshold
+                    && lqpHistoryThreshold >= 0 && lqpButterflyThreshold >= 0) {
+                int butterflyScore = heuristics.getButterflyScore(move);
+                if (historyScore <= lqpHistoryThreshold && butterflyScore <= lqpButterflyThreshold) {
+                    continue;
+                }
+            }
 
             int seeGain = 0;
             boolean seeEvaluated = false;
@@ -3052,7 +3235,7 @@ public class AI {
                 if (futilityPossible && isQuiet && !givesCheck && !attacksQueen && !attacksKingZone
                         && !opensKingFile && !seeWinsMaterial) {
                     int futilityMargin = futilityMarginForRemainingDepth(baseRemainingDepth);
-                    if (futilityMargin > 0 && staticEvalWhite - futilityMargin >= beta) {
+                    if (futilityMargin > 0 && nodeStaticEvalWhite - futilityMargin >= beta) {
                         simulatorEngine.undoLastMove();
                         continue;
                     }
@@ -3191,6 +3374,9 @@ public class AI {
             if (alpha >= beta) {
                 updateKillerMoves(depth, move);
                 incrementHistory(move, depth);
+                if (!isCapture && !isPromotion) {
+                    incrementButterfly(move);
+                }
                 heuristics.recordCounterMove(prevMove, move);
                 break;
             }
@@ -3840,11 +4026,19 @@ public class AI {
         threadHeuristics.get().addHistory(move, delta);
     }
 
+    private void incrementButterfly(int move) {
+        if (move == -1 || MoveHelper.isCapture(move) || MoveHelper.isPawnPromotionMove(move)) {
+            return;
+        }
+        threadHeuristics.get().addButterfly(move, 1);
+    }
+
     private void clearHistoryTable() {
         long stamp = acquireWriteLock();
         try {
             globalHeuristics.clearHistory();
             globalHeuristics.clearCounter();
+            globalHeuristics.clearButterfly();
         } finally {
             releaseWriteLock(stamp);
         }
@@ -4047,6 +4241,7 @@ public class AI {
         private int[][] killers;
         private final int[][] history;
         private final int[][] counter;
+        private final int[][] butterfly;
 
         private boolean[] killerDirty;
         private int[] killerDirtyList;
@@ -4062,6 +4257,11 @@ public class AI {
         private final int[] counterDirtyList;
         private int counterDirtyCount;
 
+        private final int[] butterflyDelta;
+        private final boolean[] butterflyDirty;
+        private final int[] butterflyDirtyList;
+        private int butterflyDirtyCount;
+
         private long preparedTaskId = Long.MIN_VALUE;
         private int preparedDepth = -1;
 
@@ -4069,6 +4269,7 @@ public class AI {
             this.killers = allocateKillers(Math.max(1, depth));
             this.history = new int[BOARD_SQUARES][BOARD_SQUARES];
             this.counter = new int[BOARD_SQUARES][BOARD_SQUARES];
+            this.butterfly = new int[BOARD_SQUARES][BOARD_SQUARES];
             for (int f = 0; f < BOARD_SQUARES; f++) {
                 Arrays.fill(counter[f], -1);
             }
@@ -4081,6 +4282,9 @@ public class AI {
             Arrays.fill(counterUpdates, -1);
             this.counterDirty = new boolean[HISTORY_SIZE];
             this.counterDirtyList = new int[HISTORY_SIZE];
+            this.butterflyDelta = new int[HISTORY_SIZE];
+            this.butterflyDirty = new boolean[HISTORY_SIZE];
+            this.butterflyDirtyList = new int[HISTORY_SIZE];
         }
 
         private static int[][] allocateKillers(int depth) {
@@ -4117,6 +4321,7 @@ public class AI {
             for (int f = 0; f < BOARD_SQUARES; f++) {
                 System.arraycopy(snapshot.history[f], 0, history[f], 0, BOARD_SQUARES);
                 System.arraycopy(snapshot.counter[f], 0, counter[f], 0, BOARD_SQUARES);
+                System.arraycopy(snapshot.butterfly[f], 0, butterfly[f], 0, BOARD_SQUARES);
             }
         }
 
@@ -4128,14 +4333,16 @@ public class AI {
             }
             int[][] historyCopy = new int[BOARD_SQUARES][];
             int[][] counterCopy = new int[BOARD_SQUARES][];
+            int[][] butterflyCopy = new int[BOARD_SQUARES][];
             for (int f = 0; f < BOARD_SQUARES; f++) {
                 historyCopy[f] = Arrays.copyOf(history[f], BOARD_SQUARES);
                 counterCopy[f] = Arrays.copyOf(counter[f], BOARD_SQUARES);
+                butterflyCopy[f] = Arrays.copyOf(butterfly[f], BOARD_SQUARES);
             }
-            return new Snapshot(killerCopy, historyCopy, counterCopy);
+            return new Snapshot(killerCopy, historyCopy, counterCopy, butterflyCopy);
         }
 
-        record Snapshot(int[][] killers, int[][] history, int[][] counter) {
+        record Snapshot(int[][] killers, int[][] history, int[][] counter, int[][] butterfly) {
         }
 
         boolean isPreparedFor(long taskId, int depth) {
@@ -4166,12 +4373,18 @@ public class AI {
                 counterUpdates[idx] = -1;
             }
             counterDirtyCount = 0;
+            for (int i = 0; i < butterflyDirtyCount; i++) {
+                int idx = butterflyDirtyList[i];
+                butterflyDirty[idx] = false;
+                butterflyDelta[idx] = 0;
+            }
+            butterflyDirtyCount = 0;
             preparedTaskId = Long.MIN_VALUE;
             preparedDepth = -1;
         }
 
         boolean hasUpdates() {
-            return killerDirtyCount > 0 || historyDirtyCount > 0 || counterDirtyCount > 0;
+            return killerDirtyCount > 0 || historyDirtyCount > 0 || counterDirtyCount > 0 || butterflyDirtyCount > 0;
         }
 
         void recordKiller(int depth, int move) {
@@ -4210,6 +4423,30 @@ public class AI {
             historyDelta[idx] += delta;
         }
 
+        void addButterfly(int move, int delta) {
+            if (move == -1 || delta <= 0) {
+                return;
+            }
+            int from = move & 0x3F;
+            int to = (move >>> 6) & 0x3F;
+            butterfly[from][to] += delta;
+            int idx = (from << 6) | to;
+            if (!butterflyDirty[idx]) {
+                butterflyDirty[idx] = true;
+                butterflyDirtyList[butterflyDirtyCount++] = idx;
+            }
+            butterflyDelta[idx] += delta;
+        }
+
+        int getButterflyScore(int move) {
+            if (move < 0) {
+                return 0;
+            }
+            int from = move & 0x3F;
+            int to = (move >>> 6) & 0x3F;
+            return butterfly[from][to];
+        }
+
         void recordCounterMove(int prevMove, int move) {
             if (prevMove < 0) {
                 return;
@@ -4226,7 +4463,7 @@ public class AI {
         }
 
         boolean hasPendingUpdates() {
-            return killerDirtyCount > 0 || historyDirtyCount > 0 || counterDirtyCount > 0;
+            return killerDirtyCount > 0 || historyDirtyCount > 0 || counterDirtyCount > 0 || butterflyDirtyCount > 0;
         }
 
         void mergeInto(Heuristics target) {
@@ -4251,6 +4488,12 @@ public class AI {
                 int from = idx >>> 6;
                 int to = idx & 0x3F;
                 target.counter[from][to] = counterUpdates[idx];
+            }
+            for (int i = 0; i < butterflyDirtyCount; i++) {
+                int idx = butterflyDirtyList[i];
+                int from = idx >>> 6;
+                int to = idx & 0x3F;
+                target.butterfly[from][to] += butterflyDelta[idx];
             }
         }
 
@@ -4299,6 +4542,18 @@ public class AI {
                 counterUpdates[idx] = -1;
             }
             counterDirtyCount = 0;
+        }
+
+        void clearButterfly() {
+            for (int f = 0; f < BOARD_SQUARES; f++) {
+                Arrays.fill(butterfly[f], 0);
+            }
+            for (int i = 0; i < butterflyDirtyCount; i++) {
+                int idx = butterflyDirtyList[i];
+                butterflyDirty[idx] = false;
+                butterflyDelta[idx] = 0;
+            }
+            butterflyDirtyCount = 0;
         }
 
     }

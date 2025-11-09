@@ -12,6 +12,8 @@ import julius.game.chessengine.tuning.Tuning;
 import java.util.Arrays;
 import java.util.Objects;
 
+import static julius.game.chessengine.helper.PawnMoveTables.PAWN_ATTACKERS;
+
 /**
  * Tracks piece activity (mobility plus center control) with separate midgame/endgame
  * components.  The module keeps per-piece caches and incrementally updates only the
@@ -44,6 +46,7 @@ public final class ActivityModule implements EvaluationModule {
     private static final long[] BISHOP_WATCHERS = new long[64];
     private static final long[] ROOK_WATCHERS = new long[64];
     private static final long[] QUEEN_WATCHERS = new long[64];
+    private static final int[] OUTPOST_CENTER_WEIGHT = new int[64];
 
     private static final boolean USE_WATCHER_TABLES;
 
@@ -62,9 +65,21 @@ public final class ActivityModule implements EvaluationModule {
                 | (1L << squareIndex('e', 5));
 
         initializeDirectionRays();
+        initializeOutpostWeights();
         boolean watchersReady = initializeWatcherTables();
         boolean forceFallback = Boolean.getBoolean("chessengine.activity.linearScanFallback");
         USE_WATCHER_TABLES = watchersReady && !forceFallback;
+    }
+
+    private static void initializeOutpostWeights() {
+        for (int square = 0; square < 64; square++) {
+            int file = square & 7;
+            int rank = square >>> 3;
+            int fileDistance = Math.min(Math.abs(file - 3), Math.abs(file - 4));
+            int rankDistance = Math.min(Math.abs(rank - 3), Math.abs(rank - 4));
+            int weight = 4 - (fileDistance + rankDistance);
+            OUTPOST_CENTER_WEIGHT[square] = Math.max(1, weight);
+        }
     }
 
     private static void initializeDirectionRays() {
@@ -154,11 +169,18 @@ public final class ActivityModule implements EvaluationModule {
     private long blackPieces;
     private long allPieces;
     private long sliderSquares;
+    private long whitePawns;
+    private long blackPawns;
 
     private int midgameScoreCache;
     private int endgameScoreCache;
     private boolean dirty = true;
     private boolean initialized;
+
+    private final int knightOutpostMidgame;
+    private final int knightOutpostEndgame;
+    private final int bishopOutpostMidgame;
+    private final int bishopOutpostEndgame;
 
     public ActivityModule() {
         for (int i = 0; i < activities.length; i++) {
@@ -187,6 +209,11 @@ public final class ActivityModule implements EvaluationModule {
         endgameCenterWeights[ROOK] = Tuning.activityEndgameRookCenter();
         endgameCenterWeights[QUEEN] = Tuning.activityEndgameQueenCenter();
         endgameCenterWeights[KING] = Tuning.activityEndgameKingCenter();
+
+        knightOutpostMidgame = Tuning.activityKnightOutpostMidgame();
+        knightOutpostEndgame = Tuning.activityKnightOutpostEndgame();
+        bishopOutpostMidgame = Tuning.activityBishopOutpostMidgame();
+        bishopOutpostEndgame = Tuning.activityBishopOutpostEndgame();
     }
 
     @Override
@@ -476,6 +503,8 @@ public final class ActivityModule implements EvaluationModule {
         whitePieces = 0L;
         blackPieces = 0L;
         sliderSquares = 0L;
+        whitePawns = 0L;
+        blackPawns = 0L;
 
         registerPieces(board.getWhitePawns(), WHITE, PAWN);
         registerPieces(board.getWhiteKnights(), WHITE, KNIGHT);
@@ -514,8 +543,14 @@ public final class ActivityModule implements EvaluationModule {
             long mask = 1L << index;
             if (color == WHITE) {
                 whitePieces |= mask;
+                if (pieceType == PAWN) {
+                    whitePawns |= mask;
+                }
             } else {
                 blackPieces |= mask;
+                if (pieceType == PAWN) {
+                    blackPawns |= mask;
+                }
             }
             if (isSlider(pieceType)) {
                 sliderSquares |= mask;
@@ -540,8 +575,14 @@ public final class ActivityModule implements EvaluationModule {
         long mask = 1L << square;
         if (color == WHITE) {
             whitePieces |= mask;
+            if (pieceType == PAWN) {
+                whitePawns |= mask;
+            }
         } else {
             blackPieces |= mask;
+            if (pieceType == PAWN) {
+                blackPawns |= mask;
+            }
         }
         if (isSlider(pieceType)) {
             sliderSquares |= mask;
@@ -562,8 +603,14 @@ public final class ActivityModule implements EvaluationModule {
         long mask = 1L << square;
         if (color == WHITE) {
             whitePieces &= ~mask;
+            if (activity.pieceType == PAWN) {
+                whitePawns &= ~mask;
+            }
         } else {
             blackPieces &= ~mask;
+            if (activity.pieceType == PAWN) {
+                blackPawns &= ~mask;
+            }
         }
         if (isSlider(activity.pieceType)) {
             sliderSquares &= ~mask;
@@ -631,6 +678,24 @@ public final class ActivityModule implements EvaluationModule {
         int endgameContribution = mobility * endgameMobilityWeights[pieceType]
                 + center * endgameCenterWeights[pieceType];
 
+        int outpostMidgame = 0;
+        int outpostEndgame = 0;
+        if (pieceType == KNIGHT || pieceType == BISHOP) {
+            if (isOutpostSquare(square, activity.color)) {
+                int weight = OUTPOST_CENTER_WEIGHT[square];
+                if (pieceType == KNIGHT) {
+                    outpostMidgame = weight * knightOutpostMidgame;
+                    outpostEndgame = weight * knightOutpostEndgame;
+                } else {
+                    outpostMidgame = weight * bishopOutpostMidgame;
+                    outpostEndgame = weight * bishopOutpostEndgame;
+                }
+            }
+        }
+
+        midgameContribution += outpostMidgame;
+        endgameContribution += outpostEndgame;
+
         midgameTotals[activity.color] += midgameContribution - activity.midgameScore;
         endgameTotals[activity.color] += endgameContribution - activity.endgameScore;
 
@@ -639,6 +704,13 @@ public final class ActivityModule implements EvaluationModule {
         activity.midgameScore = midgameContribution;
         activity.endgameScore = endgameContribution;
         activity.attackMask = legalTargets;
+    }
+
+    private boolean isOutpostSquare(int square, int color) {
+        long friendlyPawns = color == WHITE ? whitePawns : blackPawns;
+        long enemyPawns = color == WHITE ? blackPawns : whitePawns;
+        return (PAWN_ATTACKERS[color][square] & friendlyPawns) != 0
+                && (PAWN_ATTACKERS[color ^ 1][square] & enemyPawns) == 0;
     }
 
     private void updateScoreCache() {

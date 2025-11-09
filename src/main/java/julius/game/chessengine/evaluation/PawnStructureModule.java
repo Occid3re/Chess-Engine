@@ -10,6 +10,7 @@ import java.util.Objects;
 
 import static julius.game.chessengine.helper.BitHelper.FileMasks;
 import static julius.game.chessengine.helper.BitHelper.RankMasks;
+import static julius.game.chessengine.helper.PawnMoveTables.PAWN_ATTACKERS;
 import static julius.game.chessengine.helper.PawnMoveTables.PAWN_ATTACKS;
 import static julius.game.chessengine.helper.PawnMoveTables.PAWN_PUSHES;
 
@@ -94,6 +95,7 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
     private final int backwardPawnPenalty;
     private final int ownKingBlocksPassedPawnPenalty;
     private final int passedPawnFreePathBonusPerRank;
+    private final int supportedPassedPawnBonus;
     private final int rookHalfOpenFileBonus;
     private final int rookOpenFileBonus;
 
@@ -109,6 +111,7 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         this.backwardPawnPenalty = Tuning.backwardPawnPenalty();
         this.ownKingBlocksPassedPawnPenalty = Tuning.ownKingBlocksPassedPawnPenalty();
         this.passedPawnFreePathBonusPerRank = Tuning.passedPawnFreePathBonusPerRank();
+        this.supportedPassedPawnBonus = Tuning.supportedPassedPawnBonus();
         this.rookHalfOpenFileBonus = Tuning.rookHalfOpenFileBonus();
         this.rookOpenFileBonus = Tuning.rookOpenFileBonus();
     }
@@ -379,6 +382,15 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
             }
             if (filePathAhead != 0 && (filePathAhead & allPieces) == 0) {
                 base += passedPawnFreePathBonusPerRank * distances[square];
+            }
+
+            if (oneStep != 0) {
+                int frontIndex = Long.numberOfTrailingZeros(oneStep);
+                long enemyPawnAttackers = PAWN_ATTACKERS[color ^ 1][frontIndex] & opponentPawns;
+                long friendlyPawnSupport = PAWN_ATTACKERS[color][frontIndex] & pawns;
+                if (enemyPawnAttackers == 0 && friendlyPawnSupport != 0) {
+                    base += supportedPassedPawnBonus * distances[square];
+                }
             }
 
             bonus += base;
