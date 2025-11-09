@@ -22,6 +22,7 @@ import julius.game.chessengine.tuning.MoveOrderingParameters;
 import julius.game.chessengine.tuning.NullMoveParameters;
 import julius.game.chessengine.tuning.SearchPruningParameters;
 import julius.game.chessengine.tuning.Tuning;
+import julius.game.chessengine.search.SearchPruning;
 import julius.game.chessengine.utils.Score;
 import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
@@ -2590,41 +2591,28 @@ public class AI {
         return pawnsAfter < pawnsBefore;
     }
 
-    private int lmrReduction(int depth, int moveIndex, int historyScore) {
-        if (depth <= 1) {
+
+    private int lmrReduction(int depth, int moveIndex, int historyScore, boolean isQuiet,
+                             boolean givesCheck, boolean isPvNode) {
+        if (depth <= 1 || moveIndex <= 0 || !isQuiet) {
             return 0;
         }
 
-        int clampedDepth = Math.min(depth, LMR_MAX_DEPTH);
-        int clampedMoveIndex = Math.max(0, Math.min(moveIndex, LMR_MAX_MOVES - 1));
+        int historyReductionMax = Math.max(1, searchPruningParameters.historyReductionMax());
+        int historyClamped = Math.max(0, Math.min(historyScore, historyReductionMax));
+        int rBase = fastLog(Math.max(1, depth)) + fastLog(moveIndex + 2);
+        int boost = (historyReductionMax - historyClamped) * 2 / historyReductionMax;
+        int reduction = Math.max(0, rBase + boost);
 
-        int historyReductionMax = Math.max(0, searchPruningParameters.historyReductionMax());
-        int history = Math.max(0, Math.min(historyScore, historyReductionMax));
-        double normalized = historyReductionMax == 0
-                ? 0.0
-                : history / (double) historyReductionMax;
-        int buckets = Math.max(1, lmrBucketCount);
-        double bucketPosition = buckets == 1 ? 0.0 : normalized * (buckets - 1);
-        int lowerBucket = Math.max(0, (int) Math.floor(bucketPosition));
-        int upperBucket = Math.min(buckets - 1, lowerBucket + 1);
-        double fraction = bucketPosition - lowerBucket;
-
-        int lowerValue = lmrReductionTable[clampedDepth][clampedMoveIndex][lowerBucket];
-        if (upperBucket == lowerBucket) {
-            return Math.min(lowerValue, depth - 1);
+        if (givesCheck) {
+            reduction = Math.max(0, reduction - 1);
+        }
+        if (isPvNode && depth <= 3) {
+            reduction = Math.min(reduction, 1);
         }
 
-        int upperValue = lmrReductionTable[clampedDepth][clampedMoveIndex][upperBucket];
-        double interpolated = lowerValue + fraction * (upperValue - lowerValue);
-        int reduction = (int) Math.floor(interpolated + 1e-9);
         int maxReduction = Math.max(0, depth - 1);
-        if (reduction < 0) {
-            reduction = 0;
-        }
-        if (reduction > maxReduction) {
-            reduction = maxReduction;
-        }
-        return reduction;
+        return Math.min(reduction, maxReduction);
     }
 
     private int futilityMarginForRemainingDepth(int remainingDepth) {
@@ -2636,6 +2624,7 @@ public class AI {
         }
         return 0;
     }
+
 
     private double maximizer(Engine simulatorEngine, int depth, double alpha, double beta,
                              long boardHash, double alphaOriginal, double betaOriginal,
@@ -2649,10 +2638,6 @@ public class AI {
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, true);
         final Heuristics heuristics = threadHeuristics.get();
         final int[][] historyTable = heuristics.history;
-
-        IntArrayList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
-        seeCache.clear();
         final SearchPruningParameters.Snapshot pruning = searchPruningParameters;
         final int hmpMinIndex = pruning.hmpMinIndex();
         final int hmpHistoryMax = pruning.hmpHistoryMax();
@@ -2664,6 +2649,65 @@ public class AI {
         final int lmrCapGoodQuiet = pruning.lmrCapForGoodQuiet();
         final int maxCheckExtensionStreak = Math.max(0, pruning.maxCheckExtensionStreak());
         final int seePruneNearRootPly = Math.max(0, pruning.seePruneNearRootPly());
+        final int lqpHistoryCutoff = pruning.lqpHistoryCutoff();
+        final int lqpButterflyCutoff = pruning.lqpButterflyCutoff();
+        final int lqpStartIndex = Math.max(0, pruning.lqpStartIndex());
+        final int lqpMaxDepth = Math.max(0, pruning.lqpMaxDepth());
+
+        boolean isPvNode = Double.isFinite(alphaOriginal) && Double.isFinite(betaOriginal);
+        if (plyFromRoot == 0) {
+            isPvNode = true;
+        }
+
+        double staticEvalWhite = resolveScoreDifference(simulatorEngine.getGameState(), boardHash,
+                simulatorEngine.whitesTurn());
+        boolean staticEvalAvailable = Double.isFinite(staticEvalWhite);
+        int staticEvalCp = staticEvalAvailable ? toSidePerspectiveCp(staticEvalWhite, true) : 0;
+        int alphaCp = toSidePerspectiveCp(alpha, true);
+        int betaCp = toSidePerspectiveCp(beta, true);
+
+        boolean parentWasTactical = prevMove >= 0
+                && (MoveHelper.isCapture(prevMove) || MoveHelper.isPawnPromotionMove(prevMove));
+
+        if (staticEvalAvailable && !isPvNode && !inCheckAtNode && !parentWasTactical && depth <= 3) {
+            int efpMargin = depth <= 1
+                    ? pruning.efpMarginDepth1()
+                    : (depth == 2 ? pruning.efpMarginDepth2() : pruning.efpMarginDepth3());
+            if (efpMargin > 0 && staticEvalCp - efpMargin >= betaCp) {
+                return staticEvalWhite;
+            }
+        }
+
+        if (staticEvalAvailable) {
+            boolean snmpPruned = SearchPruning.tryStaticNullMovePrune(
+                    depth, inCheckAtNode, isPvNode,
+                    staticEvalCp, alphaCp, betaCp,
+                    score -> {});
+            if (snmpPruned) {
+                return staticEvalWhite;
+            }
+        }
+
+        boolean[] razorAborted = {false};
+        if (staticEvalAvailable) {
+            boolean razored = SearchPruning.tryRazoring(
+                    depth, inCheckAtNode, isPvNode,
+                    staticEvalCp, alphaCp, betaCp,
+                    (a, b) -> {
+                        double razorAlpha = toWhitePerspectiveFromSideCp(a, true);
+                        double razorBeta = toWhitePerspectiveFromSideCp(b, true);
+                        double qs = quiescenceSearch(simulatorEngine, true, razorAlpha, razorBeta, deadline, plyFromRoot);
+                        if (qs == EXIT_FLAG) {
+                            razorAborted[0] = true;
+                            return b;
+                        }
+                        return toSidePerspectiveCp(qs, true);
+                    },
+                    score -> {});
+            if (razored && !razorAborted[0]) {
+                return alpha;
+            }
+        }
 
         int baseRemainingDepth = Math.max(0, depth - 1);
         boolean futilityEligible = !inCheckAtNode
@@ -2672,16 +2716,14 @@ public class AI {
                 && depth <= futilityMaxDepth
                 && Double.isFinite(alpha);
         boolean futilityPossible = futilityEligible
+                && staticEvalAvailable
                 && ((baseRemainingDepth <= 1 && pruning.fpMarginDepth1() > 0)
                 || (baseRemainingDepth == 2 && pruning.fpMarginDepth2() > 0));
-        double staticEvalWhite = Double.NaN;
-        if (futilityPossible) {
-            staticEvalWhite = resolveScoreDifference(simulatorEngine.getGameState(), boardHash,
-                    simulatorEngine.whitesTurn());
-            if (!Double.isFinite(staticEvalWhite)) {
-                futilityPossible = false;
-            }
-        }
+
+        IntArrayList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
+        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
+        seeCache.clear();
+
         for (int index = 0; index < orderedMoves.size(); index++) {
             if (abortRequested(deadline)) {
                 return EXIT_FLAG;
@@ -2696,6 +2738,7 @@ public class AI {
             boolean isPromotion = MoveHelper.isPawnPromotionMove(move);
             boolean isQuiet = !isCapture && !isPromotion;
             int historyScore = historyTable[from][to];
+            int butterflyScore = heuristics.butterflyScore(move);
 
             if (!inCheckAtNode
                     && isQuiet
@@ -2706,11 +2749,21 @@ public class AI {
                 continue;
             }
 
+            if (!inCheckAtNode
+                    && isQuiet
+                    && depth <= lqpMaxDepth
+                    && index >= lqpStartIndex
+                    && historyScore <= lqpHistoryCutoff
+                    && butterflyScore <= lqpButterflyCutoff) {
+                continue;
+            }
+
+            heuristics.bumpButterfly(move);
+
             int seeGain = 0;
             boolean seeEvaluated = false;
             boolean seeWinsMaterial = false;
 
-            // SEE pruning for losing captures/quiets (keep checks/promotions)
             boolean seePruneCandidate = (!inCheckAtNode && isCapture && !isPromotion) || isQuiet;
             if (seePruneCandidate) {
                 seeGain = simulatorEngine.see(move, 0);
@@ -2747,7 +2800,9 @@ public class AI {
                 boolean givesCheckTmp = isSideInCheck(simulatorEngine, false);
                 boolean attacksQueenTmp = attacksOpponentQueenNow(simulatorEngine, true);
                 simulatorEngine.undoLastMove();
-                if (!givesCheckTmp && !attacksQueenTmp) continue;
+                if (!givesCheckTmp && !attacksQueenTmp) {
+                    continue;
+                }
             }
 
             simulatorEngine.performMove(move);
@@ -2774,10 +2829,43 @@ public class AI {
                     }
                 }
 
+                if (!isPvNode) {
+                    boolean[] probCutAborted = {false};
+                    boolean probCutPruned = SearchPruning.tryProbCut(
+                            depth, givesCheck, false,
+                            toCentipawns(-beta), toCentipawns(-alpha),
+                            () -> simulatorEngine.getAllLegalMoves().toIntArray(),
+                            m -> MoveHelper.isCapture(m) || MoveHelper.isPawnPromotionMove(m),
+                            simulatorEngine::see,
+                            simulatorEngine::performMove,
+                            simulatorEngine::undoLastMove,
+                            (reducedDepth, verifyAlphaCp, verifyBetaCp) -> {
+                                double verifyAlpha = toWhitePerspectiveFromSideCp(verifyAlphaCp, false);
+                                double verifyBeta = toWhitePerspectiveFromSideCp(verifyBetaCp, false);
+                                double verifyScore = alphaBeta(simulatorEngine, reducedDepth, verifyAlpha, verifyBeta,
+                                        false, deadline, move, plyFromRoot + 1, 0);
+                                if (verifyScore == EXIT_FLAG || positionChanged()) {
+                                    probCutAborted[0] = true;
+                                    return verifyAlphaCp;
+                                }
+                                return toSidePerspectiveCp(verifyScore, false);
+                            },
+                            score -> {});
+                    if (probCutPruned && !probCutAborted[0]) {
+                        simulatorEngine.undoLastMove();
+                        updateKillerMoves(depth, move);
+                        incrementHistory(move, depth);
+                        heuristics.recordCounterMove(prevMove, move);
+                        return beta;
+                    }
+                }
+
                 int nextDepth = depth - 1;
                 boolean forcing = givesCheck || attacksQueen;
                 boolean allowExtend = forcing && extStreak < maxCheckExtensionStreak;
-                if (allowExtend) nextDepth++;
+                if (allowExtend) {
+                    nextDepth++;
+                }
                 int nextExtStreak = allowExtend ? extStreak + 1 : 0;
 
                 eval = Double.NEGATIVE_INFINITY;
@@ -2835,11 +2923,13 @@ public class AI {
 
                         int reduction = 0;
                         if (canReduce) {
-                            reduction = lmrReduction(nextDepth, index, historyScore);
+                            reduction = lmrReduction(nextDepth, index, historyScore, isQuiet, givesCheck, isPvNode);
                             if (reduction > 0 && isQuiet && historyScore > 0 && lmrCapGoodQuiet >= 0) {
                                 reduction = Math.min(reduction, lmrCapGoodQuiet);
                             }
-                            if (reduction <= 0) canReduce = false;
+                            if (reduction <= 0) {
+                                canReduce = false;
+                            }
                         }
 
                         if (canReduce) {
@@ -2926,12 +3016,10 @@ public class AI {
         return maxEval;
     }
 
-
     private double minimizer(Engine simulatorEngine, int depth, double alpha, double beta,
                              long boardHash, double alphaOriginal, double betaOriginal,
                              IntArrayList moves, long deadline, int prevMove, int plyFromRoot,
                              int extStreak) {
-
         long start = log.isDebugEnabled() ? System.nanoTime() : 0L;
         double minEval = Double.POSITIVE_INFINITY;
         int bestMoveAtThisNode = -1;
@@ -2941,10 +3029,6 @@ public class AI {
         final boolean inCheckAtNode = isSideInCheck(simulatorEngine, false);
         final Heuristics heuristics = threadHeuristics.get();
         final int[][] historyTable = heuristics.history;
-
-        IntArrayList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
-        seeCache.clear();
         final SearchPruningParameters.Snapshot pruning = searchPruningParameters;
         final int hmpMinIndex = pruning.hmpMinIndex();
         final int hmpHistoryMax = pruning.hmpHistoryMax();
@@ -2956,6 +3040,65 @@ public class AI {
         final int lmrCapGoodQuiet = pruning.lmrCapForGoodQuiet();
         final int maxCheckExtensionStreak = Math.max(0, pruning.maxCheckExtensionStreak());
         final int seePruneNearRootPly = Math.max(0, pruning.seePruneNearRootPly());
+        final int lqpHistoryCutoff = pruning.lqpHistoryCutoff();
+        final int lqpButterflyCutoff = pruning.lqpButterflyCutoff();
+        final int lqpStartIndex = Math.max(0, pruning.lqpStartIndex());
+        final int lqpMaxDepth = Math.max(0, pruning.lqpMaxDepth());
+
+        boolean isPvNode = Double.isFinite(alphaOriginal) && Double.isFinite(betaOriginal);
+        if (plyFromRoot == 0) {
+            isPvNode = true;
+        }
+
+        double staticEvalWhite = resolveScoreDifference(simulatorEngine.getGameState(), boardHash,
+                simulatorEngine.whitesTurn());
+        boolean staticEvalAvailable = Double.isFinite(staticEvalWhite);
+        int staticEvalCp = staticEvalAvailable ? toSidePerspectiveCp(staticEvalWhite, false) : 0;
+        int alphaCp = toCentipawns(-beta);
+        int betaCp = toCentipawns(-alpha);
+
+        boolean parentWasTactical = prevMove >= 0
+                && (MoveHelper.isCapture(prevMove) || MoveHelper.isPawnPromotionMove(prevMove));
+
+        if (staticEvalAvailable && !isPvNode && !inCheckAtNode && !parentWasTactical && depth <= 3) {
+            int efpMargin = depth <= 1
+                    ? pruning.efpMarginDepth1()
+                    : (depth == 2 ? pruning.efpMarginDepth2() : pruning.efpMarginDepth3());
+            if (efpMargin > 0 && staticEvalCp - efpMargin >= betaCp) {
+                return staticEvalWhite;
+            }
+        }
+
+        if (staticEvalAvailable) {
+            boolean snmpPruned = SearchPruning.tryStaticNullMovePrune(
+                    depth, inCheckAtNode, isPvNode,
+                    staticEvalCp, alphaCp, betaCp,
+                    score -> {});
+            if (snmpPruned) {
+                return staticEvalWhite;
+            }
+        }
+
+        boolean[] razorAborted = {false};
+        if (staticEvalAvailable) {
+            boolean razored = SearchPruning.tryRazoring(
+                    depth, inCheckAtNode, isPvNode,
+                    staticEvalCp, alphaCp, betaCp,
+                    (a, b) -> {
+                        double razorAlpha = toWhitePerspectiveFromSideCp(a, false);
+                        double razorBeta = toWhitePerspectiveFromSideCp(b, false);
+                        double qs = quiescenceSearch(simulatorEngine, false, razorAlpha, razorBeta, deadline, plyFromRoot);
+                        if (qs == EXIT_FLAG) {
+                            razorAborted[0] = true;
+                            return b;
+                        }
+                        return toSidePerspectiveCp(qs, false);
+                    },
+                    score -> {});
+            if (razored && !razorAborted[0]) {
+                return alpha;
+            }
+        }
 
         int baseRemainingDepth = Math.max(0, depth - 1);
         boolean futilityEligible = !inCheckAtNode
@@ -2964,22 +3107,18 @@ public class AI {
                 && depth <= futilityMaxDepth
                 && Double.isFinite(beta);
         boolean futilityPossible = futilityEligible
+                && staticEvalAvailable
                 && ((baseRemainingDepth <= 1 && pruning.fpMarginDepth1() > 0)
                 || (baseRemainingDepth == 2 && pruning.fpMarginDepth2() > 0));
-        double staticEvalWhite = Double.NaN;
-        if (futilityPossible) {
-            staticEvalWhite = resolveScoreDifference(simulatorEngine.getGameState(), boardHash,
-                    simulatorEngine.whitesTurn());
-            if (!Double.isFinite(staticEvalWhite)) {
-                futilityPossible = false;
-            }
-        }
+
+        IntArrayList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
+        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
+        seeCache.clear();
 
         for (int index = 0; index < orderedMoves.size(); index++) {
-            if (Thread.currentThread().isInterrupted() || positionChanged() || System.nanoTime() > deadline) {
+            if (abortRequested(deadline)) {
                 return EXIT_FLAG;
             }
-
             int move = orderedMoves.getInt(index);
 
             int from = MoveHelper.deriveFromIndex(move);
@@ -2990,6 +3129,27 @@ public class AI {
             boolean isPromotion = MoveHelper.isPawnPromotionMove(move);
             boolean isQuiet = !isCapture && !isPromotion;
             int historyScore = historyTable[from][to];
+            int butterflyScore = heuristics.butterflyScore(move);
+
+            if (!inCheckAtNode
+                    && isQuiet
+                    && depth >= 2
+                    && hmpMinIndex >= 0
+                    && index >= hmpMinIndex
+                    && historyScore <= hmpHistoryMax) {
+                continue;
+            }
+
+            if (!inCheckAtNode
+                    && isQuiet
+                    && depth <= lqpMaxDepth
+                    && index >= lqpStartIndex
+                    && historyScore <= lqpHistoryCutoff
+                    && butterflyScore <= lqpButterflyCutoff) {
+                continue;
+            }
+
+            heuristics.bumpButterfly(move);
 
             int seeGain = 0;
             boolean seeEvaluated = false;
@@ -3031,7 +3191,9 @@ public class AI {
                 boolean givesCheckTmp = isSideInCheck(simulatorEngine, true);
                 boolean attacksQueenTmp = attacksOpponentQueenNow(simulatorEngine, false);
                 simulatorEngine.undoLastMove();
-                if (!givesCheckTmp && !attacksQueenTmp) continue;
+                if (!givesCheckTmp && !attacksQueenTmp) {
+                    continue;
+                }
             }
 
             simulatorEngine.performMove(move);
@@ -3042,7 +3204,7 @@ public class AI {
 
             double eval;
             if (childExact) {
-                eval = evaluateStaticPosition(simulatorEngine.getGameState(), newBoardHash, true, plyFromRoot + 1);
+                eval = evaluateStaticPosition(simulatorEngine.getGameState(), newBoardHash, false, plyFromRoot + 1);
             } else {
                 boolean givesCheck = isSideInCheck(simulatorEngine, true);
                 boolean attacksQueen = attacksOpponentQueenNow(simulatorEngine, false);
@@ -3058,10 +3220,48 @@ public class AI {
                     }
                 }
 
+                if (!isPvNode) {
+                    boolean[] probCutAborted = {false};
+                    boolean probCutPruned = SearchPruning.tryProbCut(
+                            depth, givesCheck, false,
+                            toCentipawns(alpha), toCentipawns(beta),
+                            () -> simulatorEngine.getAllLegalMoves().toIntArray(),
+                            m -> MoveHelper.isCapture(m) || MoveHelper.isPawnPromotionMove(m),
+                            simulatorEngine::see,
+                            simulatorEngine::performMove,
+                            simulatorEngine::undoLastMove,
+                            (reducedDepth, verifyAlphaCp, verifyBetaCp) -> {
+                                double verifyAlpha = toWhitePerspectiveFromSideCp(verifyAlphaCp, true);
+                                double verifyBeta = toWhitePerspectiveFromSideCp(verifyBetaCp, true);
+                                double verifyScore = alphaBeta(simulatorEngine, reducedDepth, verifyAlpha, verifyBeta,
+                                        true, deadline, move, plyFromRoot + 1, 0);
+                                if (verifyScore == EXIT_FLAG || positionChanged()) {
+                                    probCutAborted[0] = true;
+                                    return verifyAlphaCp;
+                                }
+                                return toSidePerspectiveCp(verifyScore, true);
+                            },
+                            score -> {});
+                    if (probCutPruned && !probCutAborted[0]) {
+                        simulatorEngine.undoLastMove();
+                        updateKillerMoves(depth, move);
+                        incrementHistory(move, depth);
+                        heuristics.recordCounterMove(prevMove, move);
+                        if (log.isDebugEnabled()) {
+                            long endTime = System.nanoTime();
+                            log.debug("DEPTH: {} --- {}", depth, Move.convertIntToMove(move));
+                            log.debug("<-- [-] Time taken for minimizer: {} ms", (endTime - start) / 1e6);
+                        }
+                        return beta;
+                    }
+                }
+
                 int nextDepth = depth - 1;
                 boolean forcing = givesCheck || attacksQueen;
                 boolean allowExtend = forcing && extStreak < maxCheckExtensionStreak;
-                if (allowExtend) nextDepth++;
+                if (allowExtend) {
+                    nextDepth++;
+                }
                 int nextExtStreak = allowExtend ? extStreak + 1 : 0;
 
                 eval = Double.POSITIVE_INFINITY;
@@ -3119,11 +3319,13 @@ public class AI {
 
                         int reduction = 0;
                         if (canReduce) {
-                            reduction = lmrReduction(nextDepth, index, historyScore);
+                            reduction = lmrReduction(nextDepth, index, historyScore, isQuiet, givesCheck, isPvNode);
                             if (reduction > 0 && isQuiet && historyScore > 0 && lmrCapGoodQuiet >= 0) {
                                 reduction = Math.min(reduction, lmrCapGoodQuiet);
                             }
-                            if (reduction <= 0) canReduce = false;
+                            if (reduction <= 0) {
+                                canReduce = false;
+                            }
                         }
 
                         if (canReduce) {
@@ -3149,8 +3351,7 @@ public class AI {
                                 simulatorEngine.undoLastMove();
                                 return EXIT_FLAG;
                             }
-
-                            if (usePvs && eval > alpha && eval < beta) {
+                            if (usePvs && eval < beta && eval > alpha) {
                                 eval = alphaBeta(simulatorEngine, nextDepth, alpha, beta, true, deadline, move, plyFromRoot + 1, nextExtStreak);
                                 if (eval == EXIT_FLAG || positionChanged()) {
                                     simulatorEngine.undoLastMove();
@@ -3488,12 +3689,6 @@ public class AI {
             boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
             boolean isQuiet     = !isCapture && !isPromotion;
 
-            // In qsearch (not in check), we normally do NOT consider quiet moves.
-            // If you want to allow some checks, you can selectively allow quiet check moves.
-            if (!inCheck && isQuiet) {
-                continue;
-            }
-
             // SEE pruning: drop clearly losing captures (keep promotions).
             // Optionally keep losing captures that give check (aggressive but sometimes good).
             if (!inCheck && isCapture && !isPromotion) {
@@ -3518,7 +3713,23 @@ public class AI {
                 return standPat; // nothing more to do from here
             }
 
-            simulatorEngine.performMove(m);
+            boolean madeMove = false;
+            if (!inCheck && isQuiet) {
+                if (depth >= 1) {
+                    continue;
+                }
+                simulatorEngine.performMove(m);
+                madeMove = true;
+                boolean givesCheck = isSideInCheck(simulatorEngine, !isWhitesTurn);
+                if (!givesCheck) {
+                    simulatorEngine.undoLastMove();
+                    continue;
+                }
+            }
+
+            if (!madeMove) {
+                simulatorEngine.performMove(m);
+            }
             Optional<TablebaseResult> childTablebase = resolveExactTablebaseResult(simulatorEngine);
             double child;
             if (childTablebase.isPresent()) {
@@ -3840,6 +4051,53 @@ public class AI {
         threadHeuristics.get().addHistory(move, delta);
     }
 
+    private static int toCentipawns(double value) {
+        if (!Double.isFinite(value)) {
+            return value > 0 ? Integer.MAX_VALUE : Integer.MIN_VALUE;
+        }
+        double scaled = value * 100.0;
+        if (scaled >= Integer.MAX_VALUE) {
+            return Integer.MAX_VALUE;
+        }
+        if (scaled <= Integer.MIN_VALUE) {
+            return Integer.MIN_VALUE;
+        }
+        return (int) Math.round(scaled);
+    }
+
+    private static int toSidePerspectiveCp(double value, boolean isWhite) {
+        if (!Double.isFinite(value)) {
+            return value > 0 ? Integer.MAX_VALUE : Integer.MIN_VALUE;
+        }
+        double pawns = isWhite ? value : -value;
+        double scaled = pawns * 100.0;
+        if (scaled >= Integer.MAX_VALUE) {
+            return Integer.MAX_VALUE;
+        }
+        if (scaled <= Integer.MIN_VALUE) {
+            return Integer.MIN_VALUE;
+        }
+        return (int) Math.round(scaled);
+    }
+
+    private static double toWhitePerspectiveFromSideCp(int cp, boolean isWhite) {
+        if (cp >= Integer.MAX_VALUE) {
+            return Double.POSITIVE_INFINITY;
+        }
+        if (cp <= Integer.MIN_VALUE) {
+            return Double.NEGATIVE_INFINITY;
+        }
+        double pawns = cp / 100.0;
+        return isWhite ? pawns : -pawns;
+    }
+
+    private static int fastLog(int value) {
+        if (value <= 0) {
+            return 0;
+        }
+        return 31 - Integer.numberOfLeadingZeros(value);
+    }
+
     private void clearHistoryTable() {
         long stamp = acquireWriteLock();
         try {
@@ -4047,6 +4305,7 @@ public class AI {
         private int[][] killers;
         private final int[][] history;
         private final int[][] counter;
+        private final int[][] butterfly;
 
         private boolean[] killerDirty;
         private int[] killerDirtyList;
@@ -4062,6 +4321,11 @@ public class AI {
         private final int[] counterDirtyList;
         private int counterDirtyCount;
 
+        private final int[] butterflyDelta;
+        private final boolean[] butterflyDirty;
+        private final int[] butterflyDirtyList;
+        private int butterflyDirtyCount;
+
         private long preparedTaskId = Long.MIN_VALUE;
         private int preparedDepth = -1;
 
@@ -4069,6 +4333,7 @@ public class AI {
             this.killers = allocateKillers(Math.max(1, depth));
             this.history = new int[BOARD_SQUARES][BOARD_SQUARES];
             this.counter = new int[BOARD_SQUARES][BOARD_SQUARES];
+            this.butterfly = new int[BOARD_SQUARES][BOARD_SQUARES];
             for (int f = 0; f < BOARD_SQUARES; f++) {
                 Arrays.fill(counter[f], -1);
             }
@@ -4081,6 +4346,9 @@ public class AI {
             Arrays.fill(counterUpdates, -1);
             this.counterDirty = new boolean[HISTORY_SIZE];
             this.counterDirtyList = new int[HISTORY_SIZE];
+            this.butterflyDelta = new int[HISTORY_SIZE];
+            this.butterflyDirty = new boolean[HISTORY_SIZE];
+            this.butterflyDirtyList = new int[HISTORY_SIZE];
         }
 
         private static int[][] allocateKillers(int depth) {
@@ -4117,6 +4385,7 @@ public class AI {
             for (int f = 0; f < BOARD_SQUARES; f++) {
                 System.arraycopy(snapshot.history[f], 0, history[f], 0, BOARD_SQUARES);
                 System.arraycopy(snapshot.counter[f], 0, counter[f], 0, BOARD_SQUARES);
+                System.arraycopy(snapshot.butterfly[f], 0, butterfly[f], 0, BOARD_SQUARES);
             }
         }
 
@@ -4128,14 +4397,16 @@ public class AI {
             }
             int[][] historyCopy = new int[BOARD_SQUARES][];
             int[][] counterCopy = new int[BOARD_SQUARES][];
+            int[][] butterflyCopy = new int[BOARD_SQUARES][];
             for (int f = 0; f < BOARD_SQUARES; f++) {
                 historyCopy[f] = Arrays.copyOf(history[f], BOARD_SQUARES);
                 counterCopy[f] = Arrays.copyOf(counter[f], BOARD_SQUARES);
+                butterflyCopy[f] = Arrays.copyOf(butterfly[f], BOARD_SQUARES);
             }
-            return new Snapshot(killerCopy, historyCopy, counterCopy);
+            return new Snapshot(killerCopy, historyCopy, counterCopy, butterflyCopy);
         }
 
-        record Snapshot(int[][] killers, int[][] history, int[][] counter) {
+        record Snapshot(int[][] killers, int[][] history, int[][] counter, int[][] butterfly) {
         }
 
         boolean isPreparedFor(long taskId, int depth) {
@@ -4166,12 +4437,19 @@ public class AI {
                 counterUpdates[idx] = -1;
             }
             counterDirtyCount = 0;
+
+            for (int i = 0; i < butterflyDirtyCount; i++) {
+                int idx = butterflyDirtyList[i];
+                butterflyDirty[idx] = false;
+                butterflyDelta[idx] = 0;
+            }
+            butterflyDirtyCount = 0;
             preparedTaskId = Long.MIN_VALUE;
             preparedDepth = -1;
         }
 
         boolean hasUpdates() {
-            return killerDirtyCount > 0 || historyDirtyCount > 0 || counterDirtyCount > 0;
+            return killerDirtyCount > 0 || historyDirtyCount > 0 || counterDirtyCount > 0 || butterflyDirtyCount > 0;
         }
 
         void recordKiller(int depth, int move) {
@@ -4210,6 +4488,30 @@ public class AI {
             historyDelta[idx] += delta;
         }
 
+        void bumpButterfly(int move) {
+            if (move == -1) {
+                return;
+            }
+            int from = move & 0x3F;
+            int to = (move >>> 6) & 0x3F;
+            butterfly[from][to]++;
+            int idx = (from << 6) | to;
+            butterflyDelta[idx]++;
+            if (!butterflyDirty[idx]) {
+                butterflyDirty[idx] = true;
+                butterflyDirtyList[butterflyDirtyCount++] = idx;
+            }
+        }
+
+        int butterflyScore(int move) {
+            if (move == -1) {
+                return 0;
+            }
+            int from = move & 0x3F;
+            int to = (move >>> 6) & 0x3F;
+            return butterfly[from][to];
+        }
+
         void recordCounterMove(int prevMove, int move) {
             if (prevMove < 0) {
                 return;
@@ -4226,7 +4528,7 @@ public class AI {
         }
 
         boolean hasPendingUpdates() {
-            return killerDirtyCount > 0 || historyDirtyCount > 0 || counterDirtyCount > 0;
+            return killerDirtyCount > 0 || historyDirtyCount > 0 || counterDirtyCount > 0 || butterflyDirtyCount > 0;
         }
 
         void mergeInto(Heuristics target) {
@@ -4251,6 +4553,12 @@ public class AI {
                 int from = idx >>> 6;
                 int to = idx & 0x3F;
                 target.counter[from][to] = counterUpdates[idx];
+            }
+            for (int i = 0; i < butterflyDirtyCount; i++) {
+                int idx = butterflyDirtyList[i];
+                int from = idx >>> 6;
+                int to = idx & 0x3F;
+                target.butterfly[from][to] += butterflyDelta[idx];
             }
         }
 

@@ -377,6 +377,14 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
             if ((oneStep & ownKing) != 0) {
                 base += ownKingBlocksPassedPawnPenalty;
             }
+            int frontIndex = color == WHITE ? square + 8 : square - 8;
+            if (frontIndex >= 0 && frontIndex < 64) {
+                boolean frontSafeFromEnemyPawn = (PAWN_ATTACKS[color ^ 1][frontIndex] & opponentPawns) == 0L;
+                boolean supportedByOwnPawn = (PAWN_ATTACKS[color][frontIndex] & pawns) != 0L;
+                if (frontSafeFromEnemyPawn && supportedByOwnPawn) {
+                    base += passedPawnFreePathBonusPerRank / 2;
+                }
+            }
             if (filePathAhead != 0 && (filePathAhead & allPieces) == 0) {
                 base += passedPawnFreePathBonusPerRank * distances[square];
             }
