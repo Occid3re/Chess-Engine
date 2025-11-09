@@ -50,6 +50,10 @@ public final class Tuning {
     private static int activityEndgameRookCenter;
     private static int activityEndgameQueenCenter;
     private static int activityEndgameKingCenter;
+    private static int activityOutpostKnightMidgame;
+    private static int activityOutpostKnightEndgame;
+    private static int activityOutpostBishopMidgame;
+    private static int activityOutpostBishopEndgame;
 
     private static int missingPawnShieldPenalty;
     private static int halfOpenFilePenalty;
@@ -67,6 +71,7 @@ public final class Tuning {
     private static int kingSafetyBishopAttackWeight;
     private static int kingSafetyRookAttackWeight;
     private static int kingSafetyQueenAttackWeight;
+    private static int kingSafetyStormPawnPenalty;
     private static int kingSafetyAttackQuadraticScale;
 
     private static int hangingPawnPenalty;
@@ -115,6 +120,21 @@ public final class Tuning {
 
     private static int searchFpMarginDepth1;
     private static int searchFpMarginDepth2;
+    private static int searchSnmpMarginDepth1;
+    private static int searchSnmpMarginDepth2;
+    private static int searchSnmpMarginDepth3;
+    private static int searchRazorMarginDepth1;
+    private static int searchRazorMarginDepth2;
+    private static int searchProbCutEnableDepth;
+    private static int searchProbCutMargin;
+    private static int searchProbCutSeeMin;
+    private static int searchEfpMarginDepth1;
+    private static int searchEfpMarginDepth2;
+    private static int searchEfpMarginDepth3;
+    private static int searchLqpHistoryCutoff;
+    private static int searchLqpButterflyCutoff;
+    private static int searchLqpStartIndex;
+    private static int searchLqpMaxDepth;
     private static int searchLmpBase;
     private static int searchLmpPerDepth;
     private static int searchFpMaxDepth;
@@ -348,6 +368,22 @@ public final class Tuning {
         return activityEndgameKingCenter;
     }
 
+    public static int activityOutpostKnightMidgame() {
+        return activityOutpostKnightMidgame;
+    }
+
+    public static int activityOutpostKnightEndgame() {
+        return activityOutpostKnightEndgame;
+    }
+
+    public static int activityOutpostBishopMidgame() {
+        return activityOutpostBishopMidgame;
+    }
+
+    public static int activityOutpostBishopEndgame() {
+        return activityOutpostBishopEndgame;
+    }
+
     public static int missingPawnShieldPenalty() {
         return missingPawnShieldPenalty;
     }
@@ -410,6 +446,10 @@ public final class Tuning {
 
     public static int kingSafetyQueenAttackWeight() {
         return kingSafetyQueenAttackWeight;
+    }
+
+    public static int kingSafetyStormPawnPenalty() {
+        return kingSafetyStormPawnPenalty;
     }
 
     public static int kingSafetyAttackQuadraticScale() {
@@ -582,6 +622,66 @@ public final class Tuning {
 
     public static int searchFpMarginDepth2() {
         return searchFpMarginDepth2;
+    }
+
+    public static int searchSnmpMarginDepth1() {
+        return searchSnmpMarginDepth1;
+    }
+
+    public static int searchSnmpMarginDepth2() {
+        return searchSnmpMarginDepth2;
+    }
+
+    public static int searchSnmpMarginDepth3() {
+        return searchSnmpMarginDepth3;
+    }
+
+    public static int searchRazorMarginDepth1() {
+        return searchRazorMarginDepth1;
+    }
+
+    public static int searchRazorMarginDepth2() {
+        return searchRazorMarginDepth2;
+    }
+
+    public static int searchProbCutEnableDepth() {
+        return searchProbCutEnableDepth;
+    }
+
+    public static int searchProbCutMargin() {
+        return searchProbCutMargin;
+    }
+
+    public static int searchProbCutSeeMin() {
+        return searchProbCutSeeMin;
+    }
+
+    public static int searchEfpMarginDepth1() {
+        return searchEfpMarginDepth1;
+    }
+
+    public static int searchEfpMarginDepth2() {
+        return searchEfpMarginDepth2;
+    }
+
+    public static int searchEfpMarginDepth3() {
+        return searchEfpMarginDepth3;
+    }
+
+    public static int searchLqpHistoryCutoff() {
+        return searchLqpHistoryCutoff;
+    }
+
+    public static int searchLqpButterflyCutoff() {
+        return searchLqpButterflyCutoff;
+    }
+
+    public static int searchLqpStartIndex() {
+        return searchLqpStartIndex;
+    }
+
+    public static int searchLqpMaxDepth() {
+        return searchLqpMaxDepth;
     }
 
     public static int searchLmpBase() {
@@ -907,6 +1007,10 @@ public final class Tuning {
             activityEndgameRookCenter = loadInt(ParamId.ACTIVITY_ENDGAME_CENTER_ROOK);
             activityEndgameQueenCenter = loadInt(ParamId.ACTIVITY_ENDGAME_CENTER_QUEEN);
             activityEndgameKingCenter = loadInt(ParamId.ACTIVITY_ENDGAME_CENTER_KING);
+            activityOutpostKnightMidgame = loadInt(ParamId.ACTIVITY_OUTPOST_KNIGHT_MIDGAME);
+            activityOutpostKnightEndgame = loadInt(ParamId.ACTIVITY_OUTPOST_KNIGHT_ENDGAME);
+            activityOutpostBishopMidgame = loadInt(ParamId.ACTIVITY_OUTPOST_BISHOP_MIDGAME);
+            activityOutpostBishopEndgame = loadInt(ParamId.ACTIVITY_OUTPOST_BISHOP_ENDGAME);
 
             missingPawnShieldPenalty = loadInt(ParamId.KING_SAFETY_MISSING_PAWN_SHIELD_PENALTY);
             halfOpenFilePenalty = loadInt(ParamId.KING_SAFETY_HALF_OPEN_FILE_PENALTY);
@@ -920,6 +1024,7 @@ public final class Tuning {
             kingSafetyBishopAttackWeight = loadInt(ParamId.KING_SAFETY_ATTACK_WEIGHT_BISHOP);
             kingSafetyRookAttackWeight = loadInt(ParamId.KING_SAFETY_ATTACK_WEIGHT_ROOK);
             kingSafetyQueenAttackWeight = loadInt(ParamId.KING_SAFETY_ATTACK_WEIGHT_QUEEN);
+            kingSafetyStormPawnPenalty = loadInt(ParamId.KING_SAFETY_STORM_PAWN_PENALTY);
 
             hangingPawnPenalty = loadInt(ParamId.THREAT_HANGING_PAWN_PENALTY);
             hangingKnightPenalty = loadInt(ParamId.THREAT_HANGING_KNIGHT_PENALTY);
@@ -958,6 +1063,21 @@ public final class Tuning {
 
             searchFpMarginDepth1 = loadInt(ParamId.SEARCH_FP_MARGIN_DEPTH1);
             searchFpMarginDepth2 = loadInt(ParamId.SEARCH_FP_MARGIN_DEPTH2);
+            searchSnmpMarginDepth1 = loadInt(ParamId.SEARCH_SNMP_MARGIN_DEPTH1);
+            searchSnmpMarginDepth2 = loadInt(ParamId.SEARCH_SNMP_MARGIN_DEPTH2);
+            searchSnmpMarginDepth3 = loadInt(ParamId.SEARCH_SNMP_MARGIN_DEPTH3);
+            searchRazorMarginDepth1 = loadInt(ParamId.SEARCH_RAZOR_MARGIN_DEPTH1);
+            searchRazorMarginDepth2 = loadInt(ParamId.SEARCH_RAZOR_MARGIN_DEPTH2);
+            searchProbCutEnableDepth = loadInt(ParamId.SEARCH_PROBCUT_ENABLE_DEPTH);
+            searchProbCutMargin = loadInt(ParamId.SEARCH_PROBCUT_MARGIN);
+            searchProbCutSeeMin = loadInt(ParamId.SEARCH_PROBCUT_SEE_MIN);
+            searchEfpMarginDepth1 = loadInt(ParamId.SEARCH_EFP_MARGIN_DEPTH1);
+            searchEfpMarginDepth2 = loadInt(ParamId.SEARCH_EFP_MARGIN_DEPTH2);
+            searchEfpMarginDepth3 = loadInt(ParamId.SEARCH_EFP_MARGIN_DEPTH3);
+            searchLqpHistoryCutoff = loadInt(ParamId.SEARCH_LQP_HISTORY_CUTOFF);
+            searchLqpButterflyCutoff = loadInt(ParamId.SEARCH_LQP_BUTTERFLY_CUTOFF);
+            searchLqpStartIndex = loadInt(ParamId.SEARCH_LQP_START_INDEX);
+            searchLqpMaxDepth = loadInt(ParamId.SEARCH_LQP_MAX_DEPTH);
             searchLmpBase = loadInt(ParamId.SEARCH_LMP_BASE);
             searchLmpPerDepth = loadInt(ParamId.SEARCH_LMP_PER_DEPTH);
             searchFpMaxDepth = loadInt(ParamId.SEARCH_FP_MAX_DEPTH);

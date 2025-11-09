@@ -12,6 +12,7 @@ import julius.game.chessengine.tuning.Tuning;
 import java.util.Arrays;
 import java.util.Objects;
 
+import static julius.game.chessengine.helper.PawnMoveTables.PAWN_ATTACKS;
 /**
  * Tracks piece activity (mobility plus center control) with separate midgame/endgame
  * components.  The module keeps per-piece caches and incrementally updates only the
@@ -154,6 +155,8 @@ public final class ActivityModule implements EvaluationModule {
     private long blackPieces;
     private long allPieces;
     private long sliderSquares;
+    private long whitePawns;
+    private long blackPawns;
 
     private int midgameScoreCache;
     private int endgameScoreCache;
@@ -466,6 +469,15 @@ public final class ActivityModule implements EvaluationModule {
         return pieceType == BISHOP || pieceType == ROOK || pieceType == QUEEN;
     }
 
+    private boolean isOutpostSquare(int square, int color) {
+        long friendlyPawns = color == WHITE ? whitePawns : blackPawns;
+        long enemyPawns = color == WHITE ? blackPawns : whitePawns;
+        if ((PAWN_ATTACKS[color][square] & friendlyPawns) == 0L) {
+            return false;
+        }
+        return (PAWN_ATTACKS[color ^ 1][square] & enemyPawns) == 0L;
+    }
+
     private void rebuildFromBoard(ImmutableBoardView board) {
         Arrays.fill(midgameTotals, 0);
         Arrays.fill(endgameTotals, 0);
@@ -476,6 +488,8 @@ public final class ActivityModule implements EvaluationModule {
         whitePieces = 0L;
         blackPieces = 0L;
         sliderSquares = 0L;
+        whitePawns = 0L;
+        blackPawns = 0L;
 
         registerPieces(board.getWhitePawns(), WHITE, PAWN);
         registerPieces(board.getWhiteKnights(), WHITE, KNIGHT);
@@ -514,8 +528,14 @@ public final class ActivityModule implements EvaluationModule {
             long mask = 1L << index;
             if (color == WHITE) {
                 whitePieces |= mask;
+                if (pieceType == PAWN) {
+                    whitePawns |= mask;
+                }
             } else {
                 blackPieces |= mask;
+                if (pieceType == PAWN) {
+                    blackPawns |= mask;
+                }
             }
             if (isSlider(pieceType)) {
                 sliderSquares |= mask;
@@ -540,8 +560,14 @@ public final class ActivityModule implements EvaluationModule {
         long mask = 1L << square;
         if (color == WHITE) {
             whitePieces |= mask;
+            if (pieceType == PAWN) {
+                whitePawns |= mask;
+            }
         } else {
             blackPieces |= mask;
+            if (pieceType == PAWN) {
+                blackPawns |= mask;
+            }
         }
         if (isSlider(pieceType)) {
             sliderSquares |= mask;
@@ -556,14 +582,21 @@ public final class ActivityModule implements EvaluationModule {
             return false;
         }
         int color = activity.color;
+        int pieceType = activity.pieceType;
         midgameTotals[color] -= activity.midgameScore;
         endgameTotals[color] -= activity.endgameScore;
 
         long mask = 1L << square;
         if (color == WHITE) {
             whitePieces &= ~mask;
+            if (pieceType == PAWN) {
+                whitePawns &= ~mask;
+            }
         } else {
             blackPieces &= ~mask;
+            if (pieceType == PAWN) {
+                blackPawns &= ~mask;
+            }
         }
         if (isSlider(activity.pieceType)) {
             sliderSquares &= ~mask;
@@ -630,6 +663,18 @@ public final class ActivityModule implements EvaluationModule {
                 + center * midgameCenterWeights[pieceType];
         int endgameContribution = mobility * endgameMobilityWeights[pieceType]
                 + center * endgameCenterWeights[pieceType];
+
+        if ((pieceType == KNIGHT || pieceType == BISHOP)
+                && isOutpostSquare(square, activity.color)) {
+            int centerWeight = ((CENTRAL_SQUARES >>> square) & 1L) != 0 ? 2 : 1;
+            if (pieceType == KNIGHT) {
+                midgameContribution += centerWeight * Tuning.activityOutpostKnightMidgame();
+                endgameContribution += centerWeight * Tuning.activityOutpostKnightEndgame();
+            } else {
+                midgameContribution += centerWeight * Tuning.activityOutpostBishopMidgame();
+                endgameContribution += centerWeight * Tuning.activityOutpostBishopEndgame();
+            }
+        }
 
         midgameTotals[activity.color] += midgameContribution - activity.midgameScore;
         endgameTotals[activity.color] += endgameContribution - activity.endgameScore;
