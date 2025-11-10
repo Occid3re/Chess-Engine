@@ -441,7 +441,7 @@ public class BestMoveSearchTest {
         // Compute cpLoss from the static evaluations of the best and chosen moves.
         // Skip only when either value is unavailable or non-finite.
         double cpLoss = Double.isFinite(bestScore) && Double.isFinite(chosenStaticScore)
-                ? bestScore - chosenStaticScore
+                ? Math.max(0.0, bestScore - chosenStaticScore)
                 : Double.NaN;
 
         double chosenDisplayedScore = chosenEvaluation != null ? chosenEvaluation.score() : Double.NaN;
@@ -1324,7 +1324,7 @@ public class BestMoveSearchTest {
 
             if (bestEvaluation != null) {
                 double deltaVsChosen = chosenEvaluation != null && Double.isFinite(cpLoss)
-                        ? -cpLoss
+                        ? cpLoss
                         : Double.NaN;
                 sb.append("Engine top move: ").append(bestEvaluation.move())
                         .append(" -> ").append(formatScore(bestEvaluation.score())).append(" pawns");
@@ -1372,7 +1372,7 @@ public class BestMoveSearchTest {
 
             if (Double.isFinite(cpLoss)) {
                 sb.append("Evaluation delta vs engine best: ")
-                        .append(formatScore(-cpLoss)).append(" pawns")
+                        .append(formatScore(cpLoss)).append(" pawns")
                         .append(System.lineSeparator());
             }
 
@@ -1783,12 +1783,10 @@ public class BestMoveSearchTest {
         }
 
         List<String> segments = new ArrayList<>(pv.size());
-        boolean moverIsWhite = whiteToMove;
         for (MoveAndScore moveAndScore : pv) {
             String notation = Move.convertIntToMove(moveAndScore.getMove()).toString();
-            double orientedScore = moverIsWhite ? moveAndScore.getScore() : -moveAndScore.getScore();
-            segments.add(notation + " (" + formatScore(orientedScore) + " pawns)");
-            moverIsWhite = !moverIsWhite;
+            double normalized = orientScoreForMover(whiteToMove, moveAndScore.getScore());
+            segments.add(notation + " (" + formatScore(normalized) + " pawns)");
         }
         return String.join(" -> ", segments);
     }

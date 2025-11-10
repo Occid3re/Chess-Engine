@@ -230,6 +230,7 @@ public class AI {
     private static final double MATE_SCORE_MARGIN = 2048.0;
     private static final double TB_TIE_EPSILON = 0.01;
     private static final double TABLEBASE_CLAMP = 2000.0 / 100.0;
+    private static final double ROOT_PVS_EPSILON = 1e-3;
 
     private ScheduledExecutorService scheduler;
 
@@ -2044,14 +2045,12 @@ public class AI {
 
     private RootSearchResult getBestMove(Engine simulatorEngine, boolean isWhitesTurn, int depth, long deadline,
                                          double alpha, double beta, SplittableRandom rng) {
-        int bestMove = -1;
-        double bestScore = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
-
-        boolean aborted = false;
-        boolean bestFromTablebase = false;
-
         IntArrayList sortedMoves = sortMovesByEfficiency(simulatorEngine.getAllLegalMoves(), depth,
                 simulatorEngine.getBoardStateHash(), -1, simulatorEngine);
+        if (sortedMoves.isEmpty()) {
+            return RootSearchResult.completed(null);
+        }
+
         maybeRotateRootMoves(sortedMoves, rng);
         promoteTablebaseMove(sortedMoves, simulatorEngine);
 
@@ -2065,50 +2064,150 @@ public class AI {
             }
         }
 
+        final double rootAlpha = toRootLowerBound(alpha, beta, isWhitesTurn);
+        final double rootBeta = toRootUpperBound(alpha, beta, isWhitesTurn);
+        final double[] fullWindowWhiteBounds = toWhiteBounds(rootAlpha, rootBeta, isWhitesTurn);
+
+        int bestMove = -1;
+        double bestScoreWhite = isWhitesTurn ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
+        double bestScoreRoot = Double.NEGATIVE_INFINITY;
+        boolean bestFromTablebase = false;
+        boolean aborted = false;
+
+        double currentAlpha = rootAlpha;
+
         for (int idx = 0; idx < sortedMoves.size(); idx++) {
-            int moveInt = sortedMoves.getInt(idx);
             if (abortRequested(deadline)) {
                 aborted = true;
                 break;
             }
 
-            simulatorEngine.performMove(moveInt);
+            int moveInt = sortedMoves.getInt(idx);
+            boolean[] tablebaseFlag = new boolean[1];
+            double scoreWhite;
+
+            if (idx == 0) {
+                scoreWhite = evaluateRootChild(simulatorEngine, moveInt, depth, deadline,
+                        fullWindowWhiteBounds[0], fullWindowWhiteBounds[1], isWhitesTurn, tablebaseFlag);
+            } else {
+                double probeAlpha = Math.max(currentAlpha, bestScoreRoot);
+                double probeBeta = computeRootPvsBeta(probeAlpha, rootBeta);
+                double[] probeBounds = toWhiteBounds(probeAlpha, probeBeta, isWhitesTurn);
+
+                scoreWhite = evaluateRootChild(simulatorEngine, moveInt, depth, deadline,
+                        probeBounds[0], probeBounds[1], isWhitesTurn, tablebaseFlag);
+
+                double scoreRoot = normalizeForRoot(scoreWhite, isWhitesTurn);
+                if (scoreWhite != EXIT_FLAG && scoreRoot > currentAlpha && scoreRoot < rootBeta) {
+                    scoreWhite = evaluateRootChild(simulatorEngine, moveInt, depth, deadline,
+                            fullWindowWhiteBounds[0], fullWindowWhiteBounds[1], isWhitesTurn, tablebaseFlag);
+                }
+            }
+
+            if (scoreWhite == EXIT_FLAG) {
+                aborted = true;
+                break;
+            }
+
+            double scoreRoot = normalizeForRoot(scoreWhite, isWhitesTurn);
+
+            if (bestMove == -1 || scoreRoot > bestScoreRoot) {
+                bestMove = moveInt;
+                bestScoreWhite = scoreWhite;
+                bestScoreRoot = scoreRoot;
+                bestFromTablebase = tablebaseFlag[0];
+            }
+
+            if (scoreRoot > currentAlpha) {
+                currentAlpha = scoreRoot;
+            }
+
+            if (currentAlpha >= rootBeta) {
+                break;
+            }
+        }
+
+        MoveAndScore candidate = bestMove != -1 ? createCandidate(bestMove, bestScoreWhite, bestFromTablebase) : null;
+        return aborted ? RootSearchResult.aborted(candidate) : RootSearchResult.completed(candidate);
+    }
+
+    private double evaluateRootChild(Engine simulatorEngine, int moveInt, int depth, long deadline,
+                                     double alphaWhite, double betaWhite, boolean parentIsWhite,
+                                     boolean[] tablebaseExactHolder) {
+        simulatorEngine.performMove(moveInt);
+        double score;
+        boolean moveTablebaseExact = false;
+        try {
             long childHash = simulatorEngine.getBoardStateHash();
-            double score;
-            boolean moveTablebaseExact = false;
             if (simulatorEngine.getGameState().isInStateCheckMate()) {
-                score = isWhitesTurn ? (CHECKMATE - 1) : -(CHECKMATE - 1);
+                score = parentIsWhite ? (CHECKMATE - 1) : -(CHECKMATE - 1);
             } else if (simulatorEngine.getGameState().isTerminal()) {
-                score = evaluateStaticPosition(simulatorEngine.getGameState(), childHash, !isWhitesTurn, depth);
-                if (isWhitesTurn) score = -score; // convert to WHITE-perspective
+                score = evaluateStaticPosition(simulatorEngine.getGameState(), childHash, !parentIsWhite, depth);
+                if (parentIsWhite) score = -score;
             } else {
                 Optional<TablebaseResult> childTablebase = resolveExactTablebaseResult(simulatorEngine);
                 if (childTablebase.isPresent()) {
                     moveTablebaseExact = true;
-                    score = evaluateStaticPosition(simulatorEngine.getGameState(), childHash, !isWhitesTurn, depth);
-                    if (isWhitesTurn) score = -score; // to WHITE-perspective
+                    score = evaluateStaticPosition(simulatorEngine.getGameState(), childHash, !parentIsWhite, depth);
+                    if (parentIsWhite) score = -score;
                 } else {
-                    score = alphaBeta(simulatorEngine, depth - 1, alpha, beta, !isWhitesTurn, deadline, moveInt, 1, 0);
-                    if (score == EXIT_FLAG || abortRequested(deadline)) {
-                        simulatorEngine.undoLastMove();
-                        aborted = true;
-                        break;
-                    }
+                    score = alphaBeta(simulatorEngine, depth - 1, alphaWhite, betaWhite,
+                            !parentIsWhite, deadline, moveInt, 1, 0);
                 }
             }
+        } finally {
             simulatorEngine.undoLastMove();
-
-            if (isBetterScore(isWhitesTurn, score, bestScore)) {
-                bestScore = score;
-                bestMove = moveInt;
-                bestFromTablebase = moveTablebaseExact;
-            }
-            if (isWhitesTurn) alpha = Math.max(alpha, score);
-            else beta = Math.min(beta, score);
-            if (alpha >= beta) break;
         }
-        MoveAndScore candidate = bestMove != -1 ? createCandidate(bestMove, bestScore, bestFromTablebase) : null;
-        return aborted ? RootSearchResult.aborted(candidate) : RootSearchResult.completed(candidate);
+
+        if (tablebaseExactHolder != null) {
+            tablebaseExactHolder[0] = moveTablebaseExact;
+        }
+
+        if (score == EXIT_FLAG || abortRequested(deadline)) {
+            return EXIT_FLAG;
+        }
+
+        return score;
+    }
+
+    private static double toRootLowerBound(double alphaWhite, double betaWhite, boolean rootIsWhite) {
+        if (rootIsWhite) {
+            return alphaWhite;
+        }
+        return -betaWhite;
+    }
+
+    private static double toRootUpperBound(double alphaWhite, double betaWhite, boolean rootIsWhite) {
+        if (rootIsWhite) {
+            return betaWhite;
+        }
+        return -alphaWhite;
+    }
+
+    private static double[] toWhiteBounds(double rootAlpha, double rootBeta, boolean rootIsWhite) {
+        if (rootIsWhite) {
+            return new double[]{rootAlpha, rootBeta};
+        }
+        return new double[]{-rootBeta, -rootAlpha};
+    }
+
+    private static double computeRootPvsBeta(double alpha, double beta) {
+        if (Double.compare(alpha, Double.NEGATIVE_INFINITY) == 0) {
+            return beta;
+        }
+        double epsilon = Math.max(ROOT_PVS_EPSILON, Math.ulp(alpha));
+        double candidate = alpha + epsilon;
+        if (candidate > beta) {
+            candidate = beta;
+        }
+        if (candidate <= alpha) {
+            candidate = Math.nextUp(alpha);
+        }
+        return candidate;
+    }
+
+    private static double normalizeForRoot(double whiteScore, boolean rootIsWhite) {
+        return rootIsWhite ? whiteScore : -whiteScore;
     }
 
     private MoveAndScore createCandidate(int move, double score, boolean tablebaseExact) {
