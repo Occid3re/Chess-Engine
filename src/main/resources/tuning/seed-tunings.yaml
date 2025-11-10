@@ -50,6 +50,10 @@ population:
       kingsafety.attackweightrook: 43.58
       kingsafety.backrankweaknessendgamepenalty: -51.94
       kingsafety.backrankweaknessmidgamepenalty: -75.32
+      kingsafety.backrankcovermidgamebonus: 0.00
+      kingsafety.backrankcoverendgamebonus: 0.00
+      kingsafety.backrankattackpenaltymidgame: 0.00
+      kingsafety.backrankattackpenaltyendgame: 0.00
       kingsafety.defenderbonus: 6.52
       kingsafety.halfopenfilepenalty: -5.88
       kingsafety.missingpawnshieldpenalty: -30.47
@@ -140,9 +144,18 @@ population:
       search.historyreductionmax: 7000.00
       search.hmpHistoryMax: 140.00
       search.hmpMinIndex: 36.00
+      search.iidReduceDepth: 0.00
       search.lmpBase: 4.00
       search.lmpMaxDepth: 5.00
       search.lmpPerDepth: 8.00
+      search.lmrCapGoodQuiet: 63.00
+      search.lmrDepthLogOffset: 1.00
+      search.lmrHistoryBuckets: 5.00
+      search.lmrHistoryWeightSlope: 0.50
+      search.lmrMoveLogOffset: 2.00
+      search.lmrProtectIndexMax: 2.00
+      search.lmrProtectPlyMax: 1.00
+      search.lmrScaleDivisor: 1.50
       search.lqpButterflyThreshold: 10.00
       search.lqpHistoryThreshold: 700.00
       search.lqpMaxDepth: 3.00
