@@ -14,7 +14,7 @@
 
     <groupId>julius.game</groupId>
     <artifactId>chess-engine</artifactId>
-    <version>3.9.3</version>
+    <version>3.9.4</version>
     <name>chess-engine</name>
     <description>ChessEngine</description>
 
