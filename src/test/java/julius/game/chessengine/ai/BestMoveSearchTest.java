@@ -441,7 +441,7 @@ public class BestMoveSearchTest {
         // Compute cpLoss from the static evaluations of the best and chosen moves.
         // Skip only when either value is unavailable or non-finite.
         double cpLoss = Double.isFinite(bestScore) && Double.isFinite(chosenStaticScore)
-                ? bestScore - chosenStaticScore
+                ? Math.max(0.0, bestScore - chosenStaticScore)
                 : Double.NaN;
 
         double chosenDisplayedScore = chosenEvaluation != null ? chosenEvaluation.score() : Double.NaN;
@@ -847,12 +847,15 @@ public class BestMoveSearchTest {
                 sb.append("WARNING: target depth not reached before abort").append(System.lineSeparator());
             }
 
+            boolean whiteToMove = fen.split(" ")[1].equals("w");
+
             sb.append("Search result: ");
             if (result == null) {
                 sb.append("<no move found>");
             } else {
+                double oriented = orientScoreForMover(whiteToMove, result.score);
                 sb.append(formatMove(result.move)).append(" (score=")
-                        .append(String.format(Locale.ROOT, "%.2f", result.score)).append(')');
+                        .append(String.format(Locale.ROOT, "%.2f", oriented)).append(')');
             }
             sb.append(System.lineSeparator());
 
@@ -1783,12 +1786,10 @@ public class BestMoveSearchTest {
         }
 
         List<String> segments = new ArrayList<>(pv.size());
-        boolean moverIsWhite = whiteToMove;
         for (MoveAndScore moveAndScore : pv) {
             String notation = Move.convertIntToMove(moveAndScore.getMove()).toString();
-            double orientedScore = moverIsWhite ? moveAndScore.getScore() : -moveAndScore.getScore();
+            double orientedScore = orientScoreForMover(whiteToMove, moveAndScore.getScore());
             segments.add(notation + " (" + formatScore(orientedScore) + " pawns)");
-            moverIsWhite = !moverIsWhite;
         }
         return String.join(" -> ", segments);
     }
