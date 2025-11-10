@@ -3183,6 +3183,16 @@ public class AI {
                 }
             }
 
+            if (allowLatePrune
+                    && !inCheckAtNode
+                    && isQuiet
+                    && depth >= 2
+                    && hmpMinIndex >= 0
+                    && index >= hmpMinIndex
+                    && historyScore <= hmpHistoryMax) {
+                continue;
+            }
+
             int seeGain = 0;
             boolean seeEvaluated = false;
             boolean seeWinsMaterial = false;

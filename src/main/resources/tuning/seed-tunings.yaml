@@ -138,12 +138,12 @@ population:
       search.fpmargindepth3: 260.0
       search.fpmaxdepth: 6.0
       search.historyreductionmax: 6540.9051731841755
-      search.hmphistorymax: 121.92808472289505
-      search.hmpminindex: 38.73678917772546
+      search.hmpHistoryMax: 121.92808472289505
+      search.hmpMinIndex: 38.73678917772546
       search.iidreducedepth: 2.6220408788985017
-      search.lmpbase: 6.0
-      search.lmpmaxdepth: 4.0
-      search.lmpperdepth: 10.0
+      search.lmpBase: 6.0
+      search.lmpMaxDepth: 4.0
+      search.lmpPerDepth: 10.0
       search.lmrcapgoodquiet: 16.0
       search.lmrdepthlogoffset: 4.8
       search.lmrhistorybuckets: 6.0
