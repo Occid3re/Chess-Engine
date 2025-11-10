@@ -2806,6 +2806,7 @@ public class AI {
         final int hmpHistoryMax = pruning.hmpHistoryMax();
         final int lmpBase = pruning.lmpBase();
         final int lmpPerDepth = pruning.lmpPerDepth();
+        final int lmpMaxDepth = Math.max(0, pruning.lmpMaxDepth());
         final int iidReduceDepth = pruning.iidReduceDepth();
         final int lmrProtectPlyMax = pruning.lmrProtectPlyMax();
         final int lmrProtectIndexMax = pruning.lmrProtectIndexMax();
@@ -2856,7 +2857,8 @@ public class AI {
                 }
             }
 
-            if (!inCheckAtNode
+            if (allowLatePrune
+                    && !inCheckAtNode
                     && isQuiet
                     && depth >= 2
                     && hmpMinIndex >= 0
@@ -3128,6 +3130,7 @@ public class AI {
         final int hmpHistoryMax = pruning.hmpHistoryMax();
         final int lmpBase = pruning.lmpBase();
         final int lmpPerDepth = pruning.lmpPerDepth();
+        final int lmpMaxDepth = Math.max(0, pruning.lmpMaxDepth());
         final int iidReduceDepth = pruning.iidReduceDepth();
         final int lmrProtectPlyMax = pruning.lmrProtectPlyMax();
         final int lmrProtectIndexMax = pruning.lmrProtectIndexMax();
