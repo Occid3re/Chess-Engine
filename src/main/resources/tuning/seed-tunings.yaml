@@ -136,16 +136,16 @@ population:
       search.fpmargindepth1: 88.00
       search.fpmargindepth2: 185.00
       search.fpmargindepth3: 240.00
-      search.fpmaxdepth: 6.00
+      search.fpmaxdepth: 7.00
       search.historyreductionmax: 7000.00
       search.hmpHistoryMax: 140.00
       search.hmpMinIndex: 36.00
       search.lmpBase: 4.00
-      search.lmpMaxDepth: 4.00
+      search.lmpMaxDepth: 5.00
       search.lmpPerDepth: 8.00
-      search.lqpButterflyThreshold: 8.00
-      search.lqpHistoryThreshold: 600.00
-      search.lqpMaxDepth: 2.00
+      search.lqpButterflyThreshold: 10.00
+      search.lqpHistoryThreshold: 700.00
+      search.lqpMaxDepth: 3.00
       search.lqpMoveIndexThreshold: 12.00
       search.maxcheckextensionstreak: 2.15
       search.nullbasereduction: 2.90
@@ -163,17 +163,17 @@ population:
       search.nullverylowmobilitypenalty: 1.00
       search.nullverylowmobilitythreshold: 7.00
       search.seeprunenearrootply: 6.00
-      search.probcutenabledepth: 6.00
-      search.probcutmargin: 180.00
-      search.probcutseemin: 50.00
-      search.qsmaxdeltapawn: 3.80
+      search.probcutenabledepth: 5.00
+      search.probcutmargin: 185.00
+      search.probcutseemin: 60.00
+      search.qsmaxdeltapawn: 3.60
       search.razormargindepth1: 160.00
       search.razormargindepth2: 240.00
       search.snmpmargindepth1: 100.00
       search.snmpmargindepth2: 160.00
       search.snmpmargindepth3: 220.00
-      search.ttcaptureweight: 3.30
-      search.ttmainweight: 4.90
+      search.ttcaptureweight: 3.50
+      search.ttmainweight: 5.10
       threat.hangingbishoppenalty: -17.71
       threat.hangingknightpenalty: -30.68
       threat.hangingpawnpenalty: -20.95
