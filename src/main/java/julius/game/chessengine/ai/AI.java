@@ -2817,7 +2817,8 @@ public class AI {
         final int lqpMoveIndexThreshold = Math.max(0, pruning.lqpMoveIndexThreshold());
         final int lqpHistoryThreshold = pruning.lqpHistoryThreshold();
         final int lqpButterflyThreshold = pruning.lqpButterflyThreshold();
-        final boolean allowLatePrune = plyFromRoot > 0;
+        // Protect root and immediate reply from late pruning
+        final boolean allowLatePrune = plyFromRoot >= 2;
 
         int baseRemainingDepth = Math.max(0, depth - 1);
         boolean futilityEligible = !inCheckAtNode
@@ -2848,7 +2849,7 @@ public class AI {
             boolean isQuiet = !isCapture && !isPromotion;
             int historyScore = historyTable[from][to];
 
-            if (allowLatePrune && !inCheckAtNode && isQuiet && depth <= lqpMaxDepth
+            if (allowLatePrune && !isPvNodeLocal && !inCheckAtNode && isQuiet && depth <= lqpMaxDepth
                     && lqpMoveIndexThreshold >= 0 && index > lqpMoveIndexThreshold
                     && lqpHistoryThreshold >= 0 && lqpButterflyThreshold >= 0) {
                 int butterflyScore = heuristics.getButterflyScore(move);
@@ -2858,6 +2859,7 @@ public class AI {
             }
 
             if (allowLatePrune
+                    && !isPvNodeLocal
                     && !inCheckAtNode
                     && isQuiet
                     && depth >= 2
@@ -2871,8 +2873,8 @@ public class AI {
             boolean seeEvaluated = false;
             boolean seeWinsMaterial = false;
 
-            // SEE pruning for losing captures/quiets (keep checks/promotions)
-            boolean seePruneCandidate = (!inCheckAtNode && isCapture && !isPromotion) || isQuiet;
+            // SEE pruning only for losing captures (keep checks, promotions, and all quiets)
+            boolean seePruneCandidate = !inCheckAtNode && isCapture && !isPromotion;
             if (seePruneCandidate) {
                 seeGain = simulatorEngine.see(move, 0);
                 seeEvaluated = true;
@@ -2903,7 +2905,7 @@ public class AI {
 
             boolean isTactical = isCapture || isPromotion;
             int lmpThreshold = lmpBase + depth * lmpPerDepth;
-            if (allowLatePrune && !inCheckAtNode && !isTactical && depth <= lmpMaxDepth && index > lmpThreshold) {
+            if (allowLatePrune && !isPvNodeLocal && !inCheckAtNode && !isTactical && depth <= lmpMaxDepth && index > lmpThreshold) {
                 simulatorEngine.performMove(move);
                 boolean givesCheckTmp = isSideInCheck(simulatorEngine, false);
                 boolean attacksQueenTmp = attacksOpponentQueenNow(simulatorEngine, true);
@@ -3141,7 +3143,8 @@ public class AI {
         final int lqpMoveIndexThreshold = Math.max(0, pruning.lqpMoveIndexThreshold());
         final int lqpHistoryThreshold = pruning.lqpHistoryThreshold();
         final int lqpButterflyThreshold = pruning.lqpButterflyThreshold();
-        final boolean allowLatePrune = plyFromRoot > 0;
+        // Protect root and immediate reply from late pruning
+        final boolean allowLatePrune = plyFromRoot >= 2;
 
         int baseRemainingDepth = Math.max(0, depth - 1);
         boolean futilityEligible = !inCheckAtNode
@@ -3174,7 +3177,7 @@ public class AI {
             boolean isQuiet = !isCapture && !isPromotion;
             int historyScore = historyTable[from][to];
 
-            if (allowLatePrune && !inCheckAtNode && isQuiet && depth <= lqpMaxDepth
+            if (allowLatePrune && !isPvNodeLocal && !inCheckAtNode && isQuiet && depth <= lqpMaxDepth
                     && lqpMoveIndexThreshold >= 0 && index > lqpMoveIndexThreshold
                     && lqpHistoryThreshold >= 0 && lqpButterflyThreshold >= 0) {
                 int butterflyScore = heuristics.getButterflyScore(move);
@@ -3184,6 +3187,7 @@ public class AI {
             }
 
             if (allowLatePrune
+                    && !isPvNodeLocal
                     && !inCheckAtNode
                     && isQuiet
                     && depth >= 2
@@ -3197,7 +3201,8 @@ public class AI {
             boolean seeEvaluated = false;
             boolean seeWinsMaterial = false;
 
-            boolean seePruneCandidate = (!inCheckAtNode && isCapture && !isPromotion) || isQuiet;
+            // SEE pruning only for losing captures (keep checks, promotions, and all quiets)
+            boolean seePruneCandidate = !inCheckAtNode && isCapture && !isPromotion;
             if (seePruneCandidate) {
                 seeGain = simulatorEngine.see(move, 0);
                 seeEvaluated = true;
@@ -3228,7 +3233,7 @@ public class AI {
 
             boolean isTactical = isCapture || isPromotion;
             int lmpThreshold = lmpBase + depth * lmpPerDepth;
-            if (allowLatePrune && !inCheckAtNode && !isTactical && depth <= lmpMaxDepth && index > lmpThreshold) {
+            if (allowLatePrune && !isPvNodeLocal && !inCheckAtNode && !isTactical && depth <= lmpMaxDepth && index > lmpThreshold) {
                 simulatorEngine.performMove(move);
                 boolean givesCheckTmp = isSideInCheck(simulatorEngine, true);
                 boolean attacksQueenTmp = attacksOpponentQueenNow(simulatorEngine, false);
