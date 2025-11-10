@@ -374,7 +374,7 @@ public class BestMoveSearchTest {
         analysisEngine.importBoardFromFen(fen);
 
         boolean whiteToMove = fen.split(" ")[1].equals("w");
-        double baselineForMover = orientScoreForMover(
+        double baselineForMover = normalizeScoreForRoot(
                 whiteToMove,
                 analysisEngine.getGameState().getScore().getScoreDifference()
         );
@@ -392,7 +392,7 @@ public class BestMoveSearchTest {
         for (int moveInt : legalMoves) {
             analysisEngine.performMove(moveInt);
             double scoreDiff = analysisEngine.getGameState().getScore().getScoreDifference();
-            double moverScore = orientScoreForMover(whiteToMove, scoreDiff);
+            double moverScore = normalizeScoreForRoot(whiteToMove, scoreDiff);
             analysisEngine.undoLastMove();
 
             String san = Move.convertIntToMove(moveInt).toString();
@@ -415,7 +415,7 @@ public class BestMoveSearchTest {
         MoveEvaluation staticChosenEvaluation = evaluationMap.get(chosenMove);
         MoveEvaluation chosenEvaluation = staticChosenEvaluation;
         if (searchResult != null) {
-            double oriented = orientScoreForMover(whiteToMove, searchResult.getScore());
+            double oriented = normalizeScoreForRoot(whiteToMove, searchResult.getScore());
             chosenEvaluation = new MoveEvaluation(chosenMove, oriented);
         }
 
@@ -441,7 +441,7 @@ public class BestMoveSearchTest {
         // Compute cpLoss from the static evaluations of the best and chosen moves.
         // Skip only when either value is unavailable or non-finite.
         double cpLoss = Double.isFinite(bestScore) && Double.isFinite(chosenStaticScore)
-                ? bestScore - chosenStaticScore
+                ? Math.max(0.0, bestScore - chosenStaticScore)
                 : Double.NaN;
 
         double chosenDisplayedScore = chosenEvaluation != null ? chosenEvaluation.score() : Double.NaN;
@@ -841,6 +841,8 @@ public class BestMoveSearchTest {
             sb.append("Expected best moves: ")
                     .append(String.join(", ", expectedMoves)).append(System.lineSeparator());
 
+            boolean whiteToMove = fen.split(" ")[1].equals("w");
+
             sb.append(depthCoverageSummary()).append(System.lineSeparator());
             int target = targetDepth;
             if (target > 0 && deepestCompletedDepth() < target) {
@@ -851,8 +853,9 @@ public class BestMoveSearchTest {
             if (result == null) {
                 sb.append("<no move found>");
             } else {
+                double normalized = normalizeScoreForRoot(whiteToMove, result.score);
                 sb.append(formatMove(result.move)).append(" (score=")
-                        .append(String.format(Locale.ROOT, "%.2f", result.score)).append(')');
+                        .append(String.format(Locale.ROOT, "%.2f", normalized)).append(')');
             }
             sb.append(System.lineSeparator());
 
@@ -1010,7 +1013,7 @@ public class BestMoveSearchTest {
             void record(int moveInt, int order, EvaluationResult evaluation, long nodesSpent, long nanosSpent,
                         double alphaBefore, double betaBefore, double alphaAfter, double betaAfter) {
                 moves.add(new RootMoveTrace(moveInt, order, evaluation, nodesSpent, nanosSpent,
-                        alphaBefore, betaBefore, alphaAfter, betaAfter));
+                        alphaBefore, betaBefore, alphaAfter, betaAfter, this.whiteToMove));
             }
 
             void addNote(String note) {
@@ -1101,9 +1104,11 @@ public class BestMoveSearchTest {
             private final double betaBefore;
             private final double alphaAfter;
             private final double betaAfter;
+            private final boolean rootWhiteToMove;
 
             RootMoveTrace(int moveInt, int order, EvaluationResult evaluation, long nodesSpent, long nanosSpent,
-                          double alphaBefore, double betaBefore, double alphaAfter, double betaAfter) {
+                          double alphaBefore, double betaBefore, double alphaAfter, double betaAfter,
+                          boolean rootWhiteToMove) {
                 this.moveInt = moveInt;
                 this.order = order;
                 this.evaluation = evaluation;
@@ -1113,6 +1118,7 @@ public class BestMoveSearchTest {
                 this.betaBefore = betaBefore;
                 this.alphaAfter = alphaAfter;
                 this.betaAfter = betaAfter;
+                this.rootWhiteToMove = rootWhiteToMove;
             }
 
             int order() {
@@ -1138,7 +1144,8 @@ public class BestMoveSearchTest {
                 } else if (evaluation.score == null) {
                     sb.append("<none>");
                 } else {
-                    sb.append(String.format(Locale.ROOT, "%.2f", evaluation.score));
+                    double oriented = normalizeScoreForRoot(rootWhiteToMove, evaluation.score);
+                    sb.append(String.format(Locale.ROOT, "%.2f", oriented));
                 }
 
                 sb.append(" (via ").append(evaluation.reason).append(')');
@@ -1783,18 +1790,21 @@ public class BestMoveSearchTest {
         }
 
         List<String> segments = new ArrayList<>(pv.size());
-        boolean moverIsWhite = whiteToMove;
-        for (MoveAndScore moveAndScore : pv) {
+        for (int i = 0; i < pv.size(); i++) {
+            MoveAndScore moveAndScore = pv.get(i);
             String notation = Move.convertIntToMove(moveAndScore.getMove()).toString();
-            double orientedScore = moverIsWhite ? moveAndScore.getScore() : -moveAndScore.getScore();
-            segments.add(notation + " (" + formatScore(orientedScore) + " pawns)");
-            moverIsWhite = !moverIsWhite;
+            if (i == 0) {
+                double orientedScore = normalizeScoreForRoot(whiteToMove, moveAndScore.getScore());
+                segments.add(notation + " (" + formatScore(orientedScore) + " pawns)");
+            } else {
+                segments.add(notation);
+            }
         }
         return String.join(" -> ", segments);
     }
 
-    private static double orientScoreForMover(boolean whiteToMove, double scoreDifference) {
-        return whiteToMove ? scoreDifference : -scoreDifference;
+    private static double normalizeScoreForRoot(boolean whiteToMove, double whitePerspectiveScore) {
+        return whiteToMove ? whitePerspectiveScore : -whitePerspectiveScore;
     }
 
     private static String formatScore(double pawns) {

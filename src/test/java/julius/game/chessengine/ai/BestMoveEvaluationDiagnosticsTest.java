@@ -70,7 +70,7 @@ class BestMoveEvaluationDiagnosticsTest {
             int moveInt = legalMoves.getInt(i);
             engine.performMove(moveInt);
             double scoreDiff = engine.getGameState().getScore().getScoreDifference();
-            double orientedScore = orientScoreForMover(whiteToMove, scoreDiff);
+            double orientedScore = normalizeScoreForRoot(whiteToMove, scoreDiff);
             engine.undoLastMove();
             evaluations.add(new MoveEvaluation(Move.convertIntToMove(moveInt).toString(), orientedScore));
         }
@@ -89,7 +89,9 @@ class BestMoveEvaluationDiagnosticsTest {
                 .toList();
         MoveEvaluation bestExpected = expectedEvaluations.isEmpty() ? null : expectedEvaluations.getFirst();
 
-        double cpLoss = (bestMove != null && bestExpected != null) ? bestMove.score() - bestExpected.score() : Double.NaN;
+        double cpLoss = (bestMove != null && bestExpected != null)
+                ? Math.max(0.0, bestMove.score() - bestExpected.score())
+                : Double.NaN;
         List<MoveEvaluation> topCandidates = evaluations.subList(0, Math.min(5, evaluations.size()));
 
         return new EvaluationGap(
@@ -146,8 +148,8 @@ class BestMoveEvaluationDiagnosticsTest {
         return sb.toString();
     }
 
-    private static double orientScoreForMover(boolean whiteToMove, double scoreDifference) {
-        return whiteToMove ? scoreDifference : -scoreDifference;
+    private static double normalizeScoreForRoot(boolean whiteToMove, double whitePerspectiveScore) {
+        return whiteToMove ? whitePerspectiveScore : -whitePerspectiveScore;
     }
 
     private static String formatCentipawns(double centipawns) {
