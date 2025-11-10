@@ -140,22 +140,13 @@ population:
       search.historyreductionmax: 6540.9051731841755
       search.hmpHistoryMax: 121.92808472289505
       search.hmpMinIndex: 38.73678917772546
-      search.iidreducedepth: 2.6220408788985017
       search.lmpBase: 6.0
       search.lmpMaxDepth: 4.0
       search.lmpPerDepth: 10.0
-      search.lmrcapgoodquiet: 16.0
-      search.lmrdepthlogoffset: 4.8
-      search.lmrhistorybuckets: 6.0
-      search.lmrhistoryweightslope: 0.65
-      search.lmrmovelogoffset: 4.0
-      search.lmrprotectindexmax: 8.0
-      search.lmrprotectplymax: 1.5
-      search.lmrscaledivisor: 1.8
-      search.lqpbutterflythreshold: 6.0
-      search.lqphistorythreshold: 400.0
-      search.lqpmaxdepth: 2.0
-      search.lqpmoveindexthreshold: 16.0
+      search.lqpButterflyThreshold: 6.0
+      search.lqpHistoryThreshold: 400.0
+      search.lqpMaxDepth: 2.0
+      search.lqpMoveIndexThreshold: 16.0
       search.maxcheckextensionstreak: 2.1534791931284616
       search.nullbasereduction: 2.7
       search.nulldepthcap: 4.0
@@ -171,13 +162,13 @@ population:
       search.nullswingguardmincp: 380.0
       search.nullverylowmobilitypenalty: 1.0
       search.nullverylowmobilitythreshold: 8.0
-      search.probcutenabledepth: 5.0
+      search.seeprunenearrootply: 6.0
+      search.probcutenabledepth: 6.0
       search.probcutmargin: 190.0
       search.probcutseemin: 0.0
       search.qsmaxdeltapawn: 4.25
       search.razormargindepth1: 170.0
       search.razormargindepth2: 260.0
-      search.seeprunenearrootply: 6.0
       search.snmpmargindepth1: 110.0
       search.snmpmargindepth2: 170.0
       search.snmpmargindepth3: 230.0

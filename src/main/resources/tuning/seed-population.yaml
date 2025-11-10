@@ -63,7 +63,6 @@ population:
       material.pawnvalue: 146.18558903211488
       material.queenvalue: 1095.9932622761617
       material.rookvalue: 589.0477105232216
-
       moveordering.capturemvvmultiplier: 14.997337966397541
       moveordering.captureseeclamp: 816.4065991149233
       moveordering.captureseemultiplier: 108.2128734525415
@@ -86,7 +85,6 @@ population:
       moveordering.promotionbonus: 1698.2326743213698
       moveordering.promotionseeclamp: 539.9279351366326
       moveordering.promotionseemultiplier: 28.9131884068788
-
       pawnstructure.advancedpawnbonus: 14.34859928069622
       pawnstructure.backwardpawnpenalty: -23.499313850270582
       pawnstructure.blockedpawnpenalty: -7.130656718204046
@@ -101,8 +99,6 @@ population:
       pawnstructure.rookhalfopenfilebonus: 46.74580107247273
       pawnstructure.rookopenfilebonus: 39.3090618731208
       pawnstructure.supportedpassedpawnbonus: 6.0
-
-      # --- Search / pruning (balanced) ---
       search.aspbaseoffsetcp: 11.911125256374982
       search.aspblendbaselineweight: 0.5901837443213639
       search.aspblendcandidateweight: 0.5202852835618503
@@ -136,30 +132,22 @@ population:
       search.aspmomentumstepcp: 4.956424756732777
       search.aspswingweight: 0.20660682528478136
       search.aspvolatilityweight: 0.8551099349852392
-
       search.drawbias: 0.3171886750767487
       search.fpmargindepth1: 95.0
       search.fpmargindepth2: 200.0
       search.fpmargindepth3: 260.0
       search.fpmaxdepth: 6.0
       search.historyreductionmax: 6540.9051731841755
-
-      # HMP / LMP / LQP — back to safer values (camelCase keys intact)
       search.hmpHistoryMax: 121.92808472289505
       search.hmpMinIndex: 38.73678917772546
-
       search.lmpBase: 6.0
       search.lmpMaxDepth: 4.0
       search.lmpPerDepth: 10.0
-
       search.lqpButterflyThreshold: 6.0
       search.lqpHistoryThreshold: 400.0
       search.lqpMaxDepth: 2.0
       search.lqpMoveIndexThreshold: 16.0
-
       search.maxcheckextensionstreak: 2.1534791931284616
-
-      # Null-move tuned back a notch
       search.nullbasereduction: 2.7
       search.nulldepthcap: 4.0
       search.nulldepthweight: 0.45
@@ -174,28 +162,18 @@ population:
       search.nullswingguardmincp: 380.0
       search.nullverylowmobilitypenalty: 1.0
       search.nullverylowmobilitythreshold: 8.0
-
-      # SEE near-root safety
       search.seeprunenearrootply: 6.0
-
-      # ProbCut slightly safer again
       search.probcutenabledepth: 6.0
       search.probcutmargin: 190.0
       search.probcutseemin: 0.0
-
-      # QSearch delta — revert to safer bound
       search.qsmaxdeltapawn: 4.25
-
       search.razormargindepth1: 170.0
       search.razormargindepth2: 260.0
-
       search.snmpmargindepth1: 110.0
       search.snmpmargindepth2: 170.0
       search.snmpmargindepth3: 230.0
-
       search.ttcaptureweight: 3.1042332176359375
       search.ttmainweight: 4.548662134286979
-
       threat.hangingbishoppenalty: -17.706926071941474
       threat.hangingknightpenalty: -30.6756119079627
       threat.hangingpawnpenalty: -20.95388408220842
