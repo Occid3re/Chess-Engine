@@ -389,12 +389,15 @@ class AITest_MateThreatDiagnostics {
             sb.append("Expected defensive resources: ")
                     .append(String.join(", ", lifesavingMoves)).append(System.lineSeparator());
 
+            boolean whiteToMove = fen.split(" ")[1].equals("w");
+
             sb.append("Search result: ");
             if (result == null) {
                 sb.append("<no move found>");
             } else {
+                double oriented = whiteToMove ? result.score : -result.score;
                 sb.append(formatMove(result.move)).append(" (score=")
-                        .append(String.format(Locale.ROOT, "%.2f", result.score)).append(')');
+                        .append(String.format(Locale.ROOT, "%.2f", oriented)).append(')');
             }
             sb.append(System.lineSeparator());
 
