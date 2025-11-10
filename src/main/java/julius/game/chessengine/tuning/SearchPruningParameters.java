@@ -29,6 +29,7 @@ public final class SearchPruningParameters {
                 Tuning.searchProbCutSeeMin(),
                 Tuning.searchLmpBase(),
                 Tuning.searchLmpPerDepth(),
+                Tuning.searchLmpMaxDepth(),
                 Tuning.searchHmpMinIndex(),
                 Tuning.searchHmpHistoryMax(),
                 Tuning.searchIidReduceDepth(),
@@ -60,6 +61,7 @@ public final class SearchPruningParameters {
         defaults.put(ParamId.SEARCH_PROB_CUT_SEE_MIN.key(), ParamId.SEARCH_PROB_CUT_SEE_MIN.defaultValue());
         defaults.put(ParamId.SEARCH_LMP_BASE.key(), ParamId.SEARCH_LMP_BASE.defaultValue());
         defaults.put(ParamId.SEARCH_LMP_PER_DEPTH.key(), ParamId.SEARCH_LMP_PER_DEPTH.defaultValue());
+        defaults.put(ParamId.SEARCH_LMP_MAX_DEPTH.key(), ParamId.SEARCH_LMP_MAX_DEPTH.defaultValue());
         defaults.put(ParamId.SEARCH_HMP_MIN_INDEX.key(), ParamId.SEARCH_HMP_MIN_INDEX.defaultValue());
         defaults.put(ParamId.SEARCH_HMP_HISTORY_MAX.key(), ParamId.SEARCH_HMP_HISTORY_MAX.defaultValue());
         defaults.put(ParamId.SEARCH_IID_REDUCE_DEPTH.key(), ParamId.SEARCH_IID_REDUCE_DEPTH.defaultValue());
@@ -90,6 +92,7 @@ public final class SearchPruningParameters {
             int probCutSeeMin,
             int lmpBase,
             int lmpPerDepth,
+            int lmpMaxDepth,
             int hmpMinIndex,
             int hmpHistoryMax,
             int iidReduceDepth,
