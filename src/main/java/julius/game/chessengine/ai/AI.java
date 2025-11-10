@@ -2816,6 +2816,7 @@ public class AI {
         final int lqpMoveIndexThreshold = Math.max(0, pruning.lqpMoveIndexThreshold());
         final int lqpHistoryThreshold = pruning.lqpHistoryThreshold();
         final int lqpButterflyThreshold = pruning.lqpButterflyThreshold();
+        final boolean allowLatePrune = plyFromRoot > 0;
 
         int baseRemainingDepth = Math.max(0, depth - 1);
         boolean futilityEligible = !inCheckAtNode
@@ -2846,7 +2847,7 @@ public class AI {
             boolean isQuiet = !isCapture && !isPromotion;
             int historyScore = historyTable[from][to];
 
-            if (!inCheckAtNode && isQuiet && depth <= lqpMaxDepth
+            if (allowLatePrune && !inCheckAtNode && isQuiet && depth <= lqpMaxDepth
                     && lqpMoveIndexThreshold >= 0 && index > lqpMoveIndexThreshold
                     && lqpHistoryThreshold >= 0 && lqpButterflyThreshold >= 0) {
                 int butterflyScore = heuristics.getButterflyScore(move);
@@ -2900,7 +2901,7 @@ public class AI {
 
             boolean isTactical = isCapture || isPromotion;
             int lmpThreshold = lmpBase + depth * lmpPerDepth;
-            if (!inCheckAtNode && !isTactical && depth <= lmpMaxDepth && index > lmpThreshold) {
+            if (allowLatePrune && !inCheckAtNode && !isTactical && depth <= lmpMaxDepth && index > lmpThreshold) {
                 simulatorEngine.performMove(move);
                 boolean givesCheckTmp = isSideInCheck(simulatorEngine, false);
                 boolean attacksQueenTmp = attacksOpponentQueenNow(simulatorEngine, true);
@@ -3137,6 +3138,7 @@ public class AI {
         final int lqpMoveIndexThreshold = Math.max(0, pruning.lqpMoveIndexThreshold());
         final int lqpHistoryThreshold = pruning.lqpHistoryThreshold();
         final int lqpButterflyThreshold = pruning.lqpButterflyThreshold();
+        final boolean allowLatePrune = plyFromRoot > 0;
 
         int baseRemainingDepth = Math.max(0, depth - 1);
         boolean futilityEligible = !inCheckAtNode
@@ -3169,7 +3171,7 @@ public class AI {
             boolean isQuiet = !isCapture && !isPromotion;
             int historyScore = historyTable[from][to];
 
-            if (!inCheckAtNode && isQuiet && depth <= lqpMaxDepth
+            if (allowLatePrune && !inCheckAtNode && isQuiet && depth <= lqpMaxDepth
                     && lqpMoveIndexThreshold >= 0 && index > lqpMoveIndexThreshold
                     && lqpHistoryThreshold >= 0 && lqpButterflyThreshold >= 0) {
                 int butterflyScore = heuristics.getButterflyScore(move);
@@ -3213,7 +3215,7 @@ public class AI {
 
             boolean isTactical = isCapture || isPromotion;
             int lmpThreshold = lmpBase + depth * lmpPerDepth;
-            if (!inCheckAtNode && !isTactical && depth <= lmpMaxDepth && index > lmpThreshold) {
+            if (allowLatePrune && !inCheckAtNode && !isTactical && depth <= lmpMaxDepth && index > lmpThreshold) {
                 simulatorEngine.performMove(move);
                 boolean givesCheckTmp = isSideInCheck(simulatorEngine, true);
                 boolean attacksQueenTmp = attacksOpponentQueenNow(simulatorEngine, false);
@@ -3662,7 +3664,26 @@ public class AI {
             double optimisticSwing = estimateMaxTacticalSwing(moves);
             // Delta (futility-like) pruning in qsearch: compare against original alpha window
             if (standPat + optimisticSwing <= alphaBeforeStandPat) {
-                return alpha;
+                int lastMove = simulatorEngine.getLastMove();
+                boolean lastMoveWasCapture = lastMove >= 0 && MoveHelper.isCapture(lastMove);
+                int recaptureSquare = lastMoveWasCapture ? MoveHelper.deriveToIndex(lastMove) : -1;
+
+                boolean allowDeltaPrune = true;
+                for (int i = 0; i < moves.size(); i++) {
+                    int move = moves.getInt(i);
+                    if (!MoveHelper.isCapture(move)) {
+                        continue;
+                    }
+                    boolean isRecapture = lastMoveWasCapture && MoveHelper.deriveToIndex(move) == recaptureSquare;
+                    if (isRecapture || simulatorEngine.see(move, 0) >= 0) {
+                        allowDeltaPrune = false;
+                        break;
+                    }
+                }
+
+                if (allowDeltaPrune) {
+                    return alpha;
+                }
             }
         }
 
