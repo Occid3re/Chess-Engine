@@ -1,5 +1,5 @@
 population:
-  - name: Stormy-Ram-Transition
+  - name: Zugzwang-Waltz
     evaluation:
       modules:
         materialmodule:
@@ -66,7 +66,7 @@ population:
       moveordering.capturemvvmultiplier: 14.997337966397541
       moveordering.captureseeclamp: 816.4065991149233
       moveordering.captureseemultiplier: 108.2128734525415
-      moveordering.castlingbonus: 5201.548534057966
+      moveordering.castlingbonus: 800.0
       moveordering.category.capturebad: 0.0
       moveordering.category.captureequal: 4.667448156774766
       moveordering.category.capturegood: 5.481124376560114
@@ -75,12 +75,12 @@ population:
       moveordering.category.promotion: 5.756415419737525
       moveordering.category.quiet: 1.1224931271842804
       moveordering.category.tt: 7.7397776286793505
-      moveordering.countermovebonus: 520.4601446262697
+      moveordering.countermovebonus: 280.0
       moveordering.historydecaydivisor: 1.7521454615607943
       moveordering.historyscale: 1.606342558971103
       moveordering.killer0bonus: 22.89496494174806
       moveordering.killer1bonus: 79.76289361278722
-      moveordering.killermovescore: 12430.726452180897
+      moveordering.killermovescore: 4000.0
       moveordering.maxscore: 1.38587574085523E7
       moveordering.promotionbonus: 1698.2326743213698
       moveordering.promotionseeclamp: 539.9279351366326
@@ -108,14 +108,14 @@ population:
       search.aspdefaultspancp: 32.81064401529041
       search.aspdepthpivot: 5.758621660372585
       search.aspdepthscale: 0.06041487773673835
-      search.aspfailureratio: 0.7120527014236876
+      search.aspfailureratio: 0.85
       search.aspfloorbasecp: 15.041759210085278
       search.aspfloorstreakstepcp: 22.86182365222208
       search.aspfloorvolweight: 1.4423777341558641
-      search.aspfullwindowminmultiplier: 2.2357218681869764
+      search.aspfullwindowminmultiplier: 2.8
       search.aspfullwindowscale: 2.235371743688605
       search.asphistoryblend: 0.5252019612562366
-      search.asplastspanscale: 2.2648221482802073
+      search.asplastspanscale: 2.264822148280207
       search.aspmaxretriesbase: 2.7662430510295968
       search.aspmaxretriesdepthdivisor: 1.0156193437773624
       search.aspmaxretriesdepthoffset: 19.066082695041672
@@ -133,54 +133,54 @@ population:
       search.aspswingweight: 0.20660682528478136
       search.aspvolatilityweight: 0.8551099349852392
       search.drawbias: 0.3171886750767487
-      search.fpmargindepth1: 127.85447100508182
-      search.fpmargindepth2: 322.68197246218494
-      search.fpmargindepth3: 320.0
-      search.fpmaxdepth: 8.64019895338565
+      search.fpmargindepth1: 95.0
+      search.fpmargindepth2: 200.0
+      search.fpmargindepth3: 260.0
+      search.fpmaxdepth: 6.0
       search.historyreductionmax: 6540.9051731841755
       search.hmphistorymax: 121.92808472289505
       search.hmpminindex: 38.73678917772546
       search.iidreducedepth: 2.6220408788985017
-      search.lmpbase: 3.746607725506342
-      search.lmpmaxdepth: 5.267148589784987
-      search.lmpperdepth: 7.606071904925005
-      search.lmrcapgoodquiet: 27.208205675668374
-      search.lmrdepthlogoffset: 4.324817915338708
-      search.lmrhistorybuckets: 5.482618134712996
-      search.lmrhistoryweightslope: 0.7581998640277748
-      search.lmrmovelogoffset: 3.480869172172873
-      search.lmrprotectindexmax: 4.531491799106837
-      search.lmrprotectplymax: 0.8325077540309972
-      search.lmrscaledivisor: 1.4288736116289273
-      search.lqpbutterflythreshold: 3.0
-      search.lqphistorythreshold: 150.0
-      search.lqpmaxdepth: 3.0
-      search.lqpmoveindexthreshold: 8.0
+      search.lmpbase: 6.0
+      search.lmpmaxdepth: 4.0
+      search.lmpperdepth: 10.0
+      search.lmrcapgoodquiet: 16.0
+      search.lmrdepthlogoffset: 4.8
+      search.lmrhistorybuckets: 6.0
+      search.lmrhistoryweightslope: 0.65
+      search.lmrmovelogoffset: 4.0
+      search.lmrprotectindexmax: 8.0
+      search.lmrprotectplymax: 1.5
+      search.lmrscaledivisor: 1.8
+      search.lqpbutterflythreshold: 6.0
+      search.lqphistorythreshold: 400.0
+      search.lqpmaxdepth: 2.0
+      search.lqpmoveindexthreshold: 16.0
       search.maxcheckextensionstreak: 2.1534791931284616
-      search.nullbasereduction: 3.5471370734329564
-      search.nulldepthcap: 5.067566954030266
-      search.nulldepthweight: 0.5267387155095105
-      search.nulllowmaterialpenalty: 0.8203611053775761
-      search.nulllowmaterialthreshold: 4.625581930321024
-      search.nulllowmobilitythreshold: 4.895297502394202
-      search.nullmaterialcap: 28.72238996352345
-      search.nullmaterialweight: 1.9615830794320193
-      search.nullmobilitycap: 13.707690468803563
-      search.nullmobilityweight: 0.18651868207862868
-      search.nullswingguarddivisor: 73.87380792279565
-      search.nullswingguardmincp: 302.89996783626043
-      search.nullverylowmobilitypenalty: 0.7204428533869135
-      search.nullverylowmobilitythreshold: 7.057407134010133
-      search.probcutenabledepth: 4.0
-      search.probcutmargin: 150.0
+      search.nullbasereduction: 2.7
+      search.nulldepthcap: 4.0
+      search.nulldepthweight: 0.45
+      search.nulllowmaterialpenalty: 1.2
+      search.nulllowmaterialthreshold: 6.0
+      search.nulllowmobilitythreshold: 6.0
+      search.nullmaterialcap: 24.0
+      search.nullmaterialweight: 2.3
+      search.nullmobilitycap: 12.0
+      search.nullmobilityweight: 0.25
+      search.nullswingguarddivisor: 65.0
+      search.nullswingguardmincp: 380.0
+      search.nullverylowmobilitypenalty: 1.0
+      search.nullverylowmobilitythreshold: 8.0
+      search.probcutenabledepth: 5.0
+      search.probcutmargin: 190.0
       search.probcutseemin: 0.0
-      search.qsmaxdeltapawn: 6.650566521587819
-      search.razormargindepth1: 200.0
-      search.razormargindepth2: 300.0
-      search.seeprunenearrootply: 3.6760425768212808
-      search.snmpmargindepth1: 120.0
-      search.snmpmargindepth2: 180.0
-      search.snmpmargindepth3: 240.0
+      search.qsmaxdeltapawn: 4.25
+      search.razormargindepth1: 170.0
+      search.razormargindepth2: 260.0
+      search.seeprunenearrootply: 6.0
+      search.snmpmargindepth1: 110.0
+      search.snmpmargindepth2: 170.0
+      search.snmpmargindepth3: 230.0
       search.ttcaptureweight: 3.1042332176359375
       search.ttmainweight: 4.548662134286979
       threat.hangingbishoppenalty: -17.706926071941474

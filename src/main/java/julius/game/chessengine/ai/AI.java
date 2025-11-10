@@ -220,7 +220,9 @@ public class AI {
     }
 
     private record TablebaseInfo(int dtz, int dtm, int whiteWdlSign) {
-        boolean hasDtz() { return dtz >= 0; }
+        boolean hasDtz() {
+            return dtz >= 0;
+        }
     }
 
     private static final int LMR_MAX_DEPTH = 64;
@@ -2461,7 +2463,8 @@ public class AI {
         double staticEvalWhite = resolveScoreDifference(simulatorEngine.getGameState(), boardHash,
                 simulatorEngine.whitesTurn());
         boolean staticEvalFinite = Double.isFinite(staticEvalWhite);
-        boolean isPvNode = beta - alpha > 1.0;
+        boolean isPvNode = Double.isFinite(alpha) && Double.isFinite(beta) && beta > alpha + 1.0;
+
 
         int alphaSideCp = lowerBoundForSide(alpha, beta, isWhite);
         int betaSideCp = upperBoundForSide(alpha, beta, isWhite);
@@ -3671,9 +3674,9 @@ public class AI {
         for (int i = 0; i < ordered.size(); i++) {
             int m = ordered.getInt(i);
 
-            boolean isCapture   = MoveHelper.isCapture(m);
+            boolean isCapture = MoveHelper.isCapture(m);
             boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
-            boolean isQuiet     = !isCapture && !isPromotion;
+            boolean isQuiet = !isCapture && !isPromotion;
 
             // In qsearch (not in check), we normally do NOT consider quiet moves.
             // If you want to allow some checks, you can selectively allow quiet check moves.
