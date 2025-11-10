@@ -2509,7 +2509,7 @@ public class AI {
             if (alpha >= beta) return ttScore;
         }
 
-        // (rest of your method unchanged)
+        // --- Node classification
         IntArrayList moves = simulatorEngine.getAllLegalMoves();
         int mobility = moves.size();
         BitBoard bitBoard = simulatorEngine.getBitBoard();
@@ -2519,34 +2519,39 @@ public class AI {
         boolean staticEvalFinite = Double.isFinite(staticEvalWhite);
         boolean isPvNode = Double.isFinite(alpha) && Double.isFinite(beta) && beta > alpha + 1.0;
 
-
         int alphaSideCp = lowerBoundForSide(alpha, beta, isWhite);
         int betaSideCp = upperBoundForSide(alpha, beta, isWhite);
         int staticEvalSideCp = staticEvalFinite
                 ? toCentipawnScore(isWhite ? staticEvalWhite : -staticEvalWhite)
                 : 0;
 
+        // Static-null & razoring: already correctly gated by PV
         if (staticEvalFinite) {
             boolean snmpPruned = SearchPruning.tryStaticNullMovePrune(
-                    depth, inCheck, isPvNode, staticEvalSideCp, alphaSideCp, betaSideCp, score -> {
-                    });
+                    depth, inCheck, isPvNode, staticEvalSideCp, alphaSideCp, betaSideCp, score -> {});
             if (snmpPruned) {
                 return isWhite ? beta : alpha;
             }
 
             boolean razorPruned = SearchPruning.tryRazoring(
                     depth, inCheck, isPvNode, staticEvalSideCp, alphaSideCp, betaSideCp,
-                    (a, b) -> runRazoringQuiescence(simulatorEngine, isWhite, a, b, deadline), score -> {
-                    });
+                    (a, b) -> runRazoringQuiescence(simulatorEngine, isWhite, a, b, deadline), score -> {});
             if (razorPruned) {
                 return isWhite ? alpha : beta;
             }
         }
+
         final int NULL_MOVE_SENTINEL = -1;
         boolean previousMoveWasNull = prevMove == NULL_MOVE_SENTINEL;
         if (previousMoveWasNull && plyFromRoot == 0) previousMoveWasNull = false;
 
-        boolean allowNullMove = useNullMovePruning && !inCheck && !simulatorEngine.isEndgame() && !previousMoveWasNull;
+        // **CHANGE #1**: Disable null-move at PV nodes (and keep other guards)
+        boolean allowNullMove = useNullMovePruning
+                && !isPvNode
+                && !inCheck
+                && !simulatorEngine.isEndgame()
+                && !previousMoveWasNull;
+
         if (allowNullMove) {
             double mateThreatScore = CHECKMATE - (plyFromRoot + 1);
             boolean betaSignalsMateThreat = isWhite && Double.isFinite(beta) && beta >= mateThreatScore;
@@ -2594,22 +2599,23 @@ public class AI {
                     simulatorEngine::undoLastMove,
                     (reducedDepth, a, b) -> runProbCutVerification(simulatorEngine, reducedDepth, a, b,
                             isWhite, deadline, plyFromRoot),
-                    score -> {
-                    });
+                    score -> {});
             if (probCutPruned) {
-                if (positionChanged()) {
-                    return EXIT_FLAG;
-                }
+                if (positionChanged()) return EXIT_FLAG;
                 return isWhite ? beta : alpha;
             }
         }
 
         double alphaOriginal = alpha;
         double betaOriginal = beta;
+
+        // Split by side-to-move “max/min” helpers (unchanged aside from the null-move gating above)
         if (isWhite) {
-            return maximizer(simulatorEngine, depth, alpha, beta, boardHash, alphaOriginal, betaOriginal, moves, deadline, prevMove, plyFromRoot, extStreak, staticEvalWhite);
+            return maximizer(simulatorEngine, depth, alpha, beta, boardHash, alphaOriginal, betaOriginal, moves,
+                    deadline, prevMove, plyFromRoot, extStreak, staticEvalWhite);
         } else {
-            return minimizer(simulatorEngine, depth, alpha, beta, boardHash, alphaOriginal, betaOriginal, moves, deadline, prevMove, plyFromRoot, extStreak, staticEvalWhite);
+            return minimizer(simulatorEngine, depth, alpha, beta, boardHash, alphaOriginal, betaOriginal, moves,
+                    deadline, prevMove, plyFromRoot, extStreak, staticEvalWhite);
         }
     }
 
