@@ -2705,18 +2705,16 @@ public class AI {
     }
 
     private static int toCentipawnScore(double value) {
-        if (value >= CHECKMATE) {
-            return CHECKMATE;
-        }
-        if (value <= -CHECKMATE) {
-            return -CHECKMATE;
-        }
+        // clamp to mate bounds in cp space
+        double cap = CHECKMATE;
+        if (value >= cap) return (int) cap;
+        if (value <= -cap) return (int) -cap;
         return (int) Math.round(value);
     }
 
     private static int toWindowBound(double value, boolean upper) {
         if (Double.isInfinite(value)) {
-            return upper ? CHECKMATE : -CHECKMATE;
+            return upper ? (int) CHECKMATE : (int) -CHECKMATE;
         }
         double clipped = Math.max(-CHECKMATE, Math.min(CHECKMATE, value));
         return (int) (upper ? Math.ceil(clipped) : Math.floor(clipped));
@@ -3057,6 +3055,9 @@ public class AI {
             if (beta <= alpha) {
                 updateKillerMoves(depth, move);
                 incrementHistory(move, depth);
+                if (!isCapture && !isPromotion) {
+                    incrementButterfly(move);
+                }
                 heuristics.recordCounterMove(prevMove, move);
                 break;
             }
