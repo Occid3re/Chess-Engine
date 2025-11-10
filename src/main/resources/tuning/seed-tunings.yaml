@@ -1,5 +1,5 @@
 population:
-  - name: Zugzwang-Waltz
+  - name: Alien-Termination
     evaluation:
       modules:
         materialmodule:
@@ -64,17 +64,17 @@ population:
       material.queenvalue: 1095.99
       material.rookvalue: 589.05
       moveordering.capturemvvmultiplier: 15.00
-      moveordering.captureseeclamp: 816.41
-      moveordering.captureseemultiplier: 108.21
+      moveordering.captureseeclamp: 760.00
+      moveordering.captureseemultiplier: 120.00
       moveordering.castlingbonus: 800.00
       moveordering.category.capturebad: 0.00
-      moveordering.category.captureequal: 4.67
-      moveordering.category.capturegood: 5.48
-      moveordering.category.killer0: 2.83
-      moveordering.category.killer1: 1.24
+      moveordering.category.captureequal: 4.80
+      moveordering.category.capturegood: 5.60
+      moveordering.category.killer0: 3.20
+      moveordering.category.killer1: 1.40
       moveordering.category.promotion: 5.76
-      moveordering.category.quiet: 1.12
-      moveordering.category.tt: 7.74
+      moveordering.category.quiet: 1.00
+      moveordering.category.tt: 8.50
       moveordering.countermovebonus: 280.00
       moveordering.historydecaydivisor: 1.75
       moveordering.historyscale: 1.61
@@ -133,24 +133,24 @@ population:
       search.aspswingweight: 0.21
       search.aspvolatilityweight: 0.86
       search.drawbias: 0.32
-      search.fpmargindepth1: 95.00
-      search.fpmargindepth2: 200.00
-      search.fpmargindepth3: 260.00
+      search.fpmargindepth1: 88.00
+      search.fpmargindepth2: 185.00
+      search.fpmargindepth3: 240.00
       search.fpmaxdepth: 6.00
-      search.historyreductionmax: 6540.91
-      search.hmpHistoryMax: 121.93
-      search.hmpMinIndex: 38.74
-      search.lmpBase: 6.00
+      search.historyreductionmax: 7000.00
+      search.hmpHistoryMax: 140.00
+      search.hmpMinIndex: 36.00
+      search.lmpBase: 4.00
       search.lmpMaxDepth: 4.00
-      search.lmpPerDepth: 10.00
-      search.lqpButterflyThreshold: 6.00
-      search.lqpHistoryThreshold: 400.00
+      search.lmpPerDepth: 8.00
+      search.lqpButterflyThreshold: 8.00
+      search.lqpHistoryThreshold: 600.00
       search.lqpMaxDepth: 2.00
-      search.lqpMoveIndexThreshold: 16.00
+      search.lqpMoveIndexThreshold: 12.00
       search.maxcheckextensionstreak: 2.15
-      search.nullbasereduction: 2.70
+      search.nullbasereduction: 2.90
       search.nulldepthcap: 4.00
-      search.nulldepthweight: 0.45
+      search.nulldepthweight: 0.50
       search.nulllowmaterialpenalty: 1.20
       search.nulllowmaterialthreshold: 6.00
       search.nulllowmobilitythreshold: 6.00
@@ -161,19 +161,19 @@ population:
       search.nullswingguarddivisor: 65.00
       search.nullswingguardmincp: 380.00
       search.nullverylowmobilitypenalty: 1.00
-      search.nullverylowmobilitythreshold: 8.00
+      search.nullverylowmobilitythreshold: 7.00
       search.seeprunenearrootply: 6.00
       search.probcutenabledepth: 6.00
-      search.probcutmargin: 190.00
-      search.probcutseemin: 0.00
-      search.qsmaxdeltapawn: 4.25
-      search.razormargindepth1: 170.00
-      search.razormargindepth2: 260.00
-      search.snmpmargindepth1: 110.00
-      search.snmpmargindepth2: 170.00
-      search.snmpmargindepth3: 230.00
-      search.ttcaptureweight: 3.10
-      search.ttmainweight: 4.55
+      search.probcutmargin: 180.00
+      search.probcutseemin: 50.00
+      search.qsmaxdeltapawn: 3.80
+      search.razormargindepth1: 160.00
+      search.razormargindepth2: 240.00
+      search.snmpmargindepth1: 100.00
+      search.snmpmargindepth2: 160.00
+      search.snmpmargindepth3: 220.00
+      search.ttcaptureweight: 3.30
+      search.ttmainweight: 4.90
       threat.hangingbishoppenalty: -17.71
       threat.hangingknightpenalty: -30.68
       threat.hangingpawnpenalty: -20.95
