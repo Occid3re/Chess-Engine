@@ -21,7 +21,7 @@ population:
       search.nulllowmaterialthreshold: 4.625581930321024
       material.knightvalue: 439.8900743760528
       moveordering.promotionseemultiplier: 28.9131884068788
-      threat.pawnthreatknightpenalty: -13.779087482452237
+      threat.pawnthreatknightpenalty: -22.0
       search.hmpminindex: 38.73678917772546
       search.aspbumpstreakcp: 11.631001286467999
       search.lmrhistoryweightslope: 0.7581998640277748
@@ -135,11 +135,11 @@ population:
       search.aspminspancp: 14.075967258490312
       kingsafety.backrankweaknessmidgamepenalty: -75.32017160398253
       search.aspmomentumcap: 35.4865521311111
-      threat.pawnthreatrookpenalty: -21.920327607876054
+      threat.pawnthreatrookpenalty: -35.0
       pawnstructure.connectedpawnbonus: 8.937080015008842
       moveordering.promotionseeclamp: 539.9279351366326
       pawnstructure.centerpawnbonus: 24.855828462710395
-      threat.hangingrookpenalty: -75.90426961445569
+      threat.hangingrookpenalty: -90.0
       search.nullmobilitycap: 13.707690468803563
       kingsafety.defenderbonus: 6.5238680615463585
       moveordering.category.quiet: 1.1224931271842804
@@ -147,6 +147,7 @@ population:
       search.fpmaxdepth: 8.64019895338565
       pawnstructure.rookopenfilebonus: 39.3090618731208
       threat.pawnthreatqueenpenalty: -28.358904604133688
+      threat.rooknopawncoverpenalty: -25.0
       search.aspmaxretriesbase: 2.7662430510295968
       activity.endgamemobilitybishop: 3.0453815034402525
       moveordering.category.killer0: 2.830607017405062

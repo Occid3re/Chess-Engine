@@ -51,6 +51,12 @@ public class AI {
 
     private final SyzygyTablebaseService tablebaseService;
 
+    // ---- Extracted sub-components ----
+    private final TablebaseProber tablebaseProber;
+    private final TranspositionTableManager ttManager;
+    private final HeuristicsManager heuristicsManager;
+    private final QuiescenceSearcher quiescenceSearcher;
+
     /**
      * Number of threads used for searching. Defaults to single-threaded search but
      * can be adjusted at runtime via the UCI "Threads" option.
@@ -89,28 +95,9 @@ public class AI {
     @Getter
     private int hashSizeMb;
 
-    /**
-     * Estimated footprint per stored entry in the main and capture transposition tables.
-     * The estimate accounts for the entry object itself as well as the surrounding table
-     * structure (key arrays/atomic wrappers). Values are rounded up generously so the
-     * engine never allocates more memory than requested.
-     */
-    private static final int MAIN_TT_ENTRY_BYTES = 48;
-    private static final int CAPTURE_TT_ENTRY_BYTES = 32;
-
-    /**
-     * Entry limits enforced for each table. They are powers of two because the
-     * underlying implementation rounds the capacity up to the next power of two.
-     * Keeping the min/max explicit makes the Hash option predictable for UCI
-     * front-ends.
-     */
-    private static final int MIN_MAIN_TT_ENTRIES = 1 << 12;      // 4k entries ≈ 192 KB
-    private static final int MAX_MAIN_TT_ENTRIES = 1 << 26;      // 67,108,864 entries
-    private static final int MIN_CAPTURE_TT_ENTRIES = 1 << 11;   // 2k entries ≈ 64 KB
-    private static final int MAX_CAPTURE_TT_ENTRIES = 1 << 25;   // 33,554,432 entries
-
-    public static final int MIN_HASH_SIZE_MB = 1;
-    public static final int MAX_HASH_SIZE_MB = 4096;
+    // TT entry sizes and capacity limits are managed by TranspositionTableManager.
+    public static final int MIN_HASH_SIZE_MB = TranspositionTableManager.MIN_HASH_SIZE_MB;
+    public static final int MAX_HASH_SIZE_MB = TranspositionTableManager.MAX_HASH_SIZE_MB;
 
     /**
      * Thread pool for root-split parallel search (created only if searchThreads > 1).
@@ -151,6 +138,7 @@ public class AI {
      */
     private final Heuristics globalHeuristics;
 
+    private final MoveOrderer moveOrderer;
     private final MoveOrderingParameters.Snapshot moveOrderingParameters;
     private final MoveBucket[] moveBucketOrder;
     private final double moveOrderingHistoryScale;
@@ -177,28 +165,9 @@ public class AI {
      */
     private final ThreadLocal<Heuristics> threadHeuristics;
 
-    private final StampedLock heuristicsLock = new StampedLock();
-    private final LockMetrics heuristicsLockMetrics = new LockMetrics();
+    // Lock state is managed by HeuristicsManager
 
-    // Buffers used for move ordering. Reused across calls to avoid repeated
-    // allocations when ordering moves.
-    private static final int MAX_MOVE_LIST_SIZE = 218; // maximum legal moves
-
-    private enum MoveBucket {
-        TT,
-        PROMOTION,
-        CAPTURE_GOOD,
-        CAPTURE_EQUAL,
-        KILLER0,
-        KILLER1,
-        QUIET,
-        CAPTURE_BAD
-    }
-
-    private final ThreadLocal<SortBuffers> sortBuffers =
-            ThreadLocal.withInitial(() -> new SortBuffers(MAX_MOVE_LIST_SIZE, MoveBucket.values().length));
-    private final ThreadLocal<Map<Integer, Integer>> seeCacheThreadLocal =
-            ThreadLocal.withInitial(() -> new HashMap<>(64));
+    // Move ordering buffers and SEE cache are managed by MoveOrderer.
 
     private final ThreadLocal<Long2DoubleOpenHashMap> staticEvalCache =
             ThreadLocal.withInitial(() -> {
@@ -214,16 +183,7 @@ public class AI {
     private final ThreadLocal<Deque<Engine>> workerSimulationPool =
             ThreadLocal.withInitial(ArrayDeque::new);
 
-    private record TablebaseHit(double score, int bestMove, TablebaseResult result) {
-    }
-
-    private record TablebaseContinuation(int move, double evaluation, TablebaseResult result,
-                                         boolean zeroingMove) {
-    }
-
-    private record TablebaseInfo(int dtz, int dtm, int whiteWdlSign) {
-        boolean hasDtz() { return dtz >= 0; }
-    }
+    // Tablebase records are now in TablebaseProber
 
     private static final int LMR_MAX_DEPTH = 64;
     private static final int LMR_MAX_MOVES = MAX_MOVE_LIST_SIZE;
@@ -354,7 +314,8 @@ public class AI {
         log.info("### SearchThreads = {}, LazySmpThreads = {}", searchThreads, lazySmpThreads);
 
         this.moveOrderingParameters = MoveOrderingParameters.snapshot();
-        this.moveBucketOrder = buildMoveBucketOrder(this.moveOrderingParameters);
+        this.moveOrderer = new MoveOrderer(this.moveOrderingParameters);
+        this.moveBucketOrder = moveOrderer.getBucketOrder();
         this.moveOrderingHistoryScale = Math.max(0.0, moveOrderingParameters.historyScale());
         this.moveOrderingHistoryDecayDivisor = Math.max(1, moveOrderingParameters.historyDecayDivisor());
         this.searchPruningParameters = SearchPruningParameters.snapshot();
@@ -376,6 +337,13 @@ public class AI {
         this.globalHeuristics = new Heuristics(maxDepth);
         this.threadHeuristics = ThreadLocal.withInitial(() -> new Heuristics(maxDepth));
 
+        // Initialise extracted sub-components
+        this.tablebaseProber = new TablebaseProber(tablebaseService);
+        this.ttManager = new TranspositionTableManager(this.hashSizeMb, ttMainWeight, ttCaptureWeight);
+        this.heuristicsManager = new HeuristicsManager(maxDepth);
+        this.quiescenceSearcher = new QuiescenceSearcher(
+                drawBias, quiescenceMaxDeltaPawn, tablebaseProber, this::abortRequested);
+
         rebuildTranspositionTables();
 
         this.searchPool = createSearchPool();
@@ -395,114 +363,32 @@ public class AI {
     }
 
     private long acquireWriteLock() {
-        long start = System.nanoTime();
-        long stamp = heuristicsLock.writeLock();
-        heuristicsLockMetrics.recordWriteAcquisition(System.nanoTime() - start);
-        return stamp;
+        return heuristicsManager.acquireWriteLock();
     }
 
     private long acquireReadLock() {
-        long start = System.nanoTime();
-        long stamp = heuristicsLock.readLock();
-        heuristicsLockMetrics.recordReadAcquisition(System.nanoTime() - start);
-        return stamp;
+        return heuristicsManager.acquireReadLock();
     }
 
     private void releaseWriteLock(long stamp) {
-        heuristicsLock.unlockWrite(stamp);
+        heuristicsManager.releaseWriteLock(stamp);
     }
 
     private void releaseReadLock(long stamp) {
-        heuristicsLock.unlockRead(stamp);
+        heuristicsManager.releaseReadLock(stamp);
     }
 
     private Heuristics.Snapshot captureHeuristicsSnapshot(int requiredDepth) {
-        long stamp = heuristicsLock.tryOptimisticRead();
-        if (stamp != 0L) {
-            Heuristics.Snapshot optimistic = globalHeuristics.snapshot(requiredDepth);
-            if (heuristicsLock.validate(stamp)) {
-                heuristicsLockMetrics.recordOptimisticSnapshot();
-                return optimistic;
-            }
-        }
-
-        long readStamp = acquireReadLock();
-        try {
-            heuristicsLockMetrics.recordOptimisticFallback();
-            return globalHeuristics.snapshot(requiredDepth);
-        } finally {
-            releaseReadLock(readStamp);
-        }
+        return heuristicsManager.captureSnapshot(requiredDepth);
     }
 
     private void rebuildTranspositionTables() {
         boolean concurrent = Math.max(searchThreads, lazySmpThreads) > 1;
-        long totalBytes = Math.max(1L, (long) hashSizeMb * 1024L * 1024L);
-
-        double totalWeight = ttMainWeight + ttCaptureWeight;
-        if (totalWeight <= 0.0) {
-            totalWeight = 1.0;
-        }
-        long mainBudget = Math.max(1L, (long) (totalBytes * (ttMainWeight / totalWeight)));
-        long captureBudget = Math.max(1L, totalBytes - mainBudget);
-
-        int mainCapacity = computeTableCapacity(mainBudget, MAIN_TT_ENTRY_BYTES,
-                MIN_MAIN_TT_ENTRIES, MAX_MAIN_TT_ENTRIES);
-        int captureCapacity = computeTableCapacity(captureBudget, CAPTURE_TT_ENTRY_BYTES,
-                MIN_CAPTURE_TT_ENTRIES, MAX_CAPTURE_TT_ENTRIES);
-
-        this.transpositionTableCapacity = mainCapacity;
-        this.captureTranspositionTableCapacity = captureCapacity;
-
-        this.transpositionTable = concurrent
-                ? new FixedSizeTranspositionTable<>(mainCapacity)
-                : new PlainFixedSizeTranspositionTable<>(mainCapacity, TranspositionTableEntry.class);
-
-        this.captureTranspositionTable = concurrent
-                ? new FixedSizeTranspositionTable<>(captureCapacity)
-                : new PlainFixedSizeTranspositionTable<>(captureCapacity, CaptureTranspositionTableEntry.class);
-    }
-
-    private static int computeTableCapacity(long budgetBytes, int entryBytes, int minEntries, int maxEntries) {
-        if (entryBytes <= 0) {
-            throw new IllegalArgumentException("Entry byte estimate must be positive");
-        }
-
-        long estimatedEntries = Math.max(1L, budgetBytes / entryBytes);
-        if (estimatedEntries > Integer.MAX_VALUE) {
-            estimatedEntries = Integer.MAX_VALUE;
-        }
-
-        int candidate = (int) estimatedEntries;
-        if (candidate < minEntries) {
-            candidate = minEntries;
-        } else if (candidate > maxEntries) {
-            candidate = maxEntries;
-        }
-
-        int rounded = roundUpToPowerOfTwo(candidate);
-        if (rounded < minEntries) {
-            rounded = minEntries;
-        }
-        while (rounded > maxEntries && rounded > 1) {
-            rounded >>= 1;
-        }
-        return rounded;
-    }
-
-    private static int roundUpToPowerOfTwo(int value) {
-        // define behavior for non-positive
-        if (value <= 1) return 1;
-
-        // anything above 2^30 must saturate (since 2^31 doesn't fit in signed int)
-        if (value > (1 << 30)) return 1 << 30;
-
-        // exact power-of-two? return unchanged
-        int hib = Integer.highestOneBit(value);
-        if (hib == value) return value;
-
-        // next power-of-two (safe because value <= 2^30)
-        return hib << 1;
+        ttManager.rebuild(concurrent);
+        this.transpositionTable = ttManager.getMainTable();
+        this.captureTranspositionTable = ttManager.getCaptureTable();
+        this.transpositionTableCapacity = ttManager.getMainTableCapacity();
+        this.captureTranspositionTableCapacity = ttManager.getCaptureTableCapacity();
     }
 
     /**
@@ -1024,39 +910,11 @@ public class AI {
     }
 
     private void clearStaticEvalCache() {
-        staticEvalCache.get().clear();
+        quiescenceSearcher.clearCache();
     }
 
     private double resolveScoreDifference(GameState gameState, long boardHash, boolean whiteToMove) {
-        Long2DoubleOpenHashMap cache = staticEvalCache.get();
-        Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
-        if (tablebase.isPresent()) {
-            int halfmoveClock = gameState.getHalfmoveClock();
-            long cacheKey = mixBoardHashWithHalfmove(boardHash, halfmoveClock);
-            double cached = cache.get(cacheKey);
-            if (!Double.isNaN(cached)) {
-                return cached;
-            }
-            TablebaseResult result = tablebase.get();
-            double evaluation = isExactWdl(result)
-                    ? clampTablebaseEval(Score.tablebaseToEvaluation(result, whiteToMove, halfmoveClock))
-                    : gameState.getScore().getScoreDifference();
-            cache.put(cacheKey, evaluation);
-            return evaluation;
-        }
-        double cached = cache.get(boardHash);
-        if (!Double.isNaN(cached)) {
-            return cached;
-        }
-        double computed = gameState.getScore().getScoreDifference();
-        cache.put(boardHash, computed);
-        return computed;
-    }
-
-    private static long mixBoardHashWithHalfmove(long boardHash, int halfmoveClock) {
-        long clock = Integer.toUnsignedLong(halfmoveClock);
-        long rotated = Long.rotateLeft(clock, 32);
-        return boardHash ^ rotated ^ (clock << 1);
+        return quiescenceSearcher.resolveScoreDifference(gameState, boardHash, whiteToMove);
     }
 
     protected RootSearchResult searchRootMoves(Engine sim, SearchTask task, int depth, double alpha, double beta, SplittableRandom rng) {
@@ -2073,9 +1931,9 @@ public class AI {
         maybeRotateRootMoves(sortedMoves, rng);
         promoteTablebaseMove(sortedMoves, simulatorEngine);
 
-        Optional<TablebaseHit> rootTablebase = resolveTablebaseHit(simulatorEngine, isWhitesTurn);
+        Optional<TablebaseProber.TablebaseHit> rootTablebase = resolveTablebaseHit(simulatorEngine, isWhitesTurn);
         if (rootTablebase.isPresent()) {
-            TablebaseHit hit = rootTablebase.get();
+            TablebaseProber.TablebaseHit hit = rootTablebase.get();
             int candidateMove = hit.bestMove();
             if (candidateMove >= 0 && MoveContainerUtils.contains(sortedMoves, candidateMove)) {
                 return RootSearchResult.completed(createCandidate(candidateMove, hit.score(), true));
@@ -2148,292 +2006,26 @@ public class AI {
      * 5rkr/pp2Rp2/1b1p1Pb1/3P2Q1/2n3P1/2p5/P4P2/4R1K1 w - - 1 0
      * *
      */
-    private Optional<TablebaseHit> resolveTablebaseHit(Engine engine, boolean isWhite) {
-        // Fetch any cached TB result from GameState
-        TablebaseResult result = engine.getGameState().getLastTablebaseResult().orElse(null);
-
-        // Always try probing the Syzygy tablebase if service is available
-        if (tablebaseService != null) {
-            Optional<SyzygyProbeResult> probe = tablebaseService.probe(engine.getBitBoard());
-            if (probe.isPresent()) {
-                result = TablebaseResult.from(probe.get());
-                engine.getGameState().setLastTablebaseResult(result);
-            }
-        }
-
-        // No usable WDL (unknown or incomplete probe)
-        if (!isExactWdl(result)) {
-            return Optional.empty();
-        }
-
-        // Stable evaluation: compute from White's perspective and keep the white-oriented
-        // value so all callers reason about tablebase scores consistently.
-        double whitePerspective = clampTablebaseEval(Score.tablebaseToEvaluation(result, engine.whitesTurn(),
-                engine.getGameState().getHalfmoveClock()));
-
-        // Determine best move via TB guidance (if available)
-        int bestMove = determineTablebaseBestMove(engine, result, isWhite);
-
-        return Optional.of(new TablebaseHit(whitePerspective, bestMove, result));
+    private Optional<TablebaseProber.TablebaseHit> resolveTablebaseHit(Engine engine, boolean isWhite) {
+        return tablebaseProber.resolveTablebaseHit(engine, isWhite);
     }
 
 
-
-    private int determineTablebaseBestMove(Engine simulatorEngine, TablebaseResult parentResult, boolean parentIsWhite) {
-        IntArrayList legal = simulatorEngine.getAllLegalMoves();
-        if (legal.isEmpty()) {
-            return -1;
-        }
-
-        int suggestedMove = -1;
-        TablebaseContinuation bestContinuation = null;
-
-        if (parentResult != null) {
-            Optional<SyzygyMove> suggestion = parentResult.recommendedMove();
-            if (suggestion.isPresent()) {
-                suggestedMove = findSuggestedMove(legal, suggestion.get());
-                if (suggestedMove != -1) {
-                    Optional<TablebaseContinuation> continuation = evaluateTablebaseContinuation(simulatorEngine, suggestedMove);
-                    if (continuation.isPresent()) {
-                        TablebaseContinuation candidate = continuation.get();
-                        if (isContinuationConsistent(parentResult, candidate)) {
-                            return candidate.move();
-                        }
-                        bestContinuation = candidate;
-                    }
-                }
-            }
-        }
-
-        for (int i = 0; i < legal.size(); i++) {
-            int move = legal.getInt(i);
-            if (move == suggestedMove) {
-                continue;
-            }
-            Optional<TablebaseContinuation> continuation = evaluateTablebaseContinuation(simulatorEngine, move);
-            if (continuation.isEmpty()) {
-                continue;
-            }
-            TablebaseContinuation candidate = continuation.get();
-            if (bestContinuation == null
-                    || isContinuationBetter(parentIsWhite, candidate, bestContinuation, parentResult)) {
-                bestContinuation = candidate;
-            }
-        }
-        return bestContinuation != null ? bestContinuation.move() : -1;
-    }
-
-    private Optional<TablebaseContinuation> evaluateTablebaseContinuation(Engine simulatorEngine, int move) {
-        boolean zeroing = MoveHelper.isCapture(move) || MoveHelper.derivePieceTypeBits(move) == 1;
-        simulatorEngine.performMove(move);
-        try {
-            Optional<TablebaseResult> childResult = resolveExactTablebaseResult(simulatorEngine);
-            if (childResult.isEmpty()) {
-                return Optional.empty();
-            }
-            TablebaseResult result = childResult.get();
-            double evaluation = clampTablebaseEval(Score.tablebaseToEvaluation(result, simulatorEngine.whitesTurn(),
-                    simulatorEngine.getGameState().getHalfmoveClock()));
-            return Optional.of(new TablebaseContinuation(move, evaluation, result, zeroing));
-        } finally {
-            simulatorEngine.undoLastMove();
-        }
-    }
 
     private Optional<TablebaseResult> resolveExactTablebaseResult(Engine engine) {
-        TablebaseResult result = engine.getGameState().getLastTablebaseResult().orElse(null);
-        if (tablebaseService != null) {
-            Optional<SyzygyProbeResult> probe = tablebaseService.probe(engine.getBitBoard());
-            if (probe.isPresent()) {
-                result = TablebaseResult.from(probe.get());
-                engine.getGameState().setLastTablebaseResult(result);
-            }
-        }
-        if (!isExactWdl(result)) {
-            return Optional.empty();
-        }
-        return Optional.of(result);
-    }
-
-    private boolean isContinuationConsistent(TablebaseResult parentResult, TablebaseContinuation continuation) {
-        if (parentResult == null || continuation == null) {
-            return false;
-        }
-        int parentSign = Integer.signum(parentResult.wdl().score());
-        int childSign = Integer.signum(continuation.result().wdl().score());
-        if (parentSign == 0) {
-            return childSign == 0;
-        }
-        return parentSign == -childSign;
-    }
-
-    private boolean isContinuationBetter(boolean parentIsWhite,
-                                         TablebaseContinuation candidate,
-                                         TablebaseContinuation incumbent,
-                                         TablebaseResult parentResult) {
-        if (incumbent == null) {
-            return true;
-        }
-        if (candidate == null) {
-            return false;
-        }
-
-        double candidateEval = candidate.evaluation();
-        double incumbentEval = incumbent.evaluation();
-        if (!Double.isFinite(candidateEval)) {
-            return false;
-        }
-        if (!Double.isFinite(incumbentEval)) {
-            return true;
-        }
-
-        double diff = candidateEval - incumbentEval;
-        if (Math.abs(diff) > TB_TIE_EPSILON) {
-            return parentIsWhite ? diff > 0 : diff < 0;
-        }
-
-        int outcome = parentResult != null ? Integer.signum(parentResult.wdl().score()) : 0;
-        return switch (outcome) {
-            case 1 -> preferWinningContinuation(candidate, incumbent);
-            case -1 -> preferDefensiveContinuation(candidate, incumbent);
-            case 0 -> preferDrawingContinuation(candidate, incumbent);
-            default -> false;
-        };
-    }
-
-    private boolean preferWinningContinuation(TablebaseContinuation candidate, TablebaseContinuation incumbent) {
-        int candidateDtz = normaliseDistance(candidate.result().dtz(), Integer.MAX_VALUE);
-        int incumbentDtz = normaliseDistance(incumbent.result().dtz(), Integer.MAX_VALUE);
-        if (candidateDtz != incumbentDtz) {
-            return candidateDtz < incumbentDtz;
-        }
-
-        int candidateDtm = normaliseDistance(candidate.result().dtm(), Integer.MAX_VALUE);
-        int incumbentDtm = normaliseDistance(incumbent.result().dtm(), Integer.MAX_VALUE);
-        if (candidateDtm != incumbentDtm) {
-            return candidateDtm < incumbentDtm;
-        }
-
-        if (candidate.zeroingMove() != incumbent.zeroingMove()) {
-            return candidate.zeroingMove();
-        }
-        return false;
-    }
-
-    private boolean preferDefensiveContinuation(TablebaseContinuation candidate, TablebaseContinuation incumbent) {
-        int candidateDtz = normaliseDistance(candidate.result().dtz(), Integer.MIN_VALUE);
-        int incumbentDtz = normaliseDistance(incumbent.result().dtz(), Integer.MIN_VALUE);
-        if (candidateDtz != incumbentDtz) {
-            return candidateDtz > incumbentDtz;
-        }
-
-        int candidateDtm = normaliseDistance(candidate.result().dtm(), Integer.MIN_VALUE);
-        int incumbentDtm = normaliseDistance(incumbent.result().dtm(), Integer.MIN_VALUE);
-        if (candidateDtm != incumbentDtm) {
-            return candidateDtm > incumbentDtm;
-        }
-
-        if (candidate.zeroingMove() != incumbent.zeroingMove()) {
-            return !candidate.zeroingMove();
-        }
-        return false;
-    }
-
-    private boolean preferDrawingContinuation(TablebaseContinuation candidate, TablebaseContinuation incumbent) {
-        int candidateDtz = normaliseDistance(candidate.result().dtz(), Integer.MAX_VALUE);
-        int incumbentDtz = normaliseDistance(incumbent.result().dtz(), Integer.MAX_VALUE);
-        if (candidateDtz != incumbentDtz) {
-            return candidateDtz < incumbentDtz;
-        }
-        if (candidate.zeroingMove() != incumbent.zeroingMove()) {
-            return candidate.zeroingMove();
-        }
-        int candidateDtm = normaliseDistance(candidate.result().dtm(), Integer.MAX_VALUE);
-        int incumbentDtm = normaliseDistance(incumbent.result().dtm(), Integer.MAX_VALUE);
-        if (candidateDtm != incumbentDtm) {
-            return candidateDtm < incumbentDtm;
-        }
-        return false;
-    }
-
-    private int normaliseDistance(OptionalInt value, int fallback) {
-        if (value.isEmpty()) {
-            return fallback;
-        }
-        return Math.abs(value.getAsInt());
-    }
-
-    private int findSuggestedMove(IntArrayList legal, SyzygyMove suggestion) {
-        int fromIndex = suggestion.fromIndex();
-        int toIndex = suggestion.toIndex();
-        int promotionBits = suggestion.promotionPieceTypeBits();
-        for (int i = 0; i < legal.size(); i++) {
-            int move = legal.getInt(i);
-            if (MoveHelper.deriveFromIndex(move) != fromIndex) {
-                continue;
-            }
-            if (MoveHelper.deriveToIndex(move) != toIndex) {
-                continue;
-            }
-            int movePromotion = MoveHelper.derivePromotionPieceTypeBits(move);
-            if (promotionBits == 0) {
-                if (movePromotion != 0) {
-                    continue;
-                }
-            } else if (movePromotion != promotionBits) {
-                continue;
-            }
-
-            return move;
-        }
-        return -1;
+        return tablebaseProber.resolveExactTablebaseResult(engine);
     }
 
     private void promoteTablebaseMove(IntArrayList moves, Engine engine) {
-        if (moves == null || moves.isEmpty()) {
-            return;
-        }
-        TablebaseResult result = engine.getGameState().getLastTablebaseResult().orElse(null);
-        if (result == null) {
-            return;
-        }
-        Optional<SyzygyMove> suggestion = result.recommendedMove();
-        if (suggestion.isEmpty()) {
-            return;
-        }
-        int matchedMove = findSuggestedMove(moves, suggestion.get());
-        if (matchedMove == -1) {
-            return;
-        }
-        int index = moves.indexOf(matchedMove);
-        if (index <= 0) {
-            return;
-        }
-        int first = moves.getInt(0);
-        moves.set(0, matchedMove);
-        moves.set(index, first);
+        tablebaseProber.promoteTablebaseMove(moves, engine);
     }
 
     private boolean isExactWdl(TablebaseResult result) {
-        if (result == null) {
-            return false;
-        }
-        SyzygyWdl wdl = result.wdl();
-        return wdl == SyzygyWdl.WIN || wdl == SyzygyWdl.LOSS || wdl == SyzygyWdl.DRAW;
+        return tablebaseProber.isExactWdl(result);
     }
 
     private double clampTablebaseEval(double eval) {
-        if (!Double.isFinite(eval)) {
-            return eval;
-        }
-        double mateThreshold = (CHECKMATE - MATE_SCORE_MARGIN) / 100.0;
-        if (Math.abs(eval) >= mateThreshold) {
-            return eval;
-        }
-        if (eval > TABLEBASE_CLAMP) {
-            return TABLEBASE_CLAMP;
-        }
-        return Math.max(eval, -TABLEBASE_CLAMP);
+        return tablebaseProber.clampTablebaseEval(eval);
     }
 
     private double alphaBeta(Engine simulatorEngine, int depth, double alpha, double beta,
@@ -2461,9 +2053,9 @@ public class AI {
             return evaluateStaticPosition(simulatorEngine.getGameState(), boardHash, isWhite, plyFromRoot);
         }
 
-        Optional<TablebaseHit> tablebaseHit = resolveTablebaseHit(simulatorEngine, isWhite);
+        Optional<TablebaseProber.TablebaseHit> tablebaseHit = resolveTablebaseHit(simulatorEngine, isWhite);
         if (tablebaseHit.isPresent()) {
-            TablebaseHit hit = tablebaseHit.get();
+            TablebaseProber.TablebaseHit hit = tablebaseHit.get();
             int bestMove = hit.bestMove() >= 0 ? hit.bestMove() : -1;
             double storedScore = toStoredMateScore(hit.score(), plyFromRoot);
             transpositionTable.put(boardHash,
@@ -3282,143 +2874,8 @@ public class AI {
      */
     IntArrayList sortMovesByEfficiency(IntArrayList moves, int currentDepth, long boardHash, int prevMove,
                                        Engine simulatorEngine) {
-        final int size = moves.size();
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
-        seeCache.clear();
-
-        if (size == 0) {
-            return moves;
-        }
-
-        final SortBuffers buffers = sortBuffers.get();
-        final int[] moveBuffer = buffers.moveBuffer;
-        final int[] scoreBuffer = buffers.scoreBuffer;
-        final int[] orderedBuffer = buffers.orderedBuffer;
-        final IntArrayList[] bucketIndexes = buffers.bucketIndexes;
-        for (IntArrayList bucket : bucketIndexes) {
-            bucket.clear();
-        }
-
-        final IntArrayList ttBucket = bucketIndexes[MoveBucket.TT.ordinal()];
-        final IntArrayList promotionBucket = bucketIndexes[MoveBucket.PROMOTION.ordinal()];
-        final IntArrayList captureGoodBucket = bucketIndexes[MoveBucket.CAPTURE_GOOD.ordinal()];
-        final IntArrayList captureEqualBucket = bucketIndexes[MoveBucket.CAPTURE_EQUAL.ordinal()];
-        final IntArrayList killer0Bucket = bucketIndexes[MoveBucket.KILLER0.ordinal()];
-        final IntArrayList killer1Bucket = bucketIndexes[MoveBucket.KILLER1.ordinal()];
-        final IntArrayList quietBucket = bucketIndexes[MoveBucket.QUIET.ordinal()];
-        final IntArrayList captureBadBucket = bucketIndexes[MoveBucket.CAPTURE_BAD.ordinal()];
-
-        final Heuristics heuristics = threadHeuristics.get();
-        final int[][] killerMoves = heuristics.killers;
-        final int[][] historyTable = heuristics.history;
-        final int[][] counterMove = heuristics.counter;
-
-        final int depthIndex = Math.max(0, Math.min(currentDepth, killerMoves.length - 1));
-
-        final int promotionBonus = moveOrderingParameters.promotionBonus();
-        final int killer0Bonus = moveOrderingParameters.killer0Bonus();
-        final int killer1Bonus = moveOrderingParameters.killer1Bonus();
-        final int killerMoveScore = moveOrderingParameters.killerMoveScore();
-        final int captureMvvMultiplier = moveOrderingParameters.captureMvvMultiplier();
-        final int captureSeeMultiplier = moveOrderingParameters.captureSeeMultiplier();
-        final int promotionSeeMultiplier = moveOrderingParameters.promotionSeeMultiplier();
-        final int castlingBonus = moveOrderingParameters.castlingBonus();
-        final int captureSeeClamp = Math.max(0, moveOrderingParameters.captureSeeClamp());
-        final int promotionSeeClamp = Math.max(0, moveOrderingParameters.promotionSeeClamp());
-        final int maxScore = Math.max(1, moveOrderingParameters.maxScore());
-
-        // Hash move (TT)
-        TranspositionTableEntry ttEntry = transpositionTable.get(boardHash);
-        final int ttMove = ttEntry != null ? ttEntry.bestMove : -1;
-
-        // Pre-fetch killers for this depth
-        final int k0 = killerMoves[depthIndex][0];
-        final int k1 = killerMoves[depthIndex][1];
-
-        final int prevFrom = (prevMove >= 0) ? (prevMove & 0x3F) : -1;
-        final int prevTo = (prevMove >= 0) ? ((prevMove >>> 6) & 0x3F) : -1;
-        final int cm = (prevFrom >= 0) ? counterMove[prevFrom][prevTo] : -1;
-        final int counterMoveBonus = moveOrderingParameters.counterMoveBonus();
-
-        for (int i = 0; i < size; i++) {
-            final int moveInt = moves.getInt(i);
-
-            final boolean isCapture = MoveHelper.isCapture(moveInt);
-            final boolean isPromotion = MoveHelper.isPawnPromotionMove(moveInt);
-
-            int seeValue = 0;
-            boolean hasSee = false;
-            if (isCapture) {
-                seeValue = seeCache.computeIfAbsent(moveInt, simulatorEngine::see);
-                hasSee = true;
-            }
-
-            int score;
-            IntArrayList targetBucket;
-
-            if (moveInt == ttMove) {
-                score = maxScore; // max within bucket
-                targetBucket = ttBucket;
-            } else if (isPromotion) {
-                int base = calculateMvvLvaScore(moveInt);
-                int seeBonus = 0;
-                if (hasSee) {
-                    int cappedSee = promotionSeeClamp > 0
-                            ? Math.max(-promotionSeeClamp, Math.min(promotionSeeClamp, seeValue))
-                            : seeValue;
-                    seeBonus = cappedSee * promotionSeeMultiplier;
-                }
-                score = base + promotionBonus + seeBonus;
-                targetBucket = promotionBucket;
-            } else if (isCapture) {
-                final int mvvLva = calculateMvvLvaScore(moveInt);
-                int cappedSee = captureSeeClamp > 0
-                        ? Math.max(-captureSeeClamp, Math.min(captureSeeClamp, seeValue))
-                        : seeValue;
-                score = (mvvLva * captureMvvMultiplier) + (cappedSee * captureSeeMultiplier);
-                if (score < 0) score = 0;
-                if (seeValue > 0) {
-                    targetBucket = captureGoodBucket;
-                } else if (seeValue == 0) {
-                    targetBucket = captureEqualBucket;
-                } else {
-                    targetBucket = captureBadBucket;
-                }
-            } else if (moveInt == k0) {
-                score = killerMoveScore + killer0Bonus;
-                targetBucket = killer0Bucket;
-            } else if (moveInt == k1) {
-                score = killerMoveScore + killer1Bonus;
-                targetBucket = killer1Bucket;
-            } else {
-                final int from = moveInt & 0x3F;
-                final int to = (moveInt >>> 6) & 0x3F;
-                score = historyTable[from][to];
-                if (moveInt == cm) score += counterMoveBonus;
-                if (MoveHelper.isCastlingMove(moveInt)) {
-                    score += castlingBonus;
-                }
-                targetBucket = quietBucket;
-            }
-
-            moveBuffer[i] = moveInt;
-            int s = score;
-            if (s < 0) {
-                s = 0;
-            } else if (s > maxScore) {
-                s = maxScore;
-            }
-            scoreBuffer[i] = s;
-            insertByScore(targetBucket, i, scoreBuffer, moveBuffer);
-        }
-
-        int outIndex = 0;
-        for (MoveBucket bucket : moveBucketOrder) {
-            outIndex = writeBucket(bucketIndexes[bucket.ordinal()], moveBuffer, orderedBuffer, outIndex);
-        }
-
-        MoveContainerUtils.overwriteFromBuffer(moves, orderedBuffer, size);
-        return moves;
+        return moveOrderer.sortMovesByEfficiency(moves, currentDepth, boardHash, prevMove,
+                simulatorEngine, threadHeuristics.get(), transpositionTable);
     }
 
 
@@ -3604,34 +3061,11 @@ public class AI {
 
 
     private double evaluateStaticPosition(GameState gameState, long boardHash, boolean isWhitesTurn, int depthOrPly) {
-        if (gameState.isInStateCheckMate()) {
-            return -(CHECKMATE - depthOrPly);
-        }
-        EvaluationContext context = gameState.getScore().getEvaluationContext();
-        boolean whiteToMove = context != null && context.isWhiteToMove();
-        Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
-        if (tablebase.isPresent() && isExactWdl(tablebase.get())) {
-            double whitePerspective = clampTablebaseEval(Score.tablebaseToEvaluation(tablebase.get(), whiteToMove,
-                    gameState.getHalfmoveClock()));
-            return isWhitesTurn ? whitePerspective : -whitePerspective;
-        }
-        if (gameState.isDrawForUIOrEval()) { // <-- include insufficient material for eval/UI
-            if (log.isDebugEnabled()) log.debug("DRAW");
-            double scoreDiff = resolveScoreDifference(gameState, boardHash, whiteToMove);
-            if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
-                return DRAW - drawBias;
-            } else if ((isWhitesTurn && scoreDiff < 0) || (!isWhitesTurn && scoreDiff > 0)) {
-                return DRAW + drawBias;
-            }
-            return DRAW;
-        }
-        double scoreDifference = resolveScoreDifference(gameState, boardHash, whiteToMove);
-        return isWhitesTurn ? scoreDifference : -scoreDifference;
+        return quiescenceSearcher.evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depthOrPly);
     }
 
     private IntArrayList getPossibleCapturesOrPromotions(Engine simulatorEngine) {
-        IntArrayList allLegalMoves = simulatorEngine.getAllLegalMoves();
-        return MoveContainerUtils.filterCapturesAndPromotions(allLegalMoves);
+        return MoveContainerUtils.filterCapturesAndPromotions(simulatorEngine.getAllLegalMoves());
     }
 
     private boolean hasImmediateTacticalMoves(Engine simulatorEngine) {
@@ -3639,88 +3073,23 @@ public class AI {
     }
 
     private double estimateMaxTacticalSwing(IntArrayList moves) {
-        double bestSwing = 0.0;
-        final double pawnValue = Score.getPieceValue(1);
-
-        for (int i = 0; i < moves.size(); i++) {
-            int move = moves.getInt(i);
-            double swing = 0.0;
-
-            if (MoveHelper.isCapture(move)) {
-                int capturedBits = MoveHelper.deriveCapturedPieceTypeBits(move);
-                double captureValue;
-                if (capturedBits != 0) {
-                    captureValue = Score.getPieceValue(capturedBits);
-                } else if (MoveHelper.isEnPassantMove(move)) {
-                    captureValue = pawnValue;
-                } else {
-                    captureValue = 0.0;
-                }
-                swing += captureValue;
-            }
-
-            if (MoveHelper.isPawnPromotionMove(move)) {
-                int promotionBits = MoveHelper.derivePromotionPieceTypeBits(move);
-                if (promotionBits != 0) {
-                    double promotionDelta = Score.getPieceValue(promotionBits) - pawnValue;
-                    if (promotionDelta > 0) {
-                        swing += promotionDelta;
-                    }
-                }
-            }
-
-            if (swing > bestSwing) {
-                bestSwing = swing;
-                if (bestSwing >= quiescenceMaxDeltaPawn) {
-                    return quiescenceMaxDeltaPawn;
-                }
-            }
-        }
-
-        return Math.min(bestSwing, quiescenceMaxDeltaPawn);
+        return quiescenceSearcher.estimateMaxTacticalSwing(moves);
     }
 
     private boolean isMateValue(double score) {
-        return Double.isFinite(score) && Math.abs(score) >= (CHECKMATE - MATE_SCORE_MARGIN);
+        return QuiescenceSearcher.isMateValue(score);
     }
 
     private double adjustMateFromChild(double score) {
-        if (!Double.isFinite(score)) {
-            return score;
-        }
-        if (score >= CHECKMATE - MATE_SCORE_MARGIN) {
-            return score - 1;
-        }
-        if (score <= -CHECKMATE + MATE_SCORE_MARGIN) {
-            return score + 1;
-        }
-        return score;
+        return QuiescenceSearcher.adjustMateFromChild(score);
     }
 
     private double toStoredMateScore(double score, int plyFromRoot) {
-        if (!Double.isFinite(score)) {
-            return score;
-        }
-        if (score >= CHECKMATE - MATE_SCORE_MARGIN) {
-            return score + plyFromRoot;
-        }
-        if (score <= -CHECKMATE + MATE_SCORE_MARGIN) {
-            return score - plyFromRoot;
-        }
-        return score;
+        return QuiescenceSearcher.toStoredMateScore(score, plyFromRoot);
     }
 
     private double fromStoredMateScore(double score, int plyFromRoot) {
-        if (!Double.isFinite(score)) {
-            return score;
-        }
-        if (score >= CHECKMATE - MATE_SCORE_MARGIN) {
-            return score - plyFromRoot;
-        }
-        if (score <= -CHECKMATE + MATE_SCORE_MARGIN) {
-            return score + plyFromRoot;
-        }
-        return score;
+        return QuiescenceSearcher.fromStoredMateScore(score, plyFromRoot);
     }
 
     private boolean isZeroingMove(int move) {
@@ -3735,50 +3104,7 @@ public class AI {
     }
 
     private boolean shouldUseTablebaseTieBreak(double candidateEval, double bestEval) {
-        if (!Double.isFinite(candidateEval) || !Double.isFinite(bestEval)) {
-            return false;
-        }
-        if (Math.abs(candidateEval - bestEval) > TB_TIE_EPSILON) {
-            return false;
-        }
-        if (isMateValue(candidateEval) || isMateValue(bestEval)) {
-            return false;
-        }
-        double candidateSign = Math.signum(candidateEval);
-        double bestSign = Math.signum(bestEval);
-        if (candidateSign == 0.0 || bestSign == 0.0) {
-            return false;
-        }
-        return candidateSign == bestSign;
-    }
-
-    private TablebaseInfo probeMoveTablebase(Engine engine, int move) {
-        if (tablebaseService == null || move < 0) {
-            return null;
-        }
-        engine.performMove(move);
-        try {
-            TablebaseResult result = engine.getGameState().getLastTablebaseResult().orElse(null);
-            if (!isExactWdl(result)) {
-                Optional<SyzygyProbeResult> probe = tablebaseService.probe(engine.getBitBoard());
-                if (probe.isEmpty()) {
-                    return null;
-                }
-                result = TablebaseResult.from(probe.get());
-                if (!isExactWdl(result)) {
-                    return null;
-                }
-                engine.getGameState().setLastTablebaseResult(result);
-            }
-            int dtz = result.dtz().isPresent() ? Math.abs(result.dtz().getAsInt()) : -1;
-            int dtm = result.dtm().isPresent() ? Math.abs(result.dtm().getAsInt()) : -1;
-            boolean childIsWhite = engine.whitesTurn();
-            int wdlScore = result.wdl().score();
-            int whiteWdlSign = childIsWhite ? wdlScore : -wdlScore;
-            return new TablebaseInfo(dtz, dtm, whiteWdlSign);
-        } finally {
-            engine.undoLastMove();
-        }
+        return tablebaseProber.shouldUseTablebaseTieBreak(candidateEval, bestEval);
     }
 
     private boolean preferCandidateByTablebase(Engine engine,
@@ -3787,71 +3113,8 @@ public class AI {
                                                boolean candidateZeroing,
                                                int bestMove,
                                                boolean bestZeroing) {
-        TablebaseInfo candidateInfo = probeMoveTablebase(engine, candidateMove);
-        TablebaseInfo bestInfo = probeMoveTablebase(engine, bestMove);
-        if (candidateInfo == null && bestInfo == null) {
-            return false;
-        }
-
-        int candidateSign = candidateInfo != null ? Integer.signum(candidateInfo.whiteWdlSign()) : 0;
-        int bestSign = bestInfo != null ? Integer.signum(bestInfo.whiteWdlSign()) : 0;
-
-        if (candidateSign > 0 && bestSign > 0) {
-            int candidateDtz = candidateInfo.hasDtz() ? candidateInfo.dtz() : Integer.MAX_VALUE;
-            int bestDtz = bestInfo.hasDtz() ? bestInfo.dtz() : Integer.MAX_VALUE;
-            if (candidateDtz < bestDtz) {
-                return true;
-            }
-            if (candidateDtz > bestDtz) {
-                return false;
-            }
-            if (candidateZeroing != bestZeroing) {
-                return candidateZeroing;
-            }
-            return false;
-        }
-
-        if (candidateSign < 0 && bestSign < 0) {
-            int candidateDtz = candidateInfo.hasDtz() ? candidateInfo.dtz() : -1;
-            int bestDtz = bestInfo.hasDtz() ? bestInfo.dtz() : -1;
-            if (candidateDtz > bestDtz) {
-                return true;
-            }
-            if (candidateDtz < bestDtz) {
-                return false;
-            }
-            if (candidateZeroing != bestZeroing) {
-                return !candidateZeroing;
-            }
-            return false;
-        }
-
-        if (candidateInfo != null && bestInfo == null) {
-            if (candidateSign > 0 && candidateInfo.hasDtz()) {
-                return true;
-            }
-            if (candidateSign > 0 && candidateZeroing != bestZeroing) {
-                return candidateZeroing;
-            }
-            return false;
-        }
-
-        if (candidateInfo == null) {
-            if (bestSign > 0 && bestInfo.hasDtz()) {
-                return false;
-            }
-            if (bestSign < 0 && bestInfo.hasDtz()) {
-                return false;
-            }
-            if (bestSign > 0 && candidateZeroing != bestZeroing) {
-                return candidateZeroing;
-            }
-            if (bestSign < 0 && candidateZeroing != bestZeroing) {
-                return !candidateZeroing;
-            }
-        }
-
-        return false;
+        return tablebaseProber.preferCandidateByTablebase(engine, candidateMove, candidateEval,
+                candidateZeroing, bestMove, bestZeroing);
     }
 
     /**
@@ -3894,465 +3157,13 @@ public class AI {
     }
 
     private void clearHistoryTable() {
-        long stamp = acquireWriteLock();
-        try {
-            globalHeuristics.clearHistory();
-            globalHeuristics.clearCounter();
-        } finally {
-            releaseWriteLock(stamp);
-        }
-    }
-
-    private static MoveBucket[] buildMoveBucketOrder(MoveOrderingParameters.Snapshot parameters) {
-        MoveBucket[] order = MoveBucket.values().clone();
-        Arrays.sort(order, Comparator
-                .comparingInt((MoveBucket bucket) -> resolveCategoryWeight(bucket, parameters))
-                .reversed()
-                .thenComparingInt(MoveBucket::ordinal));
-        return order;
-    }
-
-    private static int resolveCategoryWeight(MoveBucket bucket, MoveOrderingParameters.Snapshot parameters) {
-        return switch (bucket) {
-            case TT -> parameters.categoryTt();
-            case PROMOTION -> parameters.categoryPromotion();
-            case CAPTURE_GOOD -> parameters.categoryCaptureGood();
-            case CAPTURE_EQUAL -> parameters.categoryCaptureEqual();
-            case KILLER0 -> parameters.categoryKiller0();
-            case KILLER1 -> parameters.categoryKiller1();
-            case QUIET -> parameters.categoryQuiet();
-            case CAPTURE_BAD -> parameters.categoryCaptureBad();
-        };
-    }
-
-    private static void insertByScore(IntArrayList bucket, int moveIndex, int[] scoreBuffer, int[] moveBuffer) {
-        int score = scoreBuffer[moveIndex];
-        int move = moveBuffer[moveIndex];
-        int insertPosition = bucket.size();
-        while (insertPosition > 0) {
-            int existingIndex = bucket.getInt(insertPosition - 1);
-            int existingScore = scoreBuffer[existingIndex];
-            if (score > existingScore) {
-                insertPosition--;
-                continue;
-            }
-            if (score == existingScore && move > moveBuffer[existingIndex]) {
-                insertPosition--;
-                continue;
-            }
-            break;
-        }
-        bucket.add(insertPosition, moveIndex);
-    }
-
-    private static int writeBucket(IntArrayList bucket, int[] sourceMoves, int[] target, int startIndex) {
-        for (int i = 0, size = bucket.size(); i < size; i++) {
-            target[startIndex++] = sourceMoves[bucket.getInt(i)];
-        }
-        return startIndex;
+        heuristicsManager.clearHistory();
     }
 
     private int calculateMvvLvaScore(int move) {
-        if (!MoveHelper.isCapture(move)) {
-            return 0; // Not a capture move
-        }
-        int victimValue = Score.getPieceValue(MoveHelper.deriveCapturedPieceTypeBits(move));
-        int attackerValue = Score.getPieceValue(MoveHelper.derivePieceTypeBits(move));
-        return victimValue - attackerValue;
+        return MoveOrderer.calculateMvvLvaScore(move);
     }
 
-    private static final class WorkerInstrumentation {
-        private LongAdder[] idleNanos;
-        private LongAdder[] activeNanos;
-        private LongAdder[] jobCounters;
-
-        WorkerInstrumentation(int threads) {
-            ensureCapacityInternal(Math.max(1, threads));
-        }
-
-        synchronized void ensureCapacity(int threads) {
-            ensureCapacityInternal(Math.max(1, threads));
-        }
-
-        void recordIdle(int workerIndex, long nanos) {
-            if (idleNanos == null || workerIndex < 0 || workerIndex >= idleNanos.length || nanos <= 0L) {
-                return;
-            }
-            idleNanos[workerIndex].add(nanos);
-        }
-
-        void recordActive(int workerIndex, long nanos) {
-            if (activeNanos == null || workerIndex < 0 || workerIndex >= activeNanos.length || nanos <= 0L) {
-                return;
-            }
-            activeNanos[workerIndex].add(nanos);
-        }
-
-        void incrementJobs(int workerIndex) {
-            if (jobCounters == null || workerIndex < 0 || workerIndex >= jobCounters.length) {
-                return;
-            }
-            jobCounters[workerIndex].increment();
-        }
-
-        synchronized String buildSummaryAndReset(int workers) {
-            if (workers <= 0) {
-                resetAll();
-                return "";
-            }
-            ensureCapacityInternal(workers);
-            StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < workers; i++) {
-                long active = activeNanos[i].sum();
-                long idle = idleNanos[i].sum();
-                long jobs = jobCounters[i].sum();
-                long total = active + idle;
-                double utilisation = total > 0 ? (active * 100.0) / total : 0.0;
-                if (i > 0) {
-                    sb.append("; ");
-                }
-                sb.append("worker=").append(i)
-                        .append(" jobs=").append(jobs)
-                        .append(" activeMs=").append(TimeUnit.NANOSECONDS.toMillis(active))
-                        .append(" idleMs=").append(TimeUnit.NANOSECONDS.toMillis(idle))
-                        .append(" util=").append(String.format(Locale.ROOT, "%.1f%%", utilisation));
-            }
-            resetAll();
-            return sb.toString();
-        }
-
-        private void resetAll() {
-            if (idleNanos != null) {
-                for (LongAdder adder : idleNanos) {
-                    adder.reset();
-                }
-            }
-            if (activeNanos != null) {
-                for (LongAdder adder : activeNanos) {
-                    adder.reset();
-                }
-            }
-            if (jobCounters != null) {
-                for (LongAdder adder : jobCounters) {
-                    adder.reset();
-                }
-            }
-        }
-
-        private void ensureCapacityInternal(int threads) {
-            if (idleNanos != null && idleNanos.length >= threads) {
-                return;
-            }
-            idleNanos = grow(idleNanos, threads);
-            activeNanos = grow(activeNanos, threads);
-            jobCounters = grow(jobCounters, threads);
-        }
-
-        private static LongAdder[] grow(LongAdder[] original, int newLength) {
-            LongAdder[] expanded = new LongAdder[newLength];
-            int existing = original != null ? original.length : 0;
-            for (int i = 0; i < newLength; i++) {
-                if (i < existing && original[i] != null) {
-                    expanded[i] = original[i];
-                } else {
-                    expanded[i] = new LongAdder();
-                }
-            }
-            return expanded;
-        }
-    }
-
-    private static final class LockMetrics {
-        private final AtomicLong maxReadWait = new AtomicLong();
-        private final AtomicLong maxWriteWait = new AtomicLong();
-        private final LongAdder readAcquisitions = new LongAdder();
-        private final LongAdder writeAcquisitions = new LongAdder();
-        private final LongAdder optimisticSnapshots = new LongAdder();
-        private final LongAdder optimisticFallbacks = new LongAdder();
-
-        void recordReadAcquisition(long waitNanos) {
-            readAcquisitions.increment();
-            updateMax(maxReadWait, waitNanos);
-        }
-
-        void recordWriteAcquisition(long waitNanos) {
-            writeAcquisitions.increment();
-            updateMax(maxWriteWait, waitNanos);
-        }
-
-        void recordOptimisticSnapshot() {
-            optimisticSnapshots.increment();
-        }
-
-        void recordOptimisticFallback() {
-            optimisticFallbacks.increment();
-        }
-
-        private static void updateMax(AtomicLong target, long value) {
-            target.accumulateAndGet(value, Math::max);
-        }
-    }
-
-    private static final class Heuristics {
-        private static final int BOARD_SQUARES = 64;
-        private static final int HISTORY_SIZE = BOARD_SQUARES * BOARD_SQUARES;
-
-        private int[][] killers;
-        private final int[][] history;
-        private final int[][] counter;
-
-        private boolean[] killerDirty;
-        private int[] killerDirtyList;
-        private int killerDirtyCount;
-
-        private final int[] historyDelta;
-        private final boolean[] historyDirty;
-        private final int[] historyDirtyList;
-        private int historyDirtyCount;
-
-        private final int[] counterUpdates;
-        private final boolean[] counterDirty;
-        private final int[] counterDirtyList;
-        private int counterDirtyCount;
-
-        private long preparedTaskId = Long.MIN_VALUE;
-        private int preparedDepth = -1;
-
-        Heuristics(int depth) {
-            this.killers = allocateKillers(Math.max(1, depth));
-            this.history = new int[BOARD_SQUARES][BOARD_SQUARES];
-            this.counter = new int[BOARD_SQUARES][BOARD_SQUARES];
-            for (int f = 0; f < BOARD_SQUARES; f++) {
-                Arrays.fill(counter[f], -1);
-            }
-            this.killerDirty = new boolean[Math.max(1, depth)];
-            this.killerDirtyList = new int[Math.max(1, depth)];
-            this.historyDelta = new int[HISTORY_SIZE];
-            this.historyDirty = new boolean[HISTORY_SIZE];
-            this.historyDirtyList = new int[HISTORY_SIZE];
-            this.counterUpdates = new int[HISTORY_SIZE];
-            Arrays.fill(counterUpdates, -1);
-            this.counterDirty = new boolean[HISTORY_SIZE];
-            this.counterDirtyList = new int[HISTORY_SIZE];
-        }
-
-        private static int[][] allocateKillers(int depth) {
-            int[][] table = new int[depth][NUM_KILLER_MOVES];
-            for (int i = 0; i < depth; i++) {
-                Arrays.fill(table[i], -1);
-            }
-            return table;
-        }
-
-        void ensureCapacity(int depth) {
-            if (depth <= killers.length) {
-                return;
-            }
-            int[][] expanded = allocateKillers(depth);
-            for (int i = 0; i < killers.length; i++) {
-                System.arraycopy(killers[i], 0, expanded[i], 0, killers[i].length);
-            }
-            killers = expanded;
-            killerDirty = Arrays.copyOf(killerDirty, depth);
-            killerDirtyList = Arrays.copyOf(killerDirtyList, depth);
-        }
-
-        void beginIteration(Snapshot snapshot, int requiredDepth) {
-            resetUpdates();
-            ensureCapacity(requiredDepth);
-            int limit = Math.min(requiredDepth, snapshot.killers.length);
-            for (int d = 0; d < limit; d++) {
-                System.arraycopy(snapshot.killers[d], 0, killers[d], 0, NUM_KILLER_MOVES);
-            }
-            for (int d = limit; d < requiredDepth; d++) {
-                Arrays.fill(killers[d], -1);
-            }
-            for (int f = 0; f < BOARD_SQUARES; f++) {
-                System.arraycopy(snapshot.history[f], 0, history[f], 0, BOARD_SQUARES);
-                System.arraycopy(snapshot.counter[f], 0, counter[f], 0, BOARD_SQUARES);
-            }
-        }
-
-        Snapshot snapshot(int requiredDepth) {
-            int killerDepth = Math.min(requiredDepth, killers.length);
-            int[][] killerCopy = new int[killerDepth][];
-            for (int d = 0; d < killerDepth; d++) {
-                killerCopy[d] = Arrays.copyOf(killers[d], NUM_KILLER_MOVES);
-            }
-            int[][] historyCopy = new int[BOARD_SQUARES][];
-            int[][] counterCopy = new int[BOARD_SQUARES][];
-            for (int f = 0; f < BOARD_SQUARES; f++) {
-                historyCopy[f] = Arrays.copyOf(history[f], BOARD_SQUARES);
-                counterCopy[f] = Arrays.copyOf(counter[f], BOARD_SQUARES);
-            }
-            return new Snapshot(killerCopy, historyCopy, counterCopy);
-        }
-
-        record Snapshot(int[][] killers, int[][] history, int[][] counter) {
-        }
-
-        boolean isPreparedFor(long taskId, int depth) {
-            return preparedTaskId == taskId && preparedDepth == depth;
-        }
-
-        void markPrepared(long taskId, int depth) {
-            this.preparedTaskId = taskId;
-            this.preparedDepth = depth;
-        }
-
-        void resetUpdates() {
-            for (int i = 0; i < killerDirtyCount; i++) {
-                killerDirty[killerDirtyList[i]] = false;
-            }
-            killerDirtyCount = 0;
-
-            for (int i = 0; i < historyDirtyCount; i++) {
-                int idx = historyDirtyList[i];
-                historyDirty[idx] = false;
-                historyDelta[idx] = 0;
-            }
-            historyDirtyCount = 0;
-
-            for (int i = 0; i < counterDirtyCount; i++) {
-                int idx = counterDirtyList[i];
-                counterDirty[idx] = false;
-                counterUpdates[idx] = -1;
-            }
-            counterDirtyCount = 0;
-            preparedTaskId = Long.MIN_VALUE;
-            preparedDepth = -1;
-        }
-
-        boolean hasUpdates() {
-            return killerDirtyCount > 0 || historyDirtyCount > 0 || counterDirtyCount > 0;
-        }
-
-        void recordKiller(int depth, int move) {
-            if (move == -1) {
-                return;
-            }
-            int depthIndex = Math.max(0, Math.min(depth, killers.length - 1));
-            int[] row = killers[depthIndex];
-            for (int j : row) {
-                if (j == move) {
-                    return;
-                }
-            }
-            for (int i = row.length - 1; i > 0; i--) {
-                row[i] = row[i - 1];
-            }
-            row[0] = move;
-            if (!killerDirty[depthIndex]) {
-                killerDirty[depthIndex] = true;
-                killerDirtyList[killerDirtyCount++] = depthIndex;
-            }
-        }
-
-        void addHistory(int move, int delta) {
-            if (move == -1 || MoveHelper.isCapture(move) || delta <= 0) {
-                return;
-            }
-            int from = move & 0x3F;
-            int to = (move >>> 6) & 0x3F;
-            history[from][to] += delta;
-            int idx = (from << 6) | to;
-            if (!historyDirty[idx]) {
-                historyDirty[idx] = true;
-                historyDirtyList[historyDirtyCount++] = idx;
-            }
-            historyDelta[idx] += delta;
-        }
-
-        void recordCounterMove(int prevMove, int move) {
-            if (prevMove < 0) {
-                return;
-            }
-            int pf = prevMove & 0x3F;
-            int pt = (prevMove >>> 6) & 0x3F;
-            counter[pf][pt] = move;
-            int idx = (pf << 6) | pt;
-            if (!counterDirty[idx]) {
-                counterDirty[idx] = true;
-                counterDirtyList[counterDirtyCount++] = idx;
-            }
-            counterUpdates[idx] = move;
-        }
-
-        boolean hasPendingUpdates() {
-            return killerDirtyCount > 0 || historyDirtyCount > 0 || counterDirtyCount > 0;
-        }
-
-        void mergeInto(Heuristics target) {
-            for (int i = 0; i < killerDirtyCount; i++) {
-                int depth = killerDirtyList[i];
-                target.ensureCapacity(depth + 1);
-                int[] row = killers[depth];
-                for (int move : row) {
-                    if (move != -1) {
-                        target.insertKiller(depth, move);
-                    }
-                }
-            }
-            for (int i = 0; i < historyDirtyCount; i++) {
-                int idx = historyDirtyList[i];
-                int from = idx >>> 6;
-                int to = idx & 0x3F;
-                target.history[from][to] += historyDelta[idx];
-            }
-            for (int i = 0; i < counterDirtyCount; i++) {
-                int idx = counterDirtyList[i];
-                int from = idx >>> 6;
-                int to = idx & 0x3F;
-                target.counter[from][to] = counterUpdates[idx];
-            }
-        }
-
-        void insertKiller(int depth, int move) {
-            if (move == -1) {
-                return;
-            }
-            int depthIndex = Math.max(0, Math.min(depth, killers.length - 1));
-            int[] row = killers[depthIndex];
-            for (int j : row) {
-                if (j == move) {
-                    return;
-                }
-            }
-            for (int i = row.length - 1; i > 0; i--) {
-                row[i] = row[i - 1];
-            }
-            row[0] = move;
-        }
-
-        void decayHistory(int divisor) {
-            if (divisor <= 1) {
-                return;
-            }
-            for (int f = 0; f < BOARD_SQUARES; f++) {
-                for (int t = 0; t < BOARD_SQUARES; t++) {
-                    history[f][t] /= divisor;
-                }
-            }
-        }
-
-        void clearHistory() {
-            for (int f = 0; f < BOARD_SQUARES; f++) {
-                Arrays.fill(history[f], 0);
-            }
-            resetUpdates();
-        }
-
-        void clearCounter() {
-            for (int f = 0; f < BOARD_SQUARES; f++) {
-                Arrays.fill(counter[f], -1);
-            }
-            for (int i = 0; i < counterDirtyCount; i++) {
-                int idx = counterDirtyList[i];
-                counterDirty[idx] = false;
-                counterUpdates[idx] = -1;
-            }
-            counterDirtyCount = 0;
-        }
-
-    }
+    // Heuristics, WorkerInstrumentation, and LockMetrics have been extracted
+    // to their own top-level files in this package.
 }

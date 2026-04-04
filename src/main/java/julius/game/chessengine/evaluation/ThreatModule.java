@@ -28,6 +28,7 @@ public final class ThreatModule implements EvaluationModule {
 
     private final int[] hangingPenalties = new int[7];
     private final int[] pawnThreatPenalties = new int[7];
+    private final int rookNoPawnCoverPenalty;
 
     public ThreatModule() {
         hangingPenalties[PAWN] = Tuning.hangingPawnPenalty();
@@ -40,6 +41,7 @@ public final class ThreatModule implements EvaluationModule {
         pawnThreatPenalties[BISHOP] = Tuning.pawnThreatBishopPenalty();
         pawnThreatPenalties[ROOK] = Tuning.pawnThreatRookPenalty();
         pawnThreatPenalties[QUEEN] = Tuning.pawnThreatQueenPenalty();
+        rookNoPawnCoverPenalty = Tuning.rookNoPawnCoverPenalty();
     }
 
     private int midgameScoreCache;
@@ -108,9 +110,12 @@ public final class ThreatModule implements EvaluationModule {
 
     private int evaluateSide(ImmutableBoardView board, boolean isWhite, long friendlyAttacks, long enemyAttacks) {
         long pieces = isWhite ? board.getWhitePieces() : board.getBlackPieces();
+        long friendlyPawns = isWhite ? board.getWhitePawns() : board.getBlackPawns();
         long enemyPawns = isWhite ? board.getBlackPawns() : board.getWhitePawns();
+        int friendlyPawnColor = isWhite ? WHITE : BLACK;
         int enemyPawnColor = isWhite ? BLACK : WHITE;
         long enemyPawnAttacks = computePawnAttackMask(enemyPawns, enemyPawnColor);
+        long friendlyPawnAttacks = computePawnAttackMask(friendlyPawns, friendlyPawnColor);
 
         int penalty = 0;
         long remaining = pieces;
@@ -140,6 +145,10 @@ public final class ThreatModule implements EvaluationModule {
             penalty += hangingPenalties[typeBits];
             if (typeBits > PAWN && (enemyPawnAttacks & mask) != 0) {
                 penalty += pawnThreatPenalties[typeBits];
+            }
+            // Extra penalty for hanging rooks on squares not covered by any friendly pawn
+            if (typeBits == ROOK && (friendlyPawnAttacks & mask) == 0) {
+                penalty += rookNoPawnCoverPenalty;
             }
             remaining ^= bit;
         }
