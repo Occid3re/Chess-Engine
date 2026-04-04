@@ -113,7 +113,56 @@ public final class EvaluationPipeline {
         int midgameWeight = blendScale - phase;
         int endgameWeight = phase;
         long blended = (long) midgameTotal * midgameWeight + (long) endgameTotal * endgameWeight;
-        return (int) (blended / blendScale);
+        int score = (int) (blended / blendScale);
+
+        // Mop-up evaluation: in late endgame with material advantage,
+        // encourage driving the losing king toward the corner
+        if (phase > 200) { // deep endgame
+            score += computeMopUpBonus(score);
+        }
+
+        return score;
+    }
+
+    /**
+     * When one side has a significant material advantage in the endgame,
+     * bonus for: (1) losing king far from center, (2) kings close together.
+     */
+    private int computeMopUpBonus(int currentScore) {
+        if (context == null || context.getBoardView() == null) {
+            return 0;
+        }
+        // Only apply if material advantage is significant (> 2 pawns)
+        if (Math.abs(currentScore) < 200) {
+            return 0;
+        }
+        var board = context.getBoardView();
+        long whiteKing = board.getWhiteKing();
+        long blackKing = board.getBlackKing();
+        if (whiteKing == 0 || blackKing == 0) {
+            return 0;
+        }
+        int wkSq = Long.numberOfTrailingZeros(whiteKing);
+        int bkSq = Long.numberOfTrailingZeros(blackKing);
+
+        boolean whiteWinning = currentScore > 0;
+        int losingKingSq = whiteWinning ? bkSq : wkSq;
+
+        // Distance of losing king from center (d4/e4/d5/e5)
+        int losingFile = losingKingSq & 7;
+        int losingRank = losingKingSq >> 3;
+        int fileDist = Math.max(3 - losingFile, losingFile - 4);
+        int rankDist = Math.max(3 - losingRank, losingRank - 4);
+        int cornerDistance = fileDist + rankDist; // 0 at center, up to 6 at corner
+
+        // Distance between kings (encourage winning king to approach)
+        int kingFileDiff = Math.abs((wkSq & 7) - (bkSq & 7));
+        int kingRankDiff = Math.abs((wkSq >> 3) - (bkSq >> 3));
+        int kingDist = Math.max(kingFileDiff, kingRankDiff);
+        int closenessBonus = Math.max(0, 7 - kingDist); // 0 when far apart, 6 when adjacent
+
+        int mopUp = cornerDistance * 5 + closenessBonus * 3;
+        return whiteWinning ? mopUp : -mopUp;
     }
 
     public double getScoreDifference() {
