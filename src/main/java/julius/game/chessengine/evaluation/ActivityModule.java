@@ -154,6 +154,16 @@ public final class ActivityModule implements EvaluationModule {
     private long blackPieces;
     private long allPieces;
     private long sliderSquares;
+    private long whitePawns;
+    private long blackPawns;
+
+    // Bonus constants for positional features
+    private static final int KNIGHT_OUTPOST_MIDGAME = 15;
+    private static final int KNIGHT_OUTPOST_ENDGAME = 10;
+    private static final int ROOK_SEVENTH_RANK_MIDGAME = 20;
+    private static final int ROOK_SEVENTH_RANK_ENDGAME = 30;
+    private static final long RANK_7 = 0x00FF000000000000L;
+    private static final long RANK_2 = 0x000000000000FF00L;
 
     private int midgameScoreCache;
     private int endgameScoreCache;
@@ -476,8 +486,10 @@ public final class ActivityModule implements EvaluationModule {
         whitePieces = 0L;
         blackPieces = 0L;
         sliderSquares = 0L;
+        whitePawns = board.getWhitePawns();
+        blackPawns = board.getBlackPawns();
 
-        registerPieces(board.getWhitePawns(), WHITE, PAWN);
+        registerPieces(whitePawns, WHITE, PAWN);
         registerPieces(board.getWhiteKnights(), WHITE, KNIGHT);
         registerPieces(board.getWhiteBishops(), WHITE, BISHOP);
         registerPieces(board.getWhiteRooks(), WHITE, ROOK);
@@ -499,8 +511,82 @@ public final class ActivityModule implements EvaluationModule {
             }
         }
 
+        addPositionalBonuses(board);
         updateScoreCache();
         dirty = false;
+    }
+
+    /**
+     * Adds positional bonuses that go beyond simple mobility:
+     * - Knight outpost bonus (supported by own pawn, can't be attacked by enemy pawns)
+     * - Rook on 7th rank bonus (strong attacking position)
+     */
+    private void addPositionalBonuses(ImmutableBoardView board) {
+        // Knight outposts: knights on rank 4-6 supported by own pawn and not attackable by enemy pawns
+        addKnightOutpostBonus(board.getWhiteKnights(), whitePawns, blackPawns, true);
+        addKnightOutpostBonus(board.getBlackKnights(), blackPawns, whitePawns, false);
+
+        // Rook on 7th rank bonus
+        addRookSeventhRankBonus(board.getWhiteRooks(), RANK_7, board.getBlackKing(), true);
+        addRookSeventhRankBonus(board.getBlackRooks(), RANK_2, board.getWhiteKing(), false);
+    }
+
+    private void addKnightOutpostBonus(long knights, long friendlyPawns, long enemyPawns, boolean isWhite) {
+        int friendlyPawnColor = isWhite ? WHITE : BLACK;
+        int enemyPawnColor = isWhite ? BLACK : WHITE;
+        int colorIdx = isWhite ? WHITE : BLACK;
+        long remaining = knights;
+        while (remaining != 0) {
+            int sq = Long.numberOfTrailingZeros(remaining);
+            remaining &= remaining - 1;
+            int rank = sq >> 3;
+            // Only consider outpost squares on ranks 4-6 for white, 3-5 for black
+            boolean onOutpostRank = isWhite ? (rank >= 3 && rank <= 5) : (rank >= 2 && rank <= 4);
+            if (!onOutpostRank) continue;
+
+            // Check if supported by own pawn
+            long knightMask = 1L << sq;
+            long friendlyPawnAttacks = computePawnAttackMaskForSquares(friendlyPawns, friendlyPawnColor);
+            if ((friendlyPawnAttacks & knightMask) == 0) continue;
+
+            // Check if enemy pawns can attack this square (no enemy pawns on adjacent files ahead)
+            int file = sq & 7;
+            long adjacentFiles = 0L;
+            if (file > 0) adjacentFiles |= julius.game.chessengine.helper.BitHelper.FileMasks[file - 1];
+            if (file < 7) adjacentFiles |= julius.game.chessengine.helper.BitHelper.FileMasks[file + 1];
+            long forwardRanks = isWhite
+                    ? julius.game.chessengine.helper.PawnMoveTables.FORWARD_RANK_MASKS_WHITE[sq]
+                    : julius.game.chessengine.helper.PawnMoveTables.FORWARD_RANK_MASKS_BLACK[sq];
+            boolean canBeAttackedByPawn = (enemyPawns & adjacentFiles & forwardRanks) != 0;
+            if (canBeAttackedByPawn) continue;
+
+            midgameTotals[colorIdx] += KNIGHT_OUTPOST_MIDGAME;
+            endgameTotals[colorIdx] += KNIGHT_OUTPOST_ENDGAME;
+        }
+    }
+
+    private void addRookSeventhRankBonus(long rooks, long seventhRank, long enemyKing, boolean isWhite) {
+        int colorIdx = isWhite ? WHITE : BLACK;
+        long rooksOnSeventh = rooks & seventhRank;
+        if (rooksOnSeventh == 0) return;
+        // Only give bonus if enemy king is on 8th (or 1st for black) rank
+        int enemyKingRank = enemyKing != 0 ? (Long.numberOfTrailingZeros(enemyKing) >> 3) : -1;
+        boolean enemyKingOnBackRank = isWhite ? (enemyKingRank == 7) : (enemyKingRank == 0);
+        if (!enemyKingOnBackRank) return;
+        int rookCount = Long.bitCount(rooksOnSeventh);
+        midgameTotals[colorIdx] += rookCount * ROOK_SEVENTH_RANK_MIDGAME;
+        endgameTotals[colorIdx] += rookCount * ROOK_SEVENTH_RANK_ENDGAME;
+    }
+
+    private static long computePawnAttackMaskForSquares(long pawns, int pawnColor) {
+        long mask = 0L;
+        long remaining = pawns;
+        while (remaining != 0) {
+            int index = Long.numberOfTrailingZeros(remaining);
+            mask |= julius.game.chessengine.helper.PawnMoveTables.PAWN_ATTACKS[pawnColor][index];
+            remaining &= remaining - 1;
+        }
+        return mask;
     }
 
     private void registerPieces(long bitboard, int color, int pieceType) {

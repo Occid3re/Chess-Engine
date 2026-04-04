@@ -133,15 +133,24 @@ public final class ThreatModule implements EvaluationModule {
                 continue;
             }
             long mask = 1L << square;
-            if ((enemyAttacks & mask) == 0) {
-                remaining ^= bit;
-                continue;
-            }
-            if ((friendlyAttacks & mask) != 0) {
+            boolean attackedByEnemy = (enemyAttacks & mask) != 0;
+            boolean defendedByFriendly = (friendlyAttacks & mask) != 0;
+
+            if (!attackedByEnemy) {
                 remaining ^= bit;
                 continue;
             }
 
+            if (defendedByFriendly) {
+                // Defended piece attacked by enemy pawn: half pawn-threat penalty
+                if (typeBits > PAWN && (enemyPawnAttacks & mask) != 0) {
+                    penalty += pawnThreatPenalties[typeBits] / 2;
+                }
+                remaining ^= bit;
+                continue;
+            }
+
+            // Undefended (hanging) piece
             penalty += hangingPenalties[typeBits];
             if (typeBits > PAWN && (enemyPawnAttacks & mask) != 0) {
                 penalty += pawnThreatPenalties[typeBits];
