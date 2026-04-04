@@ -95,28 +95,9 @@ public class AI {
     @Getter
     private int hashSizeMb;
 
-    /**
-     * Estimated footprint per stored entry in the main and capture transposition tables.
-     * The estimate accounts for the entry object itself as well as the surrounding table
-     * structure (key arrays/atomic wrappers). Values are rounded up generously so the
-     * engine never allocates more memory than requested.
-     */
-    private static final int MAIN_TT_ENTRY_BYTES = 48;
-    private static final int CAPTURE_TT_ENTRY_BYTES = 32;
-
-    /**
-     * Entry limits enforced for each table. They are powers of two because the
-     * underlying implementation rounds the capacity up to the next power of two.
-     * Keeping the min/max explicit makes the Hash option predictable for UCI
-     * front-ends.
-     */
-    private static final int MIN_MAIN_TT_ENTRIES = 1 << 12;      // 4k entries ≈ 192 KB
-    private static final int MAX_MAIN_TT_ENTRIES = 1 << 26;      // 67,108,864 entries
-    private static final int MIN_CAPTURE_TT_ENTRIES = 1 << 11;   // 2k entries ≈ 64 KB
-    private static final int MAX_CAPTURE_TT_ENTRIES = 1 << 25;   // 33,554,432 entries
-
-    public static final int MIN_HASH_SIZE_MB = 1;
-    public static final int MAX_HASH_SIZE_MB = 4096;
+    // TT entry sizes and capacity limits are managed by TranspositionTableManager.
+    public static final int MIN_HASH_SIZE_MB = TranspositionTableManager.MIN_HASH_SIZE_MB;
+    public static final int MAX_HASH_SIZE_MB = TranspositionTableManager.MAX_HASH_SIZE_MB;
 
     /**
      * Thread pool for root-split parallel search (created only if searchThreads > 1).
@@ -184,8 +165,7 @@ public class AI {
      */
     private final ThreadLocal<Heuristics> threadHeuristics;
 
-    private final StampedLock heuristicsLock = new StampedLock();
-    private final LockMetrics heuristicsLockMetrics = new LockMetrics();
+    // Lock state is managed by HeuristicsManager
 
     // Move ordering buffers and SEE cache are managed by MoveOrderer.
 
@@ -383,114 +363,32 @@ public class AI {
     }
 
     private long acquireWriteLock() {
-        long start = System.nanoTime();
-        long stamp = heuristicsLock.writeLock();
-        heuristicsLockMetrics.recordWriteAcquisition(System.nanoTime() - start);
-        return stamp;
+        return heuristicsManager.acquireWriteLock();
     }
 
     private long acquireReadLock() {
-        long start = System.nanoTime();
-        long stamp = heuristicsLock.readLock();
-        heuristicsLockMetrics.recordReadAcquisition(System.nanoTime() - start);
-        return stamp;
+        return heuristicsManager.acquireReadLock();
     }
 
     private void releaseWriteLock(long stamp) {
-        heuristicsLock.unlockWrite(stamp);
+        heuristicsManager.releaseWriteLock(stamp);
     }
 
     private void releaseReadLock(long stamp) {
-        heuristicsLock.unlockRead(stamp);
+        heuristicsManager.releaseReadLock(stamp);
     }
 
     private Heuristics.Snapshot captureHeuristicsSnapshot(int requiredDepth) {
-        long stamp = heuristicsLock.tryOptimisticRead();
-        if (stamp != 0L) {
-            Heuristics.Snapshot optimistic = globalHeuristics.snapshot(requiredDepth);
-            if (heuristicsLock.validate(stamp)) {
-                heuristicsLockMetrics.recordOptimisticSnapshot();
-                return optimistic;
-            }
-        }
-
-        long readStamp = acquireReadLock();
-        try {
-            heuristicsLockMetrics.recordOptimisticFallback();
-            return globalHeuristics.snapshot(requiredDepth);
-        } finally {
-            releaseReadLock(readStamp);
-        }
+        return heuristicsManager.captureSnapshot(requiredDepth);
     }
 
     private void rebuildTranspositionTables() {
         boolean concurrent = Math.max(searchThreads, lazySmpThreads) > 1;
-        long totalBytes = Math.max(1L, (long) hashSizeMb * 1024L * 1024L);
-
-        double totalWeight = ttMainWeight + ttCaptureWeight;
-        if (totalWeight <= 0.0) {
-            totalWeight = 1.0;
-        }
-        long mainBudget = Math.max(1L, (long) (totalBytes * (ttMainWeight / totalWeight)));
-        long captureBudget = Math.max(1L, totalBytes - mainBudget);
-
-        int mainCapacity = computeTableCapacity(mainBudget, MAIN_TT_ENTRY_BYTES,
-                MIN_MAIN_TT_ENTRIES, MAX_MAIN_TT_ENTRIES);
-        int captureCapacity = computeTableCapacity(captureBudget, CAPTURE_TT_ENTRY_BYTES,
-                MIN_CAPTURE_TT_ENTRIES, MAX_CAPTURE_TT_ENTRIES);
-
-        this.transpositionTableCapacity = mainCapacity;
-        this.captureTranspositionTableCapacity = captureCapacity;
-
-        this.transpositionTable = concurrent
-                ? new FixedSizeTranspositionTable<>(mainCapacity)
-                : new PlainFixedSizeTranspositionTable<>(mainCapacity, TranspositionTableEntry.class);
-
-        this.captureTranspositionTable = concurrent
-                ? new FixedSizeTranspositionTable<>(captureCapacity)
-                : new PlainFixedSizeTranspositionTable<>(captureCapacity, CaptureTranspositionTableEntry.class);
-    }
-
-    private static int computeTableCapacity(long budgetBytes, int entryBytes, int minEntries, int maxEntries) {
-        if (entryBytes <= 0) {
-            throw new IllegalArgumentException("Entry byte estimate must be positive");
-        }
-
-        long estimatedEntries = Math.max(1L, budgetBytes / entryBytes);
-        if (estimatedEntries > Integer.MAX_VALUE) {
-            estimatedEntries = Integer.MAX_VALUE;
-        }
-
-        int candidate = (int) estimatedEntries;
-        if (candidate < minEntries) {
-            candidate = minEntries;
-        } else if (candidate > maxEntries) {
-            candidate = maxEntries;
-        }
-
-        int rounded = roundUpToPowerOfTwo(candidate);
-        if (rounded < minEntries) {
-            rounded = minEntries;
-        }
-        while (rounded > maxEntries && rounded > 1) {
-            rounded >>= 1;
-        }
-        return rounded;
-    }
-
-    private static int roundUpToPowerOfTwo(int value) {
-        // define behavior for non-positive
-        if (value <= 1) return 1;
-
-        // anything above 2^30 must saturate (since 2^31 doesn't fit in signed int)
-        if (value > (1 << 30)) return 1 << 30;
-
-        // exact power-of-two? return unchanged
-        int hib = Integer.highestOneBit(value);
-        if (hib == value) return value;
-
-        // next power-of-two (safe because value <= 2^30)
-        return hib << 1;
+        ttManager.rebuild(concurrent);
+        this.transpositionTable = ttManager.getMainTable();
+        this.captureTranspositionTable = ttManager.getCaptureTable();
+        this.transpositionTableCapacity = ttManager.getMainTableCapacity();
+        this.captureTranspositionTableCapacity = ttManager.getCaptureTableCapacity();
     }
 
     /**
@@ -1012,39 +910,11 @@ public class AI {
     }
 
     private void clearStaticEvalCache() {
-        staticEvalCache.get().clear();
+        quiescenceSearcher.clearCache();
     }
 
     private double resolveScoreDifference(GameState gameState, long boardHash, boolean whiteToMove) {
-        Long2DoubleOpenHashMap cache = staticEvalCache.get();
-        Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
-        if (tablebase.isPresent()) {
-            int halfmoveClock = gameState.getHalfmoveClock();
-            long cacheKey = mixBoardHashWithHalfmove(boardHash, halfmoveClock);
-            double cached = cache.get(cacheKey);
-            if (!Double.isNaN(cached)) {
-                return cached;
-            }
-            TablebaseResult result = tablebase.get();
-            double evaluation = isExactWdl(result)
-                    ? clampTablebaseEval(Score.tablebaseToEvaluation(result, whiteToMove, halfmoveClock))
-                    : gameState.getScore().getScoreDifference();
-            cache.put(cacheKey, evaluation);
-            return evaluation;
-        }
-        double cached = cache.get(boardHash);
-        if (!Double.isNaN(cached)) {
-            return cached;
-        }
-        double computed = gameState.getScore().getScoreDifference();
-        cache.put(boardHash, computed);
-        return computed;
-    }
-
-    private static long mixBoardHashWithHalfmove(long boardHash, int halfmoveClock) {
-        long clock = Integer.toUnsignedLong(halfmoveClock);
-        long rotated = Long.rotateLeft(clock, 32);
-        return boardHash ^ rotated ^ (clock << 1);
+        return quiescenceSearcher.resolveScoreDifference(gameState, boardHash, whiteToMove);
     }
 
     protected RootSearchResult searchRootMoves(Engine sim, SearchTask task, int depth, double alpha, double beta, SplittableRandom rng) {
@@ -3191,34 +3061,11 @@ public class AI {
 
 
     private double evaluateStaticPosition(GameState gameState, long boardHash, boolean isWhitesTurn, int depthOrPly) {
-        if (gameState.isInStateCheckMate()) {
-            return -(CHECKMATE - depthOrPly);
-        }
-        EvaluationContext context = gameState.getScore().getEvaluationContext();
-        boolean whiteToMove = context != null && context.isWhiteToMove();
-        Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
-        if (tablebase.isPresent() && isExactWdl(tablebase.get())) {
-            double whitePerspective = clampTablebaseEval(Score.tablebaseToEvaluation(tablebase.get(), whiteToMove,
-                    gameState.getHalfmoveClock()));
-            return isWhitesTurn ? whitePerspective : -whitePerspective;
-        }
-        if (gameState.isDrawForUIOrEval()) { // <-- include insufficient material for eval/UI
-            if (log.isDebugEnabled()) log.debug("DRAW");
-            double scoreDiff = resolveScoreDifference(gameState, boardHash, whiteToMove);
-            if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
-                return DRAW - drawBias;
-            } else if ((isWhitesTurn && scoreDiff < 0) || (!isWhitesTurn && scoreDiff > 0)) {
-                return DRAW + drawBias;
-            }
-            return DRAW;
-        }
-        double scoreDifference = resolveScoreDifference(gameState, boardHash, whiteToMove);
-        return isWhitesTurn ? scoreDifference : -scoreDifference;
+        return quiescenceSearcher.evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depthOrPly);
     }
 
     private IntArrayList getPossibleCapturesOrPromotions(Engine simulatorEngine) {
-        IntArrayList allLegalMoves = simulatorEngine.getAllLegalMoves();
-        return MoveContainerUtils.filterCapturesAndPromotions(allLegalMoves);
+        return MoveContainerUtils.filterCapturesAndPromotions(simulatorEngine.getAllLegalMoves());
     }
 
     private boolean hasImmediateTacticalMoves(Engine simulatorEngine) {
@@ -3226,88 +3073,23 @@ public class AI {
     }
 
     private double estimateMaxTacticalSwing(IntArrayList moves) {
-        double bestSwing = 0.0;
-        final double pawnValue = Score.getPieceValue(1);
-
-        for (int i = 0; i < moves.size(); i++) {
-            int move = moves.getInt(i);
-            double swing = 0.0;
-
-            if (MoveHelper.isCapture(move)) {
-                int capturedBits = MoveHelper.deriveCapturedPieceTypeBits(move);
-                double captureValue;
-                if (capturedBits != 0) {
-                    captureValue = Score.getPieceValue(capturedBits);
-                } else if (MoveHelper.isEnPassantMove(move)) {
-                    captureValue = pawnValue;
-                } else {
-                    captureValue = 0.0;
-                }
-                swing += captureValue;
-            }
-
-            if (MoveHelper.isPawnPromotionMove(move)) {
-                int promotionBits = MoveHelper.derivePromotionPieceTypeBits(move);
-                if (promotionBits != 0) {
-                    double promotionDelta = Score.getPieceValue(promotionBits) - pawnValue;
-                    if (promotionDelta > 0) {
-                        swing += promotionDelta;
-                    }
-                }
-            }
-
-            if (swing > bestSwing) {
-                bestSwing = swing;
-                if (bestSwing >= quiescenceMaxDeltaPawn) {
-                    return quiescenceMaxDeltaPawn;
-                }
-            }
-        }
-
-        return Math.min(bestSwing, quiescenceMaxDeltaPawn);
+        return quiescenceSearcher.estimateMaxTacticalSwing(moves);
     }
 
     private boolean isMateValue(double score) {
-        return Double.isFinite(score) && Math.abs(score) >= (CHECKMATE - MATE_SCORE_MARGIN);
+        return QuiescenceSearcher.isMateValue(score);
     }
 
     private double adjustMateFromChild(double score) {
-        if (!Double.isFinite(score)) {
-            return score;
-        }
-        if (score >= CHECKMATE - MATE_SCORE_MARGIN) {
-            return score - 1;
-        }
-        if (score <= -CHECKMATE + MATE_SCORE_MARGIN) {
-            return score + 1;
-        }
-        return score;
+        return QuiescenceSearcher.adjustMateFromChild(score);
     }
 
     private double toStoredMateScore(double score, int plyFromRoot) {
-        if (!Double.isFinite(score)) {
-            return score;
-        }
-        if (score >= CHECKMATE - MATE_SCORE_MARGIN) {
-            return score + plyFromRoot;
-        }
-        if (score <= -CHECKMATE + MATE_SCORE_MARGIN) {
-            return score - plyFromRoot;
-        }
-        return score;
+        return QuiescenceSearcher.toStoredMateScore(score, plyFromRoot);
     }
 
     private double fromStoredMateScore(double score, int plyFromRoot) {
-        if (!Double.isFinite(score)) {
-            return score;
-        }
-        if (score >= CHECKMATE - MATE_SCORE_MARGIN) {
-            return score - plyFromRoot;
-        }
-        if (score <= -CHECKMATE + MATE_SCORE_MARGIN) {
-            return score + plyFromRoot;
-        }
-        return score;
+        return QuiescenceSearcher.fromStoredMateScore(score, plyFromRoot);
     }
 
     private boolean isZeroingMove(int move) {
@@ -3375,13 +3157,7 @@ public class AI {
     }
 
     private void clearHistoryTable() {
-        long stamp = acquireWriteLock();
-        try {
-            globalHeuristics.clearHistory();
-            globalHeuristics.clearCounter();
-        } finally {
-            releaseWriteLock(stamp);
-        }
+        heuristicsManager.clearHistory();
     }
 
     private int calculateMvvLvaScore(int move) {
