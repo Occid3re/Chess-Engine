@@ -554,6 +554,31 @@ public final class ActivityModule implements EvaluationModule {
         // Rook on 7th rank bonus
         addRookSeventhRankBonus(board.getWhiteRooks(), RANK_7, board.getBlackKing(), true);
         addRookSeventhRankBonus(board.getBlackRooks(), RANK_2, board.getWhiteKing(), false);
+
+        // Connected rooks bonus (two rooks defending each other)
+        addConnectedRooksBonus(board.getWhiteRooks(), true);
+        addConnectedRooksBonus(board.getBlackRooks(), false);
+    }
+
+    private static final int CONNECTED_ROOKS_MIDGAME = 10;
+    private static final int CONNECTED_ROOKS_ENDGAME = 15;
+
+    private void addConnectedRooksBonus(long rooks, boolean isWhite) {
+        if (Long.bitCount(rooks) < 2) return;
+        int colorIdx = isWhite ? WHITE : BLACK;
+        // Check if any rook attacks another rook (they see each other on rank or file)
+        long remaining = rooks;
+        while (remaining != 0) {
+            int sq = Long.numberOfTrailingZeros(remaining);
+            remaining &= remaining - 1;
+            long rookAttacks = ROOK_HELPER.calculateRookMoves(sq, allPieces);
+            if ((rookAttacks & rooks) != 0) {
+                // At least one pair of connected rooks
+                midgameTotals[colorIdx] += CONNECTED_ROOKS_MIDGAME;
+                endgameTotals[colorIdx] += CONNECTED_ROOKS_ENDGAME;
+                return; // count once
+            }
+        }
     }
 
     private void addKnightOutpostBonus(long knights, long friendlyPawns, long enemyPawns, boolean isWhite) {
