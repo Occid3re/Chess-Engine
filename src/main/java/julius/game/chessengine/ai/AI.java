@@ -10,11 +10,7 @@ import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.evaluation.EvaluationContext;
-import julius.game.chessengine.search.SearchPruning;
-import julius.game.chessengine.syzygy.SyzygyMove;
-import julius.game.chessengine.syzygy.SyzygyProbeResult;
 import julius.game.chessengine.syzygy.SyzygyTablebaseService;
-import julius.game.chessengine.syzygy.SyzygyWdl;
 import julius.game.chessengine.syzygy.TablebaseResult;
 import julius.game.chessengine.tuning.AiTuning;
 import julius.game.chessengine.tuning.AspirationParameters;
@@ -32,7 +28,6 @@ import java.util.function.IntFunction;
 
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.locks.StampedLock;
 
 import static julius.game.chessengine.helper.BitHelper.FileMasks;
 import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
@@ -138,7 +133,6 @@ public class AI {
 
     private final MoveOrderer moveOrderer;
     private final MoveOrderingParameters.Snapshot moveOrderingParameters;
-    private final MoveBucket[] moveBucketOrder;
     private final double moveOrderingHistoryScale;
     private final int moveOrderingHistoryDecayDivisor;
     private final SearchPruningParameters.Snapshot searchPruningParameters;
@@ -152,8 +146,6 @@ public class AI {
     private final double nullSwingGuardDivisor;
     private final double quiescenceMaxDeltaPawn;
     private final double drawBias;
-    private final double ttMainWeight;
-    private final double ttCaptureWeight;
 
     /**
      * Per-thread heuristic state used during move ordering. The tables are
@@ -313,7 +305,6 @@ public class AI {
 
         this.moveOrderingParameters = MoveOrderingParameters.snapshot();
         this.moveOrderer = new MoveOrderer(this.moveOrderingParameters);
-        this.moveBucketOrder = moveOrderer.getBucketOrder();
         this.moveOrderingHistoryScale = Math.max(0.0, moveOrderingParameters.historyScale());
         this.moveOrderingHistoryDecayDivisor = Math.max(1, moveOrderingParameters.historyDecayDivisor());
         this.searchPruningParameters = SearchPruningParameters.snapshot();
@@ -330,8 +321,8 @@ public class AI {
         this.nullSwingGuardDivisor = Math.max(1e-9, Tuning.searchNullSwingGuardDivisor());
         this.quiescenceMaxDeltaPawn = Tuning.searchQsMaxDeltaPawn();
         this.drawBias = Tuning.searchDrawBias();
-        this.ttMainWeight = Math.max(1e-9, Tuning.searchTtMainWeight());
-        this.ttCaptureWeight = Math.max(1e-9, Tuning.searchTtCaptureWeight());
+        double ttMainWeight = Math.max(1e-9, Tuning.searchTtMainWeight());
+        double ttCaptureWeight = Math.max(1e-9, Tuning.searchTtCaptureWeight());
         this.globalHeuristics = new Heuristics(maxDepth);
         this.threadHeuristics = ThreadLocal.withInitial(() -> new Heuristics(maxDepth));
 
