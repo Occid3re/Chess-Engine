@@ -76,6 +76,7 @@ public enum ParamId {
     THREAT_PAWN_THREAT_BISHOP_PENALTY("threat.pawnThreatBishopPenalty", -10),
     THREAT_PAWN_THREAT_ROOK_PENALTY("threat.pawnThreatRookPenalty", -18),
     THREAT_PAWN_THREAT_QUEEN_PENALTY("threat.pawnThreatQueenPenalty", -25),
+    THREAT_ROOK_NO_PAWN_COVER_PENALTY("threat.rookNoPawnCoverPenalty", -20),
 
     EVALUATION_BLEND_SCALE("evaluation.blendScale", 256, 1.0, 1024.0),
 

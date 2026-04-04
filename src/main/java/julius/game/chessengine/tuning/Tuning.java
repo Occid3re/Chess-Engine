@@ -85,6 +85,7 @@ public final class Tuning {
     private static int pawnThreatBishopPenalty;
     private static int pawnThreatRookPenalty;
     private static int pawnThreatQueenPenalty;
+    private static int rookNoPawnCoverPenalty;
 
     private static int developmentPhaseThreshold;
     private static int queenDevelopmentPhaseThreshold;
@@ -498,6 +499,10 @@ public final class Tuning {
 
     public static int pawnThreatQueenPenalty() {
         return pawnThreatQueenPenalty;
+    }
+
+    public static int rookNoPawnCoverPenalty() {
+        return rookNoPawnCoverPenalty;
     }
 
     public static int developmentPhaseThreshold() {
@@ -1037,6 +1042,7 @@ public final class Tuning {
             pawnThreatBishopPenalty = loadInt(ParamId.THREAT_PAWN_THREAT_BISHOP_PENALTY);
             pawnThreatRookPenalty = loadInt(ParamId.THREAT_PAWN_THREAT_ROOK_PENALTY);
             pawnThreatQueenPenalty = loadInt(ParamId.THREAT_PAWN_THREAT_QUEEN_PENALTY);
+            rookNoPawnCoverPenalty = loadInt(ParamId.THREAT_ROOK_NO_PAWN_COVER_PENALTY);
 
             evaluationBlendScale = loadInt(ParamId.EVALUATION_BLEND_SCALE);
 
