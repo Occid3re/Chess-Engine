@@ -42,7 +42,7 @@ population:
       search.aspmaxretriesvolbonushigh: 8.17728313970275
       search.aspmaxretriesmomentumdivisor: 3.415713831580272
       search.ttmainweight: 4.548662134286979
-      activity.endgamemobilityqueen: 2.6515823707404658
+      activity.endgamemobilityqueen: 4.0
       search.nullswingguarddivisor: 73.87380792279565
       search.nulldepthcap: 5.067566954030266
       activity.midgamemobilitybishop: 11.05310596053398
@@ -55,10 +55,10 @@ population:
       pawnstructure.passedpawnfreepathbonusperrank: 17.748791935114653
       moveordering.maxscore: 1.38587574085523E7
       search.lmpperdepth: 7.606071904925005
-      material.bishoppairbonus: 54.93124467907178
+      material.bishoppairbonus: 65.0
       search.aspfloorstreakstepcp: 22.86182365222208
       search.lmrmovelogoffset: 3.480869172172873
-      activity.endgamemobilityrook: 3.0717099959664997
+      activity.endgamemobilityrook: 5.0
       activity.midgamecenterrook: 1.8432445714151602
       moveordering.castlingbonus: 5201.548534057966
       search.lmrhistorybuckets: 5.482618134712996
@@ -90,7 +90,7 @@ population:
       search.nullmaterialcap: 28.72238996352345
       moveordering.category.captureequal: 4.667448156774766
       pawnstructure.islandpenalty: -10.29479683697748
-      activity.endgamemobilityking: 2.8779474672679095
+      activity.endgamemobilityking: 5.0
       threat.hangingpawnpenalty: -20.95388408220842
       search.aspdefaultspancp: 32.81064401529041
       search.lmpbase: 3.746607725506342
@@ -108,7 +108,7 @@ population:
       kingsafety.attackweightrook: 50.0
       search.lmrprotectindexmax: 4.531491799106837
       search.aspmaxretriesdepthdivisor: 1.0156193437773624
-      activity.endgamecenterking: 6.429792404182555
+      activity.endgamecenterking: 10.0
       search.hmphistorymax: 121.92808472289505
       search.drawbias: 0.3171886750767487
       search.qsmaxdeltapawn: 6.650566521587819
