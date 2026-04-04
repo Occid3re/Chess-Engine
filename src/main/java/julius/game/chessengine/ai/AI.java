@@ -10,10 +10,7 @@ import julius.game.chessengine.engine.Engine;
 import julius.game.chessengine.engine.GameState;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.evaluation.EvaluationContext;
-import julius.game.chessengine.syzygy.SyzygyMove;
-import julius.game.chessengine.syzygy.SyzygyProbeResult;
 import julius.game.chessengine.syzygy.SyzygyTablebaseService;
-import julius.game.chessengine.syzygy.SyzygyWdl;
 import julius.game.chessengine.syzygy.TablebaseResult;
 import julius.game.chessengine.tuning.AiTuning;
 import julius.game.chessengine.tuning.AspirationParameters;
@@ -34,7 +31,6 @@ import java.util.function.IntFunction;
 
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.locks.StampedLock;
 
 import static julius.game.chessengine.helper.BitHelper.FileMasks;
 import static julius.game.chessengine.helper.KingHelper.KING_ATTACKS;
@@ -140,7 +136,6 @@ public class AI {
 
     private final MoveOrderer moveOrderer;
     private final MoveOrderingParameters.Snapshot moveOrderingParameters;
-    private final MoveBucket[] moveBucketOrder;
     private final double moveOrderingHistoryScale;
     private final int moveOrderingHistoryDecayDivisor;
     private final SearchPruningParameters.Snapshot searchPruningParameters;
@@ -154,8 +149,6 @@ public class AI {
     private final double nullSwingGuardDivisor;
     private final double quiescenceMaxDeltaPawn;
     private final double drawBias;
-    private final double ttMainWeight;
-    private final double ttCaptureWeight;
 
     /**
      * Per-thread heuristic state used during move ordering. The tables are
@@ -315,7 +308,6 @@ public class AI {
 
         this.moveOrderingParameters = MoveOrderingParameters.snapshot();
         this.moveOrderer = new MoveOrderer(this.moveOrderingParameters);
-        this.moveBucketOrder = moveOrderer.getBucketOrder();
         this.moveOrderingHistoryScale = Math.max(0.0, moveOrderingParameters.historyScale());
         this.moveOrderingHistoryDecayDivisor = Math.max(1, moveOrderingParameters.historyDecayDivisor());
         this.searchPruningParameters = SearchPruningParameters.snapshot();
@@ -332,8 +324,8 @@ public class AI {
         this.nullSwingGuardDivisor = Math.max(1e-9, Tuning.searchNullSwingGuardDivisor());
         this.quiescenceMaxDeltaPawn = Tuning.searchQsMaxDeltaPawn();
         this.drawBias = Tuning.searchDrawBias();
-        this.ttMainWeight = Math.max(1e-9, Tuning.searchTtMainWeight());
-        this.ttCaptureWeight = Math.max(1e-9, Tuning.searchTtCaptureWeight());
+        double ttMainWeight = Math.max(1e-9, Tuning.searchTtMainWeight());
+        double ttCaptureWeight = Math.max(1e-9, Tuning.searchTtCaptureWeight());
         this.globalHeuristics = new Heuristics(maxDepth);
         this.threadHeuristics = ThreadLocal.withInitial(() -> new Heuristics(maxDepth));
 
@@ -345,6 +337,10 @@ public class AI {
                 drawBias, quiescenceMaxDeltaPawn, tablebaseProber, this::abortRequested);
 
         rebuildTranspositionTables();
+
+        // Wire quiescence searcher to its late-bound dependencies
+        this.quiescenceSearcher.setDependencies(moveOrderer, threadHeuristics,
+                transpositionTable, captureTranspositionTable);
 
         this.searchPool = createSearchPool();
 
@@ -389,6 +385,9 @@ public class AI {
         this.captureTranspositionTable = ttManager.getCaptureTable();
         this.transpositionTableCapacity = ttManager.getMainTableCapacity();
         this.captureTranspositionTableCapacity = ttManager.getCaptureTableCapacity();
+        if (quiescenceSearcher != null) {
+            quiescenceSearcher.updateTranspositionTables(transpositionTable, captureTranspositionTable);
+        }
     }
 
     /**
@@ -2151,135 +2150,36 @@ public class AI {
 
 
     private boolean isSideInCheck(Engine engine, boolean isWhite) {
-        GameStateEnum state = engine.getGameState().getState();
-        return (isWhite && state == GameStateEnum.WHITE_IN_CHECK) || (!isWhite && state == GameStateEnum.BLACK_IN_CHECK);
+        return QuiescenceSearcher.isSideInCheck(engine, isWhite);
     }
 
     private boolean attacksOpponentQueenNow(Engine e, boolean moverIsWhite) {
-        BitBoard bb = e.getBitBoard();
-        long enemyQueen = moverIsWhite ? bb.getBlackQueens() : bb.getWhiteQueens();
-        if (enemyQueen == 0) return false;
-        long myAttacks = bb.getAttackBitboard(moverIsWhite);
-        return (myAttacks & enemyQueen) != 0L;
+        return SearchHelpers.attacksOpponentQueenNow(e, moverIsWhite);
     }
 
     private boolean attacksOpponentKingZone(Engine e, boolean moverIsWhite) {
-        BitBoard bb = e.getBitBoard();
-        long enemyKing = moverIsWhite ? bb.getBlackKing() : bb.getWhiteKing();
-        if (enemyKing == 0L) {
-            return false;
-        }
-        int kingIndex = Long.numberOfTrailingZeros(enemyKing);
-        long kingZone = KING_ATTACKS[kingIndex];
-        long myAttacks = bb.getAttackBitboard(moverIsWhite);
-        return (myAttacks & kingZone) != 0L;
+        return SearchHelpers.attacksOpponentKingZone(e, moverIsWhite);
     }
 
     private int computeNullMoveReduction(BitBoard board, int depth, boolean isWhite, int mobility) {
-        int maxReduction = depth - 2;
-        if (maxReduction <= 0) {
-            return 0;
-        }
-
-        long pieces = isWhite ? board.getWhitePieces() : board.getBlackPieces();
-        long pawns = isWhite ? board.getWhitePawns() : board.getBlackPawns();
-        int nonPawnMaterial = Long.bitCount(pieces) - Long.bitCount(pawns);
-        if (nonPawnMaterial < 0) {
-            nonPawnMaterial = 0;
-        }
-
-        double reductionEstimate = getReductionEstimate(depth, mobility, nonPawnMaterial);
-
-        int reduction = (int) Math.floor(Math.max(0.0, reductionEstimate));
-        return Math.min(reduction, maxReduction);
-    }
-
-    private double getReductionEstimate(int depth, int mobility, int nonPawnMaterial) {
-        int depthCap = Math.max(1, nullMoveParameters.depthCap());
-        int materialCap = Math.max(1, nullMoveParameters.materialCap());
-        int mobilityCap = Math.max(1, nullMoveParameters.mobilityCap());
-
-        double depthFactor = Math.min(Math.max(depth, 0), depthCap) / (double) depthCap;
-        double materialFactor = Math.min(Math.max(nonPawnMaterial, 0), materialCap) / (double) materialCap;
-        double mobilityFactor = Math.min(Math.max(mobility, 0), mobilityCap) / (double) mobilityCap;
-
-        double reductionEstimate = nullMoveParameters.baseReduction()
-                + (depthFactor * nullMoveParameters.depthWeight())
-                + (materialFactor * nullMoveParameters.materialWeight())
-                + (mobilityFactor * nullMoveParameters.mobilityWeight());
-
-        if (nonPawnMaterial <= nullMoveParameters.lowMaterialThreshold()
-                || mobility <= nullMoveParameters.lowMobilityThreshold()) {
-            reductionEstimate -= nullMoveParameters.lowMaterialPenalty();
-        }
-        if (mobility <= nullMoveParameters.veryLowMobilityThreshold()) {
-            reductionEstimate -= nullMoveParameters.veryLowMobilityPenalty();
-        }
-        return reductionEstimate;
+        return SearchHelpers.computeNullMoveReduction(board, depth, isWhite, mobility, nullMoveParameters);
     }
 
     private int countPawnsOnFile(BitBoard board, long fileMask) {
-        if (fileMask == 0L) {
-            return 0;
-        }
-        long pawns = (board.getWhitePawns() | board.getBlackPawns()) & fileMask;
-        return Long.bitCount(pawns);
+        return SearchHelpers.countPawnsOnFile(board, fileMask);
     }
 
     private boolean openedFileTowardKing(BitBoard boardAfterMove, long kingFileMask,
                                          int pawnsBefore, boolean interactsWithKingFile) {
-        if (!interactsWithKingFile || kingFileMask == 0L || pawnsBefore <= 0) {
-            return false;
-        }
-        int pawnsAfter = countPawnsOnFile(boardAfterMove, kingFileMask);
-        return pawnsAfter < pawnsBefore;
+        return SearchHelpers.openedFileTowardKing(boardAfterMove, kingFileMask, pawnsBefore, interactsWithKingFile);
     }
 
     private int lmrReduction(int depth, int moveIndex, int historyScore) {
-        if (depth <= 1) {
-            return 0;
-        }
-
-        int clampedDepth = Math.min(depth, LMR_MAX_DEPTH);
-        int clampedMoveIndex = Math.max(0, Math.min(moveIndex, LMR_MAX_MOVES - 1));
-
-        int historyReductionMax = Math.max(0, searchPruningParameters.historyReductionMax());
-        int history = Math.max(0, Math.min(historyScore, historyReductionMax));
-        double normalized = historyReductionMax == 0
-                ? 0.0
-                : history / (double) historyReductionMax;
-        int buckets = Math.max(1, lmrBucketCount);
-        double bucketPosition = buckets == 1 ? 0.0 : normalized * (buckets - 1);
-        int lowerBucket = Math.max(0, (int) Math.floor(bucketPosition));
-        int upperBucket = Math.min(buckets - 1, lowerBucket + 1);
-        double fraction = bucketPosition - lowerBucket;
-
-        int lowerValue = lmrReductionTable[clampedDepth][clampedMoveIndex][lowerBucket];
-        if (upperBucket == lowerBucket) {
-            return Math.min(lowerValue, depth - 1);
-        }
-
-        int upperValue = lmrReductionTable[clampedDepth][clampedMoveIndex][upperBucket];
-        double interpolated = lowerValue + fraction * (upperValue - lowerValue);
-        int reduction = (int) Math.floor(interpolated + 1e-9);
-        int maxReduction = Math.max(0, depth - 1);
-        if (reduction < 0) {
-            reduction = 0;
-        }
-        if (reduction > maxReduction) {
-            reduction = maxReduction;
-        }
-        return reduction;
+        return SearchHelpers.lmrReduction(depth, moveIndex, historyScore, lmrReductionTable, lmrBucketCount, searchPruningParameters);
     }
 
     private int futilityMarginForRemainingDepth(int remainingDepth) {
-        if (remainingDepth <= 1) {
-            return searchPruningParameters.fpMarginDepth1();
-        }
-        if (remainingDepth == 2) {
-            return searchPruningParameters.fpMarginDepth2();
-        }
-        return 0;
+        return SearchHelpers.futilityMarginForRemainingDepth(remainingDepth, searchPruningParameters);
     }
 
     private double maximizer(Engine simulatorEngine, int depth, double alpha, double beta,
@@ -2296,8 +2196,7 @@ public class AI {
         final int[][] historyTable = heuristics.history;
 
         IntArrayList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
-        seeCache.clear();
+        moveOrderer.getSeeCacheRef().get().clear();
         final SearchPruningParameters.Snapshot pruning = searchPruningParameters;
         final int hmpMinIndex = pruning.hmpMinIndex();
         final int hmpHistoryMax = pruning.hmpHistoryMax();
@@ -2588,8 +2487,7 @@ public class AI {
         final int[][] historyTable = heuristics.history;
 
         IntArrayList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
-        seeCache.clear();
+        moveOrderer.getSeeCacheRef().get().clear();
         final SearchPruningParameters.Snapshot pruning = searchPruningParameters;
         final int hmpMinIndex = pruning.hmpMinIndex();
         final int hmpHistoryMax = pruning.hmpHistoryMax();
@@ -2880,183 +2778,7 @@ public class AI {
 
 
     public double evaluateBoard(Engine simulatorEngine, boolean isWhitesTurn, long deadline) {
-        if (simulatorEngine.getGameState().isInStateCheckMate()) {
-            return -CHECKMATE;
-        }
-
-        long boardStateHash = simulatorEngine.getBoardStateHash();
-
-        // Treat both terminal draws and insufficient-material as draw for evaluation
-        if (simulatorEngine.getGameState().isDrawForUIOrEval()) {
-            double scoreDiff = resolveScoreDifference(simulatorEngine.getGameState(), boardStateHash,
-                    simulatorEngine.whitesTurn());
-            if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
-                return DRAW - drawBias;
-            } else if ((isWhitesTurn && scoreDiff < 0) || (!isWhitesTurn && scoreDiff > 0)) {
-                return DRAW + drawBias;
-            }
-            return DRAW;
-        }
-
-        double alpha = Double.NEGATIVE_INFINITY;
-        double beta = Double.POSITIVE_INFINITY;
-
-        CaptureTranspositionTableEntry entry = captureTranspositionTable.get(boardStateHash);
-        if (entry != null && entry.isWhite() == isWhitesTurn) {
-            return entry.getScore();
-        }
-
-        if (!isSideInCheck(simulatorEngine, isWhitesTurn)
-                && !hasImmediateTacticalMoves(simulatorEngine)) {
-            if (abortRequested(deadline)) {
-                return EXIT_FLAG;
-            }
-            double quietScore = evaluateStaticPosition(
-                    simulatorEngine.getGameState(), boardStateHash, isWhitesTurn, 0
-            );
-            captureTranspositionTable.put(
-                    boardStateHash, new CaptureTranspositionTableEntry(quietScore, isWhitesTurn), 0
-            );
-            return quietScore;
-        }
-
-        double score = quiescenceSearch(simulatorEngine, isWhitesTurn, alpha, beta, deadline, 0);
-        if (score != EXIT_FLAG) {
-            captureTranspositionTable.put(boardStateHash, new CaptureTranspositionTableEntry(score, isWhitesTurn), 0);
-        }
-        return score;
-    }
-
-    private double quiescenceSearch(Engine simulatorEngine,
-                                    boolean isWhitesTurn,
-                                    double alpha,
-                                    double beta,
-                                    long deadline,
-                                    int depth) {
-        // Early stop
-        if (abortRequested(deadline)) {
-            return AI.EXIT_FLAG;
-        }
-
-        GameState gameState = simulatorEngine.getGameState();
-        Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
-        if (tablebase.isPresent() && isExactWdl(tablebase.get())) {
-            long boardHash = simulatorEngine.getBoardStateHash();
-            return evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depth);
-        }
-
-        // Never expand terminal nodes in qsearch: just evaluate
-        if (gameState.isTerminal()) {
-            long boardHash = simulatorEngine.getBoardStateHash();
-            return evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depth);
-        }
-
-        final boolean inCheck = isSideInCheck(simulatorEngine, isWhitesTurn);
-
-        long boardHash = simulatorEngine.getBoardStateHash();
-        double standPat = evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depth);
-
-        double alphaBeforeStandPat = alpha;
-
-        if (!inCheck) {
-            // Fail-hard beta cut on stand-pat
-            if (standPat >= beta) {
-                return beta;
-            }
-            // Raise alpha to stand-pat
-            if (standPat > alpha) {
-                alpha = standPat;
-            }
-        }
-
-        // Move gen: evasions if in check; else captures/promotions (and optional checking moves if you add them)
-        IntArrayList moves = inCheck
-                ? simulatorEngine.getAllLegalMoves()                // all evasions
-                : getPossibleCapturesOrPromotions(simulatorEngine);  // tactical moves only
-
-        if (!inCheck) {
-            if (moves.isEmpty()) {
-                return alpha;
-            }
-
-            double optimisticSwing = estimateMaxTacticalSwing(moves);
-            // Delta (futility-like) pruning in qsearch: compare against original alpha window
-            if (standPat + optimisticSwing <= alphaBeforeStandPat) {
-                return alpha;
-            }
-        }
-
-        // Order moves (MVV-LVA, history, hash-move etc.)
-        IntArrayList ordered = sortMovesByEfficiency(
-                moves, 0, simulatorEngine.getBoardStateHash(), -1, simulatorEngine
-        );
-
-        for (int i = 0; i < ordered.size(); i++) {
-            int m = ordered.getInt(i);
-
-            boolean isCapture   = MoveHelper.isCapture(m);
-            boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
-            boolean isQuiet     = !isCapture && !isPromotion;
-
-            // In qsearch (not in check), we normally do NOT consider quiet moves.
-            // If you want to allow some checks, you can selectively allow quiet check moves.
-            if (!inCheck && isQuiet) {
-                continue;
-            }
-
-            // SEE pruning: drop clearly losing captures (keep promotions).
-            // Optionally keep losing captures that give check (aggressive but sometimes good).
-            if (!inCheck && isCapture && !isPromotion) {
-                int see = simulatorEngine.see(m, 0);
-                if (see < 0) {
-                    // Cheap “gives check?” probe; only spend the make/undo if node didn't turn terminal.
-                    if (!simulatorEngine.getGameState().isTerminal()) {
-                        simulatorEngine.performMove(m);
-                        boolean givesCheck = isSideInCheck(simulatorEngine, !isWhitesTurn);
-                        simulatorEngine.undoLastMove();
-                        if (!givesCheck) {
-                            continue; // prune losing capture that doesn't give check
-                        }
-                    } else {
-                        continue;
-                    }
-                }
-            }
-
-            // Safety guard before making the move (rare but keeps invariants)
-            if (simulatorEngine.getGameState().isTerminal()) {
-                return standPat; // nothing more to do from here
-            }
-
-            simulatorEngine.performMove(m);
-            Optional<TablebaseResult> childTablebase = resolveExactTablebaseResult(simulatorEngine);
-            double child;
-            if (childTablebase.isPresent()) {
-                long childHash = simulatorEngine.getBoardStateHash();
-                child = evaluateStaticPosition(simulatorEngine.getGameState(), childHash, !isWhitesTurn, depth + 1);
-            } else {
-                child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
-            }
-            simulatorEngine.undoLastMove();
-
-            if (child == EXIT_FLAG) {
-                return EXIT_FLAG;
-            }
-
-            double score = -child;
-            score = adjustMateFromChild(score);
-
-            // Fail-hard beta cutoff
-            if (score >= beta) {
-                return beta;
-            }
-            // Raise alpha
-            if (score > alpha) {
-                alpha = score;
-            }
-        }
-
-        return alpha;
+        return quiescenceSearcher.evaluateBoard(simulatorEngine, isWhitesTurn, deadline);
     }
 
 
@@ -3064,17 +2786,6 @@ public class AI {
         return quiescenceSearcher.evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depthOrPly);
     }
 
-    private IntArrayList getPossibleCapturesOrPromotions(Engine simulatorEngine) {
-        return MoveContainerUtils.filterCapturesAndPromotions(simulatorEngine.getAllLegalMoves());
-    }
-
-    private boolean hasImmediateTacticalMoves(Engine simulatorEngine) {
-        return simulatorEngine.hasAnyCaptureOrPromotion();
-    }
-
-    private double estimateMaxTacticalSwing(IntArrayList moves) {
-        return quiescenceSearcher.estimateMaxTacticalSwing(moves);
-    }
 
     private boolean isMateValue(double score) {
         return QuiescenceSearcher.isMateValue(score);
@@ -3093,14 +2804,7 @@ public class AI {
     }
 
     private boolean isZeroingMove(int move) {
-        if (move < 0) {
-            return false;
-        }
-        if (MoveHelper.isCapture(move)) {
-            return true;
-        }
-        int pieceBits = MoveHelper.derivePieceTypeBits(move);
-        return pieceBits == 1;
+        return SearchHelpers.isZeroingMove(move);
     }
 
     private boolean shouldUseTablebaseTieBreak(double candidateEval, double bestEval) {
