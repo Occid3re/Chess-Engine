@@ -344,6 +344,10 @@ public class AI {
 
         rebuildTranspositionTables();
 
+        // Wire quiescence searcher to its late-bound dependencies
+        this.quiescenceSearcher.setDependencies(moveOrderer, threadHeuristics,
+                transpositionTable, captureTranspositionTable);
+
         this.searchPool = createSearchPool();
 
         this.mainEngine.setOnPositionChanged(_ -> updateBoardStateHash());
@@ -388,6 +392,9 @@ public class AI {
         this.captureTranspositionTable = ttManager.getCaptureTable();
         this.transpositionTableCapacity = ttManager.getMainTableCapacity();
         this.captureTranspositionTableCapacity = ttManager.getCaptureTableCapacity();
+        if (quiescenceSearcher != null) {
+            quiescenceSearcher.updateTranspositionTables(transpositionTable, captureTranspositionTable);
+        }
     }
 
     /**
@@ -2216,8 +2223,7 @@ public class AI {
     }
 
     private boolean isSideInCheck(Engine engine, boolean isWhite) {
-        GameStateEnum state = engine.getGameState().getState();
-        return (isWhite && state == GameStateEnum.WHITE_IN_CHECK) || (!isWhite && state == GameStateEnum.BLACK_IN_CHECK);
+        return QuiescenceSearcher.isSideInCheck(engine, isWhite);
     }
 
     private boolean attacksOpponentQueenNow(Engine e, boolean moverIsWhite) {
@@ -3101,202 +3107,7 @@ public class AI {
 
 
     public double evaluateBoard(Engine simulatorEngine, boolean isWhitesTurn, long deadline) {
-        if (simulatorEngine.getGameState().isInStateCheckMate()) {
-            return -CHECKMATE;
-        }
-
-        long boardStateHash = simulatorEngine.getBoardStateHash();
-
-        // Treat both terminal draws and insufficient-material as draw for evaluation
-        if (simulatorEngine.getGameState().isDrawForUIOrEval()) {
-            double scoreDiff = resolveScoreDifference(simulatorEngine.getGameState(), boardStateHash,
-                    simulatorEngine.whitesTurn());
-            if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
-                return DRAW - drawBias;
-            } else if ((isWhitesTurn && scoreDiff < 0) || (!isWhitesTurn && scoreDiff > 0)) {
-                return DRAW + drawBias;
-            }
-            return DRAW;
-        }
-
-        double alpha = Double.NEGATIVE_INFINITY;
-        double beta = Double.POSITIVE_INFINITY;
-
-        CaptureTranspositionTableEntry entry = captureTranspositionTable.get(boardStateHash);
-        if (entry != null && entry.isWhite() == isWhitesTurn) {
-            return entry.getScore();
-        }
-
-        if (!isSideInCheck(simulatorEngine, isWhitesTurn)
-                && !hasImmediateTacticalMoves(simulatorEngine)) {
-            if (abortRequested(deadline)) {
-                return EXIT_FLAG;
-            }
-            double quietScore = evaluateStaticPosition(
-                    simulatorEngine.getGameState(), boardStateHash, isWhitesTurn, 0
-            );
-            captureTranspositionTable.put(
-                    boardStateHash, new CaptureTranspositionTableEntry(quietScore, isWhitesTurn), 0
-            );
-            return quietScore;
-        }
-
-        double score = quiescenceSearch(simulatorEngine, isWhitesTurn, alpha, beta, deadline, 0);
-        if (score != EXIT_FLAG) {
-            captureTranspositionTable.put(boardStateHash, new CaptureTranspositionTableEntry(score, isWhitesTurn), 0);
-        }
-        return score;
-    }
-
-    private double quiescenceSearch(Engine simulatorEngine,
-                                    boolean isWhitesTurn,
-                                    double alpha,
-                                    double beta,
-                                    long deadline,
-                                    int depth) {
-        // Early stop
-        if (abortRequested(deadline)) {
-            return AI.EXIT_FLAG;
-        }
-
-        GameState gameState = simulatorEngine.getGameState();
-        Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
-        if (tablebase.isPresent() && isExactWdl(tablebase.get())) {
-            long boardHash = simulatorEngine.getBoardStateHash();
-            return evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depth);
-        }
-
-        // Never expand terminal nodes in qsearch: just evaluate
-        if (gameState.isTerminal()) {
-            long boardHash = simulatorEngine.getBoardStateHash();
-            return evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depth);
-        }
-
-        final boolean inCheck = isSideInCheck(simulatorEngine, isWhitesTurn);
-
-        long boardHash = simulatorEngine.getBoardStateHash();
-        double standPat = evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depth);
-
-        double alphaBeforeStandPat = alpha;
-
-        if (!inCheck) {
-            // Fail-hard beta cut on stand-pat
-            if (standPat >= beta) {
-                return beta;
-            }
-            // Raise alpha to stand-pat
-            if (standPat > alpha) {
-                alpha = standPat;
-            }
-        }
-
-        // Move gen: evasions if in check; else captures/promotions (and optional checking moves if you add them)
-        IntArrayList moves = inCheck
-                ? simulatorEngine.getAllLegalMoves()                // all evasions
-                : getPossibleCapturesOrPromotions(simulatorEngine);  // tactical moves only
-
-        if (!inCheck) {
-            if (moves.isEmpty()) {
-                return alpha;
-            }
-
-            double optimisticSwing = estimateMaxTacticalSwing(moves);
-            // Delta (futility-like) pruning in qsearch: compare against original alpha window
-            if (standPat + optimisticSwing <= alphaBeforeStandPat) {
-                int lastMove = simulatorEngine.getLastMove();
-                boolean lastMoveWasCapture = lastMove >= 0 && MoveHelper.isCapture(lastMove);
-                int recaptureSquare = lastMoveWasCapture ? MoveHelper.deriveToIndex(lastMove) : -1;
-
-                boolean allowDeltaPrune = true;
-                for (int i = 0; i < moves.size(); i++) {
-                    int move = moves.getInt(i);
-                    if (!MoveHelper.isCapture(move)) {
-                        continue;
-                    }
-                    boolean isRecapture = lastMoveWasCapture && MoveHelper.deriveToIndex(move) == recaptureSquare;
-                    if (isRecapture || simulatorEngine.see(move, 0) >= 0) {
-                        allowDeltaPrune = false;
-                        break;
-                    }
-                }
-
-                if (allowDeltaPrune) {
-                    return alpha;
-                }
-            }
-        }
-
-        // Order moves (MVV-LVA, history, hash-move etc.)
-        IntArrayList ordered = sortMovesByEfficiency(
-                moves, 0, simulatorEngine.getBoardStateHash(), -1, simulatorEngine
-        );
-
-        for (int i = 0; i < ordered.size(); i++) {
-            int m = ordered.getInt(i);
-
-            boolean isCapture = MoveHelper.isCapture(m);
-            boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
-            boolean isQuiet = !isCapture && !isPromotion;
-
-            // In qsearch (not in check), we normally do NOT consider quiet moves.
-            // If you want to allow some checks, you can selectively allow quiet check moves.
-            if (!inCheck && isQuiet) {
-                continue;
-            }
-
-            // SEE pruning: drop clearly losing captures (keep promotions).
-            // Optionally keep losing captures that give check (aggressive but sometimes good).
-            if (!inCheck && isCapture && !isPromotion) {
-                int see = simulatorEngine.see(m, 0);
-                if (see < 0) {
-                    // Cheap “gives check?” probe; only spend the make/undo if node didn't turn terminal.
-                    if (!simulatorEngine.getGameState().isTerminal()) {
-                        simulatorEngine.performMove(m);
-                        boolean givesCheck = isSideInCheck(simulatorEngine, !isWhitesTurn);
-                        simulatorEngine.undoLastMove();
-                        if (!givesCheck) {
-                            continue; // prune losing capture that doesn't give check
-                        }
-                    } else {
-                        continue;
-                    }
-                }
-            }
-
-            // Safety guard before making the move (rare but keeps invariants)
-            if (simulatorEngine.getGameState().isTerminal()) {
-                return standPat; // nothing more to do from here
-            }
-
-            simulatorEngine.performMove(m);
-            Optional<TablebaseResult> childTablebase = resolveExactTablebaseResult(simulatorEngine);
-            double child;
-            if (childTablebase.isPresent()) {
-                long childHash = simulatorEngine.getBoardStateHash();
-                child = evaluateStaticPosition(simulatorEngine.getGameState(), childHash, !isWhitesTurn, depth + 1);
-            } else {
-                child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
-            }
-            simulatorEngine.undoLastMove();
-
-            if (child == EXIT_FLAG) {
-                return EXIT_FLAG;
-            }
-
-            double score = -child;
-            score = adjustMateFromChild(score);
-
-            // Fail-hard beta cutoff
-            if (score >= beta) {
-                return beta;
-            }
-            // Raise alpha
-            if (score > alpha) {
-                alpha = score;
-            }
-        }
-
-        return alpha;
+        return quiescenceSearcher.evaluateBoard(simulatorEngine, isWhitesTurn, deadline);
     }
 
 
@@ -3304,17 +3115,6 @@ public class AI {
         return quiescenceSearcher.evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depthOrPly);
     }
 
-    private IntArrayList getPossibleCapturesOrPromotions(Engine simulatorEngine) {
-        return MoveContainerUtils.filterCapturesAndPromotions(simulatorEngine.getAllLegalMoves());
-    }
-
-    private boolean hasImmediateTacticalMoves(Engine simulatorEngine) {
-        return simulatorEngine.hasAnyCaptureOrPromotion();
-    }
-
-    private double estimateMaxTacticalSwing(IntArrayList moves) {
-        return quiescenceSearcher.estimateMaxTacticalSwing(moves);
-    }
 
     private boolean isMateValue(double score) {
         return QuiescenceSearcher.isMateValue(score);

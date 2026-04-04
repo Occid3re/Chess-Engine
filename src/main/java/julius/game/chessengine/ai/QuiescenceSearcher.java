@@ -25,21 +25,19 @@ final class QuiescenceSearcher {
 
     private static final double MATE_SCORE_MARGIN = 2048.0;
     private static final double TABLEBASE_CLAMP = 2000.0 / 100.0;
+    static final double EXIT_FLAG = AI.EXIT_FLAG;
 
     private final double drawBias;
     private final double quiescenceMaxDeltaPawn;
     private final ThreadLocal<Long2DoubleOpenHashMap> staticEvalCache;
-
-    /**
-     * Callback to check if the search should abort. Avoids a circular
-     * dependency back to AI for deadline checking.
-     */
     private final LongPredicate abortChecker;
-
-    /**
-     * Delegate for tablebase probing (resolveExactTablebaseResult, isExactWdl, clampTablebaseEval).
-     */
     private final TablebaseProber tablebaseProber;
+
+    // Dependencies set after construction (avoids circular init with AI)
+    private MoveOrderer moveOrderer;
+    private ThreadLocal<Heuristics> threadHeuristics;
+    private TranspositionTable<TranspositionTableEntry> transpositionTable;
+    private TranspositionTable<CaptureTranspositionTableEntry> captureTranspositionTable;
 
     QuiescenceSearcher(double drawBias,
                        double quiescenceMaxDeltaPawn,
@@ -56,8 +54,188 @@ final class QuiescenceSearcher {
         });
     }
 
+    void setDependencies(MoveOrderer moveOrderer,
+                         ThreadLocal<Heuristics> threadHeuristics,
+                         TranspositionTable<TranspositionTableEntry> transpositionTable,
+                         TranspositionTable<CaptureTranspositionTableEntry> captureTranspositionTable) {
+        this.moveOrderer = moveOrderer;
+        this.threadHeuristics = threadHeuristics;
+        this.transpositionTable = transpositionTable;
+        this.captureTranspositionTable = captureTranspositionTable;
+    }
+
+    void updateTranspositionTables(TranspositionTable<TranspositionTableEntry> main,
+                                   TranspositionTable<CaptureTranspositionTableEntry> capture) {
+        this.transpositionTable = main;
+        this.captureTranspositionTable = capture;
+    }
+
     void clearCache() {
         staticEvalCache.get().clear();
+    }
+
+    // ---- Main entry points ----
+
+    double evaluateBoard(Engine simulatorEngine, boolean isWhitesTurn, long deadline) {
+        if (simulatorEngine.getGameState().isInStateCheckMate()) {
+            return -CHECKMATE;
+        }
+
+        long boardStateHash = simulatorEngine.getBoardStateHash();
+
+        if (simulatorEngine.getGameState().isDrawForUIOrEval()) {
+            double scoreDiff = resolveScoreDifference(simulatorEngine.getGameState(), boardStateHash,
+                    simulatorEngine.whitesTurn());
+            if ((isWhitesTurn && scoreDiff > 0) || (!isWhitesTurn && scoreDiff < 0)) {
+                return DRAW - drawBias;
+            } else if ((isWhitesTurn && scoreDiff < 0) || (!isWhitesTurn && scoreDiff > 0)) {
+                return DRAW + drawBias;
+            }
+            return DRAW;
+        }
+
+        double alpha = Double.NEGATIVE_INFINITY;
+        double beta = Double.POSITIVE_INFINITY;
+
+        CaptureTranspositionTableEntry entry = captureTranspositionTable.get(boardStateHash);
+        if (entry != null && entry.isWhite() == isWhitesTurn) {
+            return entry.getScore();
+        }
+
+        if (!isSideInCheck(simulatorEngine, isWhitesTurn)
+                && !simulatorEngine.hasAnyCaptureOrPromotion()) {
+            if (abortChecker.test(deadline)) return EXIT_FLAG;
+            double quietScore = evaluateStaticPosition(
+                    simulatorEngine.getGameState(), boardStateHash, isWhitesTurn, 0
+            );
+            captureTranspositionTable.put(
+                    boardStateHash, new CaptureTranspositionTableEntry(quietScore, isWhitesTurn), 0
+            );
+            return quietScore;
+        }
+
+        double score = quiescenceSearch(simulatorEngine, isWhitesTurn, alpha, beta, deadline, 0);
+        if (score != EXIT_FLAG) {
+            captureTranspositionTable.put(boardStateHash, new CaptureTranspositionTableEntry(score, isWhitesTurn), 0);
+        }
+        return score;
+    }
+
+    double quiescenceSearch(Engine simulatorEngine,
+                            boolean isWhitesTurn,
+                            double alpha,
+                            double beta,
+                            long deadline,
+                            int depth) {
+        if (abortChecker.test(deadline)) {
+            return EXIT_FLAG;
+        }
+
+        GameState gameState = simulatorEngine.getGameState();
+        Optional<TablebaseResult> tablebase = gameState.getLastTablebaseResult();
+        if (tablebase.isPresent() && tablebaseProber.isExactWdl(tablebase.get())) {
+            long boardHash = simulatorEngine.getBoardStateHash();
+            return evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depth);
+        }
+
+        if (gameState.isTerminal()) {
+            long boardHash = simulatorEngine.getBoardStateHash();
+            return evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depth);
+        }
+
+        final boolean inCheck = isSideInCheck(simulatorEngine, isWhitesTurn);
+
+        long boardHash = simulatorEngine.getBoardStateHash();
+        double standPat = evaluateStaticPosition(gameState, boardHash, isWhitesTurn, depth);
+
+        double alphaBeforeStandPat = alpha;
+
+        if (!inCheck) {
+            if (standPat >= beta) {
+                return beta;
+            }
+            if (standPat > alpha) {
+                alpha = standPat;
+            }
+        }
+
+        IntArrayList moves = inCheck
+                ? simulatorEngine.getAllLegalMoves()
+                : MoveContainerUtils.filterCapturesAndPromotions(simulatorEngine.getAllLegalMoves());
+
+        if (!inCheck) {
+            if (moves.isEmpty()) {
+                return alpha;
+            }
+            double optimisticSwing = estimateMaxTacticalSwing(moves);
+            if (standPat + optimisticSwing <= alphaBeforeStandPat) {
+                return alpha;
+            }
+        }
+
+        IntArrayList ordered = moveOrderer.sortMovesByEfficiency(
+                moves, 0, simulatorEngine.getBoardStateHash(), -1, simulatorEngine,
+                threadHeuristics.get(), transpositionTable
+        );
+
+        for (int i = 0; i < ordered.size(); i++) {
+            int m = ordered.getInt(i);
+
+            boolean isCapture = MoveHelper.isCapture(m);
+            boolean isPromotion = MoveHelper.isPawnPromotionMove(m);
+            boolean isQuiet = !isCapture && !isPromotion;
+
+            if (!inCheck && isQuiet) {
+                continue;
+            }
+
+            if (!inCheck && isCapture && !isPromotion) {
+                int see = simulatorEngine.see(m, 0);
+                if (see < 0) {
+                    if (!simulatorEngine.getGameState().isTerminal()) {
+                        simulatorEngine.performMove(m);
+                        boolean givesCheck = isSideInCheck(simulatorEngine, !isWhitesTurn);
+                        simulatorEngine.undoLastMove();
+                        if (!givesCheck) {
+                            continue;
+                        }
+                    } else {
+                        continue;
+                    }
+                }
+            }
+
+            if (simulatorEngine.getGameState().isTerminal()) {
+                return standPat;
+            }
+
+            simulatorEngine.performMove(m);
+            Optional<TablebaseResult> childTablebase = tablebaseProber.resolveExactTablebaseResult(simulatorEngine);
+            double child;
+            if (childTablebase.isPresent()) {
+                long childHash = simulatorEngine.getBoardStateHash();
+                child = evaluateStaticPosition(simulatorEngine.getGameState(), childHash, !isWhitesTurn, depth + 1);
+            } else {
+                child = quiescenceSearch(simulatorEngine, !isWhitesTurn, -beta, -alpha, deadline, depth + 1);
+            }
+            simulatorEngine.undoLastMove();
+
+            if (child == EXIT_FLAG) {
+                return EXIT_FLAG;
+            }
+
+            double score = -child;
+            score = adjustMateFromChild(score);
+
+            if (score >= beta) {
+                return beta;
+            }
+            if (score > alpha) {
+                alpha = score;
+            }
+        }
+
+        return alpha;
     }
 
     // ---- Static evaluation ----
@@ -162,6 +340,14 @@ final class QuiescenceSearcher {
         }
 
         return Math.min(bestSwing, quiescenceMaxDeltaPawn);
+    }
+
+    // ---- Board query helpers ----
+
+    static boolean isSideInCheck(Engine engine, boolean isWhite) {
+        julius.game.chessengine.engine.GameStateEnum state = engine.getGameState().getState();
+        return (isWhite && state == julius.game.chessengine.engine.GameStateEnum.WHITE_IN_CHECK)
+                || (!isWhite && state == julius.game.chessengine.engine.GameStateEnum.BLACK_IN_CHECK);
     }
 
     // ---- Score helpers ----
