@@ -2360,8 +2360,7 @@ public class AI {
         final int[][] historyTable = heuristics.history;
 
         IntArrayList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
-        seeCache.clear();
+        moveOrderer.getSeeCacheRef().get().clear();
         final SearchPruningParameters.Snapshot pruning = searchPruningParameters;
         final int hmpMinIndex = pruning.hmpMinIndex();
         final int hmpHistoryMax = pruning.hmpHistoryMax();
@@ -2686,8 +2685,7 @@ public class AI {
         final int[][] historyTable = heuristics.history;
 
         IntArrayList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
-        seeCache.clear();
+        moveOrderer.getSeeCacheRef().get().clear();
         final SearchPruningParameters.Snapshot pruning = searchPruningParameters;
         final int hmpMinIndex = pruning.hmpMinIndex();
         final int hmpHistoryMax = pruning.hmpHistoryMax();
