@@ -167,6 +167,10 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         int whiteBackwardBase = calculateBackwardPawnPenalty(whitePawns, blackPawns, allPieces, true, backwardPawnPenalty);
         int blackBackwardBase = calculateBackwardPawnPenalty(blackPawns, whitePawns, allPieces, false, backwardPawnPenalty);
 
+        // Space advantage: count pawns beyond the 4th rank (midgame only)
+        int whiteSpace = calculateSpaceBonus(whitePawns, true);
+        int blackSpace = calculateSpaceBonus(blackPawns, false);
+
         int whiteMidgameTotal = structure.whiteCenterPawnBonus
                 + structure.whiteDoubledPawnPenalty
                 + structure.whiteIsolatedPawnPenalty
@@ -177,7 +181,8 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
                 + whitePassed
                 + whiteAdvanceBase
                 + whiteBlockedBase
-                + whiteBackwardBase;
+                + whiteBackwardBase
+                + whiteSpace;
 
         int whiteEndgameTotal = structure.whiteCenterPawnBonus
                 + structure.whiteDoubledPawnPenalty
@@ -201,7 +206,8 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
                 + blackPassed
                 + blackAdvanceBase
                 + blackBlockedBase
-                + blackBackwardBase;
+                + blackBackwardBase
+                + blackSpace;
 
         int blackEndgameTotal = structure.blackCenterPawnBonus
                 + structure.blackDoubledPawnPenalty
@@ -403,6 +409,18 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         int fileDiff = Math.abs((sq1 & 7) - (sq2 & 7));
         int rankDiff = Math.abs((sq1 >> 3) - (sq2 >> 3));
         return Math.max(fileDiff, rankDiff);
+    }
+
+    /**
+     * Space bonus: counts pawns in the opponent's half of the board.
+     * Each pawn beyond the center gives 3 cp midgame bonus for controlling space.
+     */
+    private static int calculateSpaceBonus(long pawns, boolean isWhite) {
+        // White pawns on ranks 5-7 (indices 32-55), black pawns on ranks 2-4 (indices 8-31)
+        long advancedMask = isWhite
+                ? 0x00FFFFFF00000000L  // ranks 5, 6, 7
+                : 0x00000000FFFFFF00L; // ranks 2, 3, 4
+        return Long.bitCount(pawns & advancedMask) * 3;
     }
 
     private int countHalfOpenFilesWithRooks(long rooksBitboard, long friendlyPawns, long enemyPawns) {
