@@ -49,6 +49,12 @@ public class AI {
 
     private final SyzygyTablebaseService tablebaseService;
 
+    // ---- Extracted sub-components ----
+    private final TablebaseProber tablebaseProber;
+    private final TranspositionTableManager ttManager;
+    private final HeuristicsManager heuristicsManager;
+    private final QuiescenceSearcher quiescenceSearcher;
+
     /**
      * Number of threads used for searching. Defaults to single-threaded search but
      * can be adjusted at runtime via the UCI "Threads" option.
@@ -375,6 +381,13 @@ public class AI {
         this.ttCaptureWeight = Math.max(1e-9, Tuning.searchTtCaptureWeight());
         this.globalHeuristics = new Heuristics(maxDepth);
         this.threadHeuristics = ThreadLocal.withInitial(() -> new Heuristics(maxDepth));
+
+        // Initialise extracted sub-components
+        this.tablebaseProber = new TablebaseProber(tablebaseService);
+        this.ttManager = new TranspositionTableManager(this.hashSizeMb, ttMainWeight, ttCaptureWeight);
+        this.heuristicsManager = new HeuristicsManager(maxDepth);
+        this.quiescenceSearcher = new QuiescenceSearcher(
+                drawBias, quiescenceMaxDeltaPawn, tablebaseProber, this::abortRequested);
 
         rebuildTranspositionTables();
 
