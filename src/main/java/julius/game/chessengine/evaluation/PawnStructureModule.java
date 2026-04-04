@@ -152,8 +152,8 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         int whiteOpenFiles = countOpenFilesWithRooks(whiteRooks, allPawns) * rookOpenFileBonus;
         int blackOpenFiles = countOpenFilesWithRooks(blackRooks, allPawns) * rookOpenFileBonus;
 
-        int whitePassed = calculatePassedPawnBonus(whitePawns, blackPawns, allPieces, whiteKing, true);
-        int blackPassed = calculatePassedPawnBonus(blackPawns, whitePawns, allPieces, blackKing, false);
+        int whitePassed = calculatePassedPawnBonus(whitePawns, blackPawns, allPieces, whiteKing, blackKing, true);
+        int blackPassed = calculatePassedPawnBonus(blackPawns, whitePawns, allPieces, blackKing, whiteKing, false);
 
         int whiteAdvanceBase = calculatePawnAdvanceBonus(whitePawns, allPieces, blackAttacks, true);
         int blackAdvanceBase = calculatePawnAdvanceBonus(blackPawns, allPieces, whiteAttacks, false);
@@ -351,7 +351,8 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         return penalty;
     }
 
-    private int calculatePassedPawnBonus(long pawns, long opponentPawns, long allPieces, long ownKing, boolean isWhite) {
+    private int calculatePassedPawnBonus(long pawns, long opponentPawns, long allPieces,
+                                         long ownKing, long enemyKing, boolean isWhite) {
         if (pawns == 0) {
             return 0;
         }
@@ -360,6 +361,7 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
         int[] rankWeights = isWhite ? PASSED_RANK_WEIGHT_WHITE : PASSED_RANK_WEIGHT_BLACK;
         int[] distances = isWhite ? DISTANCE_TO_PROMOTION_WHITE : DISTANCE_TO_PROMOTION_BLACK;
         int color = isWhite ? WHITE : BLACK;
+        int enemyKingSquare = enemyKing != 0 ? Long.numberOfTrailingZeros(enemyKing) : -1;
         long remaining = pawns;
         while (remaining != 0) {
             int square = Long.numberOfTrailingZeros(remaining);
@@ -381,9 +383,23 @@ public final class PawnStructureModule implements EvaluationModule, MaterialModu
                 base += passedPawnFreePathBonusPerRank * distances[square];
             }
 
+            // Bonus when enemy king is far from the passed pawn (endgame relevance)
+            if (enemyKingSquare >= 0) {
+                int promotionSquare = isWhite ? (square & 7) + 56 : (square & 7);
+                int enemyKingDist = chebyshevDistance(enemyKingSquare, promotionSquare);
+                // Bonus scales with distance: further king = bigger bonus
+                base += enemyKingDist * 5;
+            }
+
             bonus += base;
         }
         return bonus;
+    }
+
+    private static int chebyshevDistance(int sq1, int sq2) {
+        int fileDiff = Math.abs((sq1 & 7) - (sq2 & 7));
+        int rankDiff = Math.abs((sq1 >> 3) - (sq2 >> 3));
+        return Math.max(fileDiff, rankDiff);
     }
 
     private int countHalfOpenFilesWithRooks(long rooksBitboard, long friendlyPawns, long enemyPawns) {
