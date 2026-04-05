@@ -742,6 +742,24 @@ public final class ActivityModule implements EvaluationModule {
         int endgameContribution = mobility * endgameMobilityWeights[pieceType]
                 + center * endgameCenterWeights[pieceType];
 
+        // Trapped piece penalty: minor/major pieces with very low mobility
+        if (pieceType != KING && mobility <= 1) {
+            int trappedPenalty = (mobility == 0) ? -30 : -10;
+            midgameContribution += trappedPenalty;
+            endgameContribution += trappedPenalty;
+        }
+
+        // Bishop long diagonal bonus: bishops on main diagonals with many open squares
+        if (pieceType == BISHOP) {
+            long mainDiag = 0x8040201008040201L; // a1-h8
+            long antiDiag = 0x0102040810204080L; // a8-h1
+            long sq = 1L << square;
+            if ((sq & (mainDiag | antiDiag)) != 0 && mobility >= 7) {
+                midgameContribution += 12;
+                endgameContribution += 8;
+            }
+        }
+
         midgameTotals[activity.color] += midgameContribution - activity.midgameScore;
         endgameTotals[activity.color] += endgameContribution - activity.endgameScore;
 
