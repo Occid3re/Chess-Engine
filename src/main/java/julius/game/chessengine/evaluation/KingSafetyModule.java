@@ -300,13 +300,11 @@ public final class KingSafetyModule implements EvaluationModule {
         int shieldPenalty = state.missingShield * missingPawnShieldPenalty;
         int attackPenalty = -state.totalAttackWeight;
         int defenderBonus = state.defenderCount * this.defenderBonus;
-        int stormCount = countPawnStormPawns(enemyPawns, kingSquare, isWhite);
-        int stormMidgame = stormCount * pawnStormMidgamePenalty;
-        int stormEndgame = stormCount * pawnStormEndgamePenalty;
+        int pawnStormPenalty = computePawnStormPenalty(enemyPawns, kingSquare, isWhite);
         computeBackrankWeaknessPenalty(state, board, isWhite);
-        int baseMidgame = shieldPenalty + state.filePenalty + attackPenalty + defenderBonus;
-        state.midgameKingSafety = baseMidgame + stormMidgame + state.backrankWeaknessMidgame;
-        state.endgameKingSafety = baseMidgame / 2 + stormEndgame + state.backrankWeaknessEndgame;
+        int baseMidgame = shieldPenalty + state.filePenalty + attackPenalty + defenderBonus + pawnStormPenalty;
+        state.midgameKingSafety = baseMidgame + state.backrankWeaknessMidgame;
+        state.endgameKingSafety = baseMidgame / 2 + state.backrankWeaknessEndgame;
 
         long queens = isWhite ? board.getWhiteQueens() : board.getBlackQueens();
         int queenMid = 0;
@@ -550,6 +548,36 @@ public final class KingSafetyModule implements EvaluationModule {
             state.zoneAttackWeights[square] += weight;
             relevant &= relevant - 1;
         }
+    }
+
+    /**
+     * Penalty for enemy pawns advancing toward our king. Pawns on the same or
+     * adjacent files within 3 ranks of the king receive a distance-based penalty.
+     */
+    private static int computePawnStormPenalty(long enemyPawns, int kingSquare, boolean isWhite) {
+        if (enemyPawns == 0 || kingSquare < 0) {
+            return 0;
+        }
+        int kingFile = kingSquare & 7;
+        int kingRank = kingSquare >> 3;
+        int penalty = 0;
+        long remaining = enemyPawns;
+        while (remaining != 0) {
+            int sq = Long.numberOfTrailingZeros(remaining);
+            remaining &= remaining - 1;
+            int pawnFile = sq & 7;
+            int pawnRank = sq >> 3;
+            int fileDist = Math.abs(pawnFile - kingFile);
+            if (fileDist > 1) continue; // only same file and adjacent files
+            // Distance in ranks toward the king
+            int rankDist = isWhite ? (pawnRank - kingRank) : (kingRank - pawnRank);
+            if (rankDist <= 0) continue; // pawn is behind or on same rank as king
+            if (rankDist <= 3) {
+                // Closer pawn = bigger threat: 3 ranks away = -4, 2 = -8, 1 = -12
+                penalty -= (4 - rankDist) * 4;
+            }
+        }
+        return penalty;
     }
 
     private static long computeShieldMask(long kingBits, boolean isWhite) {

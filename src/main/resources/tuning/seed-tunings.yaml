@@ -67,7 +67,7 @@ population:
       moveordering.killer0bonus: 22.89496494174806
       search.nullbasereduction: 3.5471370734329564
       kingsafety.attackweightpawn: 8.831993317370175
-      activity.endgamecenterknight: 8.381255286063753
+      activity.endgamecenterknight: 12.0
       activity.midgamemobilityking: 0.0
       threat.pawnthreatbishoppenalty: -11.803162006658457
       search.aspvolatilityweight: 0.8551099349852392
@@ -89,7 +89,7 @@ population:
       search.lmrcapgoodquiet: 27.208205675668374
       search.nullmaterialcap: 28.72238996352345
       moveordering.category.captureequal: 4.667448156774766
-      pawnstructure.islandpenalty: -10.29479683697748
+      pawnstructure.islandpenalty: -14.0
       activity.endgamemobilityking: 5.0
       threat.hangingpawnpenalty: -20.95388408220842
       search.aspdefaultspancp: 32.81064401529041
@@ -120,11 +120,11 @@ population:
       search.fpmargindepth2: 322.68197246218494
       material.pawnvalue: 146.18558903211488
       kingsafety.attackweightqueen: 32.02409051995434
-      pawnstructure.doubledpawnpenalty: -9.678139647521522
+      pawnstructure.doubledpawnpenalty: -14.0
       search.seeprunenearrootply: 3.6760425768212808
       moveordering.historydecaydivisor: 1.7521454615607943
       pawnstructure.passedpawnbonus: 50.0
-      activity.midgamecenterknight: 3.702564587417092
+      activity.midgamecenterknight: 6.0
       activity.midgamecenterqueen: 3.4406529878224257
       search.aspbumpdepthcp: 3.7085655999707887
       search.nullmaterialweight: 1.9615830794320193

@@ -115,6 +115,13 @@ public final class EvaluationPipeline {
         long blended = (long) midgameTotal * midgameWeight + (long) endgameTotal * endgameWeight;
         int score = (int) (blended / blendScale);
 
+        // Tempo bonus: small advantage for the side to move
+        if (context.isWhiteToMove()) {
+            score += 10; // ~0.1 pawn advantage for having the move
+        } else {
+            score -= 10;
+        }
+
         // Mop-up evaluation: in late endgame with material advantage,
         // encourage driving the losing king toward the corner
         if (phase > 200) { // deep endgame
