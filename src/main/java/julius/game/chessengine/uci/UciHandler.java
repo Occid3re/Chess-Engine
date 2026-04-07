@@ -315,35 +315,31 @@ public class UciHandler {
 
         lastInfoNanos.set(0L);
         lastBroadcastedDtz = null;
-        // Force a fresh search — clear any stale result from a prior position-change
-        // triggered mini-search so the coordinator does not skip enqueuing.
-        ai.clearSearchResult();
+
+        // Compute time limit for blocking search
+        final long searchTimeMs;
+        if (movetime > 0) {
+            searchTimeMs = movetime;
+        } else if (timeLeft > 0 || inc > 0) {
+            // Time management: use ~1/20 of remaining time + 75% of increment
+            long base = timeLeft > 0 ? timeLeft / 20 : 0;
+            long incBonus = (long) (inc * 0.75);
+            searchTimeMs = Math.max(100, base + incBonus);
+        } else if (depth > 0) {
+            searchTimeMs = 300_000; // 5 min for depth-limited search
+        } else {
+            searchTimeMs = 5000; // fallback: 5s per move
+        }
+
         searchThread = new Thread(() -> {
-            ai.startAutoPlay(false, false); // start calculation without auto-move
             try {
-                long nextInfo = System.nanoTime();
-                while (!Thread.currentThread().isInterrupted()) {
-                    if (!Boolean.TRUE.equals(running.get())) {
-                        break;
-                    }
-                    long now = System.nanoTime();
-                    if (now >= nextInfo) {
-                        publishSearchInfo();
-                        nextInfo = now + INFO_INTERVAL_NANOS;
-                    }
-                    Integer bm = ai.getCurrentBestMoveInt();
-                    if (bm != null && bm != -1) {
-                        break;
-                    }
-                    Thread.sleep(50);
-                }
-            } catch (InterruptedException ignored) {
-                // interrupted by stop()
-            } finally {
+                // Use blocking search — bypasses the broken coordinator/async pattern
+                // which had a race condition where position-change triggered a premature
+                // 50ms search before the go command's time budget was applied.
+                MoveAndScore result = ai.searchBestMoveBlocking(searchTimeMs);
                 publishSearchInfo();
-                Integer bm = ai.getCurrentBestMoveInt();
-                if (bm != null && bm != -1) {
-                    respondWithMoveOrTerminal(bm, "search result");
+                if (result != null && result.getMove() != -1) {
+                    respondWithMoveOrTerminal(result.getMove(), "search result");
                 } else {
                     IntArrayList legal = engine.getAllLegalMoves();
                     if (!legal.isEmpty()) {
@@ -352,7 +348,14 @@ public class UciHandler {
                         output.accept("bestmove (none)");
                     }
                 }
-                ai.stopCalculation();
+            } catch (Exception e) {
+                IntArrayList legal = engine.getAllLegalMoves();
+                if (!legal.isEmpty()) {
+                    respondWithMoveOrTerminal(legal.getInt(0), "error fallback");
+                } else {
+                    output.accept("bestmove (none)");
+                }
+            } finally {
                 UciHandler.this.searchThread = null;
             }
         });

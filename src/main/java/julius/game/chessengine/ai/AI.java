@@ -1078,6 +1078,7 @@ public class AI {
             TimeManager.TimeBudget budget = (timeLimitMillis > 0)
                     ? timeManager.beginSearchWithOverride(timeLimitMillis)
                     : timeManager.beginSearch();
+            // Time budget established: allocation=timeLimitMillis
 
             SearchTask task;
             synchronized (searchConfigLock) {
