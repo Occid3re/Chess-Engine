@@ -198,6 +198,8 @@ public class UciHandler {
         if (idx >= tokens.length) {
             return;
         }
+        // Stop any running search before changing position.
+        stop();
         if ("startpos".equals(tokens[idx])) {
             engine.startNewGame();
             idx++;
@@ -313,6 +315,9 @@ public class UciHandler {
 
         lastInfoNanos.set(0L);
         lastBroadcastedDtz = null;
+        // Force a fresh search — clear any stale result from a prior position-change
+        // triggered mini-search so the coordinator does not skip enqueuing.
+        ai.clearSearchResult();
         searchThread = new Thread(() -> {
             ai.startAutoPlay(false, false); // start calculation without auto-move
             try {

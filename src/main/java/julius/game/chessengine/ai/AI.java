@@ -1195,6 +1195,16 @@ public class AI {
         searchResultReady = false;
     }
 
+    /**
+     * Clears the cached search result so the next startAutoPlay forces a fresh search.
+     * Called by UCI go command to prevent stale results from a position-change mini-search.
+     */
+    public void clearSearchResult() {
+        searchResultReady = false;
+        currentBestMove = -1;
+        bestMoveForHash = -1;
+    }
+
     private void shutdownWorkerThreads() {
         Thread coordinatorSnapshot;
         Thread[] workersSnapshot;
