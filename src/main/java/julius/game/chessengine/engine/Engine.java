@@ -376,7 +376,7 @@ public class Engine {
             System.arraycopy(a, 0, legalMoveScratch, 0, w);
             cacheLegalMoves(boardStateHash, w);
 
-            // 4) return a defensive copy for callers (cache retains reusable buffers)
+            // 4) return zero-copy wrap for callers (sort creates its own output)
             return copyCachedLegalMoves();
         }
     }
@@ -415,7 +415,7 @@ public class Engine {
     }
 
     private IntArrayList copyCachedLegalMoves() {
-        // Defensive copy — callers sort in-place so we must not expose the cache array.
+        // Defensive copy — callers may iterate/modify the list.
         int[] snapshot = java.util.Arrays.copyOf(cachedLegalMoves, cachedLegalMoveCount);
         return new IntArrayList(snapshot);
     }

@@ -343,12 +343,12 @@ public class AI {
         this.rootFanoutStatsEnabled = Boolean.parseBoolean(System.getProperty(ROOT_FANOUT_PROPERTY, "false"));
         double ratioCandidate;
         try {
-            ratioCandidate = Double.parseDouble(System.getProperty(ROOT_FANOUT_RATIO_PROPERTY, "1.0"));
+            ratioCandidate = Double.parseDouble(System.getProperty(ROOT_FANOUT_RATIO_PROPERTY, "0.25"));
         } catch (NumberFormatException ex) {
-            ratioCandidate = 1.0d;
+            ratioCandidate = 0.25d;
         }
         if (Double.isNaN(ratioCandidate) || ratioCandidate <= 0d) {
-            ratioCandidate = 1.0d;
+            ratioCandidate = 0.25d;
         } else if (ratioCandidate > 1.0d) {
             ratioCandidate = 1.0d;
         }
@@ -1082,6 +1082,9 @@ public class AI {
                     : timeManager.beginSearch();
             // Time budget established: allocation=timeLimitMillis
 
+            // Determine how many Lazy SMP workers to use (calling thread is worker 0)
+            final int smpWorkerCount = lazySmpThreads > 1 ? lazySmpThreads : 1;
+
             SearchTask task;
             synchronized (searchConfigLock) {
                 while (reconfiguringSearchThreads) {
@@ -1098,7 +1101,7 @@ public class AI {
                         boardStateHash,
                         simulatorEngine.whitesTurn(),
                         budget,
-                        1,
+                        smpWorkerCount,
                         simulatorEngine.createSimulation()
                 );
 
@@ -1113,10 +1116,19 @@ public class AI {
                 this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
             }
 
+            // Dispatch Lazy SMP helper workers (workers 1..N-1) to shared search queue
+            if (smpWorkerCount > 1) {
+                ensureCalculationThreadsRunning();
+                for (int i = 1; i < smpWorkerCount; i++) {
+                    searchJobs.offer(SearchJob.work(task));
+                }
+            }
+
             SplittableRandom rng = (lazySmpThreads > 1)
                     ? new SplittableRandom(boardStateHash ^ System.nanoTime())
                     : null;
 
+            // Calling thread acts as worker 0
             threadSearchTask.set(task);
             try {
                 iterativeDeepening(task, simulatorEngine, rng);
@@ -1125,6 +1137,10 @@ public class AI {
             }
 
             task.workerDone();
+            // Wait for Lazy SMP helpers to finish
+            if (smpWorkerCount > 1) {
+                task.awaitCompletion();
+            }
             completeSearchTask(task, simulatorEngine);
             task.requestStop();
 
@@ -3652,8 +3668,11 @@ public class AI {
             outIndex = writeBucket(bucketIndexes[bucket.ordinal()], moveBuffer, orderedBuffer, outIndex);
         }
 
-        MoveContainerUtils.overwriteFromBuffer(moves, orderedBuffer, size);
-        return moves;
+        // Return a NEW IntArrayList from orderedBuffer instead of overwriting input.
+        // This allows callers (e.g. copyCachedLegalMoves) to pass wrapped cache arrays
+        // without the sort corrupting the underlying cache.
+        int[] result = java.util.Arrays.copyOf(orderedBuffer, size);
+        return new IntArrayList(result);
     }
 
 
