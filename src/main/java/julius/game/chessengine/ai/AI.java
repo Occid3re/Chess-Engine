@@ -1148,13 +1148,25 @@ public class AI {
                 lastSearchDepth = task.getBest().depth;
                 return new MoveAndScore(currentBestMove, task.getBest().score, task.getBest().tablebaseExact);
             }
-            return null;
+            // Fallback: return any legal move to prevent null crashes
+            return fallbackLegalMove(simulatorEngine);
         } catch (RuntimeException ex) {
             log.error("Synchronous search failed", ex);
-            return null;
+            return fallbackLegalMove(mainEngine);
         } finally {
             activeSearch.set(null);
         }
+    }
+
+    private MoveAndScore fallbackLegalMove(Engine engine) {
+        try {
+            IntArrayList legal = engine.getAllLegalMoves();
+            if (!legal.isEmpty()) {
+                log.warn("Search returned no result; using fallback legal move");
+                return new MoveAndScore(legal.getInt(0), 0.0);
+            }
+        } catch (Exception ignored) {}
+        return null;
     }
 
     private SplittableRandom createLazyWorkerRng(SearchTask task, int workerIndex) {
