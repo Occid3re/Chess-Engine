@@ -187,7 +187,70 @@ public final class EvaluationPipeline {
             score = score * 3 / 4;
         }
 
+        // Rook vs minor piece — rook is usually winning but less so without pawns
+        boolean wRookVsMinor = wRooks == 1 && wQueens == 0 && wMinors == 0
+                && bRooks == 0 && bQueens == 0 && bMinors == 1;
+        boolean bRookVsMinor = bRooks == 1 && bQueens == 0 && bMinors == 0
+                && wRooks == 0 && wQueens == 0 && wMinors == 1;
+        if (wRookVsMinor || bRookVsMinor) {
+            int totalPawns = wPawns + bPawns;
+            if (totalPawns == 0) {
+                score = score / 2; // rook vs minor without pawns is very drawish
+            } else if (totalPawns <= 2) {
+                score = score * 3 / 4; // slight scaling with few pawns
+            }
+        }
+
+        // Passed pawn bonus in endgame — king proximity to passed pawns matters
+        if (wPawns + bPawns > 0 && wQueens == 0 && bQueens == 0) {
+            score += computePassedPawnKingProximity(board, whiteWinning);
+        }
+
         return score;
+    }
+
+    /**
+     * In queenless endgames, bonus for the winning king being close to passed pawns
+     * and penalty for the losing king being close to enemy passed pawns.
+     */
+    private int computePassedPawnKingProximity(julius.game.chessengine.board.ImmutableBoardView board,
+                                                boolean whiteWinning) {
+        long whiteKing = board.getWhiteKing();
+        long blackKing = board.getBlackKing();
+        if (whiteKing == 0 || blackKing == 0) return 0;
+
+        int wkSq = Long.numberOfTrailingZeros(whiteKing);
+        int bkSq = Long.numberOfTrailingZeros(blackKing);
+        int bonus = 0;
+
+        // Check for advanced passed pawns (rank 6+) and reward king proximity
+        long wPawns = board.getWhitePawns();
+        long bPawns = board.getBlackPawns();
+
+        // White advanced pawns (rank 6 = bits 40-47, rank 7 = bits 48-55)
+        long wAdvanced = wPawns & 0x00FFFF0000000000L; // rank 6-7
+        while (wAdvanced != 0) {
+            int sq = Long.numberOfTrailingZeros(wAdvanced);
+            wAdvanced &= wAdvanced - 1;
+            // Bonus for white king near its own advanced pawn
+            int wkDist = Math.max(Math.abs((wkSq & 7) - (sq & 7)), Math.abs((wkSq >> 3) - (sq >> 3)));
+            int bkDist = Math.max(Math.abs((bkSq & 7) - (sq & 7)), Math.abs((bkSq >> 3) - (sq >> 3)));
+            bonus += (7 - wkDist) * 3;  // reward our king being close
+            bonus -= (7 - bkDist) * 5;  // penalize if enemy king is close (blocking)
+        }
+
+        // Black advanced pawns (rank 3 = bits 16-23, rank 2 = bits 8-15)
+        long bAdvanced = bPawns & 0x0000000000FFFF00L; // rank 2-3
+        while (bAdvanced != 0) {
+            int sq = Long.numberOfTrailingZeros(bAdvanced);
+            bAdvanced &= bAdvanced - 1;
+            int wkDist = Math.max(Math.abs((wkSq & 7) - (sq & 7)), Math.abs((wkSq >> 3) - (sq >> 3)));
+            int bkDist = Math.max(Math.abs((bkSq & 7) - (sq & 7)), Math.abs((bkSq >> 3) - (sq >> 3)));
+            bonus -= (7 - bkDist) * 3;  // reward black king near its pawn
+            bonus += (7 - wkDist) * 5;  // penalize if our king is close (blocking)
+        }
+
+        return bonus;
     }
 
     private int computeMopUpBonus(int currentScore) {
