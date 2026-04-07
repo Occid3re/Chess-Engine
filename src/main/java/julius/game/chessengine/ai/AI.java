@@ -212,6 +212,10 @@ public class AI {
     private final ThreadLocal<Deque<Engine>> workerSimulationPool =
             ThreadLocal.withInitial(ArrayDeque::new);
 
+    // Reusable buffer for zero-allocation legal move retrieval in search
+    private final ThreadLocal<IntArrayList> threadMoveBuffer =
+            ThreadLocal.withInitial(() -> new IntArrayList(MAX_MOVE_LIST_SIZE));
+
     private record TablebaseHit(double score, int bestMove, TablebaseResult result) {
     }
 

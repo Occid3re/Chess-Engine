@@ -131,6 +131,49 @@ public class Engine {
         }
     }
 
+    /**
+     * Zero-allocation access to legal moves for search hot path.
+     * Populates the provided list instead of allocating a new one.
+     * Callers MUST NOT retain references to the list contents across moves.
+     */
+    public void getLegalMovesInto(IntArrayList dest) {
+        synchronized (boardLock) {
+            long boardHash = getBoardStateHash();
+            if (legalMovesNeedUpdate || cachedLegalMovesHash != boardHash) {
+                if (gameState.isTerminal()) {
+                    cacheLegalMoves(boardHash, 0);
+                    dest.clear();
+                    return;
+                }
+                // Generate directly into pseudo buffer, filter, cache
+                IntArrayList pseudo = pseudoMoveBuffer;
+                pseudo.clear();
+                BitBoard.PinState pinState = bitBoard.generateAllPossibleMovesInto(bitBoard.whitesTurn, pseudo);
+                final boolean inCheck = bitBoard.isInCheck(bitBoard.whitesTurn);
+                final int[] a = pseudo.elements();
+                final int n = pseudo.size();
+                int w = 0;
+                for (int i = 0; i < n; i++) {
+                    final int m = a[i];
+                    if (!inCheck) {
+                        if (!MoveHelper.isEnPassantMove(m) || bitBoard.isMoveLegalFast(m, pinState)) {
+                            a[w++] = m;
+                        }
+                    } else if (bitBoard.isMoveLegalFast(m, pinState)) {
+                        a[w++] = m;
+                    }
+                }
+                pseudo.size(w);
+                ensureLegalMoveScratchCapacity(w);
+                System.arraycopy(a, 0, legalMoveScratch, 0, w);
+                cacheLegalMoves(boardHash, w);
+            }
+            // Copy from cache into caller's buffer without allocating
+            dest.clear();
+            dest.addElements(0, cachedLegalMoves, 0, cachedLegalMoveCount);
+        }
+    }
+
     public boolean hasAnyCaptureOrPromotion() {
         synchronized (boardLock) {
             if (gameState.isTerminal()) {
@@ -372,10 +415,10 @@ public class Engine {
     }
 
     private IntArrayList copyCachedLegalMoves() {
-        // Defensive copy of the used range only
-        int[] snapshot = java.util.Arrays.copyOf(cachedLegalMoves, cachedLegalMoveCount);
-        // IntArrayList(int[]) wraps the provided array without copying again
-        return new IntArrayList(snapshot);
+        // Wrap the cached array directly — callers may sort in-place but the
+        // cache is swapped on the next generateLegalMoves() call via double-buffering,
+        // so mutation of the returned list does not corrupt future cache reads.
+        return IntArrayList.wrap(cachedLegalMoves, cachedLegalMoveCount);
     }
 
     private void resetCachedLegalMoves() {
