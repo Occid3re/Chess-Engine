@@ -34,6 +34,8 @@ public final class MaterialModule implements EvaluationModule {
 
     private final int[] midgameMaterial = new int[2];
     private final int[] endgameMaterial = new int[2];
+    private final int[] midgamePst = new int[2];
+    private final int[] endgamePst = new int[2];
     private final int[] bishopCounts = new int[2];
     private final int bishopPairBonus;
 
@@ -144,9 +146,16 @@ public final class MaterialModule implements EvaluationModule {
         int movedPiece = MoveHelper.derivePieceTypeBits(move);
         boolean moverIsWhite = mover == WHITE;
         boolean opponentIsWhite = !moverIsWhite;
+        int fromSq = MoveHelper.deriveFromIndex(move);
+        int toSq = MoveHelper.deriveToIndex(move);
 
         if (!undo) {
+            // PST: piece moves from -> to
+            removePst(mover, movedPiece, fromSq);
+            addPst(mover, promotion != 0 ? promotion : movedPiece, toSq);
+
             if (captured != 0) {
+                removePst(mover ^ 1, captured, captureSquare(move));
                 if (pawnChangeListener != null && captured == PAWN) {
                     pawnChangeListener.onPawnRemoved(opponentIsWhite, captureSquare(move));
                 }
@@ -154,20 +163,31 @@ public final class MaterialModule implements EvaluationModule {
             }
             if (promotion != 0) {
                 if (pawnChangeListener != null && movedPiece == PAWN) {
-                    pawnChangeListener.onPawnRemoved(moverIsWhite, MoveHelper.deriveFromIndex(move));
+                    pawnChangeListener.onPawnRemoved(moverIsWhite, fromSq);
                 }
                 removePiece(mover, movedPiece);
                 addPiece(mover, promotion);
             }
+            if (MoveHelper.isCastlingMove(move)) {
+                updateCastlingRookPst(mover, toSq, false);
+            }
         } else {
+            if (MoveHelper.isCastlingMove(move)) {
+                updateCastlingRookPst(mover, toSq, true);
+            }
+            // PST: reverse
+            removePst(mover, promotion != 0 ? promotion : movedPiece, toSq);
+            addPst(mover, movedPiece, fromSq);
+
             if (promotion != 0) {
                 removePiece(mover, promotion);
                 addPiece(mover, movedPiece);
                 if (pawnChangeListener != null && movedPiece == PAWN) {
-                    pawnChangeListener.onPawnAdded(moverIsWhite, MoveHelper.deriveFromIndex(move));
+                    pawnChangeListener.onPawnAdded(moverIsWhite, fromSq);
                 }
             }
             if (captured != 0) {
+                addPst(mover ^ 1, captured, captureSquare(move));
                 addPiece(mover ^ 1, captured);
                 if (pawnChangeListener != null && captured == PAWN) {
                     pawnChangeListener.onPawnAdded(opponentIsWhite, captureSquare(move));
@@ -178,9 +198,29 @@ public final class MaterialModule implements EvaluationModule {
         updateScoreCaches();
     }
 
+    private void updateCastlingRookPst(int color, int kingTo, boolean undo) {
+        int rookFrom, rookTo;
+        if (kingTo == 6 || kingTo == 62) { // kingside
+            rookFrom = (color == WHITE) ? 7 : 63;
+            rookTo = (color == WHITE) ? 5 : 61;
+        } else { // queenside
+            rookFrom = (color == WHITE) ? 0 : 56;
+            rookTo = (color == WHITE) ? 3 : 59;
+        }
+        if (undo) {
+            removePst(color, ROOK, rookTo);
+            addPst(color, ROOK, rookFrom);
+        } else {
+            removePst(color, ROOK, rookFrom);
+            addPst(color, ROOK, rookTo);
+        }
+    }
+
     private void rebuildFromContext(EvaluationContext context) {
         Arrays.fill(midgameMaterial, 0);
         Arrays.fill(endgameMaterial, 0);
+        Arrays.fill(midgamePst, 0);
+        Arrays.fill(endgamePst, 0);
         Arrays.fill(bishopCounts, 0);
 
         accumulatePieces(WHITE, PAWN, Long.bitCount(context.getWhitePawns()));
@@ -194,6 +234,20 @@ public final class MaterialModule implements EvaluationModule {
         accumulatePieces(BLACK, BISHOP, Long.bitCount(context.getBlackBishops()));
         accumulatePieces(BLACK, ROOK, Long.bitCount(context.getBlackRooks()));
         accumulatePieces(BLACK, QUEEN, Long.bitCount(context.getBlackQueens()));
+
+        // PSTs from all pieces including kings
+        accumulatePst(WHITE, PAWN, context.getWhitePawns());
+        accumulatePst(WHITE, KNIGHT, context.getWhiteKnights());
+        accumulatePst(WHITE, BISHOP, context.getWhiteBishops());
+        accumulatePst(WHITE, ROOK, context.getWhiteRooks());
+        accumulatePst(WHITE, QUEEN, context.getWhiteQueens());
+        accumulatePst(WHITE, KING, context.getWhiteKing());
+        accumulatePst(BLACK, PAWN, context.getBlackPawns());
+        accumulatePst(BLACK, KNIGHT, context.getBlackKnights());
+        accumulatePst(BLACK, BISHOP, context.getBlackBishops());
+        accumulatePst(BLACK, ROOK, context.getBlackRooks());
+        accumulatePst(BLACK, QUEEN, context.getBlackQueens());
+        accumulatePst(BLACK, KING, context.getBlackKing());
 
         updateScoreCaches();
         dirty = false;
@@ -255,9 +309,35 @@ public final class MaterialModule implements EvaluationModule {
         return MoveHelper.deriveToIndex(move);
     }
 
+    private void accumulatePst(int colorIndex, int pieceType, long bitboard) {
+        while (bitboard != 0) {
+            int sq = Long.numberOfTrailingZeros(bitboard);
+            bitboard &= bitboard - 1;
+            int pstSq = (colorIndex == WHITE) ? sq : (sq ^ 56);
+            midgamePst[colorIndex] += PieceSquareTables.midgame(pieceType, pstSq);
+            endgamePst[colorIndex] += PieceSquareTables.endgame(pieceType, pstSq);
+        }
+    }
+
+    private void addPst(int colorIndex, int pieceType, int square) {
+        if (pieceType == 0) return;
+        int pstSq = (colorIndex == WHITE) ? square : (square ^ 56);
+        midgamePst[colorIndex] += PieceSquareTables.midgame(pieceType, pstSq);
+        endgamePst[colorIndex] += PieceSquareTables.endgame(pieceType, pstSq);
+    }
+
+    private void removePst(int colorIndex, int pieceType, int square) {
+        if (pieceType == 0) return;
+        int pstSq = (colorIndex == WHITE) ? square : (square ^ 56);
+        midgamePst[colorIndex] -= PieceSquareTables.midgame(pieceType, pstSq);
+        endgamePst[colorIndex] -= PieceSquareTables.endgame(pieceType, pstSq);
+    }
+
     private void updateScoreCaches() {
-        midgameScoreCache = midgameMaterial[WHITE] - midgameMaterial[BLACK];
-        endgameScoreCache = endgameMaterial[WHITE] - endgameMaterial[BLACK];
+        midgameScoreCache = (midgameMaterial[WHITE] + midgamePst[WHITE])
+                          - (midgameMaterial[BLACK] + midgamePst[BLACK]);
+        endgameScoreCache = (endgameMaterial[WHITE] + endgamePst[WHITE])
+                          - (endgameMaterial[BLACK] + endgamePst[BLACK]);
         dirty = false;
     }
 }
