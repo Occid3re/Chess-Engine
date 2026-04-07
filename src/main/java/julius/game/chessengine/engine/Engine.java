@@ -415,10 +415,9 @@ public class Engine {
     }
 
     private IntArrayList copyCachedLegalMoves() {
-        // Wrap the cached array directly — callers may sort in-place but the
-        // cache is swapped on the next generateLegalMoves() call via double-buffering,
-        // so mutation of the returned list does not corrupt future cache reads.
-        return IntArrayList.wrap(cachedLegalMoves, cachedLegalMoveCount);
+        // Defensive copy — callers sort in-place so we must not expose the cache array.
+        int[] snapshot = java.util.Arrays.copyOf(cachedLegalMoves, cachedLegalMoveCount);
+        return new IntArrayList(snapshot);
     }
 
     private void resetCachedLegalMoves() {
