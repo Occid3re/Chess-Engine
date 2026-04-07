@@ -399,6 +399,37 @@ public final class BestMoveFixtures {
             new BestMoveTestCase(
                     "2kr3r/8/1p4np/p1p1qp2/P1Ppp3/1B6/1PP1QPP1/3RN1K1 w - - 0 26",
                     List.of("Qh5", "g3", "Qf1", "Kf1")
+            ),
+            // --- Lichess blunder positions (Stockfish-verified) ---
+            new BestMoveTestCase(
+                    "2r1k3/5p1p/p3p1b1/4PPQ1/1p5P/1Pq5/P1P3R1/1KRr4 b - - 0 34",
+                    List.of("Rxc1"),
+                    6
+            ),
+            new BestMoveTestCase(
+                    "2r1r1k1/p4ppp/1p3q2/1P3N2/2n5/8/P2RPPPP/1Q2KB1R w K - 1 24",
+                    List.of("e3"),
+            ),
+            new BestMoveTestCase(
+                    "3rkb1r/1pp1pppp/p1n1q1b1/8/3PP2P/2N2N2/PPP1B1P1/R2Q2KR b k - 0 16",
+                    List.of("Nd4")
+            ),
+            new BestMoveTestCase(
+                    "6k1/7p/8/1p6/1P6/P1b3p1/2P1K3/8 b - - 1 55",
+                    List.of("Kf7"),
+                    6
+            ),
+            new BestMoveTestCase(
+                    "r2qk2r/pp1bbppp/2n5/2P5/1P1pn3/Q4N2/P2BPPPP/RN2KB1R w KQkq - 1 11",
+                    List.of("Qd3", "Bd3")
+            ),
+            new BestMoveTestCase(
+                    "r3r1k1/p4ppp/1p3q2/nPb5/3N1B2/8/P1Q1PPPP/3RKB1R w K - 1 20",
+                    List.of("Bd2", "Be3")
+            ),
+            new BestMoveTestCase(
+                    "2r1kb1r/1q2pppp/p3b3/1p2P3/8/1P3NR1/PKPQBP1P/4R3 b k - 3 19",
+                    List.of("g6")
             )
     );
 
