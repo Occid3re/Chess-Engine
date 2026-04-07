@@ -113,7 +113,107 @@ public final class EvaluationPipeline {
         int midgameWeight = blendScale - phase;
         int endgameWeight = phase;
         long blended = (long) midgameTotal * midgameWeight + (long) endgameTotal * endgameWeight;
-        return (int) (blended / blendScale);
+        int score = (int) (blended / blendScale);
+
+        // Tempo bonus
+        if (context.isWhiteToMove()) {
+            score += 10;
+        } else {
+            score -= 10;
+        }
+
+        // Endgame scaling for drawish positions
+        score = applyEndgameScaling(score);
+
+        // Mop-up evaluation: drive losing king to corner in won endgames
+        if (phase > 200 && Math.abs(score) >= 200) {
+            score += computeMopUpBonus(score);
+        }
+
+        return score;
+    }
+
+    private int applyEndgameScaling(int score) {
+        if (context == null || context.getBoardView() == null) return score;
+        var board = context.getBoardView();
+
+        int wPawns = Long.bitCount(board.getWhitePawns());
+        int bPawns = Long.bitCount(board.getBlackPawns());
+        int wKnights = Long.bitCount(board.getWhiteKnights());
+        int bKnights = Long.bitCount(board.getBlackKnights());
+        int wBishops = Long.bitCount(board.getWhiteBishops());
+        int bBishops = Long.bitCount(board.getBlackBishops());
+        int wRooks = Long.bitCount(board.getWhiteRooks());
+        int bRooks = Long.bitCount(board.getBlackRooks());
+        int wQueens = Long.bitCount(board.getWhiteQueens());
+        int bQueens = Long.bitCount(board.getBlackQueens());
+
+        int wMinors = wKnights + wBishops;
+        int bMinors = bKnights + bBishops;
+        int wMajors = wRooks + wQueens;
+        int bMajors = bRooks + bQueens;
+
+        // Insufficient material
+        if (wPawns == 0 && wMajors == 0 && wMinors <= 1
+                && bPawns == 0 && bMajors == 0 && bMinors <= 1) {
+            return score / 16;
+        }
+
+        // Lone minor piece advantage without pawns
+        if (wPawns == 0 && bPawns == 0 && wMajors == 0 && bMajors == 0
+                && Math.abs(wMinors - bMinors) <= 1) {
+            return score / 4;
+        }
+
+        // Opposite-colored bishops only
+        if (wBishops == 1 && bBishops == 1 && wRooks == 0 && bRooks == 0
+                && wQueens == 0 && bQueens == 0 && wKnights == 0 && bKnights == 0) {
+            long wb = board.getWhiteBishops();
+            long bb = board.getBlackBishops();
+            int wbSq = Long.numberOfTrailingZeros(wb);
+            int bbSq = Long.numberOfTrailingZeros(bb);
+            boolean wbLight = ((wbSq >> 3) + (wbSq & 7)) % 2 == 0;
+            boolean bbLight = ((bbSq >> 3) + (bbSq & 7)) % 2 == 0;
+            if (wbLight != bbLight) {
+                score = score / 2;
+            }
+        }
+
+        // No pawns for winning side with only minor pieces
+        boolean whiteWinning = score > 0;
+        if (whiteWinning && wPawns == 0 && wMajors == 0 && wMinors <= 2) {
+            score = score * 3 / 4;
+        } else if (!whiteWinning && bPawns == 0 && bMajors == 0 && bMinors <= 2) {
+            score = score * 3 / 4;
+        }
+
+        return score;
+    }
+
+    private int computeMopUpBonus(int currentScore) {
+        var board = context.getBoardView();
+        long whiteKing = board.getWhiteKing();
+        long blackKing = board.getBlackKing();
+        if (whiteKing == 0 || blackKing == 0) return 0;
+
+        int wkSq = Long.numberOfTrailingZeros(whiteKing);
+        int bkSq = Long.numberOfTrailingZeros(blackKing);
+        boolean whiteWinning = currentScore > 0;
+        int losingKingSq = whiteWinning ? bkSq : wkSq;
+
+        int losingFile = losingKingSq & 7;
+        int losingRank = losingKingSq >> 3;
+        int fileDist = Math.max(3 - losingFile, losingFile - 4);
+        int rankDist = Math.max(3 - losingRank, losingRank - 4);
+        int cornerDistance = fileDist + rankDist;
+
+        int kingFileDiff = Math.abs((wkSq & 7) - (bkSq & 7));
+        int kingRankDiff = Math.abs((wkSq >> 3) - (bkSq >> 3));
+        int kingDist = Math.max(kingFileDiff, kingRankDiff);
+        int closenessBonus = Math.max(0, 7 - kingDist);
+
+        int mopUp = cornerDistance * 5 + closenessBonus * 3;
+        return whiteWinning ? mopUp : -mopUp;
     }
 
     public double getScoreDifference() {
