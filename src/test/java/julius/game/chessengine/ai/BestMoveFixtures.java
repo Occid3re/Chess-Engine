@@ -408,7 +408,7 @@ public final class BestMoveFixtures {
             ),
             new BestMoveTestCase(
                     "2r1r1k1/p4ppp/1p3q2/1P3N2/2n5/8/P2RPPPP/1Q2KB1R w K - 1 24",
-                    List.of("e3"),
+                    List.of("e3")
             ),
             new BestMoveTestCase(
                     "3rkb1r/1pp1pppp/p1n1q1b1/8/3PP2P/2N2N2/PPP1B1P1/R2Q2KR b k - 0 16",

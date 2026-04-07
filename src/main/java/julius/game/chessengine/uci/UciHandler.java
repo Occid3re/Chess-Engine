@@ -337,8 +337,13 @@ public class UciHandler {
                 // which had a race condition where position-change triggered a premature
                 // 50ms search before the go command's time budget was applied.
                 MoveAndScore result = ai.searchBestMoveBlocking(searchTimeMs);
-                publishSearchInfo();
+                // Publish final search info
+                long nodes = ai.getNodesVisited();
                 if (result != null && result.getMove() != -1) {
+                    String moveStr = toUci(result.getMove());
+                    int searchDepth = Math.max(1, ai.getLastSearchDepth());
+                    output.accept(String.format("info depth %d %s nodes %d pv %s",
+                            searchDepth, formatScore(result.getScore()), nodes, moveStr));
                     respondWithMoveOrTerminal(result.getMove(), "search result");
                 } else {
                     IntArrayList legal = engine.getAllLegalMoves();

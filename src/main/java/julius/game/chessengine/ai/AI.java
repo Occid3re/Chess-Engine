@@ -309,6 +309,8 @@ public class AI {
     @Getter
     private long nodesVisited = 0;
     @Getter
+    private volatile int lastSearchDepth = 0;
+    @Getter
     private long nullMoveCount = 0;
 
     public AI(Engine mainEngine) {
@@ -1127,6 +1129,7 @@ public class AI {
             task.requestStop();
 
             if (searchResultReady && currentBestMove != -1 && bestMoveForHash == boardStateHash) {
+                lastSearchDepth = task.getBest().depth;
                 return new MoveAndScore(currentBestMove, task.getBest().score, task.getBest().tablebaseExact);
             }
             return null;
