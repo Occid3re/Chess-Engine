@@ -1101,7 +1101,7 @@ public class AI {
                         boardStateHash,
                         simulatorEngine.whitesTurn(),
                         budget,
-                        smpWorkerCount,
+                        1,
                         simulatorEngine.createSimulation()
                 );
 
@@ -1116,13 +1116,11 @@ public class AI {
                 this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
             }
 
-            // Dispatch Lazy SMP helper workers (workers 1..N-1) to shared search queue
-            if (smpWorkerCount > 1) {
-                ensureCalculationThreadsRunning();
-                for (int i = 1; i < smpWorkerCount; i++) {
-                    searchJobs.offer(SearchJob.work(task));
-                }
-            }
+            // Don't use Lazy SMP workers in blocking mode — they were causing
+            // race conditions where the worker would call task.requestStop() before
+            // the calling thread even started searching. The calling thread handles
+            // all search work when smpWorkerCount is effectively 1.
+            final int effectiveSmp = 1;
 
             SplittableRandom rng = (lazySmpThreads > 1)
                     ? new SplittableRandom(boardStateHash ^ System.nanoTime())
@@ -1137,10 +1135,6 @@ public class AI {
             }
 
             task.workerDone();
-            // Wait for Lazy SMP helpers to finish
-            if (smpWorkerCount > 1) {
-                task.awaitCompletion();
-            }
             completeSearchTask(task, simulatorEngine);
             task.requestStop();
 
@@ -1496,11 +1490,9 @@ public class AI {
             logAndResetWorkerInstrumentation();
             return;
         }
-        if (currentBoardState != task.getBoardHash()) {
-            logAndResetWorkerInstrumentation();
-            return;
-        }
-
+        // Note: we don't check currentBoardState here because blocking search
+        // has its own snapshot in the task, and position-changed callbacks can
+        // race-update currentBoardState during multi-threaded searches.
         BestMoveDepth best = task.getBest();
         int move = best.move;
 
