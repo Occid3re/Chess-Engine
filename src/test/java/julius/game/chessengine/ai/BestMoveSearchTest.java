@@ -39,20 +39,27 @@ public class BestMoveSearchTest {
     private static final String ROOT_FANOUT_RATIO_PROPERTY = "chessengine.rootFanoutRatio";
 
     static {
+        // Default to full PC resources (matches Lichess blitz config: 16 threads, 1GB hash)
+        // Override with -Dchessengine.searchThreads=N or -Dchessengine.bestmove.timeMs=N
         System.setProperty(PARALLEL_OVERRIDE_PROPERTY,
                 System.getProperty(PARALLEL_OVERRIDE_PROPERTY, "false"));
         System.setProperty(ROOT_FANOUT_RATIO_PROPERTY,
-                System.getProperty(ROOT_FANOUT_RATIO_PROPERTY, "0.75"));
+                System.getProperty(ROOT_FANOUT_RATIO_PROPERTY, "0.25"));
         System.setProperty("chessengine.searchThreads",
-                System.getProperty("chessengine.searchThreads", "1"));
+                System.getProperty("chessengine.searchThreads", "16"));
         System.setProperty("chessengine.lazySmpThreads",
                 System.getProperty("chessengine.lazySmpThreads", "1"));
         System.setProperty("chessengine.rootParallelLimit",
-                System.getProperty("chessengine.rootParallelLimit", "48"));
+                System.getProperty("chessengine.rootParallelLimit", "120"));
+        System.setProperty("chessengine.tt.mb",
+                System.getProperty("chessengine.tt.mb", "1024"));
     }
 
     private static final SearchEnvironment SEARCH_ENVIRONMENT = SearchEnvironment.detect();
     private static final int DEFAULT_SEARCH_DEPTH = 4;
+    /** Time budget per position in milliseconds. Mirrors Lichess blitz allocation (~3s/move). */
+    private static final long DEFAULT_SEARCH_TIME_MS = Long.parseLong(
+            System.getProperty("chessengine.bestmove.timeMs", "3000"));
     private static final long UNBOUNDED_SEARCH_TIME_MILLIS = java.util.concurrent.TimeUnit.DAYS.toMillis(365L * 100L);
 
     private final List<DecisionStatistics> decisionSummaries = new ArrayList<>();
@@ -74,12 +81,15 @@ public class BestMoveSearchTest {
         Engine engine = new Engine();
         engine.importBoardFromFen(fen);
 
-        int searchDepth = depthOverride != null ? depthOverride : DEFAULT_SEARCH_DEPTH;
+        // If a depth override is provided, use depth-based search; otherwise use time-based.
+        // Time-based with full PC resources gives realistic Lichess-like performance.
+        int searchDepth = depthOverride != null ? depthOverride : 32;
+        long searchTimeMs = depthOverride != null ? UNBOUNDED_SEARCH_TIME_MILLIS : DEFAULT_SEARCH_TIME_MS;
         List<String> expectedMovesView = List.copyOf(expectedMoves);
 
         AiTuning tuning = SEARCH_ENVIRONMENT.applyTo(AiTuning.builder())
                 .maxDepth(searchDepth)
-                .timeLimitMillis(UNBOUNDED_SEARCH_TIME_MILLIS)
+                .timeLimitMillis(searchTimeMs)
                 .nullMovePruning(true)
                 .build();
 
@@ -89,7 +99,9 @@ public class BestMoveSearchTest {
         long nullMovesBefore = ai.getNullMoveCount();
         long startNanos = System.nanoTime();
 
-        MoveAndScore result = ai.searchToDepthBlocking(searchDepth);
+        MoveAndScore result = depthOverride != null
+                ? ai.searchToDepthBlocking(searchDepth)
+                : ai.searchForTimeBlocking(searchTimeMs);
         Duration wallClock = Duration.ofNanos(System.nanoTime() - startNanos);
 
         int deepestCompletedDepth = ai.deepestCompletedDepth();
@@ -124,11 +136,14 @@ public class BestMoveSearchTest {
         decisionJsonLines.add(statistics.toJsonLine());
         decisionTextBlocks.add(humanReadable + diagnostics);
 
-        Assertions.assertTrue(deepestCompletedDepth <= searchDepth,
-                () -> "Search reached depth " + deepestCompletedDepth + " before stopping; target depth was "
-                        + searchDepth + System.lineSeparator()
-                        + ai.depthCoverageSummary() + System.lineSeparator()
-                        + humanReadable + System.lineSeparator() + diagnostics);
+        // Only enforce the depth ceiling for depth-overridden tests (time-based runs are unbounded).
+        if (depthOverride != null) {
+            Assertions.assertTrue(deepestCompletedDepth <= searchDepth,
+                    () -> "Search reached depth " + deepestCompletedDepth + " before stopping; target depth was "
+                            + searchDepth + System.lineSeparator()
+                            + ai.depthCoverageSummary() + System.lineSeparator()
+                            + humanReadable + System.lineSeparator() + diagnostics);
+        }
 
         boolean acceptedMove = expectedMovesView.contains(moveString);
 
@@ -599,6 +614,15 @@ public class BestMoveSearchTest {
             this.targetDepth = targetDepth;
             resetDepthDiagnostics();
             return super.searchBestMoveBlocking(UNBOUNDED_SEARCH_TIME_MILLIS);
+        }
+
+        MoveAndScore searchForTimeBlocking(long timeLimitMillis) {
+            if (timeLimitMillis <= 0) {
+                throw new IllegalArgumentException("timeLimitMillis must be positive");
+            }
+            this.targetDepth = 32; // bounded only by time
+            resetDepthDiagnostics();
+            return super.searchBestMoveBlocking(timeLimitMillis);
         }
 
         int deepestCompletedDepth() {
