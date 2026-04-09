@@ -104,6 +104,10 @@ public final class EvaluationPipeline {
         return endgameTotal;
     }
 
+    // A/B test knob: disable endgame scaling and mop-up via -Dchessengine.endgameFeatures=0
+    private static final boolean ENDGAME_FEATURES = !"0".equals(
+            System.getProperty("chessengine.endgameFeatures", "1"));
+
     public int getBlendedScore() {
         refreshTotals();
         if (context == null) {
@@ -122,12 +126,14 @@ public final class EvaluationPipeline {
             score -= 10;
         }
 
-        // Endgame scaling for drawish positions
-        score = applyEndgameScaling(score);
+        if (ENDGAME_FEATURES) {
+            // Endgame scaling for drawish positions
+            score = applyEndgameScaling(score);
 
-        // Mop-up evaluation: drive losing king to corner in won endgames
-        if (phase > 200 && Math.abs(score) >= 200) {
-            score += computeMopUpBonus(score);
+            // Mop-up evaluation: drive losing king to corner in won endgames
+            if (phase > 200 && Math.abs(score) >= 200) {
+                score += computeMopUpBonus(score);
+            }
         }
 
         return score;

@@ -2583,9 +2583,13 @@ public class AI {
         boolean previousMoveWasNull = prevMove == NULL_MOVE_SENTINEL;
         if (previousMoveWasNull && plyFromRoot == 0) previousMoveWasNull = false;
 
-        // **CHANGE #1**: Disable null-move at PV nodes (and keep other guards)
+        // Null-move pruning. PV-node gating is configurable:
+        //   -Dchessengine.nullAtPv=true (default) allows null-move at PV nodes (v3.6.9 behaviour)
+        //   -Dchessengine.nullAtPv=false disables it at PV nodes
+        boolean nullAtPv = !"false".equalsIgnoreCase(
+                System.getProperty("chessengine.nullAtPv", "true"));
         boolean allowNullMove = useNullMovePruning
-                && !isPvNode
+                && (nullAtPv || !isPvNode)
                 && !inCheck
                 && !simulatorEngine.isEndgame()
                 && !previousMoveWasNull;
