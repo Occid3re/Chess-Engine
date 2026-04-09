@@ -812,10 +812,24 @@ def play_game(client: berserk.Client,
                     slack = 0.1 if tc_bucket == "bullet" else 0.15
                     try:
                         result = engine.play(board, chess.engine.Limit(time=max(0.05, think_time - slack)))
-                        move_sent = safe_make_move(client, game_id, result.move.uci())
-                        if not move_sent:
-                            print("[warn] Move send failed, retrying once")
-                            safe_make_move(client, game_id, result.move.uci())
+                        if result is None or result.move is None:
+                            # Engine produced no move — pick a random legal move so the
+                            # game continues instead of crashing the bot.
+                            print("[warn] engine.play returned no move, falling back to random legal")
+                            moves_list = list(board.legal_moves)
+                            if moves_list:
+                                fallback = random.choice(moves_list)
+                                move_sent = safe_make_move(client, game_id, fallback.uci())
+                                if not move_sent:
+                                    print("[warn] Fallback move send failed, retrying once")
+                                    safe_make_move(client, game_id, fallback.uci())
+                            else:
+                                print("[warn] no legal moves available, skipping")
+                        else:
+                            move_sent = safe_make_move(client, game_id, result.move.uci())
+                            if not move_sent:
+                                print("[warn] Move send failed, retrying once")
+                                safe_make_move(client, game_id, result.move.uci())
                     except (asyncio.TimeoutError,
                             chess.engine.EngineError,
                             chess.engine.EngineTerminatedError) as e:

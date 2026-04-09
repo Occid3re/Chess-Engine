@@ -446,12 +446,31 @@ public class UciHandler {
     }
 
     private void respondWithMoveOrTerminal(int move, String reason) {
-        if (engine.getGameState().isTerminal()) {
-            output.accept("info string Terminal position detected during " + reason + "; responding with bestmove (none)");
+        // If we have a real move from the search/fallback, just play it.
+        // The previous "isTerminal()" guard was buggy: between games it could
+        // see a stale terminal flag from the *previous* game's final position
+        // and emit "bestmove (none)" for the new game's startpos, crashing
+        // the Lichess bot. A move only exists if the search/fallback found
+        // legal moves, so the position cannot truly be terminal here.
+        if (move == -1) {
+            output.accept("info string No move available during " + reason + "; responding with bestmove (none)");
             output.accept("bestmove (none)");
-        } else {
+            return;
+        }
+        try {
             engine.performMove(move);
             output.accept("bestmove " + toUci(move));
+        } catch (RuntimeException ex) {
+            output.accept("info string performMove failed during " + reason + ": " + ex.getMessage());
+            // Fall back to whatever first legal move exists in the LIVE engine.
+            IntArrayList legal = engine.getAllLegalMoves();
+            if (!legal.isEmpty()) {
+                int safe = legal.getInt(0);
+                engine.performMove(safe);
+                output.accept("bestmove " + toUci(safe));
+            } else {
+                output.accept("bestmove (none)");
+            }
         }
     }
 

@@ -1159,6 +1159,16 @@ public class AI {
                 log.warn("Search returned no result; using fallback legal move");
                 return new MoveAndScore(legal.getInt(0), 0.0);
             }
+        } catch (Exception e) {
+            log.warn("Fallback legal move generation failed: {}", e.toString());
+        }
+        // Last resort: try the main engine's live state
+        try {
+            IntArrayList legal = mainEngine.getAllLegalMoves();
+            if (!legal.isEmpty()) {
+                log.warn("Search and simulator fallback empty; returning live engine first legal move");
+                return new MoveAndScore(legal.getInt(0), 0.0);
+            }
         } catch (Exception ignored) {}
         return null;
     }
