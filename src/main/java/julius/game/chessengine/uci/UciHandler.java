@@ -90,6 +90,18 @@ public class UciHandler {
                 lastInfoNanos.set(0L);
             }
             case "setoption" -> setOption(tokens);
+            case "eval" -> {
+                // Custom UCI extension: print the classic evaluation of the current position
+                // in centipawns (white-perspective). Used for NN training data generation.
+                // getScoreDifference() returns pawns, so multiply by 100 for centipawns.
+                try {
+                    double scoreDiff = engine.getGameState().getScore().getScoreDifference();
+                    int cp = (int) Math.round(scoreDiff * 100.0);
+                    output.accept("info string classiceval " + cp);
+                } catch (Exception e) {
+                    output.accept("info string classiceval 0");
+                }
+            }
             case "quit" -> {
                 stop();
                 return false;

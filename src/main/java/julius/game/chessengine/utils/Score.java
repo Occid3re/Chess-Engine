@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.evaluation.*;
+import julius.game.chessengine.evaluation.nn.NeuralBlendModule;
+import julius.game.chessengine.evaluation.nn.SmallNN;
 import julius.game.chessengine.syzygy.SyzygyProbeResult;
 import julius.game.chessengine.syzygy.SyzygyTablebaseService;
 import julius.game.chessengine.syzygy.SyzygyWdl;
@@ -24,6 +26,30 @@ public class Score {
     private static final ThreadLocal<ScoreFactory> THREAD_FACTORY = new ThreadLocal<>();
     private static volatile ScoreFactory GLOBAL_FACTORY = bitBoard -> new Score(bitBoard, EvaluationWeights.identity());
     private static volatile SyzygyTablebaseService TABLEBASE_SERVICE;
+
+    // Neural evaluation toggle. Set -Dchessengine.eval.mode=neural to use NN; defaults to classic.
+    private static final String EVAL_MODE = System.getProperty("chessengine.eval.mode", "classic");
+    private static final String NN_RESOURCE = System.getProperty("chessengine.nn.weights",
+            "/nn/v1/weights.bin");
+    private static volatile SmallNN NEURAL_WEIGHTS;  // loaded lazily on first use
+    private static volatile boolean NEURAL_LOAD_ATTEMPTED = false;
+
+    private static SmallNN loadNeuralWeightsIfNeeded() {
+        if (!"neural".equalsIgnoreCase(EVAL_MODE)) {
+            return null;
+        }
+        if (NEURAL_LOAD_ATTEMPTED) {
+            return NEURAL_WEIGHTS;
+        }
+        synchronized (Score.class) {
+            if (NEURAL_LOAD_ATTEMPTED) {
+                return NEURAL_WEIGHTS;
+            }
+            NEURAL_WEIGHTS = SmallNN.loadFromResource(NN_RESOURCE);
+            NEURAL_LOAD_ATTEMPTED = true;
+            return NEURAL_WEIGHTS;
+        }
+    }
 
     private static final int DEFAULT_TABLEBASE_PIECE_LIMIT = 6;
     private static volatile int tablebasePieceLimit = DEFAULT_TABLEBASE_PIECE_LIMIT;
@@ -64,6 +90,16 @@ public class Score {
 
     public Score(EvaluationWeights weights) {
         this.weights = weights != null ? weights : EvaluationWeights.identity();
+
+        // Neural mode: replace the full 5-module pipeline with a single NeuralBlendModule.
+        // If weights can't be loaded, fall back to classic.
+        SmallNN nn = loadNeuralWeightsIfNeeded();
+        if (nn != null) {
+            this.evaluationPipeline = new EvaluationPipeline(
+                    List.of(new NeuralBlendModule(nn)),
+                    EvaluationWeights.identity());
+            return;
+        }
 
         MaterialModule materialModule = new MaterialModule();
         PawnStructureModule pawnStructureModule = new PawnStructureModule();
