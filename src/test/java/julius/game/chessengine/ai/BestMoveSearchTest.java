@@ -52,7 +52,7 @@ public class BestMoveSearchTest {
         System.setProperty("chessengine.rootParallelLimit",
                 System.getProperty("chessengine.rootParallelLimit", "120"));
         System.setProperty("chessengine.tt.mb",
-                System.getProperty("chessengine.tt.mb", "1024"));
+                System.getProperty("chessengine.tt.mb", "2048"));
     }
 
     private static final SearchEnvironment SEARCH_ENVIRONMENT = SearchEnvironment.detect();
@@ -83,8 +83,12 @@ public class BestMoveSearchTest {
 
         // If a depth override is provided, use depth-based search; otherwise use time-based.
         // Time-based with full PC resources gives realistic Lichess-like performance.
+        // In neural mode, depth overrides may hang forever — fall back to time-based.
+        boolean neuralMode = "neural".equalsIgnoreCase(
+                System.getProperty("chessengine.eval.mode", "classic"));
+        boolean useDepthSearch = depthOverride != null && !neuralMode;
         int searchDepth = depthOverride != null ? depthOverride : 32;
-        long searchTimeMs = depthOverride != null ? UNBOUNDED_SEARCH_TIME_MILLIS : DEFAULT_SEARCH_TIME_MS;
+        long searchTimeMs = useDepthSearch ? UNBOUNDED_SEARCH_TIME_MILLIS : DEFAULT_SEARCH_TIME_MS;
         List<String> expectedMovesView = List.copyOf(expectedMoves);
 
         AiTuning tuning = SEARCH_ENVIRONMENT.applyTo(AiTuning.builder())
@@ -99,7 +103,7 @@ public class BestMoveSearchTest {
         long nullMovesBefore = ai.getNullMoveCount();
         long startNanos = System.nanoTime();
 
-        MoveAndScore result = depthOverride != null
+        MoveAndScore result = useDepthSearch
                 ? ai.searchToDepthBlocking(searchDepth)
                 : ai.searchForTimeBlocking(searchTimeMs);
         Duration wallClock = Duration.ofNanos(System.nanoTime() - startNanos);

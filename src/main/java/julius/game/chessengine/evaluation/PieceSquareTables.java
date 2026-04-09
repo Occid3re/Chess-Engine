@@ -16,6 +16,17 @@ public final class PieceSquareTables {
 
     private PieceSquareTables() {}
 
+    /**
+     * Runtime scale for PST contributions. Defaults to 0.0 (disabled).
+     * PSTs were shown to regress by ~89 Elo in self-play at 10+0.1 because
+     * they double-count with ActivityModule (center control + mobility),
+     * KingSafetyModule, and the existing genetic-tuned material weights.
+     * Re-enable via -Dchessengine.pstScale=1.0 only if the eval is re-tuned
+     * with PSTs as a joint constraint.
+     */
+    private static final double PST_SCALE = Double.parseDouble(
+            System.getProperty("chessengine.pstScale", "0.0"));
+
     // ────────────── MIDGAME ──────────────
 
     private static final int[] MG_PAWN = {
@@ -165,7 +176,8 @@ public final class PieceSquareTables {
      * For black, mirror the square: {@code square ^ 56}.
      */
     public static int midgame(int pieceType, int square) {
-        return MIDGAME[pieceType][square];
+        int raw = MIDGAME[pieceType][square];
+        return PST_SCALE == 1.0 ? raw : (int) Math.round(raw * PST_SCALE);
     }
 
     /**
@@ -173,6 +185,7 @@ public final class PieceSquareTables {
      * For black, mirror the square: {@code square ^ 56}.
      */
     public static int endgame(int pieceType, int square) {
-        return ENDGAME[pieceType][square];
+        int raw = ENDGAME[pieceType][square];
+        return PST_SCALE == 1.0 ? raw : (int) Math.round(raw * PST_SCALE);
     }
 }

@@ -343,12 +343,12 @@ public class AI {
         this.rootFanoutStatsEnabled = Boolean.parseBoolean(System.getProperty(ROOT_FANOUT_PROPERTY, "false"));
         double ratioCandidate;
         try {
-            ratioCandidate = Double.parseDouble(System.getProperty(ROOT_FANOUT_RATIO_PROPERTY, "0.25"));
+            ratioCandidate = Double.parseDouble(System.getProperty(ROOT_FANOUT_RATIO_PROPERTY, "1.0"));
         } catch (NumberFormatException ex) {
-            ratioCandidate = 0.25d;
+            ratioCandidate = 1.0d;
         }
         if (Double.isNaN(ratioCandidate) || ratioCandidate <= 0d) {
-            ratioCandidate = 0.25d;
+            ratioCandidate = 1.0d;
         } else if (ratioCandidate > 1.0d) {
             ratioCandidate = 1.0d;
         }
