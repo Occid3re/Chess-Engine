@@ -249,18 +249,20 @@ public final class NNUEAccumulator {
     // ── Low-level accumulator operations ──
 
     private void addFeature(int perspective, int featureIndex, NNUENetwork net) {
-        short[] weights = net.getL1WeightsRow(featureIndex);
+        short[] weights = net.getL1Weights();
+        int offset = net.getL1Offset(featureIndex);
         short[] acc = values[perspective];
         for (int i = 0; i < SIZE; i++) {
-            acc[i] += weights[i];
+            acc[i] += weights[offset + i];
         }
     }
 
     private void removeFeature(int perspective, int featureIndex, NNUENetwork net) {
-        short[] weights = net.getL1WeightsRow(featureIndex);
+        short[] weights = net.getL1Weights();
+        int offset = net.getL1Offset(featureIndex);
         short[] acc = values[perspective];
         for (int i = 0; i < SIZE; i++) {
-            acc[i] -= weights[i];
+            acc[i] -= weights[offset + i];
         }
     }
 

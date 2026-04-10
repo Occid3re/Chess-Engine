@@ -93,22 +93,19 @@ def sample_positions_from_pgn(pgn_dir, target_count, min_ply=12, max_ply=200, sa
     return positions[:target_count]
 
 
-def label_with_stockfish(positions, sf_path, depth=16, threads=4, hash_mb=256):
-    """Label positions with Stockfish evaluation."""
-    print(f"[+] Labeling {len(positions)} positions with Stockfish depth {depth}")
-    print(f"    Engine: {sf_path}")
-    print(f"    Threads: {threads}, Hash: {hash_mb}MB")
+def _label_chunk(args):
+    """Worker function: label a chunk of positions with one Stockfish instance."""
+    chunk, sf_path, depth, threads_per_worker, hash_per_worker, worker_id = args
 
     engine = chess.engine.SimpleEngine.popen_uci(sf_path)
-    engine.configure({"Threads": threads, "Hash": hash_mb})
+    engine.configure({"Threads": threads_per_worker, "Hash": hash_per_worker})
 
     fens = []
     evals = []
     wdls = []
     failed = 0
-    t0 = time.time()
 
-    for i, (fen, wdl) in enumerate(positions):
+    for i, (fen, wdl) in enumerate(chunk):
         try:
             board = chess.Board(fen)
             info = engine.analyse(board, chess.engine.Limit(depth=depth))
@@ -123,29 +120,76 @@ def label_with_stockfish(positions, sf_path, depth=16, threads=4, hash_mb=256):
                     failed += 1
                     continue
 
-            # Clamp to +-2000
             cp = max(-2000, min(2000, cp))
-
             fens.append(fen)
             evals.append(cp)
             wdls.append(wdl)
 
         except Exception as e:
             failed += 1
-            if failed < 5:
-                print(f"    [warn] Position {i} failed: {e}")
-
-        if (i + 1) % 500 == 0:
-            elapsed = time.time() - t0
-            rate = (i + 1) / elapsed
-            eta = (len(positions) - i - 1) / rate if rate > 0 else 0
-            print(f"    {i+1}/{len(positions)} ({rate:.0f} pos/s, ETA {eta/60:.1f}m, failed={failed})", end="\r")
+            if failed < 3:
+                print(f"    [w{worker_id}] Position failed: {e}")
 
     engine.quit()
-    elapsed = time.time() - t0
-    print(f"\n[+] Labeled {len(fens)} positions in {elapsed:.0f}s ({len(fens)/elapsed:.0f} pos/s), {failed} failures")
+    return fens, evals, wdls, failed
 
-    return fens, np.array(evals, dtype=np.int16), np.array(wdls, dtype=np.uint8)
+
+def label_with_stockfish(positions, sf_path, depth=16, threads=4, hash_mb=256):
+    """Label positions with Stockfish evaluation using parallel workers."""
+    import concurrent.futures
+
+    # Use multiple SF instances for parallelism instead of one fat instance.
+    # Each worker gets fewer threads but we run many in parallel.
+    num_workers = max(1, threads // 2)  # e.g. 8 threads -> 4 workers x 2 threads
+    threads_per = max(1, threads // num_workers)
+    hash_per = max(64, hash_mb // num_workers)
+
+    print(f"[+] Labeling {len(positions)} positions with Stockfish depth {depth}")
+    print(f"    Engine: {sf_path}")
+    print(f"    Workers: {num_workers} x {threads_per} threads, {hash_per}MB hash each")
+
+    # Split positions into chunks
+    chunk_size = (len(positions) + num_workers - 1) // num_workers
+    chunks = []
+    for i in range(num_workers):
+        start = i * chunk_size
+        end = min(start + chunk_size, len(positions))
+        if start < end:
+            chunks.append((positions[start:end], sf_path, depth, threads_per, hash_per, i))
+
+    t0 = time.time()
+
+    # Run workers in parallel using ProcessPoolExecutor
+    all_fens = []
+    all_evals = []
+    all_wdls = []
+    total_failed = 0
+
+    # Use ThreadPoolExecutor since each worker spawns its own SF subprocess
+    with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
+        futures = [executor.submit(_label_chunk, chunk) for chunk in chunks]
+
+        # Monitor progress
+        done_count = 0
+        for future in concurrent.futures.as_completed(futures):
+            fens, evals_list, wdls_list, failed = future.result()
+            all_fens.extend(fens)
+            all_evals.extend(evals_list)
+            all_wdls.extend(wdls_list)
+            total_failed += failed
+            done_count += 1
+            elapsed = time.time() - t0
+            rate = len(all_fens) / elapsed if elapsed > 0 else 0
+            remaining = len(positions) - len(all_fens) - total_failed
+            eta = remaining / rate if rate > 0 else 0
+            print(f"    Worker {done_count}/{num_workers} done. "
+                  f"{len(all_fens)} labeled ({rate:.0f} pos/s, ETA {eta/60:.1f}m, failed={total_failed})")
+
+    elapsed = time.time() - t0
+    print(f"[+] Labeled {len(all_fens)} positions in {elapsed:.0f}s "
+          f"({len(all_fens)/elapsed:.0f} pos/s), {total_failed} failures")
+
+    return all_fens, np.array(all_evals, dtype=np.int16), np.array(all_wdls, dtype=np.uint8)
 
 
 def main():

@@ -162,8 +162,13 @@ def train(model, train_data, val_data, epochs, lr, batch_size, device):
     wf_train, bf_train, stm_train, eval_train, wdl_train = train_data
     wf_val, bf_val, stm_val, eval_val, wdl_val = val_data
 
-    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-6)
+    # Split params: sparse optimizer for EmbeddingBag, dense optimizer for rest
+    sparse_params = [p for n, p in model.named_parameters() if 'l1' in n]
+    dense_params = [p for n, p in model.named_parameters() if 'l1' not in n]
+    optimizer = optim.SparseAdam(sparse_params, lr=lr)
+    optimizer_dense = optim.Adam(dense_params, lr=lr, weight_decay=1e-6)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    scheduler_dense = optim.lr_scheduler.CosineAnnealingLR(optimizer_dense, T_max=epochs)
     loss_fn = nn.MSELoss()
 
     best_val_loss = float('inf')
@@ -196,6 +201,7 @@ def train(model, train_data, val_data, epochs, lr, batch_size, device):
             et, wt = et.to(device), wt.to(device)
 
             optimizer.zero_grad()
+            optimizer_dense.zero_grad()
             pred = torch.sigmoid(model(wf, wo, bf, bo))
 
             # Hybrid loss: eval + WDL
@@ -205,11 +211,13 @@ def train(model, train_data, val_data, epochs, lr, batch_size, device):
 
             loss.backward()
             optimizer.step()
+            optimizer_dense.step()
 
             epoch_loss += loss.item()
             batches += 1
 
         scheduler.step()
+        scheduler_dense.step()
         avg_train = epoch_loss / max(1, batches)
 
         # Validation

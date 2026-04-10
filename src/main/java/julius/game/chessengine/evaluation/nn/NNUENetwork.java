@@ -73,18 +73,18 @@ public final class NNUENetwork {
     }
 
     /**
-     * Get L1 weight row for a given feature index (for accumulator add/sub).
-     * Returns a view into the flat array — do NOT modify.
+     * Get the flat L1 weight array (for accumulator add/sub by offset).
+     * The row for feature index {@code i} starts at offset {@code i * l1Size}.
      */
-    public short[] getL1WeightsRow(int featureIndex) {
-        // Row-major: row i starts at i * l1Size
-        // We return a reference to a pre-sliced array for zero-allocation
-        // But for simplicity, we work with offset arithmetic in the caller.
-        // Actually, let's just return the full array and let caller use offset.
-        // For now, allocate a slice (this is called ~20 times per move, not per node).
-        short[] row = new short[l1Size];
-        System.arraycopy(l1Weights, featureIndex * l1Size, row, 0, l1Size);
-        return row;
+    public short[] getL1Weights() {
+        return l1Weights;
+    }
+
+    /**
+     * Get the offset into the L1 weight array for a given feature index.
+     */
+    public int getL1Offset(int featureIndex) {
+        return featureIndex * l1Size;
     }
 
     /**

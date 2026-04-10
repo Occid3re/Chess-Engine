@@ -46,12 +46,11 @@ public final class NNUEModule implements EvaluationModule {
     public void evaluate(EvaluationContext context) {
         if (!dirty) return;
 
+        // Lazy rebuild: rebuild accumulator from scratch only when evaluation
+        // is actually needed. This avoids per-make/unmake overhead for nodes
+        // that get pruned without ever calling evaluate().
         NNUEAccumulator acc = threadAccumulator.get();
-
-        // If accumulator needs refresh (e.g. after initialize or desync), rebuild
-        if (acc.needsRefresh()) {
-            acc.rebuildFromScratch(context.getBoardView(), network);
-        }
+        acc.rebuildFromScratch(context.getBoardView(), network);
 
         // Get clipped accumulator output
         short[] buffer = threadForwardBuffer.get();
@@ -64,19 +63,12 @@ public final class NNUEModule implements EvaluationModule {
 
     @Override
     public void applyMove(MoveContext moveContext) {
-        NNUEAccumulator acc = threadAccumulator.get();
-        acc.applyMove(
-                moveContext.getMove(),
-                moveContext.getCurrentContext().getBoardView(),
-                network
-        );
+        // Lazy strategy: just mark dirty. Accumulator rebuild deferred to evaluate().
         dirty = true;
     }
 
     @Override
     public void undoMove(MoveContext moveContext) {
-        NNUEAccumulator acc = threadAccumulator.get();
-        acc.undoMove();
         dirty = true;
     }
 

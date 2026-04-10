@@ -40,7 +40,7 @@ public class Score {
 
     // NNUE (nnue mode)
     private static final String NNUE_RESOURCE = System.getProperty("chessengine.nnue.weights",
-            "/nn/nnue/weights.bin.gz");
+            "/nn/nnue/weights.bin");
     private static volatile NNUENetwork NNUE_WEIGHTS;
     private static volatile boolean NNUE_LOAD_ATTEMPTED = false;
 

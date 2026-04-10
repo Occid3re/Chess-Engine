@@ -34,7 +34,7 @@ public final class NNUEFeatures {
     /** Total feature space per perspective: 64 king squares * 640. */
     public static final int TOTAL_FEATURES = 64 * FEATURES_PER_KING; // 40960
     /** Size of the first hidden layer (accumulator width). */
-    public static final int ACCUMULATOR_SIZE = 256;
+    public static final int ACCUMULATOR_SIZE = 128;
 
     /**
      * Compute the HalfKP feature index for a piece from a given perspective.
