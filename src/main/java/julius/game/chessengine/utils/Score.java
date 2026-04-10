@@ -5,6 +5,8 @@ import julius.game.chessengine.board.BitBoard;
 import julius.game.chessengine.engine.GameStateEnum;
 import julius.game.chessengine.evaluation.*;
 import julius.game.chessengine.evaluation.nn.NeuralBlendModule;
+import julius.game.chessengine.evaluation.nn.NNUEModule;
+import julius.game.chessengine.evaluation.nn.NNUENetwork;
 import julius.game.chessengine.evaluation.nn.SmallNN;
 import julius.game.chessengine.syzygy.SyzygyProbeResult;
 import julius.game.chessengine.syzygy.SyzygyTablebaseService;
@@ -27,12 +29,20 @@ public class Score {
     private static volatile ScoreFactory GLOBAL_FACTORY = bitBoard -> new Score(bitBoard, EvaluationWeights.identity());
     private static volatile SyzygyTablebaseService TABLEBASE_SERVICE;
 
-    // Neural evaluation toggle. Set -Dchessengine.eval.mode=neural to use NN; defaults to classic.
+    // Evaluation mode: "classic" (default), "neural" (dense NN residual), "nnue" (HalfKP NNUE).
     private static final String EVAL_MODE = System.getProperty("chessengine.eval.mode", "classic");
+
+    // Dense NN (neural mode)
     private static final String NN_RESOURCE = System.getProperty("chessengine.nn.weights",
             "/nn/v1/weights.bin");
-    private static volatile SmallNN NEURAL_WEIGHTS;  // loaded lazily on first use
+    private static volatile SmallNN NEURAL_WEIGHTS;
     private static volatile boolean NEURAL_LOAD_ATTEMPTED = false;
+
+    // NNUE (nnue mode)
+    private static final String NNUE_RESOURCE = System.getProperty("chessengine.nnue.weights",
+            "/nn/nnue/weights.bin.gz");
+    private static volatile NNUENetwork NNUE_WEIGHTS;
+    private static volatile boolean NNUE_LOAD_ATTEMPTED = false;
 
     private static SmallNN loadNeuralWeightsIfNeeded() {
         if (!"neural".equalsIgnoreCase(EVAL_MODE)) {
@@ -48,6 +58,23 @@ public class Score {
             NEURAL_WEIGHTS = SmallNN.loadFromResource(NN_RESOURCE);
             NEURAL_LOAD_ATTEMPTED = true;
             return NEURAL_WEIGHTS;
+        }
+    }
+
+    private static NNUENetwork loadNNUEWeightsIfNeeded() {
+        if (!"nnue".equalsIgnoreCase(EVAL_MODE)) {
+            return null;
+        }
+        if (NNUE_LOAD_ATTEMPTED) {
+            return NNUE_WEIGHTS;
+        }
+        synchronized (Score.class) {
+            if (NNUE_LOAD_ATTEMPTED) {
+                return NNUE_WEIGHTS;
+            }
+            NNUE_WEIGHTS = NNUENetwork.loadFromResource(NNUE_RESOURCE);
+            NNUE_LOAD_ATTEMPTED = true;
+            return NNUE_WEIGHTS;
         }
     }
 
@@ -90,6 +117,15 @@ public class Score {
 
     public Score(EvaluationWeights weights) {
         this.weights = weights != null ? weights : EvaluationWeights.identity();
+
+        // NNUE mode: HalfKP incremental accumulator (fastest, strongest).
+        NNUENetwork nnue = loadNNUEWeightsIfNeeded();
+        if (nnue != null) {
+            this.evaluationPipeline = new EvaluationPipeline(
+                    List.of(new NNUEModule(nnue)),
+                    EvaluationWeights.identity());
+            return;
+        }
 
         // Neural mode: replace the full 5-module pipeline with a single NeuralBlendModule.
         // If weights can't be loaded, fall back to classic.
