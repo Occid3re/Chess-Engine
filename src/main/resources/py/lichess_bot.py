@@ -18,6 +18,7 @@ from pathlib import Path
 import datetime
 from typing import Optional, List, Dict
 import threading
+import requests.exceptions
 import asyncio
 import random
 import contextlib
@@ -1279,4 +1280,26 @@ if __name__ == "__main__":
         "[+] Configured engine search threads (CHESSENGINE_THREADS/NUMBER_OF_PROCESSORS):"
         f" {configured_threads}"
     )
-    run_bot()
+    # Resilient run loop: auto-reconnect on stream disconnect or transient errors.
+    MAX_RETRIES = 50
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            run_bot()
+            break  # clean exit
+        except (requests.exceptions.ChunkedEncodingError,
+                requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout) as e:
+            wait = min(30, 5 * attempt)
+            print(f"[!] Stream disconnected (attempt {attempt}/{MAX_RETRIES}): {type(e).__name__}: {e}")
+            print(f"[!] Reconnecting in {wait}s...")
+            time.sleep(wait)
+        except KeyboardInterrupt:
+            print("[!] KeyboardInterrupt — shutting down.")
+            break
+        except Exception as e:
+            wait = min(60, 10 * attempt)
+            print(f"[!] Unexpected error (attempt {attempt}/{MAX_RETRIES}): {type(e).__name__}: {e}")
+            print(f"[!] Reconnecting in {wait}s...")
+            time.sleep(wait)
+    else:
+        print(f"[!] Max retries ({MAX_RETRIES}) exhausted. Exiting.")
