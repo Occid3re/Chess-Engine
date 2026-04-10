@@ -1101,7 +1101,7 @@ public class AI {
                         boardStateHash,
                         simulatorEngine.whitesTurn(),
                         budget,
-                        1,
+                        smpWorkerCount,
                         simulatorEngine.createSimulation()
                 );
 
@@ -1116,15 +1116,36 @@ public class AI {
                 this.calculatedLine = Collections.synchronizedList(new ArrayList<>());
             }
 
-            // Don't use Lazy SMP workers in blocking mode — they were causing
-            // race conditions where the worker would call task.requestStop() before
-            // the calling thread even started searching. The calling thread handles
-            // all search work when smpWorkerCount is effectively 1.
-            final int effectiveSmp = 1;
+            // Re-enabled Lazy SMP workers in blocking mode. The original bug was that
+            // shared-pool workers checked keepCalculating (always false in blocking mode)
+            // and immediately aborted. Fix: spawn dedicated threads that bypass the pool
+            // and run iterativeDeepening directly with their own simulators.
+            final int extraWorkers = Math.max(0, smpWorkerCount - 1);
+            Thread[] smpThreads = new Thread[extraWorkers];
 
             SplittableRandom rng = (lazySmpThreads > 1)
                     ? new SplittableRandom(boardStateHash ^ System.nanoTime())
                     : null;
+
+            // Launch SMP helper threads (workers 1..N-1) BEFORE the calling thread starts
+            for (int w = 0; w < extraWorkers; w++) {
+                final int workerIdx = w + 1;
+                final Engine workerSim = simulatorEngine.createSimulation();
+                final SplittableRandom workerRng = createLazyWorkerRng(task, workerIdx);
+                smpThreads[w] = new Thread(() -> {
+                    threadSearchTask.set(task);
+                    try {
+                        iterativeDeepening(task, workerSim, workerRng);
+                    } catch (Exception e) {
+                        log.error("Blocking SMP worker {} error", workerIdx, e);
+                    } finally {
+                        threadSearchTask.remove();
+                        task.workerDone();
+                    }
+                }, "smp-blocking-" + workerIdx);
+                smpThreads[w].setDaemon(true);
+                smpThreads[w].start();
+            }
 
             // Calling thread acts as worker 0
             threadSearchTask.set(task);
@@ -1135,6 +1156,16 @@ public class AI {
             }
 
             task.workerDone();
+
+            // Wait for SMP helpers to finish
+            for (Thread t : smpThreads) {
+                if (t != null) {
+                    try { t.join(5000); } catch (InterruptedException ignored) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+            }
+
             completeSearchTask(task, simulatorEngine);
             task.requestStop();
 
