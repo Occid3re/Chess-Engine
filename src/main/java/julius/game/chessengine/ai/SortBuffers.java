@@ -8,6 +8,8 @@ final class SortBuffers {
     final int[] scoreBuffer;
     final int[] orderedBuffer;
     final IntArrayList[] bucketIndexes;
+    /** Reusable result list — avoids allocation in sortMovesByEfficiency. */
+    final IntArrayList resultList;
 
     SortBuffers(int maxMoveListSize, int bucketCount) {
         this.moveBuffer = new int[maxMoveListSize];
@@ -17,5 +19,6 @@ final class SortBuffers {
         for (int i = 0; i < bucketCount; i++) {
             bucketIndexes[i] = new IntArrayList(maxMoveListSize);
         }
+        this.resultList = new IntArrayList(maxMoveListSize);
     }
 }

@@ -195,8 +195,12 @@ public class AI {
 
     private final ThreadLocal<SortBuffers> sortBuffers =
             ThreadLocal.withInitial(() -> new SortBuffers(MAX_MOVE_LIST_SIZE, MoveBucket.values().length));
-    private final ThreadLocal<Map<Integer, Integer>> seeCacheThreadLocal =
-            ThreadLocal.withInitial(() -> new HashMap<>(64));
+    private final ThreadLocal<it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap> seeCacheThreadLocal =
+            ThreadLocal.withInitial(() -> {
+                var map = new it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap(64);
+                map.defaultReturnValue(Integer.MIN_VALUE);
+                return map;
+            });
 
     private final ThreadLocal<Long2DoubleOpenHashMap> staticEvalCache =
             ThreadLocal.withInitial(() -> {
@@ -2942,7 +2946,7 @@ public class AI {
         final int[][] historyTable = heuristics.history;
 
         IntArrayList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
+        final var seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
         final SearchPruningParameters.Snapshot pruning = searchPruningParameters;
         final int hmpMinIndex = pruning.hmpMinIndex();
@@ -3268,7 +3272,7 @@ public class AI {
         final int[][] historyTable = heuristics.history;
 
         IntArrayList orderedMoves = sortMovesByEfficiency(moves, depth, boardHash, prevMove, simulatorEngine);
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
+        final var seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
         final SearchPruningParameters.Snapshot pruning = searchPruningParameters;
         final int hmpMinIndex = pruning.hmpMinIndex();
@@ -3583,7 +3587,7 @@ public class AI {
     IntArrayList sortMovesByEfficiency(IntArrayList moves, int currentDepth, long boardHash, int prevMove,
                                        Engine simulatorEngine) {
         final int size = moves.size();
-        final Map<Integer, Integer> seeCache = seeCacheThreadLocal.get();
+        final var seeCache = seeCacheThreadLocal.get();
         seeCache.clear();
 
         if (size == 0) {
@@ -3649,7 +3653,11 @@ public class AI {
             int seeValue = 0;
             boolean hasSee = false;
             if (isCapture) {
-                seeValue = seeCache.computeIfAbsent(moveInt, simulatorEngine::see);
+                seeValue = seeCache.get(moveInt);
+                if (seeValue == Integer.MIN_VALUE) {
+                    seeValue = simulatorEngine.see(moveInt);
+                    seeCache.put(moveInt, seeValue);
+                }
                 hasSee = true;
             }
 
@@ -3717,9 +3725,7 @@ public class AI {
             outIndex = writeBucket(bucketIndexes[bucket.ordinal()], moveBuffer, orderedBuffer, outIndex);
         }
 
-        // Return a NEW IntArrayList from orderedBuffer instead of overwriting input.
-        // This allows callers (e.g. copyCachedLegalMoves) to pass wrapped cache arrays
-        // without the sort corrupting the underlying cache.
+        // Must copy: recursive alphaBeta reuses the same thread-local orderedBuffer.
         int[] result = java.util.Arrays.copyOf(orderedBuffer, size);
         return new IntArrayList(result);
     }
