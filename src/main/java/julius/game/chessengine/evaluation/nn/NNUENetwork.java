@@ -56,6 +56,9 @@ public final class NNUENetwork {
     private final short l3Bias;
     private final int outputScale;
 
+    // Thread-local buffer for L2 output (avoids allocation in forward pass)
+    private final ThreadLocal<int[]> l2Buffer;
+
     private NNUENetwork(int featureSize, int l1Size, int l2Size,
                         short[] l1Weights, short[] l1Biases,
                         short[] l2Weights, short[] l2Biases,
@@ -70,6 +73,7 @@ public final class NNUENetwork {
         this.l3Weights = l3Weights;
         this.l3Bias = l3Bias;
         this.outputScale = outputScale;
+        this.l2Buffer = ThreadLocal.withInitial(() -> new int[l2Size]);
     }
 
     /**
@@ -103,9 +107,8 @@ public final class NNUENetwork {
     public int forward(short[] input) {
         int l2InputSize = l1Size * 2;
 
-        // L2: int32 accumulation to avoid overflow
-        // Each L2 neuron: sum(input[i] * L2weight[i]) + bias, then ClippedReLU
-        int[] l2Out = new int[l2Size]; // temporary, could be thread-local for zero-alloc
+        // L2: int32 accumulation to avoid overflow (zero-allocation via thread-local)
+        int[] l2Out = l2Buffer.get();
         for (int j = 0; j < l2Size; j++) {
             int sum = l2Biases[j];
             int base = j * l2InputSize;
