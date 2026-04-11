@@ -202,12 +202,15 @@ def train(model, train_data, val_data, epochs, lr, batch_size, device):
 
             optimizer.zero_grad()
             optimizer_dense.zero_grad()
-            pred = torch.sigmoid(model(wf, wo, bf, bo))
+            raw_pred = model(wf, wo, bf, bo)
 
-            # Hybrid loss: eval + WDL
-            eval_loss = loss_fn(pred, et)
-            wdl_loss = loss_fn(pred, wt)
-            loss = EVAL_WEIGHT * eval_loss + WDL_WEIGHT * wdl_loss
+            # Direct centipawn Huber loss — much stronger gradients than sigmoid
+            # Scale raw prediction to centipawn range (output * 400)
+            pred_cp = raw_pred * 400.0
+            # Target: convert sigmoid-squashed back to centipawns
+            true_cp = -400.0 * torch.log((1.0 / et.clamp(1e-6, 1-1e-6)) - 1.0)
+
+            loss = torch.nn.functional.smooth_l1_loss(pred_cp, true_cp, beta=50.0)
 
             loss.backward()
             optimizer.step()
@@ -241,15 +244,13 @@ def train(model, train_data, val_data, epochs, lr, batch_size, device):
                 wf, wo, bf, bo = wf.to(device), wo.to(device), bf.to(device), bo.to(device)
                 et, wt = et.to(device), wt.to(device)
 
-                pred = torch.sigmoid(model(wf, wo, bf, bo))
-                loss = EVAL_WEIGHT * loss_fn(pred, et) + WDL_WEIGHT * loss_fn(pred, wt)
+                raw_pred = model(wf, wo, bf, bo)
+                pred_cp = raw_pred * 400.0
+                true_cp = -400.0 * torch.log((1.0 / et.clamp(1e-6, 1-1e-6)) - 1.0)
+                loss = torch.nn.functional.smooth_l1_loss(pred_cp, true_cp, beta=50.0)
                 val_loss += loss.item()
                 val_batches += 1
-
-                # Convert back to centipawns for RMSE
-                pred_cp = -EVAL_SCALE * torch.log((1.0 / pred.clamp(1e-6, 1-1e-6)) - 1.0)
-                true_cp_from_sigmoid = -EVAL_SCALE * torch.log((1.0 / et.clamp(1e-6, 1-1e-6)) - 1.0)
-                val_cp_errors.extend((pred_cp - true_cp_from_sigmoid).cpu().numpy())
+                val_cp_errors.extend((pred_cp - true_cp).cpu().numpy())
 
         avg_val = val_loss / max(1, val_batches)
         cp_rmse = np.sqrt(np.mean(np.array(val_cp_errors) ** 2))
@@ -271,7 +272,7 @@ def train(model, train_data, val_data, epochs, lr, batch_size, device):
     return model
 
 
-def export_weights(model, path, output_scale=OUTPUT_SCALE):
+def export_weights(model, path, output_scale=OUTPUT_SCALE, l1_size=None):
     """Export weights in binary format matching Java NNUENetwork.java."""
     import os
     os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
@@ -281,7 +282,9 @@ def export_weights(model, path, output_scale=OUTPUT_SCALE):
     # L1 weights from EmbeddingBag: shape (40960, 256)
     l1_w = state['l1.weight'].numpy()  # (40960, 256)
     # No L1 biases in EmbeddingBag — use zeros
-    l1_b = np.zeros(L1_SIZE, dtype=np.float32)
+    if l1_size is None:
+        l1_size = l1_w.shape[1]
+    l1_b = np.zeros(l1_size, dtype=np.float32)
 
     # L2 weights: shape (32, 512)
     l2_w = state['l2.weight'].numpy()  # (32, 512) — row-major, need to transpose for Java
@@ -314,7 +317,7 @@ def export_weights(model, path, output_scale=OUTPUT_SCALE):
         # Header
         f.write(struct.pack('<i', 1))           # version
         f.write(struct.pack('<i', TOTAL_FEATURES))
-        f.write(struct.pack('<i', L1_SIZE))
+        f.write(struct.pack('<i', l1_size))
         f.write(struct.pack('<i', L2_SIZE))
 
         # L1 weights: (40960, 256) row-major as int16
@@ -346,6 +349,7 @@ def main():
     parser.add_argument("--batch-size", type=int, default=8192)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--val-split", type=float, default=0.1)
+    parser.add_argument("--l1-size", type=int, default=L1_SIZE, help="L1 accumulator width")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -377,7 +381,7 @@ def main():
     print(f"[+] Train: {n_train}, Val: {n_val}")
 
     # Create model
-    model = NNUENet().to(device)
+    model = NNUENet(l1_size=args.l1_size).to(device)
     total_params = sum(p.numel() for p in model.parameters())
     print(f"[+] Model parameters: {total_params:,}")
 
@@ -386,7 +390,7 @@ def main():
 
     # Export
     model = model.cpu()
-    export_weights(model, args.out)
+    export_weights(model, args.out, l1_size=args.l1_size)
 
 
 if __name__ == "__main__":
