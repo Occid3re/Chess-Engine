@@ -45,7 +45,7 @@ STOCKFISH_EXE = r"E:\ChessEngines\stockfish_17.1\stockfish-windows-x86-64-avx2.e
 SYZYGY_NATIVE = r"C:\Development\Chess-Engine\target\classes\natives\win-x86_64\Release\JSyzygy.dll"
 SYZYGY_PATHS = r"C:\Syzygy"
 
-NNUE_WEIGHTS_DIR = r"C:\Development\Chess-Engine\src\main\resources\nn\nnue"
+NNUE_WEIGHTS_DIR = r"C:\Development\Chess-Engine\src\main\resources\nn\v1"
 EVOLVE_DIR = r"C:\Development\Chess-Engine\scripts\nn-training\evolve"
 
 # Self-play settings
@@ -64,20 +64,20 @@ FINETUNE_LR = 3e-4           # lower LR for fine-tuning (vs 1e-3 for initial)
 FINETUNE_BATCH = 8192
 
 # Match settings
-MATCH_GAMES = 100            # games for champion vs challenger
-MATCH_TC = "10+0.1"         # time control for validation match
+MATCH_GAMES = 40             # games for champion vs challenger (fast feedback)
+MATCH_TC = "5+0.05"         # fast TC for neural-vs-neural (both pay same NPS cost)
 MIN_ELO_GAIN = 0            # accept if Elo gain > this (0 = any improvement)
 
 # Mutation settings
-MUTATION_SCALE = 0.02        # stddev of gaussian noise added to weights
-NUM_MUTATIONS = 3            # mutations to try per generation
+MUTATION_SCALE = 0.015       # stddev of gaussian noise (smaller = more precise)
+NUM_MUTATIONS = 4            # mutations to try per generation
 
 
 def engine_cmd(weights_path, extra_props=""):
-    """Build Java engine command for CuteChess."""
+    """Build Java engine command for CuteChess using dense neural eval."""
     props = (
-        f"-Dchessengine.eval.mode=nnue "
-        f"-Dchessengine.nnue.weights={weights_path} "
+        f"-Dchessengine.eval.mode=neural "
+        f"-Dchessengine.nn.weights={weights_path} "
         f"-Dchessengine.searchThreads=4 "
         f"-Dchessengine.lazySmpThreads=4 "
         f"-Dchessengine.tt.mb=256 "
@@ -241,10 +241,10 @@ def self_play_and_label(weights_path, num_games=SELF_PLAY_GAMES):
 
 
 def finetune_nnue(base_weights_path, data_path, output_path):
-    """Fine-tune NNUE weights on new data."""
-    print(f"  Fine-tuning NNUE on {data_path}...")
+    """Fine-tune dense NN weights on new data."""
+    print(f"  Fine-tuning on {data_path}...")
     cmd = [
-        sys.executable, "-u", "train_nnue.py",
+        sys.executable, "-u", "train.py",
         "--data", data_path,
         "--out", output_path,
         "--epochs", str(FINETUNE_EPOCHS),
@@ -261,30 +261,31 @@ def finetune_nnue(base_weights_path, data_path, output_path):
 
 
 def mutate_weights(weights_path, output_path, scale=MUTATION_SCALE):
-    """Create a mutated copy of NNUE weights by adding gaussian noise."""
+    """Create a mutated copy of dense NN weights (float32) by adding gaussian noise."""
     with open(weights_path, 'rb') as f:
         data = bytearray(f.read())
 
-    # Skip header (4 ints = 16 bytes)
-    header_size = 16
-    # Mutate weight bytes (int16 values)
-    weights_data = np.frombuffer(data[header_size:], dtype=np.int16).copy()
+    # Dense NN format: 3 int32 header (inputSize, h1Size, h2Size) = 12 bytes
+    # Then: float32 arrays (means, stds, W1, b1, W2, b2, W3, b3, outputScale)
+    header_size = 12
+    weights_data = np.frombuffer(data[header_size:], dtype=np.float32).copy()
 
-    # Add gaussian noise scaled to weight magnitude
-    noise = np.random.normal(0, scale, size=weights_data.shape)
-    weight_magnitudes = np.abs(weights_data).astype(np.float32) + 1.0
-    perturbation = (noise * weight_magnitudes).astype(np.int16)
-    weights_data += perturbation
+    # Skip means and stds (first inputSize*2 floats) — don't mutate normalization
+    import struct
+    input_size = struct.unpack('<i', data[0:4])[0]
+    skip = input_size * 2  # means + stds
 
-    # Write back
-    result = bytearray(data[:header_size]) + weights_data.tobytes()
-    # Preserve the footer (last 4 bytes: L3 bias + output scale)
-    footer_start = header_size + len(weights_data) * 2
-    if footer_start < len(data):
-        result += data[footer_start:]
+    # Only mutate actual weights (after means/stds), but not outputScale (last float)
+    mutable = weights_data[skip:-1]
+    noise = np.random.normal(0, scale, size=mutable.shape).astype(np.float32)
+    magnitudes = np.abs(mutable) + 0.001
+    mutable += noise * magnitudes
+    weights_data[skip:-1] = mutable
 
+    # Write back: header + mutated weights
     with open(output_path, 'wb') as f:
-        f.write(result)
+        f.write(data[:header_size])
+        f.write(weights_data.tobytes())
 
     return output_path
 
@@ -420,7 +421,8 @@ def main():
         with open(os.path.join(EVOLVE_DIR, "evolution_history.json"), 'w') as f:
             json.dump(history, f, indent=2)
 
-        print(f"\n  History: {[f'gen{h['gen']}:{h['elo']:+.0f}' for h in history[-5:]]}")
+        summary = ["gen%d:%+.0f" % (h["gen"], h["elo"]) for h in history[-5:]]
+        print("\n  History: %s" % summary)
 
     print(f"\n{'='*60}")
     print(f"  EVOLUTION COMPLETE ({args.generations} generations)")
