@@ -352,6 +352,35 @@ def replay(game_id: str) -> Optional[dict]:
     return {"id": game_id, "game": entry, "sans": sans.split()[:len(ucis)], "ucis": ucis, "fens": fens}
 
 
+def snapshot() -> dict:
+    with _lock:
+        snap = json.loads(json.dumps(_status))
+        lichess = json.loads(json.dumps(_lichess))
+    if lichess["games"]:
+        snap["recent"] = lichess["games"]
+    snap["ratings"] = lichess["ratings"]
+    snap["ratingsUpdated"] = lichess["updated"]
+    snap["last24h"] = _last24h(lichess["games"])
+    snap.update({
+        "name": _username(),
+        "enabled": enabled(),
+        "hours": hours() or "always",
+        "timezone": os.environ.get("ALIEKNEK_TZ", "Europe/Vienna"),
+        "inWindow": in_window(),
+        "playUntil": play_until() or None,
+        "envHours": os.environ.get("ALIEKNEK_HOURS", "") or "always",
+        "envEnabled": _truthy(os.environ.get("ALIEKNEK_ENABLED", "true")),
+        "overrides": sorted(k for k in _control() if k in ("enabled", "hours", "playUntil")),
+        "now": _now().strftime("%H:%M"),
+        "serverTime": int(time.time() * 1000),
+    })
+    if snap["state"] not in ("playing", "no-token", "error", "starting") and not snap["enabled"]:
+        snap["state"] = "disabled"
+    elif snap["state"] == "idle" and not snap["inWindow"] and not snap["playUntil"]:
+        snap["state"] = "sleeping"
+    return snap
+
+
 # ------------------------------------------------------------------ watch page
 
 class _Handler(BaseHTTPRequestHandler):
