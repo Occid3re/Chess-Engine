@@ -80,9 +80,9 @@ ALLOW_CASUAL = False  # accept casual games?
 ALLOW_CORRESPONDENCE = False  # accept correspondence TC?
 ACCEPT_TC_TYPES = {"bullet", "blitz", "rapid", "classical"}  # which TCs to accept
 
-# Engine selection: "core" = 5.x engine (default), "legacy" = 4.x engine
+# Engine selection: "core" = new core engine (default), "legacy" = old AI engine
 ENGINE_CORE = os.environ.get("BOT_ENGINE_CORE", "core").strip().lower()
-# Send the real clocks so the engine's own time manager decides (default for the 5.x core);
+# Send the real clocks so the engine's own time manager decides (default for the core engine);
 # otherwise the bot computes a fixed per-move time as before.
 USE_ENGINE_CLOCK = os.environ.get("BOT_ENGINE_CLOCK", "1" if ENGINE_CORE != "legacy" else "0") == "1"
 ENGINE_MOVE_OVERHEAD_MS = int(os.environ.get("BOT_MOVE_OVERHEAD_MS", "150"))
@@ -258,7 +258,7 @@ def build_engine_cmd() -> List[str]:
 
     TUNING_FILE = os.environ.get("CHESSENGINE_TUNING_FILE", DEFAULT_TUNING_FILE)
 
-    # 5.x core (default) uses a single Lazy SMP thread count; the legacy 4.x engine uses the split above.
+    # The core engine (default) uses a single Lazy SMP thread count; the legacy engine uses the split above.
     CORE_T = os.environ.get("CHESSENGINE_CORE_THREADS", SEARCH_T)
 
     syzygy_native, syzygy_paths = _resolve_syzygy_config()

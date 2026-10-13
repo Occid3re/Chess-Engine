@@ -24,7 +24,7 @@ Java chess engine targeting 2000+ Lichess blitz Elo. Current rating: ~1770.
 - **Build**: `./mvnw.cmd -DskipTests package`
 - **UCI JAR**: `target/chess-engine-4.0.0-uci.jar`
 
-## 5.x core engine (DEFAULT since 2026-10-13)
+## New core engine (DEFAULT since 2026-10-13)
 
 `UciMain` runs the new core in `julius.game.chessengine.core` unless `-Dchessengine.core=legacy` is set.
 It has no dependencies (plain `javac` builds it) and does ~0.8-1M nps per thread vs ~6k for the legacy AI.

@@ -6,7 +6,7 @@ import java.io.InputStreamReader;
 
 /**
  * Entry point for running the engine via the UCI protocol on standard IO.
- * Runs the 5.x core engine by default; {@code -Dchessengine.core=legacy} selects the 4.x engine.
+ * Runs the core engine (julius.game.chessengine.core) by default; {@code -Dchessengine.core=legacy} selects the old AI.
  */
 public final class UciMain {
 
