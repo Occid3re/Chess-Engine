@@ -179,6 +179,12 @@ public final class SearchManager {
         initTime(l, root);
         tt.newSearch();
 
+        if (!root.isValid()) {
+            // A king is missing or the side not to move is in check: searching would capture a king.
+            output.accept("info string invalid position " + root.toFen());
+            output.accept("bestmove 0000");
+            return;
+        }
         int[] legal = new int[256];
         int n = MoveGen.generateAll(root, legal, 0);
         int legalCount = 0, onlyMove = Move.NONE;

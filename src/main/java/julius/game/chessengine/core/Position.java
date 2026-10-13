@@ -209,8 +209,14 @@ public final class Position {
         if (ep >= 0) key ^= EP_KEYS[ep & 7];
         if (side == BLACK) key ^= SIDE_KEY;
         histPly = 0;
-        checkers = attackersTo(kingSquare(side), all) & occ[side ^ 1];
+        checkers = pieces[side * 6 + KING] != 0L ? attackersTo(kingSquare(side), all) & occ[side ^ 1] : 0L;
         pinnedValid = false;
+    }
+
+    /** Exactly one king per side and the side not to move is not in check. */
+    public boolean isValid() {
+        if (Long.bitCount(pieces[KING]) != 1 || Long.bitCount(pieces[6 + KING]) != 1) return false;
+        return !isAttacked(kingSquare(side ^ 1), side, all);
     }
 
     public String toFen() {
