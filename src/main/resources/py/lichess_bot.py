@@ -49,10 +49,15 @@ import berserk
 import chess
 import chess.engine
 
+try:  # schedule / on-off switch / watch page (optional companion module)
+    import alieknek_service as svc
+except ImportError:
+    svc = None
+
 # ================== USER CONFIG ==================
 ENGINE_BAT = ""  # e.g. r"E:\ChessEngines\chess-engine-3.0.9.bat"
-JAR_DIR = r"C:\Development\Chess-Engine\target"
-JAVA_EXE = r"java"
+JAR_DIR = os.environ.get("BOT_JAR_DIR", r"C:\Development\Chess-Engine\target")
+JAVA_EXE = os.environ.get("BOT_JAVA", "java")
 DEFAULT_TUNING_FILE = r"C:\Development\Chess-Engine\target\classes\tuning\seed-tunings.yaml"
 
 LICHESS_TOKEN = os.environ.get("LICHESS_TOKEN") or "YOUR_TOKEN_HERE"
@@ -75,8 +80,18 @@ ALLOW_CASUAL = False  # accept casual games?
 ALLOW_CORRESPONDENCE = False  # accept correspondence TC?
 ACCEPT_TC_TYPES = {"bullet", "blitz", "rapid", "classical"}  # which TCs to accept
 
+# Engine selection: "core" = 5.x engine (default), "legacy" = 4.x engine
+ENGINE_CORE = os.environ.get("BOT_ENGINE_CORE", "core").strip().lower()
+# Send the real clocks so the engine's own time manager decides (default for the 5.x core);
+# otherwise the bot computes a fixed per-move time as before.
+USE_ENGINE_CLOCK = os.environ.get("BOT_ENGINE_CLOCK", "1" if ENGINE_CORE != "legacy" else "0") == "1"
+ENGINE_MOVE_OVERHEAD_MS = int(os.environ.get("BOT_MOVE_OVERHEAD_MS", "150"))
+
 # Game concurrency (helps prevent overload)
 MAX_CONCURRENT_GAMES = int(os.environ.get("MAX_CONCURRENT_GAMES", "1"))
+# Think on the opponent's time (only sensible when one game runs at a time)
+USE_PONDER = os.environ.get(
+    "BOT_PONDER", "1" if ENGINE_CORE != "legacy" and MAX_CONCURRENT_GAMES == 1 else "0") == "1"
 
 # Network hardening
 HTTP_TOTAL_RETRIES = int(os.environ.get("HTTP_TOTAL_RETRIES", "5"))
@@ -243,9 +258,14 @@ def build_engine_cmd() -> List[str]:
 
     TUNING_FILE = os.environ.get("CHESSENGINE_TUNING_FILE", DEFAULT_TUNING_FILE)
 
+    # 5.x core (default) uses a single Lazy SMP thread count; the legacy 4.x engine uses the split above.
+    CORE_T = os.environ.get("CHESSENGINE_CORE_THREADS", SEARCH_T)
+
     syzygy_native, syzygy_paths = _resolve_syzygy_config()
 
     engine_sysprops = [
+        f"-Dchessengine.core={ENGINE_CORE}",
+        f"-Dchessengine.threads={CORE_T}",
         f"-Dchessengine.searchThreads={SEARCH_T}",
         f"-Dchessengine.lazySmpThreads={LAZY_T}",
         f"-Dchessengine.rootParallelLimit={ROOT_LIMIT}",
@@ -427,8 +447,9 @@ def start_engine():
     print("[+] Engine command:", " ".join(shlex.quote(x) for x in cmd))
     try:
         engine = chess.engine.SimpleEngine.popen_uci(cmd)
+        overhead_name = "Move Overhead" if "Move Overhead" in engine.options else "MoveOverhead"
         try:
-            engine.configure({"Ponder": False, "MoveOverhead": 150})
+            engine.configure({overhead_name: ENGINE_MOVE_OVERHEAD_MS})
         except chess.engine.EngineError:
             pass
     except FileNotFoundError as e:
@@ -490,6 +511,32 @@ def _estimate_tc_bucket(limit_seconds: Optional[float], increment_seconds: Optio
     if est_minutes <= 25.0:
         return "rapid"
     return "classical"
+
+
+def _clock_seconds(value) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, datetime.timedelta):
+        return value.total_seconds()
+    try:
+        return float(value) / 1000.0
+    except (TypeError, ValueError):
+        return None
+
+
+def build_limit(state: dict, think_time: float, slack: float) -> chess.engine.Limit:
+    """Clock-based limit (engine manages its time) or a fixed move time as fallback."""
+    if USE_ENGINE_CLOCK:
+        wtime = _clock_seconds(state.get("wtime"))
+        btime = _clock_seconds(state.get("btime"))
+        if wtime is not None and btime is not None:
+            return chess.engine.Limit(
+                white_clock=max(0.05, wtime - slack),
+                black_clock=max(0.05, btime - slack),
+                white_inc=_clock_seconds(state.get("winc")) or 0.0,
+                black_inc=_clock_seconds(state.get("binc")) or 0.0,
+            )
+    return chess.engine.Limit(time=max(0.05, think_time - slack))
 
 
 def calc_move_time(state: dict, my_color_is_white: bool,
@@ -728,6 +775,8 @@ def play_game(client: berserk.Client,
                 white_id = event["white"]["id"]
                 black_id = event["black"]["id"]
                 my_color_is_white = (white_id == me_id)
+                if svc is not None:
+                    svc.game_started(game_id, event, me_id)
                 state = event.get("state", {})
                 clock = event.get("clock") or {}
                 if "initial" in clock:
@@ -741,6 +790,8 @@ def play_game(client: berserk.Client,
                     for mv in moves.split():
                         board.push_uci(mv)
                 current_move_count = len(moves.split()) if moves else 0
+                if svc is not None:
+                    svc.game_update(game_id, board, state)
                 if current_move_count == 0:
                     pass
                 elif current_move_count == 1 and my_color_is_white and abort_reason == "reply":
@@ -752,7 +803,10 @@ def play_game(client: berserk.Client,
                     think_time = calc_move_time(state, my_color_is_white, clock_initial, clock_increment)
                     slack = 0.1 if tc_bucket == "bullet" else 0.15
                     try:
-                        result = engine.play(board, chess.engine.Limit(time=max(0.05, think_time - slack)))
+                        result = engine.play(board, build_limit(state, think_time, slack), ponder=USE_PONDER,
+                                             info=chess.engine.INFO_BASIC | chess.engine.INFO_SCORE)
+                        if svc is not None:
+                            svc.engine_info(result.info)
                         move_sent = safe_make_move(client, game_id, result.move.uci())
                         if not move_sent:
                             print("[warn] Move send failed, retrying once")
@@ -786,6 +840,8 @@ def play_game(client: berserk.Client,
                     for mv in moves.split():
                         board.push_uci(mv)
                 current_move_count = len(moves.split()) if moves else 0
+                if svc is not None:
+                    svc.game_update(game_id, board, state)
                 if current_move_count == 0:
                     pass
                 elif current_move_count == 1 and my_color_is_white and abort_reason == "reply":
@@ -812,7 +868,8 @@ def play_game(client: berserk.Client,
                             tc_bucket = _estimate_tc_bucket(clock_initial, clock_increment)
                     slack = 0.1 if tc_bucket == "bullet" else 0.15
                     try:
-                        result = engine.play(board, chess.engine.Limit(time=max(0.05, think_time - slack)))
+                        result = engine.play(board, build_limit(state, think_time, slack), ponder=USE_PONDER,
+                                             info=chess.engine.INFO_BASIC | chess.engine.INFO_SCORE)
                         if result is None or result.move is None:
                             # Engine produced no move — pick a random legal move so the
                             # game continues instead of crashing the bot.
@@ -827,6 +884,8 @@ def play_game(client: berserk.Client,
                             else:
                                 print("[warn] no legal moves available, skipping")
                         else:
+                            if svc is not None:
+                                svc.engine_info(result.info)
                             move_sent = safe_make_move(client, game_id, result.move.uci())
                             if not move_sent:
                                 print("[warn] Move send failed, retrying once")
@@ -857,6 +916,8 @@ def play_game(client: berserk.Client,
                 break
     finally:
         _cancel_abort_timer()
+        if svc is not None:
+            svc.game_finished(game_id)
 
     return engine
 
@@ -1084,6 +1145,14 @@ def outbound_challenge_loop(stop_event: threading.Event,
             if before != after:
                 print(f"[outbound] pruned cooldown list: {before} -> {after}")
 
+            # Only inside the configured play window / while switched on
+            if svc is not None and not svc.accepting():
+                for _ in range(60):
+                    if stop_event.is_set():
+                        return
+                    time.sleep(1)
+                continue
+
             # Idle-only
             if active_counter.get() != 0:
                 print("[outbound] a game is active -> skipping this cycle")
@@ -1193,6 +1262,9 @@ def run_bot():
     client, username, me_id = connect_lichess()
     engine = start_engine()
     print("[+] Waiting for challenges... (accepting: {})".format(", ".join(sorted(ACCEPT_VARIANTS))))
+    if svc is not None:
+        svc.set_state("idle")
+        print(f"[+] Play window: {svc.hours() or 'always'} | enabled={svc.enabled()}")
 
     active_counter = ActiveCounter()
 
@@ -1231,12 +1303,15 @@ def run_bot():
                     accept = False
                 elif active_counter.get() >= MAX_CONCURRENT_GAMES:
                     accept = False
+                off_hours = svc is not None and not svc.accepting()
+                if off_hours:
+                    accept = False
 
                 if accept:
                     safe_accept_challenge(client, chal_id)
                 else:
                     # Use a generic reason that isn't misleading
-                    reason = "later" if active_counter.get() >= MAX_CONCURRENT_GAMES else "variant"
+                    reason = "later" if off_hours or active_counter.get() >= MAX_CONCURRENT_GAMES else "variant"
                     safe_decline_challenge(client, chal_id, reason=reason)
 
             elif et == "challengeCanceled":
@@ -1280,6 +1355,16 @@ if __name__ == "__main__":
         "[+] Configured engine search threads (CHESSENGINE_THREADS/NUMBER_OF_PROCESSORS):"
         f" {configured_threads}"
     )
+    if svc is not None:
+        svc.start_web()
+        if LICHESS_TOKEN in ("", "YOUR_TOKEN_HERE"):
+            print("[!] No LICHESS_TOKEN configured; serving the status page only.")
+            svc.set_state("no-token")
+            while True:
+                time.sleep(3600)
+        while not svc.enabled():
+            svc.set_state("disabled")
+            time.sleep(30)
     # Resilient run loop: auto-reconnect on stream disconnect or transient errors.
     MAX_RETRIES = 50
     for attempt in range(1, MAX_RETRIES + 1):

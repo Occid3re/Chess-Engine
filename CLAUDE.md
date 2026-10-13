@@ -24,7 +24,24 @@ Java chess engine targeting 2000+ Lichess blitz Elo. Current rating: ~1770.
 - **Build**: `./mvnw.cmd -DskipTests package`
 - **UCI JAR**: `target/chess-engine-4.0.0-uci.jar`
 
-## Architecture
+## 5.x core engine (DEFAULT since 2026-10-13)
+
+`UciMain` runs the new core in `julius.game.chessengine.core` unless `-Dchessengine.core=legacy` is set.
+It has no dependencies (plain `javac` builds it) and does ~0.8-1M nps per thread vs ~6k for the legacy AI.
+
+- Position/MoveGen/Attacks (magic bitboards, perft-verified), Searcher (negamax PVS, int centipawns, TT, NMP,
+  LMR, RFP, ProbCut, singular ext., history/continuation history), SearchManager (Lazy SMP, time management)
+- Eval: tapered hand-crafted eval, weights in `src/main/resources/core/eval-weights.txt`,
+  fitted by `core.tuning.EvalTuner` to `E:\Chess-Data\tuning\elite2M.txt` (fen;whiteCp;wdl)
+- NNUE (optional): `core/nnue.bin` resource, (768->H)x2->1 SCReLU, trained by `core.nnue.Trainer` (CPU, Java)
+  on self-play data from `core.tools.DataGen`. Keep int[] arrays + per-feature weight rows: other layouts do not vectorise.
+- Results (10+0.1, 1 thread): 40-0 vs 4.0.0, 40-0 vs 3.6.9, 52-6-2 vs Stockfish UCI_Elo 2600; 4 threads vs 1: +168 Elo
+- Match harness: `E:\ChessEngines\harness\` (sprt.sh, match.sh, vs_sf.sh, smp.sh, snap.sh, elite_openings.epd)
+- Tests: `./mvnw.cmd -Dtest=CoreEngineTest test`
+- Server deployment (play.juliussze.at, Occid3re/play repo): `alieknek` service with play window, switch and watch page
+  (`src/main/resources/py/alieknek_service.py`, `watch/`)
+
+## Legacy 4.x architecture (`-Dchessengine.core=legacy`)
 
 - Bitboard move generation
 - Alpha-beta with PVS, LMR, null-move, aspiration windows, futility, razoring, ProbCut

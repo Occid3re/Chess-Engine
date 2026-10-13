@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alieknek</title>
+<link rel="stylesheet" href="/alieknek/style.css">
+<script src="/alieknek/app.js" defer></script>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Alieknek <small>Schach-Bot</small></h1>
+    <span id="state" class="chip">…</span>
+  </header>
+  <p id="schedule" class="muted"></p>
+  <section id="live" hidden>
+    <div class="player" id="top"><span class="name"></span><span class="clock"></span></div>
+    <div id="board" aria-label="Brett"></div>
+    <div class="player" id="bottom"><span class="name"></span><span class="clock"></span></div>
+    <p id="engine" class="muted"></p>
+    <p><a id="lichess" target="_blank" rel="noopener noreferrer">Partie auf Lichess öffnen</a></p>
+  </section>
+  <section>
+    <h2>Letzte Partien</h2>
+    <ul id="recent"><li class="muted">Noch keine.</li></ul>
+  </section>
+  <p class="muted"><a href="https://lichess.org/@/Alieknek" target="_blank" rel="noopener noreferrer">Profil auf Lichess</a></p>
+</main>
+</body>
+</html>

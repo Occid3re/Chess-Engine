@@ -7,9 +7,6 @@
  */
 package julius.game.chessengine.syzygy.bridge;
 
-import lombok.Getter;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -31,18 +28,18 @@ import java.util.Locale;
  */
 public final class SyzygyBridge {
 
-    private static final Logger LOG = LogManager.getLogger();
+    private static final Log LOG = new Log();
     private static final String LIBRARY_NAME = "JSyzygy";
     private static final String LIBRARY_OVERRIDE_PROPERTY = "chessengine.syzygy.nativeLibrary";
     private static final String LIBRARY_OVERRIDE_ENV = "CHESSENGINE_SYZYGY_NATIVE";
-    /**
-     * -- GETTER --
-     */
-    @Getter
     private static boolean libLoaded = false;
     private static int tbLargest = 0;
 
     private SyzygyBridge() {
+    }
+
+    public static boolean isLibLoaded() {
+        return libLoaded;
     }
 
     /*
@@ -271,6 +268,36 @@ public final class SyzygyBridge {
         @Override
         public String toString() {
             return resourceDirectory;
+        }
+    }
+
+    /**
+     * Minimal "{}"-style logger on top of the JDK logger (stderr by default). Keeps this class free of
+     * third-party dependencies and its output off stdout, which carries the UCI protocol.
+     */
+    private static final class Log {
+        private final System.Logger delegate = System.getLogger(SyzygyBridge.class.getName());
+
+        void info(String fmt, Object... args) {
+            log(System.Logger.Level.INFO, fmt, args);
+        }
+
+        void warn(String fmt, Object... args) {
+            log(System.Logger.Level.WARNING, fmt, args);
+        }
+
+        private void log(System.Logger.Level level, String fmt, Object... args) {
+            if (!delegate.isLoggable(level)) return;
+            StringBuilder sb = new StringBuilder();
+            int arg = 0, from = 0, at;
+            while ((at = fmt.indexOf("{}", from)) >= 0) {
+                sb.append(fmt, from, at).append(arg < args.length ? args[arg++] : "{}");
+                from = at + 2;
+            }
+            sb.append(fmt.substring(from));
+            Throwable thrown = arg < args.length && args[args.length - 1] instanceof Throwable t ? t : null;
+            if (thrown != null) delegate.log(level, sb.toString(), thrown);
+            else delegate.log(level, sb.toString());
         }
     }
 }

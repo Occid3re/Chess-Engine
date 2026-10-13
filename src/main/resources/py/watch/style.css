@@ -1,0 +1,29 @@
+:root { --bg: #f6f5f2; --fg: #1d1d1f; --muted: #6b6b70; --card: #fff; --line: #e2e1dc; --light: #eeeed2; --dark: #769656; --hl: #f6f669aa; --accent: #2f7d4a; --bad: #c0392b; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #161618; --fg: #ececf0; --muted: #9a9aa2; --card: #222226; --line: #2e2e33; --light: #b8b8a4; --dark: #5d7a45; --hl: #d8d84f99; --accent: #5fbf7f; --bad: #e5735f; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 520px; margin: 0 auto; padding: 16px; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+h1 { font-size: 1.5rem; margin: 0; }
+h1 small { font-size: .9rem; color: var(--muted); font-weight: 400; }
+h2 { font-size: 1.1rem; margin: 24px 0 8px; }
+.muted { color: var(--muted); font-size: .9rem; }
+.chip { padding: 4px 10px; border-radius: 999px; background: var(--card); font-size: .85rem; white-space: nowrap; }
+.chip.playing { background: var(--accent); color: #fff; }
+#board { display: grid; grid-template-columns: repeat(8, 1fr); width: 100%; aspect-ratio: 1; border-radius: 6px; overflow: hidden; user-select: none; }
+#board div { display: flex; align-items: center; justify-content: center; font-size: min(9vw, 46px); line-height: 1; }
+#board .l { background: var(--light); }
+#board .d { background: var(--dark); }
+#board .hl { box-shadow: inset 0 0 0 100px var(--hl); }
+#board .w { color: #fff; text-shadow: 0 0 2px #000, 0 0 1px #000; }
+#board .b { color: #111; }
+.player { display: flex; justify-content: space-between; gap: 8px; padding: 8px 2px; font-weight: 600; }
+.clock { font-variant-numeric: tabular-nums; background: var(--card); padding: 2px 8px; border-radius: 6px; }
+.clock.run { outline: 2px solid var(--accent); }
+ul { list-style: none; padding: 0; margin: 0; }
+li { display: flex; justify-content: space-between; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.win { color: var(--accent); font-weight: 600; }
+.loss { color: var(--bad); font-weight: 600; }
+a { color: var(--accent); }
