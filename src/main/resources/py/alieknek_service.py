@@ -7,16 +7,19 @@ Configuration (environment):
   ALIEKNEK_TZ           time zone of the windows (default Europe/Vienna)
   ALIEKNEK_DATA_DIR     where status/recent games/control file live (default ./alieknek-data)
   ALIEKNEK_STATUS_PORT  port of the watch page (0 = off)
+  ALIEKNEK_CONTROL_PORT port of the control API for the play app (0 = off; keep it off the public proxy)
 
 A control file (<data>/control.json) written by the CLI overrides the environment without a redeploy:
-  python3 alieknek_service.py off | on | auto | hours 01:00-05:00 | status
+  python3 alieknek_service.py off | on | auto | hours 01:00-05:00 | play <minutes> | status
 """
 import datetime
 import json
 import os
+import re
 import sys
 import threading
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional
@@ -32,6 +35,12 @@ RECENT_LIMIT = 30
 
 _lock = threading.Lock()
 _status = {"state": "starting", "game": None, "recent": [], "engine": {}}
+# Public Lichess data (ratings, finished games with rating changes); refreshed by a background thread.
+_lichess = {"ratings": {}, "games": [], "updated": None}
+_moves = {}  # game id -> SAN moves of recently finished games (for the replay)
+_refresh = threading.Event()
+LICHESS = "https://lichess.org"
+GAME_ID = re.compile(r"^[A-Za-z0-9]{8}$")
 
 
 def _truthy(value: str) -> bool:
@@ -106,9 +115,18 @@ def in_window(now: Optional[datetime.datetime] = None) -> bool:
     return False
 
 
+def play_until() -> int:
+    """Epoch milliseconds until which the bot plays regardless of the windows ("play now"), 0 if unset."""
+    try:
+        until = int(_control().get("playUntil") or 0)
+    except (TypeError, ValueError):
+        return 0
+    return until if until > time.time() * 1000 else 0
+
+
 def accepting() -> bool:
     """True when the bot should accept challenges and challenge others."""
-    return enabled() and in_window()
+    return enabled() and (in_window() or play_until() > 0)
 
 
 # ------------------------------------------------------------------ status
@@ -208,25 +226,130 @@ def game_finished(game_id: str) -> None:
             _save("recent.json", _status["recent"])
         _status["game"] = None
         _status["state"] = "idle"
+    _refresh.set()
 
 
-def snapshot() -> dict:
+# ------------------------------------------------------------------ Lichess statistics
+
+def _username() -> str:
+    return os.environ.get("ALIEKNEK_NAME", "Alieknek")
+
+
+def _get(url: str, accept: str = "application/json") -> bytes:
+    request = urllib.request.Request(url, headers={"Accept": accept, "User-Agent": "AlieknekStatus/1.0"})
+    with urllib.request.urlopen(request, timeout=20) as response:
+        return response.read()
+
+
+def _game_entry(g: dict) -> Optional[dict]:
+    me = _username().lower()
+    players = g.get("players", {})
+    white, black = players.get("white", {}), players.get("black", {})
+    if (white.get("user") or {}).get("id") == me:
+        color, mine, opp = "white", white, black
+    elif (black.get("user") or {}).get("id") == me:
+        color, mine, opp = "black", black, white
+    else:
+        return None
+    winner = g.get("winner")
+    status = g.get("status")
+    result = "draw" if not winner else ("win" if winner == color else "loss")
+    if status in ("aborted", "noStart"):
+        result = "aborted"
+    clock = g.get("clock") or {}
+    return {
+        "id": g.get("id"),
+        "opponent": (opp.get("user") or {}).get("name") or opp.get("aiLevel") and f"Stockfish {opp['aiLevel']}" or "?",
+        "opponentTitle": (opp.get("user") or {}).get("title"),
+        "opponentRating": opp.get("rating"),
+        "rating": mine.get("rating"),
+        "ratingDiff": mine.get("ratingDiff"),
+        "color": color,
+        "result": result,
+        "status": status,
+        "rated": g.get("rated"),
+        "perf": g.get("perf") or g.get("speed"),
+        "clock": {"initial": clock.get("initial"), "increment": clock.get("increment")},
+        "opening": (g.get("opening") or {}).get("name"),
+        "plies": len((g.get("moves") or "").split()),
+        "endedAt": g.get("lastMoveAt") or g.get("createdAt"),
+    }
+
+
+def refresh_lichess() -> None:
+    """Fetch ratings and the last games of the bot account (public data, no token needed)."""
+    name = _username()
+    user = json.loads(_get(f"{LICHESS}/api/user/{name}"))
+    ratings = {}
+    for perf in ("bullet", "blitz", "rapid", "classical"):
+        data = (user.get("perfs") or {}).get(perf)
+        if data and data.get("games"):
+            ratings[perf] = {"rating": data.get("rating"), "games": data.get("games"), "rd": data.get("rd"),
+                             "prov": data.get("prov", False)}
+    raw = _get(f"{LICHESS}/api/games/user/{name}?max={RECENT_LIMIT}&moves=true&opening=true",
+               accept="application/x-ndjson").decode("utf-8")
+    games, moves = [], {}
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        g = json.loads(line)
+        entry = _game_entry(g)
+        if entry:
+            games.append(entry)
+            moves[entry["id"]] = g.get("moves") or ""
     with _lock:
-        snap = json.loads(json.dumps(_status))
-    snap.update({
-        "name": os.environ.get("ALIEKNEK_NAME", "Alieknek"),
-        "enabled": enabled(),
-        "hours": hours() or "always",
-        "timezone": os.environ.get("ALIEKNEK_TZ", "Europe/Vienna"),
-        "inWindow": in_window(),
-        "now": _now().strftime("%H:%M"),
-        "serverTime": int(time.time() * 1000),
-    })
-    if snap["state"] not in ("playing", "no-token", "error", "starting") and not snap["enabled"]:
-        snap["state"] = "disabled"
-    elif snap["state"] == "idle" and not snap["inWindow"]:
-        snap["state"] = "sleeping"
-    return snap
+        _lichess.update({"ratings": ratings, "games": games, "updated": int(time.time() * 1000)})
+        _moves.clear()
+        _moves.update(moves)
+
+
+def _last24h(games: list) -> dict:
+    since = time.time() * 1000 - 24 * 3600 * 1000
+    recent = [g for g in games if (g.get("endedAt") or 0) >= since and g.get("result") != "aborted"]
+    change = {}
+    for g in recent:
+        if g.get("rated") and g.get("ratingDiff") is not None:
+            change[g["perf"]] = change.get(g["perf"], 0) + g["ratingDiff"]
+    return {"games": len(recent), "wins": sum(g["result"] == "win" for g in recent),
+            "draws": sum(g["result"] == "draw" for g in recent),
+            "losses": sum(g["result"] == "loss" for g in recent), "ratingChange": change}
+
+
+def _lichess_loop() -> None:
+    """Two public requests per refresh. Gentle on Lichess's rate limits: every 10 minutes while the bot
+    may play, every 30 minutes otherwise, plus once after each game, but never more than once a minute."""
+    while True:
+        started = time.time()
+        try:
+            refresh_lichess()
+        except Exception as e:  # network trouble or HTTP 429: keep the last data, try again later
+            print(f"[lichess-stats] refresh failed: {e}")
+        _refresh.wait(600 if accepting() else 1800)
+        _refresh.clear()
+        time.sleep(max(5.0, 60.0 - (time.time() - started)))
+
+
+def replay(game_id: str) -> Optional[dict]:
+    """Positions of one of the recently finished games (from the cache only: no extra Lichess requests)."""
+    if not GAME_ID.match(game_id or ""):
+        return None
+    with _lock:
+        sans = _moves.get(game_id)
+        entry = next((g for g in _lichess["games"] if g["id"] == game_id), None)
+    if sans is None:
+        return None
+    import chess  # python-chess, installed for the bot
+    board = chess.Board()
+    fens, ucis = [board.fen()], []
+    for san in sans.split():
+        try:
+            move = board.parse_san(san)
+        except ValueError:
+            break
+        ucis.append(move.uci())
+        board.push(move)
+        fens.append(board.fen())
+    return {"id": game_id, "game": entry, "sans": sans.split()[:len(ucis)], "ucis": ucis, "fens": fens}
 
 
 # ------------------------------------------------------------------ watch page
@@ -264,15 +387,82 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class _ControlHandler(BaseHTTPRequestHandler):
+    """Internal control API: GET /control returns the status, POST /control changes the settings.
+
+    Body fields (all optional): enabled (bool), hours ("01:00-05:00", "" = always), playForMinutes (int,
+    plays now for that long and switches the bot on; 0 ends it), reset (true = back to the environment).
+    Only reachable inside the Docker network; the play API forwards requests of logged-in users.
+    """
+
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        if path.startswith("/control/game/"):
+            data = replay(path[len("/control/game/"):])
+            return self._send(200, data) if data else self._send(404, {"error": "unknown game"})
+        if path != "/control":
+            return self._send(404, {"error": "not found"})
+        return self._send(200, snapshot())
+
+    def do_POST(self):
+        if self.path.split("?", 1)[0] != "/control":
+            return self._send(404, {"error": "not found"})
+        try:
+            length = min(int(self.headers.get("Content-Length") or 0), 4096)
+            body = json.loads(self.rfile.read(length) or b"{}")
+            if not isinstance(body, dict):
+                raise ValueError("object expected")
+        except (ValueError, TypeError):
+            return self._send(400, {"error": "invalid JSON"})
+        update = {}
+        if body.get("reset"):
+            update.update({"enabled": None, "hours": None, "playUntil": None})
+        if "enabled" in body:
+            update["enabled"] = bool(body["enabled"])
+        if "hours" in body:
+            spec = str(body["hours"] or "").strip()
+            if spec and spec.lower() not in ("always", "24/7") and not _parse_windows(spec):
+                return self._send(400, {"error": "hours must look like 01:00-05:00"})
+            update["hours"] = spec
+        if "playForMinutes" in body:
+            try:
+                minutes = max(0, min(24 * 60, int(body["playForMinutes"])))
+            except (TypeError, ValueError):
+                return self._send(400, {"error": "playForMinutes must be a number"})
+            update["playUntil"] = int(time.time() * 1000 + minutes * 60_000) if minutes else None
+            if minutes:
+                update["enabled"] = True
+        _write_control(update)
+        return self._send(200, snapshot())
+
+    def _send(self, code, payload):
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+
 def start_web(port: Optional[int] = None) -> None:
     port = int(os.environ.get("ALIEKNEK_STATUS_PORT", "0")) if port is None else port
     with _lock:
         _status["recent"] = _load_recent()
     if port <= 0:
         return
+    threading.Thread(target=_lichess_loop, daemon=True, name="lichess-stats").start()
     server = ThreadingHTTPServer(("0.0.0.0", port), _Handler)
     threading.Thread(target=server.serve_forever, daemon=True, name="watch-page").start()
     print(f"[+] Watch page on port {port}")
+    control_port = int(os.environ.get("ALIEKNEK_CONTROL_PORT", "0"))
+    if control_port > 0:
+        control = ThreadingHTTPServer(("0.0.0.0", control_port), _ControlHandler)
+        threading.Thread(target=control.serve_forever, daemon=True, name="control-api").start()
+        print(f"[+] Control API on port {control_port}")
 
 
 # ------------------------------------------------------------------ CLI
@@ -296,6 +486,10 @@ if __name__ == "__main__":
         _write_control({"enabled": None, "hours": None})
     elif cmd == "hours" and len(sys.argv) > 2:
         _write_control({"hours": sys.argv[2]})
+    elif cmd == "play" and len(sys.argv) > 2:
+        minutes = int(sys.argv[2])
+        _write_control({"playUntil": int(time.time() * 1000 + minutes * 60_000) if minutes else None,
+                        "enabled": True if minutes else _control().get("enabled")})
     elif cmd != "status":
         print(__doc__)
         sys.exit(2)
