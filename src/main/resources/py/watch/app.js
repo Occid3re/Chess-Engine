@@ -67,10 +67,26 @@ function drawRecent(recent) {
     a.textContent = `${r.color === 'white' ? '♔' : '♚'} gegen ${r.opponent}${rating}`;
     const res = document.createElement('span');
     res.className = r.result;
-    res.textContent = RESULT[r.result] || r.result;
+    const diff = r.rated && typeof r.ratingDiff === 'number' ? ` ${signed(r.ratingDiff)}` : '';
+    res.textContent = (RESULT[r.result] || r.result) + diff;
     li.append(a, res);
     return li;
   }));
+}
+
+function signed(n) {
+  return n > 0 ? `+${n}` : n < 0 ? `−${Math.abs(n)}` : '±0';
+}
+
+const PERF = { bullet: 'Bullet', blitz: 'Blitz', rapid: 'Schnellschach', classical: 'Klassisch' };
+
+/** „Blitz 1730 (+12 in 24 h) · Bullet 1634“ – Spielarten nach Zahl der Partien. */
+function ratingText(s) {
+  const change = (s.last24h && s.last24h.ratingChange) || {};
+  return Object.entries(s.ratings || {})
+    .sort((a, b) => b[1].games - a[1].games)
+    .map(([perf, r]) => `${PERF[perf] || perf} ${r.rating}${change[perf] ? ` (${signed(change[perf])} in 24 h)` : ''}`)
+    .join(' · ');
 }
 
 function render() {
@@ -81,6 +97,7 @@ function render() {
   $('schedule').textContent = snap.enabled
     ? `Spielzeiten: ${snap.hours === 'always' ? 'immer' : snap.hours} (${snap.timezone}), jetzt ${snap.now}`
     : 'Der Bot ist ausgeschaltet.';
+  $('rating').textContent = ratingText(snap);
 
   const g = snap.game;
   $('live').hidden = !(g && g.fen);

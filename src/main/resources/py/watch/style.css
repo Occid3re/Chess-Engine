@@ -27,3 +27,4 @@ li { display: flex; justify-content: space-between; gap: 8px; padding: 8px 0; bo
 .win { color: var(--accent); font-weight: 600; }
 .loss { color: var(--bad); font-weight: 600; }
 a { color: var(--accent); }
+.rating { font-weight: 600; font-variant-numeric: tabular-nums; margin: 4px 0 12px; }

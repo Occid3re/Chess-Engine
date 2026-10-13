@@ -33,8 +33,12 @@ It has no dependencies (plain `javac` builds it) and does ~0.8-1M nps per thread
   LMR, RFP, ProbCut, singular ext., history/continuation history), SearchManager (Lazy SMP, time management)
 - Eval: tapered hand-crafted eval, weights in `src/main/resources/core/eval-weights.txt`,
   fitted by `core.tuning.EvalTuner` to `E:\Chess-Data\tuning\elite2M.txt` (fen;whiteCp;wdl)
-- NNUE (optional): `core/nnue.bin` resource, (768->H)x2->1 SCReLU, trained by `core.nnue.Trainer` (CPU, Java)
-  on self-play data from `core.tools.DataGen`. Keep int[] arrays + per-feature weight rows: other layouts do not vectorise.
+- NNUE (DEFAULT when `core/nnue.bin` is bundled; `-Dcore.useNnue=false` or UCI `UseNNUE false` = hand-crafted):
+  (768->256)x2->1 SCReLU, QA=255/QB=256, trained by `core.nnue.Trainer` (CPU, Java, ~20 s/epoch on 16M positions)
+  on `E:\Chess-Data\tuning\elite2M.txt` + self-play from `core.tools.DataGen` (`E:\Chess-Data\selfplay\sp_all.txt`,
+  13.7M positions, 6000 nodes/move), lambda 0.3, K 230, 15 epochs. Measured at 10+0.1: net on 8.8M positions
+  +38±22 Elo vs hand-crafted (641 games); net on 15.9M (bundled) +39±32 vs that one. More data = next gain.
+  Keep int[] arrays + per-feature weight rows: other layouts do not vectorise.
 - Results (10+0.1, 1 thread): 40-0 vs 4.0.0, 40-0 vs 3.6.9, 52-6-2 vs Stockfish UCI_Elo 2600; 4 threads vs 1: +168 Elo
 - Match harness: `E:\ChessEngines\harness\` (sprt.sh, match.sh, vs_sf.sh, smp.sh, snap.sh, elite_openings.epd)
 - Tests: `./mvnw.cmd -Dtest=CoreEngineTest test`
