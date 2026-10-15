@@ -6,6 +6,9 @@ Lichess bot runner with strict API compliance:
 - Backs off a full minute on HTTP 429 (honors Retry-After), pushing back future calls
 - Persistent outbound session; fewer lookups; randomized jitter
 - Optional conservative global QPS limiter
+- In-game calls (moves, abort, resign) are exempt from all of that: they go out at once, on their own
+  lean adapter, because the clock is running — a two-second pause per move is a lost bullet game
+- Measures its own latency per move and hands the engine that much less clock
 """
 
 import os
@@ -95,6 +98,8 @@ USE_PONDER = os.environ.get(
 
 # Network hardening
 HTTP_TOTAL_RETRIES = int(os.environ.get("HTTP_TOTAL_RETRIES", "5"))
+# In-game calls: short timeout, at most one quick retry (safe_make_move retries on top of that)
+IN_GAME_TIMEOUT = float(os.environ.get("BOT_MOVE_TIMEOUT", "5"))
 HTTP_BACKOFF = float(os.environ.get("HTTP_BACKOFF", "0.5"))
 HTTP_POOL_MAXSIZE = int(os.environ.get("HTTP_POOL_MAXSIZE", "20"))
 HTTP_TIMEOUT = float(os.environ.get("HTTP_TIMEOUT", "10"))  # seconds
@@ -290,15 +295,17 @@ def _make_retry():
     # Compatible with old/new urllib3
     methods = frozenset({"GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"})
     try:
+        # No 429 here and no Retry-After sleep inside urllib3: the request wrapper below backs off itself,
+        # with the global limiter, so a long Retry-After never blocks a thread silently.
         return Retry(
             total=HTTP_TOTAL_RETRIES,
             connect=HTTP_TOTAL_RETRIES,
             read=HTTP_TOTAL_RETRIES,
             backoff_factor=HTTP_BACKOFF,
-            status_forcelist=(429, 500, 502, 503, 504),
+            status_forcelist=(500, 502, 503, 504),
             allowed_methods=methods,
             raise_on_status=False,
-            respect_retry_after_header=True,
+            respect_retry_after_header=False,
         )
     except TypeError:
         # Older urllib3 fallback
@@ -307,20 +314,65 @@ def _make_retry():
             connect=HTTP_TOTAL_RETRIES,
             read=HTTP_TOTAL_RETRIES,
             backoff_factor=HTTP_BACKOFF,
-            status_forcelist=(429, 500, 502, 503, 504),
+            status_forcelist=(500, 502, 503, 504),
             method_whitelist=methods,  # deprecated in newer versions
         )
 
 
-def _mount_adapter(obj, adapter: HTTPAdapter):
+def _make_fast_retry():
+    """For in-game calls: one quick connection retry, never a read retry (the move may already be in),
+    no status retries and no Retry-After sleep – the clock is running."""
+    methods = frozenset({"GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"})
+    try:
+        return Retry(total=1, connect=1, read=0, backoff_factor=0.2, status_forcelist=(),
+                     allowed_methods=methods, raise_on_status=False, respect_retry_after_header=False)
+    except TypeError:
+        return Retry(total=1, connect=1, read=0, backoff_factor=0.2, status_forcelist=(), method_whitelist=methods)
+
+
+# Everything under this prefix is a running game: moves, abort, resign, chat, the game stream.
+IN_GAME_URL_PREFIX = "https://lichess.org/api/bot/game/"
+_IN_GAME_PATH = re.compile(r"/api/bot/game/[A-Za-z0-9]+/(move|abort|resign|chat)(/|$)")
+
+
+def _is_in_game_request(args, kwargs) -> bool:
+    """True for a move, abort, resign or chat call of a running game (requests' Session.request(method, url, ...))."""
+    url = kwargs.get("url")
+    if url is None:
+        url = args[1] if len(args) > 1 else (args[0] if args else "")
+    return bool(_IN_GAME_PATH.search(str(url or "")))
+
+
+class _LagMeter:
+    """What a move costs beyond the engine's own search: handling the event, the UCI round trip and the
+    POST to Lichess. The engine gets that much less clock, so it never plans with time that is already gone.
+    An exponential average, floored by the per-game base and capped so one hiccup cannot starve the search."""
+
+    def __init__(self, ceiling: float = 1.5):
+        self.ceiling = ceiling
+        self.ema: Optional[float] = None
+
+    def record(self, lag_s: float) -> None:
+        lag_s = max(0.0, min(float(lag_s), 5.0))
+        self.ema = lag_s if self.ema is None else 0.7 * self.ema + 0.3 * lag_s
+
+    def slack(self, base: float) -> float:
+        if self.ema is None:
+            return base
+        return max(base, min(self.ceiling, self.ema * 1.5 + 0.05))
+
+
+def _mount_adapter(obj, adapter: HTTPAdapter, prefix: Optional[str] = None):
+    """Mount for all traffic, or – with a prefix – only for URLs under it (requests picks the longest match)."""
+    prefixes = (prefix,) if prefix else ("https://", "http://")
     if hasattr(obj, "mount"):
-        obj.mount("https://", adapter)
-        obj.mount("http://", adapter)
+        for p in prefixes:
+            obj.mount(p, adapter)
         return
     inner = getattr(obj, "session", None)
     if inner is not None and hasattr(inner, "mount"):
-        inner.mount("https://", adapter)
-        inner.mount("http://", adapter)
+        for p in prefixes:
+            inner.mount(p, adapter)
 
 
 def _set_headers(obj, headers: dict):
@@ -387,6 +439,9 @@ def make_hardened_session(token: str) -> berserk.TokenSession:
     retry = _make_retry()
     adapter = HTTPAdapter(max_retries=retry, pool_maxsize=HTTP_POOL_MAXSIZE, pool_block=True)
     _mount_adapter(ts, adapter)
+    # Running games get the lean adapter: moves must not sit in a retry loop or a Retry-After sleep.
+    _mount_adapter(ts, HTTPAdapter(max_retries=_make_fast_retry(), pool_maxsize=HTTP_POOL_MAXSIZE, pool_block=True),
+                   prefix=IN_GAME_URL_PREFIX)
 
     _set_headers(ts, {"User-Agent": USER_AGENT, "Accept": "application/json"})
     _set_trust_env(ts, not DISABLE_PROXIES)
@@ -397,6 +452,10 @@ def make_hardened_session(token: str) -> berserk.TokenSession:
     def _request_wrapped(*args, **kwargs):
         # Streaming endpoints (SSE/NDJSON) stay open; do NOT serialize or set a short timeout.
         is_stream = kwargs.get("stream", False)
+        if not is_stream and _is_in_game_request(args, kwargs):
+            # A move, abort or resign: straight out, past the pacing and the mutex – the clock is running.
+            kwargs.setdefault("timeout", IN_GAME_TIMEOUT)
+            return _orig_request(*args, **kwargs)
         if not is_stream:
             kwargs.setdefault("timeout", HTTP_TIMEOUT)
             with _REQUEST_MUTEX:  # <- only one non-stream call at a time
@@ -695,6 +754,31 @@ def play_game(client: berserk.Client,
     abort_timer_generation = 0
     abort_lock = threading.Lock()
     abort_start_time = game_start_time
+    # Our own latency per move, measured as we go: the engine gets that much less clock.
+    lag = _LagMeter()
+    received = time.monotonic()
+
+    def _think_and_send(current_board: chess.Board, current_state: dict, base_slack: float):
+        """Search with the measured latency taken off the clocks, post the move, update the latency."""
+        nonlocal engine
+        limit = build_limit(current_state, calc_move_time(current_state, my_color_is_white, clock_initial, clock_increment),
+                            lag.slack(base_slack))
+        started = time.monotonic()
+        result = engine.play(current_board, limit, ponder=USE_PONDER, info=chess.engine.INFO_BASIC | chess.engine.INFO_SCORE)
+        searched = time.monotonic() - started
+        if result is None or result.move is None:
+            return result, False
+        if svc is not None:
+            svc.engine_info(result.info)
+        sent = safe_make_move(client, game_id, result.move.uci())
+        if not sent:
+            print("[warn] Move send failed, retrying once")
+            sent = safe_make_move(client, game_id, result.move.uci())
+        if sent:
+            reported = result.info.get("time") if result.info else None
+            think = float(reported) if isinstance(reported, (int, float)) and reported > 0 else searched
+            lag.record((time.monotonic() - received) - think)
+        return result, sent
 
     def _cancel_abort_timer():
         nonlocal abort_timer, abort_reason
@@ -769,6 +853,7 @@ def play_game(client: berserk.Client,
 
     try:
         for event in stream:
+            received = time.monotonic()
             t = event.get("type")
 
             if t == "gameFull":
@@ -800,17 +885,9 @@ def play_game(client: berserk.Client,
                     _cancel_abort_timer()
 
                 if is_my_turn(board, my_color_is_white) and not board.is_game_over():
-                    think_time = calc_move_time(state, my_color_is_white, clock_initial, clock_increment)
                     slack = 0.1 if tc_bucket == "bullet" else 0.15
                     try:
-                        result = engine.play(board, build_limit(state, think_time, slack), ponder=USE_PONDER,
-                                             info=chess.engine.INFO_BASIC | chess.engine.INFO_SCORE)
-                        if svc is not None:
-                            svc.engine_info(result.info)
-                        move_sent = safe_make_move(client, game_id, result.move.uci())
-                        if not move_sent:
-                            print("[warn] Move send failed, retrying once")
-                            move_sent = safe_make_move(client, game_id, result.move.uci())
+                        result, move_sent = _think_and_send(board, state, slack)
                         if move_sent and my_color_is_white and current_move_count == 0 and ABORT_NO_MOVE_AFTER > 0:
                             _schedule_abort_timer("reply")
                     except (asyncio.TimeoutError,
@@ -853,7 +930,6 @@ def play_game(client: berserk.Client,
                     continue
 
                 if is_my_turn(board, my_color_is_white):
-                    think_time = calc_move_time(state, my_color_is_white, clock_initial, clock_increment)
                     if tc_bucket is None and clock_initial is None:
                         key_time = "wtime" if my_color_is_white else "btime"
                         time_val = state.get(key_time)
@@ -868,8 +944,7 @@ def play_game(client: berserk.Client,
                             tc_bucket = _estimate_tc_bucket(clock_initial, clock_increment)
                     slack = 0.1 if tc_bucket == "bullet" else 0.15
                     try:
-                        result = engine.play(board, build_limit(state, think_time, slack), ponder=USE_PONDER,
-                                             info=chess.engine.INFO_BASIC | chess.engine.INFO_SCORE)
+                        result, move_sent = _think_and_send(board, state, slack)
                         if result is None or result.move is None:
                             # Engine produced no move — pick a random legal move so the
                             # game continues instead of crashing the bot.
@@ -883,13 +958,6 @@ def play_game(client: berserk.Client,
                                     safe_make_move(client, game_id, fallback.uci())
                             else:
                                 print("[warn] no legal moves available, skipping")
-                        else:
-                            if svc is not None:
-                                svc.engine_info(result.info)
-                            move_sent = safe_make_move(client, game_id, result.move.uci())
-                            if not move_sent:
-                                print("[warn] Move send failed, retrying once")
-                                safe_make_move(client, game_id, result.move.uci())
                     except (asyncio.TimeoutError,
                             chess.engine.EngineError,
                             chess.engine.EngineTerminatedError) as e:

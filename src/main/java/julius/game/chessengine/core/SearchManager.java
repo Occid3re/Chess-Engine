@@ -94,20 +94,41 @@ public final class SearchManager {
         long time = root.side == Position.WHITE ? l.wtime : l.btime;
         long inc = root.side == Position.WHITE ? l.winc : l.binc;
         if (time < 0) return;
-        long left = Math.max(1, time - moveOverhead);
-        int mtg = l.movestogo > 0 ? Math.min(l.movestogo, 40) : 32;
-        double opt = (double) left / mtg + inc * 0.75;
-        double max;
-        if (l.movestogo > 0) {
-            opt = Math.min(opt, left * 0.6);
-            max = Math.min(opt * 4.0, left * 0.8);
-        } else {
-            opt = Math.min(opt, left * 0.25);
-            max = Math.min(opt * 5.0, left * 0.45);
-        }
-        optimumMs = Math.max(1, (long) opt);
-        maximumMs = Math.max(1, (long) max);
+        long[] budget = allocate(time, inc, l.movestogo, root.fullmove, moveOverhead);
+        optimumMs = budget[0];
+        maximumMs = budget[1];
         timeManaged = true;
+    }
+
+    /**
+     * The budget for one move, {optimum, maximum} in milliseconds. With moves to go, the clock is shared
+     * evenly. In sudden death and increment games the share assumes about 40 more moves at the start and
+     * fewer as the game goes on, never fewer than 16, so later moves keep a fair share instead of the early
+     * ones eating it; the optimum stays under a fifth of the clock, the maximum under 40 %. Under ten
+     * seconds a move gets a twentieth of the clock (at most an eighth) plus most of the increment, so a
+     * bullet scramble never runs the flag down.
+     */
+    static long[] allocate(long time, long inc, int movestogo, int fullmove, int moveOverhead) {
+        long left = Math.max(1, time - moveOverhead);
+        inc = Math.max(0, inc);
+        double opt, max;
+        if (movestogo > 0) {
+            int mtg = Math.min(movestogo, 50);
+            opt = (double) left / mtg + inc * 0.75;
+            opt = Math.min(opt, left * (mtg == 1 ? 0.8 : 0.6));
+            max = Math.min(opt * 3.0, left * 0.8);
+        } else {
+            int mtg = Math.max(16, 40 - Math.max(0, fullmove - 1) / 2);
+            opt = (double) left / mtg + inc * 0.8;
+            opt = Math.min(opt, left * 0.20);
+            max = Math.min(opt * 3.0, left * 0.40);
+            if (left < 10_000) {
+                opt = Math.min(opt, left / 20.0 + inc * 0.6);
+                max = Math.min(max, left / 8.0 + inc * 0.6);
+            }
+        }
+        max = Math.max(max, opt);
+        return new long[]{Math.max(1, (long) opt), Math.max(1, (long) max)};
     }
 
     /** Called by the main search thread periodically. */
