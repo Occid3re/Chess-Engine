@@ -17,12 +17,12 @@ Treat the brain as your primary knowledge store. If you discover something usefu
 
 Java chess engine targeting 2000+ Lichess blitz Elo. Current rating: ~1770.
 
-- **Branch**: v4.0.1
+- **Branch**: v4.0.2
 - **Repo**: github.com/Occid3re/Chess-Engine
 - **Lichess bot**: Alieknek (https://lichess.org/@/Alieknek)
 - **Java**: 25 (preview enabled)
 - **Build**: `./mvnw.cmd -DskipTests package`
-- **UCI JAR**: `target/chess-engine-4.0.1-uci.jar`
+- **UCI JAR**: `target/chess-engine-4.0.2-uci.jar`
 
 ## New core engine (DEFAULT since 2026-10-13)
 
@@ -76,6 +76,10 @@ It has no dependencies (plain `javac` builds it) and does ~0.8-1M nps per thread
 13. **Time budget per move** (`SearchManager.allocate`, v4.0.1): moves-to-go 40 at the start shrinking to 16,
     optimum ≤ 20 % and maximum ≤ 40 % of the clock, under 10 s a twentieth plus most of the increment. The
     old `left/32`, max 45 % spent the clock early: in 3+2 only 20 s were left after move 40.
+14. **Weekly play schedule** (`alieknek_service.py`, v4.0.2): `ALIEKNEK_HOURS` / `botctl hours` take weekday groups
+    (`Mo-Fr 01:00-05:00; Sa-So 00:00-08:00`, `always`, `never`; days not named do not play; a window may
+    cross midnight). The control API also takes `schedule` (seven lists of [start, end] minutes) and reports
+    `schedule`, `windowEndsAt`, `nextWindowAt` – the play app's week editor builds on that.
 
 ## Eval Modes
 
