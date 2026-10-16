@@ -237,7 +237,17 @@ def window_bounds(now: Optional[datetime.datetime] = None):
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     for start, end in days[now.weekday()]:
         if start <= minute < end:
-            ends = midnight + datetime.timedelta(minutes=end)
+            # A window that reaches midnight goes on when the next day starts at 00:00 ("Sa-So 22:00-02:00",
+            # "always"): report the real end, or no end at all when the whole week is one window.
+            offset, until = 0, end
+            while until == DAY_MINUTES and offset < 7:
+                following = days[(now.weekday() + offset + 1) % 7]
+                if not following or following[0][0] != 0:
+                    break
+                offset, until = offset + 1, following[0][1]
+            if offset >= 7:
+                return None, None
+            ends = midnight + datetime.timedelta(days=offset, minutes=until)
             return int(ends.timestamp() * 1000), None
     for offset in range(8):
         day = (now.weekday() + offset) % 7

@@ -74,3 +74,20 @@ def test_in_window_and_bounds(svc, monkeypatch):
     monkeypatch.setattr(svc, "hours", lambda: "never")
     assert not svc.in_window(monday_night)
     assert svc.window_bounds(monday_night) == (None, None)
+
+
+def test_window_end_runs_past_midnight(svc, monkeypatch):
+    tz = datetime.timezone.utc
+    monkeypatch.setattr(svc, "hours", lambda: "Sa,So 22:00-02:00")
+    saturday_night = datetime.datetime(2026, 10, 24, 23, 0, tzinfo=tz)   # a Saturday
+    ends, nxt = svc.window_bounds(saturday_night)
+    assert ends == int(datetime.datetime(2026, 10, 25, 2, 0, tzinfo=tz).timestamp() * 1000) and nxt is None
+    sunday_night = datetime.datetime(2026, 10, 25, 23, 0, tzinfo=tz)
+    ends, nxt = svc.window_bounds(sunday_night)
+    assert ends == int(datetime.datetime(2026, 10, 26, 2, 0, tzinfo=tz).timestamp() * 1000) and nxt is None
+    monkeypatch.setattr(svc, "hours", lambda: "Mo 20:00-24:00; Di 00:00-24:00; Mi 00:00-05:00")
+    monday_evening = datetime.datetime(2026, 10, 19, 21, 0, tzinfo=tz)
+    assert svc.window_bounds(monday_evening)[0] == int(datetime.datetime(2026, 10, 21, 5, 0, tzinfo=tz).timestamp() * 1000)
+    monkeypatch.setattr(svc, "hours", lambda: "always")
+    assert svc.in_window(monday_evening)
+    assert svc.window_bounds(monday_evening) == (None, None), "one window round the clock has no end"
