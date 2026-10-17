@@ -17,12 +17,12 @@ Treat the brain as your primary knowledge store. If you discover something usefu
 
 Java chess engine targeting 2000+ Lichess blitz Elo. Current rating: ~1770.
 
-- **Branch**: v4.0.0
+- **Branch**: v4.0.3
 - **Repo**: github.com/Occid3re/Chess-Engine
 - **Lichess bot**: Alieknek (https://lichess.org/@/Alieknek)
 - **Java**: 25 (preview enabled)
 - **Build**: `./mvnw.cmd -DskipTests package`
-- **UCI JAR**: `target/chess-engine-4.0.0-uci.jar`
+- **UCI JAR**: `target/chess-engine-4.0.3-uci.jar`
 
 ## New core engine (DEFAULT since 2026-10-13)
 
@@ -69,6 +69,19 @@ It has no dependencies (plain `javac` builds it) and does ~0.8-1M nps per thread
 9. **NNUE lazy rebuild is faster than incremental in Java** — cache locality of single accumulator beats ply-indexed arrays. Don't add push/pop copy overhead.
 10. **blendscale=903.96 is correct**. Changing to 256 costs -35 Elo. The genetic tuner found this value.
 11. **Endgame scaling features are worth +12 Elo** — keep them enabled.
+12. **In-game Lichess calls bypass the global pacing** (v4.0.1). `BOT_QPS=0.5` paced *every* non-stream call,
+    including posting a move, so the bot never moved faster than one move per 2 s: 60+0 bullet was lost on
+    time around move 30, blitz endgames ran at the 2 s floor. Moves, abort and resign now skip the limiter
+    and the mutex and use a lean adapter (no status retries, no Retry-After sleep). Keep it that way.
+13. **Time budget per move** (`SearchManager.allocate`, v4.0.1): moves-to-go 40 at the start shrinking to 16,
+    optimum ≤ 20 % and maximum ≤ 40 % of the clock, under 10 s a twentieth plus most of the increment. The
+    old `left/32`, max 45 % spent the clock early: in 3+2 only 20 s were left after move 40.
+14. **Weekly play schedule** (`alieknek_service.py`, v4.0.2): `ALIEKNEK_HOURS` / `botctl hours` take weekday groups
+    (`Mo-Fr 01:00-05:00; Sa-So 00:00-08:00`, `always`, `never`; days not named do not play; a window may
+    cross midnight). The control API also takes `schedule` (seven lists of [start, end] minutes) and reports
+    `schedule`, `windowEndsAt`, `nextWindowAt` – the play app's week editor builds on that.
+    `windowEndsAt` follows a window across midnight into the next day's 00:00 start (v4.0.3) and is
+    null for `always` – before that the app showed "bis 00:00 Uhr" for a bot that never stops.
 
 ## Eval Modes
 

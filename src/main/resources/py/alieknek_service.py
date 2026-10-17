@@ -3,7 +3,9 @@
 
 Configuration (environment):
   ALIEKNEK_ENABLED      true/false (default true)
-  ALIEKNEK_HOURS        play windows, e.g. "01:00-05:00" or "01:00-05:00,13:00-14:00"; empty = always
+  ALIEKNEK_HOURS        play windows: "01:00-05:00" or "01:00-05:00,13:00-14:00" (every day), with
+                        weekdays "Mo-Fr 01:00-05:00; Sa-So 00:00-08:00" (days not named: no play),
+                        "always" or empty = always, "never" = never; a window may cross midnight
   ALIEKNEK_TZ           time zone of the windows (default Europe/Vienna)
   ALIEKNEK_DATA_DIR     where status/recent games/control file live (default ./alieknek-data)
   ALIEKNEK_STATUS_PORT  port of the watch page (0 = off)
@@ -81,38 +83,180 @@ def _now() -> datetime.datetime:
     return datetime.datetime.now(tz) if tz else datetime.datetime.now()
 
 
-def _parse_windows(spec: str):
-    windows = []
-    for part in spec.replace(";", ",").split(","):
-        part = part.strip()
-        if not part or "-" not in part:
+DAY_NAMES = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+DAY_ALIASES = {"mo": 0, "mon": 0, "di": 1, "tue": 1, "tu": 1, "mi": 2, "wed": 2, "we": 2, "do": 3, "thu": 3, "th": 3,
+               "fr": 4, "fri": 4, "sa": 5, "sat": 5, "so": 6, "sun": 6, "su": 6}
+DAY_MINUTES = 24 * 60
+MAX_WINDOWS_PER_DAY = 8
+
+
+def _parse_time(text: str) -> int:
+    hours, minutes = text.strip().split(":")
+    h, m = int(hours), int(minutes)
+    if not (0 <= h <= 24 and 0 <= m <= 59) or (h == 24 and m != 0):
+        raise ValueError(f"time {text!r} out of range")
+    return h * 60 + m
+
+
+def _merge(windows) -> list:
+    """Sorted, clamped to the day, overlapping or touching windows joined, empty ones dropped."""
+    clean = sorted((max(0, int(a)), min(DAY_MINUTES, int(b))) for a, b in windows)
+    merged = []
+    for start, end in clean:
+        if end <= start:
             continue
-        a, b = part.split("-", 1)
-        try:
-            ha, ma = (int(x) for x in a.strip().split(":"))
-            hb, mb = (int(x) for x in b.strip().split(":"))
-        except ValueError:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def parse_schedule(spec: str) -> list:
+    """The week as seven lists of (start, end) minutes, Monday first. Raises ValueError on nonsense.
+
+    Groups are separated by ";". A group names days (Mo, Di, … or Mon, Tue, …, ranges like Mo-Fr, lists like
+    Sa,So) and windows (HH:MM-HH:MM); a group without days means every day. A window whose end is not after
+    its start crosses midnight and continues on the next day. Days no group names do not play."""
+    text = (spec or "").strip()
+    low = text.lower()
+    if low in ("", "always", "24/7", "00:00-24:00"):
+        return [[(0, DAY_MINUTES)] for _ in range(7)]
+    if low in ("never", "nie", "off"):
+        return [[] for _ in range(7)]
+    days = [[] for _ in range(7)]
+    for part in text.split(";"):
+        tokens = [t for t in re.split(r"[,\s]+", part.strip()) if t]
+        if not tokens:
             continue
-        windows.append((ha * 60 + ma, hb * 60 + mb))
-    return windows
+        day_tokens = [t for t in tokens if ":" not in t]
+        windows = [t for t in tokens if ":" in t]
+        if not windows:
+            raise ValueError(f"no window in {part.strip()!r}")
+        selected = set()
+        for token in day_tokens:
+            if "-" in token:
+                a, b = token.split("-", 1)
+                ia, ib = DAY_ALIASES.get(a.lower()), DAY_ALIASES.get(b.lower())
+                if ia is None or ib is None:
+                    raise ValueError(f"unknown day in {token!r}")
+                d = ia
+                while True:
+                    selected.add(d)
+                    if d == ib:
+                        break
+                    d = (d + 1) % 7
+            else:
+                index = DAY_ALIASES.get(token.lower())
+                if index is None:
+                    raise ValueError(f"unknown day {token!r}")
+                selected.add(index)
+        if not day_tokens:
+            selected = set(range(7))
+        for window in windows:
+            if "-" not in window:
+                raise ValueError(f"window {window!r} must look like 01:00-05:00")
+            a, b = window.split("-", 1)
+            start, end = _parse_time(a), _parse_time(b)
+            for d in selected:
+                if end > start:
+                    days[d].append((start, end))
+                elif end < start:  # crosses midnight
+                    days[d].append((start, DAY_MINUTES))
+                    days[(d + 1) % 7].append((0, end))
+    return [_merge(d) for d in days]
+
+
+def _fmt_time(minutes: int) -> str:
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def format_schedule(days) -> str:
+    """The canonical text for a week: "always", "never", windows alone when every day is the same, else
+    groups of consecutive equal days such as "Mo-Fr 01:00-05:00; Sa-So 00:00-08:00"."""
+    days = [_merge(d) for d in days]
+    if all(d == [(0, DAY_MINUTES)] for d in days):
+        return "always"
+    if all(not d for d in days):
+        return "never"
+    windows = lambda d: ",".join(f"{_fmt_time(a)}-{_fmt_time(b)}" for a, b in d)
+    if all(d == days[0] for d in days):
+        return windows(days[0])
+    groups, i = [], 0
+    while i < 7:
+        j = i
+        while j + 1 < 7 and days[j + 1] == days[i]:
+            j += 1
+        if days[i]:
+            label = DAY_NAMES[i] if i == j else f"{DAY_NAMES[i]}-{DAY_NAMES[j]}"
+            groups.append(f"{label} {windows(days[i])}")
+        i = j + 1
+    return "; ".join(groups)
+
+
+def schedule_from_json(value) -> list:
+    """A week sent by the app: seven lists of [start, end] minute pairs. Raises ValueError on nonsense."""
+    if not isinstance(value, list) or len(value) != 7:
+        raise ValueError("schedule needs seven days")
+    days = []
+    for day in value:
+        if not isinstance(day, list) or len(day) > MAX_WINDOWS_PER_DAY:
+            raise ValueError("a day is a list of at most eight windows")
+        windows = []
+        for window in day:
+            if not isinstance(window, list) or len(window) != 2 or not all(isinstance(x, int) and not isinstance(x, bool) for x in window):
+                raise ValueError("a window is [start, end] in minutes")
+            start, end = window
+            if not (0 <= start < end <= DAY_MINUTES):
+                raise ValueError("a window runs from 0 to at most 1440 minutes, end after start")
+            windows.append((start, end))
+        days.append(_merge(windows))
+    return days
+
+
+def schedule() -> list:
+    """The week in force; an unreadable spec counts as always, like before."""
+    try:
+        return parse_schedule(hours())
+    except ValueError:
+        return [[(0, DAY_MINUTES)] for _ in range(7)]
 
 
 def in_window(now: Optional[datetime.datetime] = None) -> bool:
-    spec = hours()
-    if spec.lower() in ("", "always", "24/7", "00:00-24:00"):
-        return True
-    windows = _parse_windows(spec)
-    if not windows:
-        return True
     now = now or _now()
     minute = now.hour * 60 + now.minute
-    for start, end in windows:
-        if start <= end:
-            if start <= minute < end:
-                return True
-        elif minute >= start or minute < end:  # wraps past midnight
-            return True
-    return False
+    return any(start <= minute < end for start, end in schedule()[now.weekday()])
+
+
+def window_bounds(now: Optional[datetime.datetime] = None):
+    """(ends_at, next_at) as epoch milliseconds: when the current window ends (None outside one) and when
+    the next one starts (None inside one or when the week has no window)."""
+    now = now or _now()
+    days = schedule()
+    minute = now.hour * 60 + now.minute
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    for start, end in days[now.weekday()]:
+        if start <= minute < end:
+            # A window that reaches midnight goes on when the next day starts at 00:00 ("Sa-So 22:00-02:00",
+            # "always"): report the real end, or no end at all when the whole week is one window.
+            offset, until = 0, end
+            while until == DAY_MINUTES and offset < 7:
+                following = days[(now.weekday() + offset + 1) % 7]
+                if not following or following[0][0] != 0:
+                    break
+                offset, until = offset + 1, following[0][1]
+            if offset >= 7:
+                return None, None
+            ends = midnight + datetime.timedelta(days=offset, minutes=until)
+            return int(ends.timestamp() * 1000), None
+    for offset in range(8):
+        day = (now.weekday() + offset) % 7
+        for start, end in days[day]:
+            if offset == 0 and start <= minute:
+                continue
+            starts = midnight + datetime.timedelta(days=offset, minutes=start)
+            return None, int(starts.timestamp() * 1000)
+    return None, None
 
 
 def play_until() -> int:
@@ -367,6 +511,9 @@ def snapshot() -> dict:
         "hours": hours() or "always",
         "timezone": os.environ.get("ALIEKNEK_TZ", "Europe/Vienna"),
         "inWindow": in_window(),
+        "schedule": [[list(w) for w in day] for day in schedule()],
+        "windowEndsAt": window_bounds()[0],
+        "nextWindowAt": window_bounds()[1],
         "playUntil": play_until() or None,
         "envHours": os.environ.get("ALIEKNEK_HOURS", "") or "always",
         "envEnabled": _truthy(os.environ.get("ALIEKNEK_ENABLED", "true")),
@@ -419,8 +566,10 @@ class _Handler(BaseHTTPRequestHandler):
 class _ControlHandler(BaseHTTPRequestHandler):
     """Internal control API: GET /control returns the status, POST /control changes the settings.
 
-    Body fields (all optional): enabled (bool), hours ("01:00-05:00", "" = always), playForMinutes (int,
-    plays now for that long and switches the bot on; 0 ends it), reset (true = back to the environment).
+    Body fields (all optional): enabled (bool), hours ("Mo-Fr 01:00-05:00; Sa-So 00:00-08:00", "" = always,
+    "never"), schedule (seven lists of [start, end] minute pairs, Monday first – stored as the hours text),
+    playForMinutes (int, plays now for that long and switches the bot on; 0 ends it), reset (true = back to
+    the environment).
     Only reachable inside the Docker network; the play API forwards requests of logged-in users.
     """
 
@@ -451,10 +600,17 @@ class _ControlHandler(BaseHTTPRequestHandler):
             update.update({"enabled": None, "hours": None, "playUntil": None})
         if "enabled" in body:
             update["enabled"] = bool(body["enabled"])
-        if "hours" in body:
+        if "schedule" in body:
+            try:
+                update["hours"] = format_schedule(schedule_from_json(body["schedule"]))
+            except ValueError as e:
+                return self._send(400, {"error": str(e)})
+        elif "hours" in body:
             spec = str(body["hours"] or "").strip()
-            if spec and spec.lower() not in ("always", "24/7") and not _parse_windows(spec):
-                return self._send(400, {"error": "hours must look like 01:00-05:00"})
+            try:
+                parse_schedule(spec)
+            except ValueError as e:
+                return self._send(400, {"error": f"hours: {e}"})
             update["hours"] = spec
         if "playForMinutes" in body:
             try:
