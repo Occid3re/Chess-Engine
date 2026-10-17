@@ -33,12 +33,16 @@ except ImportError:  # Python < 3.9: windows are interpreted in local time
 
 DATA_DIR = Path(os.environ.get("ALIEKNEK_DATA_DIR", "alieknek-data"))
 WATCH_DIR = Path(__file__).resolve().parent / "watch"
-RECENT_LIMIT = 30
+RECENT_LIMIT = 50  # one games-export request either way
 
 _lock = threading.Lock()
 _status = {"state": "starting", "game": None, "recent": [], "engine": {}}
 # Public Lichess data (ratings, finished games with rating changes); refreshed by a background thread.
 _lichess = {"ratings": {}, "games": [], "updated": None}
+_engine = {"name": None}
+_history = {}  # perf -> [[epochMs, rating], ...]; kept in DATA_DIR/rating-history.json
+HISTORY_DAYS = 120
+HISTORY_MAX_POINTS = 3000
 _moves = {}  # game id -> SAN moves of recently finished games (for the replay)
 _refresh = threading.Event()
 LICHESS = "https://lichess.org"
@@ -420,6 +424,49 @@ def _game_entry(g: dict) -> Optional[dict]:
     }
 
 
+def engine_started(name: Optional[str]) -> None:
+    """The bot reports the UCI name of the engine it runs (e.g. "Alieknek 4.0.5")."""
+    with _lock:
+        _engine["name"] = name
+
+
+def _load_history() -> dict:
+    try:
+        data = json.loads((DATA_DIR / "rating-history.json").read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _record_history(ratings: dict, games: list) -> None:
+    """Grows the rating curve from data we fetch anyway (no extra Lichess request; the public
+    rating-history endpoint returns nothing for this bot account). A point is added when a rating
+    changes; an empty history is first backfilled from the cached games (rating before + change)."""
+    now = int(time.time() * 1000)
+    with _lock:
+        if not _history:
+            for g in sorted(games, key=lambda g: g.get("endedAt") or 0):
+                if g.get("rated") and g.get("rating") is not None and g.get("ratingDiff") is not None:
+                    _history.setdefault(g["perf"], []).append([g.get("endedAt") or now, g["rating"] + g["ratingDiff"]])
+        changed = False
+        for perf, data in ratings.items():
+            points = _history.setdefault(perf, [])
+            if not points or points[-1][1] != data["rating"]:
+                points.append([now, data["rating"]])
+                changed = True
+            if len(points) > HISTORY_MAX_POINTS:
+                del points[:len(points) - HISTORY_MAX_POINTS]
+        snapshot_copy = json.loads(json.dumps(_history))
+    if changed:
+        _save("rating-history.json", snapshot_copy)
+
+
+def _recent_history() -> dict:
+    cutoff = time.time() * 1000 - HISTORY_DAYS * 86_400_000
+    with _lock:
+        return {perf: [pt for pt in points if pt[0] >= cutoff] for perf, points in _history.items() if points}
+
+
 def refresh_lichess() -> None:
     """Fetch ratings and the last games of the bot account (public data, no token needed)."""
     name = _username()
@@ -445,6 +492,7 @@ def refresh_lichess() -> None:
         _lichess.update({"ratings": ratings, "games": games, "updated": int(time.time() * 1000)})
         _moves.clear()
         _moves.update(moves)
+    _record_history(ratings, games)
 
 
 def _last24h(games: list) -> dict:
@@ -457,6 +505,42 @@ def _last24h(games: list) -> dict:
     return {"games": len(recent), "wins": sum(g["result"] == "win" for g in recent),
             "draws": sum(g["result"] == "draw" for g in recent),
             "losses": sum(g["result"] == "loss" for g in recent), "ratingChange": change}
+
+
+def _stats(games: list) -> dict:
+    """Results of the cached games per time control and overall, plus the most played openings."""
+    played = [g for g in games if g.get("result") in ("win", "draw", "loss")]
+
+    def summary(group: list) -> dict:
+        n = len(group)
+        wins = sum(g["result"] == "win" for g in group)
+        draws = sum(g["result"] == "draw" for g in group)
+        losses = n - wins - draws
+        opp = [g["opponentRating"] for g in group if g.get("opponentRating")]
+        avg = round(sum(opp) / len(opp)) if opp else None
+        score = (wins + draws / 2) / n if n else None
+        # Linear performance estimate (FIDE-style): average opponent +-400 per net win per game.
+        perf = round(avg + 400 * (wins - losses) / n) if n and avg else None
+        diff = sum(g.get("ratingDiff") or 0 for g in group if g.get("rated"))
+        return {"games": n, "wins": wins, "draws": draws, "losses": losses, "score": score,
+                "avgOpponent": avg, "performance": perf, "ratingChange": diff}
+
+    by_perf = {}
+    for g in played:
+        by_perf.setdefault(g.get("perf") or "?", []).append(g)
+    openings = {}
+    for g in played:
+        name = (g.get("opening") or "").split(":")[0].strip()
+        if name:
+            openings.setdefault(name, []).append(g)
+    top = sorted(openings.items(), key=lambda kv: -len(kv[1]))[:6]
+    return {
+        "all": summary(played),
+        "white": summary([g for g in played if g.get("color") == "white"]),
+        "black": summary([g for g in played if g.get("color") == "black"]),
+        "byPerf": {perf: summary(group) for perf, group in by_perf.items()},
+        "openings": [{"name": name, **summary(group)} for name, group in top],
+    }
 
 
 def _lichess_loop() -> None:
@@ -505,6 +589,10 @@ def snapshot() -> dict:
     snap["ratings"] = lichess["ratings"]
     snap["ratingsUpdated"] = lichess["updated"]
     snap["last24h"] = _last24h(lichess["games"])
+    snap["stats"] = _stats(lichess["games"])
+    snap["history"] = _recent_history()
+    with _lock:
+        snap["engineName"] = _engine["name"]
     snap.update({
         "name": _username(),
         "enabled": enabled(),
@@ -637,6 +725,7 @@ def start_web(port: Optional[int] = None) -> None:
     port = int(os.environ.get("ALIEKNEK_STATUS_PORT", "0")) if port is None else port
     with _lock:
         _status["recent"] = _load_recent()
+        _history.update(_load_history())
     if port <= 0:
         return
     threading.Thread(target=_lichess_loop, daemon=True, name="lichess-stats").start()

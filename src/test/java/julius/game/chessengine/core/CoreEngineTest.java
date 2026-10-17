@@ -97,6 +97,22 @@ class CoreEngineTest {
     }
 
     @Test
+    void uciSurvivesNonNumericOptionsAndSetsTuningParameters() {
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        Uci uci = new Uci(new java.io.PrintStream(bytes, true));
+        int before = Tune.rfpMargin;
+        try {
+            assertTrue(uci.handle("setoption name Ponder value false"));
+            assertTrue(uci.handle("setoption name rfpMargin value 90"));
+            assertTrue(uci.handle("isready"));
+            assertTrue(bytes.toString().contains("readyok"), bytes.toString());
+            assertEquals(90, Tune.rfpMargin);
+        } finally {
+            Tune.set("rfpMargin", before);
+        }
+    }
+
+    @Test
     void findsMateInTwo() {
         SearchManager manager = new SearchManager(16, 1);
         Position p = new Position("r1b1kb1r/pppp1ppp/5q2/4n3/3KP3/2N3PN/PPP4P/R1BQ1B1R b kq - 0 1");

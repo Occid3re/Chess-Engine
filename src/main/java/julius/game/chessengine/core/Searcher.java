@@ -22,9 +22,15 @@ public final class Searcher {
     private static final int[][] LMR = new int[64][64];
 
     static {
+        initLmr();
+    }
+
+    /** (Re)builds the late-move-reduction table from {@link Tune#lmrBase} and {@link Tune#lmrDiv}. */
+    static void initLmr() {
+        double base = Tune.lmrBase / 100.0, div = Tune.lmrDiv / 100.0;
         for (int d = 1; d < 64; d++) {
             for (int m = 1; m < 64; m++) {
-                LMR[d][m] = (int) (0.75 + Math.log(d) * Math.log(m) / 2.25);
+                LMR[d][m] = (int) (base + Math.log(d) * Math.log(m) / div);
             }
         }
     }
@@ -106,7 +112,7 @@ public final class Searcher {
             rootDepth = depth;
             selDepth = 0;
             rootUpdatedMove = Move.NONE;
-            int delta = 15;
+            int delta = Tune.aspDelta;
             int alpha = -INF, beta = INF;
             if (depth >= 4) {
                 alpha = Math.max(prevScore - delta, -INF);
@@ -217,7 +223,7 @@ public final class Searcher {
     }
 
     private static int statBonus(int depth) {
-        return Math.min(2000, 160 * depth - 120);
+        return Math.min(Tune.bonusMax, Tune.bonusMul * depth - Tune.bonusSub);
     }
 
     private void scoreMoves(int ply, int n, int ttMove, boolean qs) {
@@ -392,19 +398,19 @@ public final class Searcher {
 
         if (!pvNode && !inCheck && excluded == Move.NONE) {
             // Reverse futility pruning
-            if (depth <= 8 && evalv - 75 * (depth - (improving ? 1 : 0)) >= beta && evalv < TB_BOUND) {
+            if (depth <= 8 && evalv - Tune.rfpMargin * (depth - (improving ? 1 : 0)) >= beta && evalv < TB_BOUND) {
                 return evalv;
             }
             // Razoring
-            if (depth <= 3 && evalv + 220 * depth < alpha) {
+            if (depth <= 3 && evalv + Tune.razorMargin * depth < alpha) {
                 int v = qsearch(alpha, alpha + 1, ply);
                 if (v <= alpha) return v;
             }
             // Null move pruning
-            if (depth >= 3 && evalv >= beta && staticEval >= beta - 15 * depth + 150
+            if (depth >= 3 && evalv >= beta && staticEval >= beta - Tune.nmpDepthMargin * depth + Tune.nmpBaseMargin
                     && ply > 0 && moveStack[ply - 1] != Move.NONE
                     && pos.hasNonPawnMaterial(pos.side) && beta > -TB_BOUND) {
-                int r = 4 + depth / 4 + Math.min(3, (evalv - beta) / 200);
+                int r = 4 + depth / 4 + Math.min(3, (evalv - beta) / Tune.nmpEvalDiv);
                 moveStack[ply] = Move.NONE;
                 pieceStack[ply] = 0;
                 if (acc != null) acc.pushNull(ply);
@@ -421,7 +427,7 @@ public final class Searcher {
                 }
             }
             // ProbCut
-            int probBeta = beta + 200;
+            int probBeta = beta + Tune.probcutMargin;
             if (depth >= 5 && Math.abs(beta) < TB_BOUND
                     && !(ttHit && ttDepth >= depth - 3 && ttScore != VALUE_NONE && ttScore < probBeta)) {
                 int[] moves = moveBuf[ply];
@@ -486,11 +492,11 @@ public final class Searcher {
                         continue;
                     }
                     if (!givesCheck) {
-                        if (lmrDepth <= 3 && hist < -1500 * depth) continue;
-                        if (!inCheck && lmrDepth <= 8 && staticEval + 100 + 100 * lmrDepth <= alpha) continue;
-                        if (lmrDepth <= 8 && !pos.seeGE(m, -25 * lmrDepth * lmrDepth)) continue;
+                        if (lmrDepth <= 3 && hist < -Tune.histPrune * depth) continue;
+                        if (!inCheck && lmrDepth <= 8 && staticEval + Tune.futBase + Tune.futMul * lmrDepth <= alpha) continue;
+                        if (lmrDepth <= 8 && !pos.seeGE(m, -Tune.seeQuiet * lmrDepth * lmrDepth)) continue;
                     }
-                } else if (depth <= 8 && scores[i] < 0 && !pos.seeGE(m, -100 * depth)) {
+                } else if (depth <= 8 && scores[i] < 0 && !pos.seeGE(m, -Tune.seeNoisy * depth)) {
                     continue;
                 }
             }
@@ -500,14 +506,14 @@ public final class Searcher {
             if (!root && m == ttMove && excluded == Move.NONE && depth >= 7 && ttDepth >= depth - 3
                     && (ttBound & BOUND_LOWER) != 0 && ttScore != VALUE_NONE && Math.abs(ttScore) < TB_BOUND
                     && ply < 2 * rootDepth) {
-                int singularBeta = ttScore - 2 * depth;
+                int singularBeta = ttScore - Tune.singularMul * depth / 10;
                 excludedStack[ply] = m;
                 int v = search(singularBeta - 1, singularBeta, (depth - 1) / 2, ply, cutNode);
                 excludedStack[ply] = Move.NONE;
                 if (mgr.stop) return 0;
                 if (v < singularBeta) {
                     ext = 1;
-                    if (!pvNode && v < singularBeta - 20 && ply < rootDepth) ext = 2;
+                    if (!pvNode && v < singularBeta - Tune.doubleExtMargin && ply < rootDepth) ext = 2;
                 } else if (singularBeta >= beta) {
                     return singularBeta; // multi-cut
                 } else if (ttScore >= beta) {
@@ -530,7 +536,7 @@ public final class Searcher {
                 if (!improving) rr++;
                 if (givesCheck) rr--;
                 if (m == killers[ply][0] || m == killers[ply][1] || m == counter) rr--;
-                if (quiet) rr -= hist / 6000;
+                if (quiet) rr -= hist / Tune.lmrHistDiv;
                 int d = Math.max(1, Math.min(newDepth, newDepth - rr));
                 score = -search(-alpha - 1, -alpha, d, ply + 1, true);
                 if (score > alpha && d < newDepth) {
@@ -643,7 +649,7 @@ public final class Searcher {
                 return bestScore;
             }
             if (bestScore > alpha) alpha = bestScore;
-            futilityBase = staticEval + 160;
+            futilityBase = staticEval + Tune.qsFutility;
         }
 
         if (ttMove != Move.NONE && (!pos.isPseudoLegal(ttMove) || (!inCheck && !Move.isNoisy(ttMove)))) ttMove = Move.NONE;

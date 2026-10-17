@@ -517,6 +517,8 @@ def start_engine():
         fail(f"[-] Could not start engine: {e}")
 
     print("[+] Engine started successfully")
+    if svc is not None:
+        svc.engine_started(engine.id.get("name"))
     return engine
 
 

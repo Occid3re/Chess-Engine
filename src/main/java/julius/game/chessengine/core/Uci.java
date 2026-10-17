@@ -83,6 +83,12 @@ public final class Uci {
                 send("option name SyzygyPath type string default <empty>");
                 send("option name Ponder type check default false");
                 send("option name UseNNUE type check default true");
+                if (Tune.enabled()) {
+                    for (Tune.Param p : Tune.params()) {
+                        send("option name " + p.name() + " type spin default " + p.defaultValue()
+                                + " min " + p.min() + " max " + p.max());
+                    }
+                }
                 send("uciok");
             }
             case "isready" -> send("readyok");
@@ -143,6 +149,14 @@ public final class Uci {
                 }
             }
             default -> {
+                // Tuning parameters (only numeric ones); anything else, e.g. "Ponder false", is ignored.
+                try {
+                    if (!value.isEmpty() && Tune.set(name, Integer.parseInt(value))) {
+                        send("info string " + name + " = " + value);
+                    }
+                } catch (NumberFormatException ignored) {
+                    // not a tuning parameter
+                }
             }
         }
     }
