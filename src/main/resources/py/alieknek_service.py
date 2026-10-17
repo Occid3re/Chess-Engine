@@ -444,11 +444,12 @@ def _record_history(ratings: dict, games: list) -> None:
     changes; an empty history is first backfilled from the cached games (rating before + change)."""
     now = int(time.time() * 1000)
     with _lock:
+        changed = False
         if not _history:
             for g in sorted(games, key=lambda g: g.get("endedAt") or 0):
                 if g.get("rated") and g.get("rating") is not None and g.get("ratingDiff") is not None:
                     _history.setdefault(g["perf"], []).append([g.get("endedAt") or now, g["rating"] + g["ratingDiff"]])
-        changed = False
+                    changed = True
         for perf, data in ratings.items():
             points = _history.setdefault(perf, [])
             if not points or points[-1][1] != data["rating"]:
