@@ -132,8 +132,8 @@
             }
 
             if (options.awaitReady) {
+                // send the isready right away; returning here would leave it queued until the next send()
                 this.queue.unshift({ command: 'isready', options: { expectReady: true } });
-                return;
             }
 
             this._processQueue();

@@ -1,6 +1,6 @@
 package julius.game.chessengine.uci.websocket;
 
-import julius.game.chessengine.uci.UciHandler;
+import julius.game.chessengine.core.Uci;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -11,6 +11,10 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
 
+/**
+ * The browser UI (static/index.html) talks UCI over {@code /ws/uci}: every WebSocket session gets its own
+ * core engine, whose output lines go back to that session.
+ */
 @Component
 public class UciWebSocketHandler extends TextWebSocketHandler {
 
@@ -19,30 +23,32 @@ public class UciWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
-        UciHandler handler = new UciHandler(message -> sendSafely(session, message), session::isOpen);
-        session.getAttributes().put(HANDLER_ATTRIBUTE, handler);
+        Uci engine = new Uci(message -> sendSafely(session, message));
+        session.getAttributes().put(HANDLER_ATTRIBUTE, engine);
     }
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
-        UciHandler handler = (UciHandler) session.getAttributes().get(HANDLER_ATTRIBUTE);
-        if (handler == null) {
-            log.warn("No UciHandler bound to session {}", session.getId());
+        Uci engine = (Uci) session.getAttributes().get(HANDLER_ATTRIBUTE);
+        if (engine == null) {
+            log.warn("No engine bound to session {}", session.getId());
             session.close(CloseStatus.SERVER_ERROR);
             return;
         }
-        boolean keepRunning = handler.handle(message.getPayload());
-        if (!keepRunning) {
-            handler.stop();
-            session.close(CloseStatus.NORMAL);
+        for (String line : message.getPayload().split("\\R")) {
+            if (!engine.handle(line.trim())) {
+                engine.close();
+                session.close(CloseStatus.NORMAL);
+                return;
+            }
         }
     }
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
-        UciHandler handler = (UciHandler) session.getAttributes().remove(HANDLER_ATTRIBUTE);
-        if (handler != null) {
-            handler.stop();
+        Uci engine = (Uci) session.getAttributes().remove(HANDLER_ATTRIBUTE);
+        if (engine != null) {
+            engine.close();
         }
     }
 

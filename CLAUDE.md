@@ -15,25 +15,31 @@ Treat the brain as your primary knowledge store. If you discover something usefu
 
 ## Project Overview
 
-Java chess engine targeting 2000+ Lichess blitz Elo. Current rating: ~1770.
+Java chess engine, plays on Lichess as the bot Alieknek: blitz ~2480 (October 2026, up from ~1770 with the
+legacy AI before the core engine).
 
 - **Branch**: v4.0.0 (v4.0.3 is kept identical)
 - **Repo**: github.com/Occid3re/Chess-Engine
 - **Lichess bot**: Alieknek (https://lichess.org/@/Alieknek)
 - **Java**: 25 (preview enabled)
 - **Build**: `./mvnw.cmd -DskipTests package`
-- **UCI JAR**: `target/chess-engine-4.0.5-uci.jar`
+- **UCI JAR**: `target/chess-engine-<version>-uci.jar` (main class `uci.UciMain` -> `core.Uci`)
+- **Tests**: `./mvnw.cmd test` (CoreEngineTest, TimeManagementTest, Syzygy bridge tests);
+  Python: `scripts/tests` (pytest; not installed locally, run it in the `lostopf-alieknek` image with
+  `/opt/venv/bin/pip install pytest`)
 
-## New core engine (DEFAULT since 2026-10-13)
+## Core engine (`julius.game.chessengine.core`)
 
-`UciMain` runs the new core in `julius.game.chessengine.core` unless `-Dchessengine.core=legacy` is set.
-It has no dependencies (plain `javac` builds it) and does ~0.8-1M nps per thread vs ~6k for the legacy AI.
+No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
 
 - Position/MoveGen/Attacks (magic bitboards, perft-verified), Searcher (negamax PVS, int centipawns, TT, NMP,
   LMR, RFP, ProbCut, singular ext., history/continuation history), SearchManager (Lazy SMP, time management)
+- Search constants live in `core/Tune.java` (name, default, min, max, SPSA step). With `-Dcore.tune=true` they
+  are UCI spin options; `scripts/tuning/spsa.py` reads them from that file, so add new tunables there.
 - Eval: tapered hand-crafted eval, weights in `src/main/resources/core/eval-weights.txt`,
   fitted by `core.tuning.EvalTuner` to `E:\Chess-Data\tuning\elite2M.txt` (fen;whiteCp;wdl)
-- NNUE (DEFAULT when `core/nnue.bin` is bundled; `-Dcore.useNnue=false` or UCI `UseNNUE false` = hand-crafted):
+- NNUE (DEFAULT when `core/nnue.bin` is bundled; `-Dcore.useNnue=false` or UCI `UseNNUE false` = hand-crafted,
+  `-Dcore.nnueFile=<path>` loads another net):
   (768->256)x2->1 SCReLU with 8 material output buckets (file version 2), QA=255/QB=256, trained by
   `core.nnue.Trainer -Dtrain.buckets=8` (CPU, Java, ~70 s/epoch on 66M samples), lambda 0.3, K 230, 15 epochs.
   Data in `E:\Chess-Data\`: tuning/elite2M.txt, selfplay/sp_all.txt (13.7M, HCE engine), v5b_nnue.txt (17.6M, NNUE
@@ -44,78 +50,65 @@ It has no dependencies (plain `javac` builds it) and does ~0.8-1M nps per thread
   Why: Stockfish review of 30 server games found endgame moves lost 26 cp/move vs 14 in middlegames, and the
   training data had half the deep endgames of real games. Keep int[] arrays + per-feature/per-bucket weight rows:
   other layouts do not vectorise.
+- Self-play data: `core.tools.DataGen` (`-Dgen.starts`, `-Dgen.syzygy`, `-Dgen.winScore/winPlies/drawPly/drawPlies`)
 - Results (10+0.1, 1 thread): 40-0 vs 4.0.0, 40-0 vs 3.6.9, 52-6-2 vs Stockfish UCI_Elo 2600; 4 threads vs 1: +168 Elo
-- Match harness: `E:\ChessEngines\harness\` (sprt.sh, match.sh, vs_sf.sh, smp.sh, snap.sh, elite_openings.epd)
-- Tests: `./mvnw.cmd -Dtest=CoreEngineTest test`
+- Match harness: `E:\ChessEngines\harness\` (sprt.sh, match.sh, vs_sf.sh, smp.sh, snap.sh, elite_openings.epd);
+  snapshots in `E:\ChessEngines\v5-dev\<name>\run.bat`
+- Browser UI: `ChessEngineApplication` (Spring Boot) serves `static/` and `/ws/uci`, one core `Uci` per WebSocket
 - Server deployment (play.juliussze.at, Occid3re/play repo): `alieknek` service with play window, switch and watch page
   (`src/main/resources/py/alieknek_service.py`, `watch/`)
 
-## Legacy 4.x architecture (`-Dchessengine.core=legacy`)
+## Training and tuning (`scripts/tuning`)
 
-- Bitboard move generation
-- Alpha-beta with PVS, LMR, null-move, aspiration windows, futility, razoring, ProbCut
-- Lazy SMP (dedicated threads in blocking search, NOT shared thread pool)
-- Syzygy 6-piece tablebases via JNI
-- Opening book (PGN-based)
-- Evaluation: 5 hand-crafted modules (Material, PawnStructure, Activity, KingSafety, Threat)
-- Tuning: `src/main/resources/tuning/seed-tunings.yaml` (Alien-Termination config)
-- NNUE: HalfKP architecture in progress (eval.mode=nnue, not production yet)
+- `cutechess.py`: cutechess-cli wrapper (`run_match`, SPRT, result parsing) shared by the tools below
+- `generations.py`: NNUE generations: DataGen self-play with the current best net -> train a child on a window of
+  recent data + elite + endgames twice -> SPRT [0,5] child vs parent -> promote to `E:\Chess-Data\nets\best.bin`.
+  Resumable (`E:\Chess-Data\generations\state.json`).
+- `spsa.py`: Fishtest-style SPSA over `Tune.java` (all parameters at once, game pairs per iteration), resumable
+  (`E:\Chess-Data\tuning\spsa-state.json`); `--verify` SPRTs the result against the defaults.
+- `scripts/nn-training/generate_nnue_data.py`: Stockfish labels for PGN positions (npz), if SF-labelled data is wanted.
+- The former evolve*/genetic loops are gone: they picked the best of a few mutants after ~40 games each, i.e. noise.
 
 ## Key Decisions & Lessons (IMPORTANT — read before making changes)
 
-1. **PSTs are DISABLED** (`pstScale=0.0`). They regressed -89 Elo due to double-counting with ActivityModule. Do NOT re-enable without joint eval retuning.
-2. **Null-move at PV nodes is ENABLED** (`nullAtPv=true`). Disabling it costs -47 Elo. v3.6.9 had it enabled.
-3. **Root fanout ratio is 1.0**. Lowering it (e.g. 0.25) cripples root parallelism at low thread counts. Cost: -50 Elo.
-4. **Lazy SMP in blocking search uses DEDICATED threads**, not the shared pool. The shared pool checks `keepCalculating` which is false in blocking mode → workers abort immediately. See commit 9004eb06 for the original bug.
-5. **Static BestMoveSearchTest can hide Elo regressions**. Always gate improvements on 40+ game self-play matches at 10+0.1.
-6. **v3.6.9 tuning on v4 code is -23 Elo**. The Alien-Termination tuning is optimized for the current codebase.
-7. **respondWithMoveOrTerminal must NOT check isTerminal()** — it can see stale state from previous games. Fixed in commit 9f0aaed5.
-8. **Lichess bot needs auto-reconnect** — SSE stream drops randomly. Retry loop in `__main__`.
-9. **NNUE lazy rebuild is faster than incremental in Java** — cache locality of single accumulator beats ply-indexed arrays. Don't add push/pop copy overhead.
-10. **blendscale=903.96 is correct**. Changing to 256 costs -35 Elo. The genetic tuner found this value.
-11. **Endgame scaling features are worth +12 Elo** — keep them enabled.
-12. **In-game Lichess calls bypass the global pacing** (v4.0.1). `BOT_QPS=0.5` paced *every* non-stream call,
-    including posting a move, so the bot never moved faster than one move per 2 s: 60+0 bullet was lost on
-    time around move 30, blitz endgames ran at the 2 s floor. Moves, abort and resign now skip the limiter
-    and the mutex and use a lean adapter (no status retries, no Retry-After sleep). Keep it that way.
-13. **Time budget per move** (`SearchManager.allocate`, v4.0.1): moves-to-go 40 at the start shrinking to 16,
-    optimum ≤ 20 % and maximum ≤ 40 % of the clock, under 10 s a twentieth plus most of the increment. The
-    old `left/32`, max 45 % spent the clock early: in 3+2 only 20 s were left after move 40.
-14. **Weekly play schedule** (`alieknek_service.py`, v4.0.2): `ALIEKNEK_HOURS` / `botctl hours` take weekday groups
-    (`Mo-Fr 01:00-05:00; Sa-So 00:00-08:00`, `always`, `never`; days not named do not play; a window may
-    cross midnight). The control API also takes `schedule` (seven lists of [start, end] minutes) and reports
-    `schedule`, `windowEndsAt`, `nextWindowAt` – the play app's week editor builds on that.
-    `windowEndsAt` follows a window across midnight into the next day's 00:00 start (v4.0.3) and is
-    null for `always` – before that the app showed "bis 00:00 Uhr" for a bot that never stops.
-
-## Eval Modes
-
-- `-Dchessengine.eval.mode=classic` (DEFAULT, strongest currently)
-- `-Dchessengine.eval.mode=neural` (dense 71-feature residual NN, opt-in, -158 Elo in self-play)
-- `-Dchessengine.eval.mode=nnue` (HalfKP NNUE, in development, needs more training data)
-
-## NNUE Development
-
-- **Architecture**: HalfKP 40960 → 128 → ClippedReLU → 32 → ClippedReLU → 1
-- **Java classes**: NNUEFeatures, NNUEAccumulator, NNUENetwork, NNUEModule (in evaluation/nn/)
-- **Training**: scripts/nn-training/train_nnue.py (PyTorch, EmbeddingBag sparse L1, hybrid WDL+eval loss)
-- **Data gen**: scripts/nn-training/generate_nnue_data.py (parallel SF labeling from PGN)
-- **Evolution**: scripts/nn-training/evolve_nnue.py (self-play + mutation + selection loop)
-- **Current NPS gap**: NNUE depth 5 vs classic depth 6 in 5s (1 depth behind)
-- **Training data**: Lichess Elite DB (2500+ rated) at E:/Chess-Data/lichess-elite/pgns/
-- **Next step**: Train on 2M elite positions, then run evolution loop
+1. **Static test suites can hide Elo regressions**. Always gate changes on self-play (SPRT or 40+ game matches at
+   10+0.1), never on a test position score alone.
+2. **Lichess bot needs auto-reconnect** — SSE stream drops randomly. Retry loop in `__main__`.
+3. **In-game Lichess calls bypass the global pacing** (v4.0.1). `BOT_QPS=0.5` paced *every* non-stream call,
+   including posting a move, so the bot never moved faster than one move per 2 s: 60+0 bullet was lost on
+   time around move 30, blitz endgames ran at the 2 s floor. Moves, abort and resign now skip the limiter
+   and the mutex and use a lean adapter (no status retries, no Retry-After sleep). Keep it that way.
+4. **Time budget per move** (`SearchManager.allocate`, v4.0.1): moves-to-go 40 at the start shrinking to 16,
+   optimum ≤ 20 % and maximum ≤ 40 % of the clock, under 10 s a twentieth plus most of the increment. The
+   old `left/32`, max 45 % spent the clock early: in 3+2 only 20 s were left after move 40.
+5. **Weekly play schedule** (`alieknek_service.py`, v4.0.2): `ALIEKNEK_HOURS` / `botctl hours` take weekday groups
+   (`Mo-Fr 01:00-05:00; Sa-So 00:00-08:00`, `always`, `never`; days not named do not play; a window may
+   cross midnight). The control API also takes `schedule` (seven lists of [start, end] minutes) and reports
+   `schedule`, `windowEndsAt`, `nextWindowAt` – the play app's week editor builds on that.
+   `windowEndsAt` follows a window across midnight into the next day's 00:00 start (v4.0.3) and is
+   null for `always` – before that the app showed "bis 00:00 Uhr" for a bot that never stops.
+6. **UCI must survive any `setoption`**: cutechess sends `setoption name Ponder value false`; parsing every unknown
+   option as a tuning integer killed the engine loop (a 0-84 "SPRT" of disconnects). Unknown or non-numeric
+   options are ignored; CoreEngineTest covers it.
+7. **Lichess challenge errors carry a cooldown** (`'seconds': N`): the bot leaves that opponent alone for N s
+   and ignores `challenge` events it sent itself (v4.0.4).
+8. **Legacy AI removed (2026-10-18)**: the old `ai/`, `engine/`, `evaluation/`, `search/`, `tuning/` packages, its
+   YAML tunings and HalfKP/PyTorch scripts are in git history (last at bf35e882). Old engine builds for matches
+   stay in `E:\ChessEngines\` (v3.6.9, v4.0.0-classic, ...).
 
 ## Testing
 
-- **BestMoveSearchTest**: `./mvnw.cmd -Dtest=BestMoveSearchTest test` (baseline: 80/97)
 - **Self-play**: CuteChess CLI at `"C:\Program Files (x86)\Cute Chess\cutechess-cli.exe"`
-- **Engine slots**: E:\ChessEngines\ (v4.0.0-classic, v3.6.9, v3.9.1, etc.)
+- **Engine slots**: E:\ChessEngines\ (v4.0.0-classic, v3.6.9, v3.9.1, v5-dev snapshots, etc.)
 - **Stockfish**: E:\ChessEngines\stockfish_17.1\stockfish-windows-x86-64-avx2.exe
+- **Bench**: `java -jar target/chess-engine-<version>-uci.jar bench` (node count changes with search or net)
 
 ## Bot Deployment
 
+The production bot runs on the server (see the play repo's CLAUDE.md). Locally:
+
 ```bash
-BOT_TC=blitz CHESSENGINE_THREADS=16 CHESSENGINE_LAZY_THREADS=8 \
+BOT_TC=blitz CHESSENGINE_THREADS=16 \
   /c/Python38/python.exe -u src/main/resources/py/lichess_bot.py
 ```
 

@@ -61,7 +61,6 @@ except ImportError:
 ENGINE_BAT = ""  # e.g. r"E:\ChessEngines\chess-engine-3.0.9.bat"
 JAR_DIR = os.environ.get("BOT_JAR_DIR", r"C:\Development\Chess-Engine\target")
 JAVA_EXE = os.environ.get("BOT_JAVA", "java")
-DEFAULT_TUNING_FILE = r"C:\Development\Chess-Engine\target\classes\tuning\seed-tunings.yaml"
 
 LICHESS_TOKEN = os.environ.get("LICHESS_TOKEN") or "YOUR_TOKEN_HERE"
 
@@ -83,18 +82,15 @@ ALLOW_CASUAL = False  # accept casual games?
 ALLOW_CORRESPONDENCE = False  # accept correspondence TC?
 ACCEPT_TC_TYPES = {"bullet", "blitz", "rapid", "classical"}  # which TCs to accept
 
-# Engine selection: "core" = new core engine (default), "legacy" = old AI engine
-ENGINE_CORE = os.environ.get("BOT_ENGINE_CORE", "core").strip().lower()
-# Send the real clocks so the engine's own time manager decides (default for the core engine);
-# otherwise the bot computes a fixed per-move time as before.
-USE_ENGINE_CLOCK = os.environ.get("BOT_ENGINE_CLOCK", "1" if ENGINE_CORE != "legacy" else "0") == "1"
+# Send the real clocks so the engine's own time manager decides (default);
+# otherwise the bot computes a fixed per-move time.
+USE_ENGINE_CLOCK = os.environ.get("BOT_ENGINE_CLOCK", "1") == "1"
 ENGINE_MOVE_OVERHEAD_MS = int(os.environ.get("BOT_MOVE_OVERHEAD_MS", "150"))
 
 # Game concurrency (helps prevent overload)
 MAX_CONCURRENT_GAMES = int(os.environ.get("MAX_CONCURRENT_GAMES", "1"))
 # Think on the opponent's time (only sensible when one game runs at a time)
-USE_PONDER = os.environ.get(
-    "BOT_PONDER", "1" if ENGINE_CORE != "legacy" and MAX_CONCURRENT_GAMES == 1 else "0") == "1"
+USE_PONDER = os.environ.get("BOT_PONDER", "1" if MAX_CONCURRENT_GAMES == 1 else "0") == "1"
 
 # Network hardening
 HTTP_TOTAL_RETRIES = int(os.environ.get("HTTP_TOTAL_RETRIES", "5"))
@@ -129,60 +125,9 @@ OUTBOUND_INSPECT_LIMIT = int(os.environ.get("OUTBOUND_INSPECT_LIMIT", "20"))
 
 
 # =================================================
-# ---- Auto thread planner (env vars still override) ----
-def _detect_cpus():
-    logical = os.cpu_count() or 2
-    physical = None
-    try:
-        import psutil  # optional but nice to have
-        physical = psutil.cpu_count(logical=False) or None
-    except Exception:
-        pass
-    # fallback if we can't see physical cores (approximate HT)
-    if physical is None:
-        physical = max(1, logical // 2)
-    return logical, physical
-
-
-def _auto_thread_plan(max_concurrent_games: int = 1):
-    logical, physical = _detect_cpus()
-
-    # Reserve a bit for OS/Python/GC (+ extra if you allow multiple concurrent games)
-    reserve = 2 + max(0, max_concurrent_games - 1)
-
-    # Aim around physical cores, not 1.25×
-    target_total = max(1, min(physical, (logical - reserve)))
-
-    # Root split scales poorly past ~3 on most PVS/YBWC setups
-    search_threads = min(3, max(1, target_total // 4))
-    lazy_threads = max(1, target_total - search_threads)
-
-    # Keep root fanout sane relative to root threads
-    root_par_limit = max(24, min(96, search_threads * 12))
-
-    return {
-        "logical": logical,
-        "physical": physical,
-        "search": search_threads,
-        "lazy": lazy_threads,
-        "root_limit": root_par_limit,
-    }
-
-
-# If user set explicit env vars, honor them; else auto-plan.
-if os.environ.get("CHESSENGINE_THREADS") or os.environ.get("CHESSENGINE_LAZY_THREADS"):
-    SEARCH_THREADS = os.environ.get("CHESSENGINE_THREADS") or "4"
-    LAZY_SMP_THREADS = os.environ.get("CHESSENGINE_LAZY_THREADS") or SEARCH_THREADS
-    ROOT_PAR_LIMIT = os.environ.get("CHESSENGINE_ROOT_PAR_LIMIT", "128")
-else:
-    _plan = _auto_thread_plan(MAX_CONCURRENT_GAMES)
-    SEARCH_THREADS = str(_plan["search"])
-    LAZY_SMP_THREADS = str(_plan["lazy"])
-    ROOT_PAR_LIMIT = str(_plan["root_limit"])
-    print(
-        f"[+] Auto thread plan: logical={_plan['logical']}, physical={_plan['physical']}, "
-        f"search={SEARCH_THREADS}, lazy={LAZY_SMP_THREADS}, rootParallelLimit={ROOT_PAR_LIMIT}"
-    )
+# ---- Engine: Lazy SMP threads and hash (MB); the server deployment sets both through the environment ----
+ENGINE_THREADS = os.environ.get("CHESSENGINE_CORE_THREADS") or os.environ.get("CHESSENGINE_THREADS") or "10"
+ENGINE_HASH_MB = os.environ.get("CHESSENGINE_TT_MB", "1024")
 
 
 def fail(msg: str):
@@ -209,11 +154,8 @@ def find_latest_uci_jar(dir_path: str) -> Optional[Path]:
 
 def build_engine_cmd() -> List[str]:
     """
-    Production-focused engine launcher:
-    - Low-pause GC (ZGC by default), fixed Xms=Xmx, pre-touched heap
-    - Sane thread fanout that scales on 24 physical cores without lock thrash
-    - Opening book disabled at runtime to avoid random file I/O stalls
-    - All values remain overridable via environment variables
+    Engine launcher: the latest chess-engine-*-uci.jar with a low-pause GC (ZGC by default), fixed
+    Xms=Xmx and a pre-touched heap; threads, hash and Syzygy tables come from the environment.
     """
     if ENGINE_BAT and Path(ENGINE_BAT).exists():
         return ["cmd", "/c", ENGINE_BAT]
@@ -248,38 +190,11 @@ def build_engine_cmd() -> List[str]:
         "-XX:FlightRecorderOptions=stackdepth=256",
     ]
 
-    # -------- Engine defaults (good for blitz/rapid on 24P; override with env)
-    TT_MB      = os.environ.get("CHESSENGINE_TT_MB", "1024")
-    SEARCH_T   = os.environ.get("CHESSENGINE_THREADS", "10")
-    LAZY_T     = os.environ.get("CHESSENGINE_LAZY_THREADS", "4")
-    ROOT_LIMIT = os.environ.get("CHESSENGINE_ROOT_PAR_LIMIT", "120")
-
-    # Avoid mid-game disk hits unless you preload the book fully at startup
-    BOOK_ENABLED = os.environ.get("CHESSENGINE_BOOK_ENABLED", "false")
-
-    # Trim chatter/allocations a bit
-    INFO_MIN_MS = os.environ.get("CHESSENGINE_UCI_INFO_MIN_MS", "200")
-    PV_MAX_LEN  = os.environ.get("CHESSENGINE_UCI_MAX_PV", "10")
-
-    TUNING_FILE = os.environ.get("CHESSENGINE_TUNING_FILE", DEFAULT_TUNING_FILE)
-
-    # The core engine (default) uses a single Lazy SMP thread count; the legacy engine uses the split above.
-    CORE_T = os.environ.get("CHESSENGINE_CORE_THREADS", SEARCH_T)
-
     syzygy_native, syzygy_paths = _resolve_syzygy_config()
 
     engine_sysprops = [
-        f"-Dchessengine.core={ENGINE_CORE}",
-        f"-Dchessengine.threads={CORE_T}",
-        f"-Dchessengine.searchThreads={SEARCH_T}",
-        f"-Dchessengine.lazySmpThreads={LAZY_T}",
-        f"-Dchessengine.rootParallelLimit={ROOT_LIMIT}",
-        f"-Dchessengine.tt.mb={TT_MB}",
-        f"-Dchessengine.openingbook.enabled={BOOK_ENABLED}",
-        f"-Dchessengine.uci.info.minIntervalMs={INFO_MIN_MS}",
-        f"-Dchessengine.uci.info.maxPvLen={PV_MAX_LEN}",
-        f"-Dchessengine.tuning.file={TUNING_FILE}",
-        "-Dlogging.level.root=INFO",
+        f"-Dchessengine.threads={ENGINE_THREADS}",
+        f"-Dchessengine.tt.mb={ENGINE_HASH_MB}",
     ]
 
     if syzygy_native:
@@ -1426,11 +1341,7 @@ if __name__ == "__main__":
     cpu_display = cpu_count if cpu_count is not None else "unknown"
     print(f"[+] Detected logical CPU cores: {cpu_display}")
     print(f"[+] Python active threads at startup: {threading.active_count()}")
-    configured_threads = str(SEARCH_THREADS).strip()
-    print(
-        "[+] Configured engine search threads (CHESSENGINE_THREADS/NUMBER_OF_PROCESSORS):"
-        f" {configured_threads}"
-    )
+    print(f"[+] Engine threads (CHESSENGINE_THREADS): {ENGINE_THREADS}, hash: {ENGINE_HASH_MB} MB")
     if svc is not None:
         svc.start_web()
         if LICHESS_TOKEN in ("", "YOUR_TOKEN_HERE"):

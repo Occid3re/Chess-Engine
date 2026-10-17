@@ -33,12 +33,17 @@ public final class Uci {
             "8/5pk1/6p1/1p1P4/1Pr2P2/6P1/5K2/3R4 w - - 0 45",
     };
 
-    private final PrintStream out;
+    private final java.util.function.Consumer<String> out;
     private final SearchManager manager;
     private final Position position = new Position();
     private String syzygyPath = "";
 
     public Uci(PrintStream out) {
+        this(out::println);
+    }
+
+    /** UCI front end writing its output lines to {@code out} (stdout, or e.g. a WebSocket session). */
+    public Uci(java.util.function.Consumer<String> out) {
         this.out = out;
         int hash = Integer.getInteger("chessengine.tt.mb", Integer.getInteger("core.hash", 64));
         int threads = Integer.getInteger("chessengine.threads", Integer.getInteger("core.threads", 1));
@@ -67,7 +72,13 @@ public final class Uci {
     }
 
     private synchronized void send(String s) {
-        out.println(s);
+        out.accept(s);
+    }
+
+    /** Stops a running search and waits for it; used when the client goes away. */
+    public void close() {
+        manager.stopSearch();
+        manager.waitForFinish();
     }
 
     public boolean handle(String line) {
