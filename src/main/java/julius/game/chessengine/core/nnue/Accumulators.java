@@ -63,6 +63,7 @@ public final class Accumulators {
 
     /** Evaluation in centipawns from the side to move's perspective. */
     public int evaluate(Position p, int ply) {
-        return p.side == WHITE ? net.evaluate(white[ply], black[ply]) : net.evaluate(black[ply], white[ply]);
+        int bucket = Network.bucketFor(Long.bitCount(p.all), net.buckets);
+        return p.side == WHITE ? net.evaluate(white[ply], black[ply], bucket) : net.evaluate(black[ply], white[ply], bucket);
     }
 }

@@ -6,6 +6,7 @@ import julius.game.chessengine.core.Position;
 import julius.game.chessengine.core.SearchLimits;
 import julius.game.chessengine.core.SearchManager;
 import julius.game.chessengine.core.Searcher;
+import julius.game.chessengine.core.Tablebases;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -23,11 +24,31 @@ import java.util.concurrent.atomic.AtomicLong;
  * {@code fen;whiteScore;wdl} lines (wdl: 2 = white won, 1 = draw, 0 = black won) for quiet positions.
  *
  * <p>Usage: {@code DataGen <out> <threads> <positions> [nodesPerMove] [openings.epd]}</p>
+ *
+ * <p>Optional system properties (endgame coverage):</p>
+ * <ul>
+ *   <li>{@code gen.starts=file} – positions ({@code fen} or {@code fen;...} lines) to start games from,
+ *       e.g. late middlegames and endgames; {@code gen.startFraction} (default 0.4) of the games use them.</li>
+ *   <li>{@code gen.syzygy=paths} – once a game reaches the tables, its result is the tablebase verdict
+ *       (and the game continues {@code gen.tbExtraPlies} plies, default 40, to record more endgame positions).
+ *       Needs {@code chessengine.syzygy.nativeLibrary}.</li>
+ *   <li>{@code gen.winScore}/{@code gen.winPlies} (default 1500/6) and {@code gen.drawPly}/{@code gen.drawPlies}
+ *       (default 80/12) – adjudication; higher values play decided games and long draws out further.</li>
+ * </ul>
  */
 public final class DataGen {
 
     private static final AtomicLong written = new AtomicLong();
     private static final AtomicLong games = new AtomicLong();
+
+    private static final double START_FRACTION = Double.parseDouble(System.getProperty("gen.startFraction", "0.4"));
+    private static final int WIN_SCORE = Integer.getInteger("gen.winScore", 1500);
+    private static final int WIN_PLIES = Integer.getInteger("gen.winPlies", 6);
+    private static final int DRAW_PLY = Integer.getInteger("gen.drawPly", 80);
+    private static final int DRAW_PLIES = Integer.getInteger("gen.drawPlies", 12);
+    private static final int TB_EXTRA_PLIES = Integer.getInteger("gen.tbExtraPlies", 40);
+    private static List<String> starts = List.of();
+    private static Tablebases tablebases;
 
     public static void main(String[] args) throws Exception {
         Path out = Path.of(args[0]);
@@ -35,6 +56,15 @@ public final class DataGen {
         long target = Long.parseLong(args[2]);
         long nodes = args.length > 3 ? Long.parseLong(args[3]) : 6000;
         List<String> openings = args.length > 4 ? Files.readAllLines(Path.of(args[4])) : List.of();
+        String startFile = System.getProperty("gen.starts");
+        if (startFile != null) {
+            starts = Files.readAllLines(Path.of(startFile));
+            System.out.println("start positions: " + starts.size() + " (fraction " + START_FRACTION + ")");
+        }
+        String tbPaths = System.getProperty("gen.syzygy");
+        if (tbPaths != null) {
+            tablebases = Tablebases.load(tbPaths, System.out::println);
+        }
         long seed = System.nanoTime();
         BufferedWriter writer = Files.newBufferedWriter(out, StandardCharsets.UTF_8,
                 StandardOpenOption.CREATE, StandardOpenOption.APPEND);
@@ -78,9 +108,23 @@ public final class DataGen {
         List<Integer> scores = new ArrayList<>();
         StringBuilder sb = new StringBuilder();
         while (written.get() < target) {
-            boolean fromBook = !openings.isEmpty() && rng.nextInt(4) != 0;
-            Position p = fromBook ? new Position(openings.get(rng.nextInt(openings.size())) + " 0 1") : new Position();
-            int randomPlies = fromBook ? rng.nextInt(3) : 8 + rng.nextInt(2);
+            Position p;
+            int randomPlies;
+            if (!starts.isEmpty() && rng.nextDouble() < START_FRACTION) {
+                String line = starts.get(rng.nextInt(starts.size()));
+                int semi = line.indexOf(';');
+                try {
+                    p = new Position(semi > 0 ? line.substring(0, semi) : line);
+                } catch (RuntimeException e) {
+                    continue;
+                }
+                if (!p.isValid()) continue;
+                randomPlies = rng.nextInt(3);
+            } else {
+                boolean fromBook = !openings.isEmpty() && rng.nextInt(4) != 0;
+                p = fromBook ? new Position(openings.get(rng.nextInt(openings.size())) + " 0 1") : new Position();
+                randomPlies = fromBook ? rng.nextInt(3) : 8 + rng.nextInt(2);
+            }
             boolean ok = true;
             for (int i = 0; i < randomPlies; i++) {
                 int n = legalMoves(p, moves);
@@ -95,8 +139,18 @@ public final class DataGen {
             fens.clear();
             scores.clear();
             int result = -1; // white-perspective wdl
+            int tbResult = -1, tbEntryPly = 0;
             int winPlies = 0, drawPlies = 0;
             for (int ply = 0; ply < 400; ply++) {
+                if (tablebases != null && tbResult < 0 && p.castling == 0 && Long.bitCount(p.all) <= tablebases.largest()) {
+                    int[] probe = tablebases.probeRoot(p);
+                    if (probe != null) {
+                        int stm = probe[1];
+                        tbResult = stm == 0 ? 1 : ((stm > 0) == (p.side == Position.WHITE) ? 2 : 0);
+                        tbEntryPly = ply;
+                    }
+                }
+                if (tbResult >= 0 && ply - tbEntryPly >= TB_EXTRA_PLIES) break;
                 int n = legalMoves(p, moves);
                 if (n == 0) {
                     result = p.inCheck() ? (p.side == Position.WHITE ? 0 : 2) : 1;
@@ -113,16 +167,16 @@ public final class DataGen {
                 int score = r[1];
                 if (best == Move.NONE) best = moves[0];
                 int whiteScore = p.side == Position.WHITE ? score : -score;
-                if (Math.abs(score) >= 1500) {
-                    if (++winPlies >= 6) {
+                if (tbResult < 0 && Math.abs(score) >= WIN_SCORE) {
+                    if (++winPlies >= WIN_PLIES) {
                         result = whiteScore > 0 ? 2 : 0;
                         break;
                     }
                 } else {
                     winPlies = 0;
                 }
-                if (ply >= 80 && Math.abs(score) <= 8) {
-                    if (++drawPlies >= 12) {
+                if (tbResult < 0 && ply >= DRAW_PLY && Math.abs(score) <= 8) {
+                    if (++drawPlies >= DRAW_PLIES) {
                         result = 1;
                         break;
                     }
@@ -135,6 +189,7 @@ public final class DataGen {
                 }
                 p.makeMove(best);
             }
+            if (tbResult >= 0) result = tbResult; // the theoretical value beats how the game happened to end
             if (result < 0) result = 1;
             games.incrementAndGet();
             sb.setLength(0);

@@ -19,6 +19,7 @@ import java.util.concurrent.Future;
  * (768 -> H) x 2 -> 1 SCReLU network with Adam on a sigmoid-MSE loss and writes a quantised network.
  *
  * <p>Usage: {@code Trainer <out.bin> <hidden> <epochs> <lambda> <K> <file1> [file2 ...]}.
+ * {@code -Dtrain.buckets=8} trains material-bucketed output layers (file version 2).
  * A file argument may carry a sample-weight-free limit as {@code path@maxLines}.</p>
  */
 public final class Trainer {
@@ -27,6 +28,7 @@ public final class Trainer {
     static final float CLIP = 1.98f;
 
     final int hidden;
+    final int buckets;
     final float lambda;
     final float k;
 
@@ -39,18 +41,20 @@ public final class Trainer {
     byte[] stm;
 
     // parameters
-    final float[] w1, b1, w2;
-    float b2;
-    final float[] mW1, vW1, mB1, vB1, mW2, vW2;
-    float mB2, vB2;
+    final float[] w1, b1, w2, b2;
+    final float[] mW1, vW1, mB1, vB1, mW2, vW2, mB2, vB2;
 
-    Trainer(int hidden, float lambda, float k) {
+    Trainer(int hidden, int buckets, float lambda, float k) {
         this.hidden = hidden;
+        this.buckets = buckets;
         this.lambda = lambda;
         this.k = k;
         w1 = new float[768 * hidden];
         b1 = new float[hidden];
-        w2 = new float[2 * hidden];
+        w2 = new float[2 * hidden * buckets];
+        b2 = new float[buckets];
+        mB2 = new float[buckets];
+        vB2 = new float[buckets];
         mW1 = new float[w1.length];
         vW1 = new float[w1.length];
         mB1 = new float[hidden];
@@ -70,7 +74,7 @@ public final class Trainer {
         int epochs = Integer.parseInt(args[2]);
         float lambda = Float.parseFloat(args[3]);
         float k = Float.parseFloat(args[4]);
-        Trainer t = new Trainer(hidden, lambda, k);
+        Trainer t = new Trainer(hidden, Integer.getInteger("train.buckets", 1), lambda, k);
         List<String> files = new ArrayList<>();
         for (int i = 5; i < args.length; i++) files.add(args[i]);
         t.load(files);
@@ -113,7 +117,9 @@ public final class Trainer {
                         wdl = java.util.Arrays.copyOf(wdl, nc);
                         stm = java.util.Arrays.copyOf(stm, nc);
                     }
-                    if (totalPieces + 32 >= pcs.length) pcs = java.util.Arrays.copyOf(pcs, pcs.length * 2);
+                    if (totalPieces + 32 >= pcs.length) {
+                        pcs = java.util.Arrays.copyOf(pcs, (int) Math.min(Integer.MAX_VALUE - 16L, pcs.length * 2L));
+                    }
                     offset[total] = (int) totalPieces;
                     int sq = 56;
                     int i = 0;
@@ -158,7 +164,7 @@ public final class Trainer {
         final float[] gW1 = new float[w1.length];
         final float[] gB1 = new float[hidden];
         final float[] gW2 = new float[w2.length];
-        float gB2;
+        final float[] gB2 = new float[buckets];
         final boolean[] touched = new boolean[768];
         final float[] accW = new float[hidden], accB = new float[hidden];
         final float[] dW = new float[hidden], dB = new float[hidden];
@@ -174,7 +180,7 @@ public final class Trainer {
             }
             java.util.Arrays.fill(gB1, 0f);
             java.util.Arrays.fill(gW2, 0f);
-            gB2 = 0f;
+            java.util.Arrays.fill(gB2, 0f);
             loss = 0;
         }
 
@@ -202,11 +208,13 @@ public final class Trainer {
             nOut[0] = n;
             float[] us = stm[s] == 0 ? accW : accB;
             float[] them = stm[s] == 0 ? accB : accW;
-            float out = b2;
+            int bucket = Network.bucketFor(n, buckets);
+            int o = bucket * 2 * h;
+            float out = b2[bucket];
             for (int j = 0; j < h; j++) {
                 float u = Math.min(Math.max(us[j], 0f), 1f);
                 float t = Math.min(Math.max(them[j], 0f), 1f);
-                out += u * u * w2[j] + t * t * w2[h + j];
+                out += u * u * w2[o + j] + t * t * w2[o + h + j];
             }
             return out;
         }
@@ -221,7 +229,9 @@ public final class Trainer {
             float err = pred - target;
             loss += err * err;
             float g = 2f * err * pred * (1 - pred) * SCALE / k;
-            gB2 += g;
+            int bucket = Network.bucketFor(n, buckets);
+            int o = bucket * 2 * h;
+            gB2[bucket] += g;
             boolean whiteStm = stm[s] == 0;
             float[] us = whiteStm ? accW : accB;
             float[] them = whiteStm ? accB : accW;
@@ -230,10 +240,10 @@ public final class Trainer {
             for (int j = 0; j < h; j++) {
                 float u = us[j], t = them[j];
                 float cu = Math.min(Math.max(u, 0f), 1f), ct = Math.min(Math.max(t, 0f), 1f);
-                gW2[j] += g * cu * cu;
-                gW2[h + j] += g * ct * ct;
-                dUs[j] = (u > 0f && u < 1f) ? g * w2[j] * 2f * u : 0f;
-                dThem[j] = (t > 0f && t < 1f) ? g * w2[h + j] * 2f * t : 0f;
+                gW2[o + j] += g * cu * cu;
+                gW2[o + h + j] += g * ct * ct;
+                dUs[j] = (u > 0f && u < 1f) ? g * w2[o + j] * 2f * u : 0f;
+                dThem[j] = (t > 0f && t < 1f) ? g * w2[o + h + j] * 2f * t : 0f;
             }
             for (int j = 0; j < h; j++) gB1[j] += dW[j] + dB[j];
             for (int i = 0; i < n; i++) {
@@ -342,11 +352,7 @@ public final class Trainer {
         }
         for (Future<?> f : fs) f.get();
         double loss = 0;
-        float gb2 = 0;
-        for (Worker w : workers) {
-            loss += w.loss;
-            gb2 += w.gB2;
-        }
+        for (Worker w : workers) loss += w.loss;
         for (int j = 0; j < hidden; j++) {
             float g = 0f;
             for (Worker w : workers) g += w.gB1[j];
@@ -355,7 +361,7 @@ public final class Trainer {
             vB1[j] = b2c * vB1[j] + (1 - b2c) * g * g;
             b1[j] = Math.max(-CLIP, Math.min(CLIP, b1[j] - lr * (mB1[j] / bc1) / ((float) Math.sqrt(vB1[j] / bc2) + eps)));
         }
-        for (int j = 0; j < 2 * hidden; j++) {
+        for (int j = 0; j < w2.length; j++) {
             float g = 0f;
             for (Worker w : workers) g += w.gW2[j];
             g *= scale;
@@ -363,10 +369,14 @@ public final class Trainer {
             vW2[j] = b2c * vW2[j] + (1 - b2c) * g * g;
             w2[j] = Math.max(-CLIP, Math.min(CLIP, w2[j] - lr * (mW2[j] / bc1) / ((float) Math.sqrt(vW2[j] / bc2) + eps)));
         }
-        float g = gb2 * scale;
-        mB2 = b1c * mB2 + (1 - b1c) * g;
-        vB2 = b2c * vB2 + (1 - b2c) * g * g;
-        b2 -= lr * (mB2 / bc1) / ((float) Math.sqrt(vB2 / bc2) + eps);
+        for (int b = 0; b < buckets; b++) {
+            float g = 0f;
+            for (Worker w : workers) g += w.gB2[b];
+            g *= scale;
+            mB2[b] = b1c * mB2[b] + (1 - b1c) * g;
+            vB2[b] = b2c * vB2[b] + (1 - b2c) * g * g;
+            b2[b] -= lr * (mB2[b] / bc1) / ((float) Math.sqrt(vB2[b] / bc2) + eps);
+        }
         return loss / batch;
     }
 
@@ -429,15 +439,16 @@ public final class Trainer {
         try (OutputStream os = Files.newOutputStream(out);
              DataOutputStream d = new DataOutputStream(new java.io.BufferedOutputStream(os))) {
             d.writeBytes("ALNN");
-            writeInt(d, 1);
+            writeInt(d, buckets > 1 ? 2 : 1);
             writeInt(d, hidden);
             writeInt(d, QA);
             writeInt(d, QB);
             writeInt(d, SCALE);
+            if (buckets > 1) writeInt(d, buckets);
             for (float v : w1) writeShort(d, Math.round(v * QA));
             for (float v : b1) writeShort(d, Math.round(v * QA));
             for (float v : w2) writeShort(d, Math.round(v * QB));
-            writeInt(d, Math.round(b2 * QA * QB));
+            for (float v : b2) writeInt(d, Math.round(v * QA * QB));
         }
     }
 

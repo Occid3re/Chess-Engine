@@ -1017,10 +1017,10 @@ def find_similar_bots(client: berserk.Client,
         ids_sample = ids_needing_lookup[:max(1, min(OUTBOUND_INSPECT_LIMIT, 20))]
         try:
             # ONE request for up to ~20 users
-            bulk = list(client.users.get_by_ids(ids_sample))
+            bulk = list(client.users.get_by_id(*ids_sample))
             print(f"[outbound] bulk lookup for {len(ids_sample)} users returned {len(bulk)}")
         except Exception as e:
-            print(f"[outbound] bulk get_by_ids failed: {e}")
+            print(f"[outbound] bulk get_by_id failed: {e}")
             bulk = []
         time.sleep(API_REQUEST_DELAY)
 
@@ -1045,7 +1045,9 @@ def challenge_user(client: berserk.Client,
                    rated: bool,
                    clock_limit: int,
                    clock_increment: int,
-                   color: str = "random") -> bool:
+                   color: str = "random") -> "tuple[bool, int]":
+    """Returns (sent, seconds to leave this opponent alone). Lichess tells how long, e.g. when the
+    opponent has reached its daily bot-game limit; otherwise the normal cooldown applies."""
     try:
         client.challenges.create(
             opponent,
@@ -1056,7 +1058,7 @@ def challenge_user(client: berserk.Client,
             color=color,
         )
         print(f"[+] Challenged {opponent} (rated={rated}, {clock_limit}+{clock_increment})")
-        return True
+        return True, OUTBOUND_COOLDOWN_SEC
     except (berserk.exceptions.ResponseError, berserk.exceptions.ApiError) as e:
         status = getattr(getattr(e, "response", None), "status_code", None)
         if status == 429:
@@ -1064,7 +1066,8 @@ def challenge_user(client: berserk.Client,
             print("[warn] Challenge creation hit 429; backing off 60s.")
             _GLOBAL_RL.bump(60)
         print(f"[-] Challenge to {opponent} rejected: {e}")
-        return False
+        wait = re.search(r"'seconds':\s*(\d+)", str(e))
+        return False, max(OUTBOUND_COOLDOWN_SEC, int(wait.group(1)) if wait else 0)
 
 
 class ActiveCounter:
@@ -1185,7 +1188,7 @@ def outbound_challenge_loop(stop_event: threading.Event,
                     break
 
                 print(f"[outbound] challenging {opp} ({OUTBOUND_TC} {OUTBOUND_CLOCK_LIMIT}+{OUTBOUND_INCREMENT})")
-                ok = challenge_user(
+                ok, leave_alone = challenge_user(
                     client,
                     opponent=opp,
                     rated=OUTBOUND_RATED,
@@ -1193,8 +1196,9 @@ def outbound_challenge_loop(stop_event: threading.Event,
                     clock_increment=OUTBOUND_INCREMENT,
                     color="random",
                 )
-                if ok:
-                    recently_challenged[opp] = time.time()
+                # Successful or not: do not ask the same bot again for a while. The map keeps entries for
+                # OUTBOUND_COOLDOWN_SEC after their timestamp, so a later timestamp means a longer pause.
+                recently_challenged[opp] = time.time() + leave_alone - OUTBOUND_COOLDOWN_SEC
 
                 time.sleep(max(0.5, API_REQUEST_DELAY))
 
@@ -1288,6 +1292,8 @@ def run_bot():
                 tc_bucket = classify_tc_from_challenge(chal)  # bullet|blitz|rapid|classical|correspondence
                 rated = chal.get("rated", False)
                 challenger = chal.get("challenger", {}).get("name") or chal.get("challenger", {}).get("id", "?")
+                if (chal.get("challenger") or {}).get("id") == me_id:
+                    continue  # our own outgoing challenge
                 print(f"[event] Challenge from {challenger} | variant={variant} | tc={tc_bucket} | rated={rated}")
 
                 accept = True
