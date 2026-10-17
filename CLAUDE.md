@@ -22,7 +22,7 @@ Java chess engine targeting 2000+ Lichess blitz Elo. Current rating: ~1770.
 - **Lichess bot**: Alieknek (https://lichess.org/@/Alieknek)
 - **Java**: 25 (preview enabled)
 - **Build**: `./mvnw.cmd -DskipTests package`
-- **UCI JAR**: `target/chess-engine-4.0.4-uci.jar`
+- **UCI JAR**: `target/chess-engine-4.0.5-uci.jar`
 
 ## New core engine (DEFAULT since 2026-10-13)
 
@@ -34,11 +34,16 @@ It has no dependencies (plain `javac` builds it) and does ~0.8-1M nps per thread
 - Eval: tapered hand-crafted eval, weights in `src/main/resources/core/eval-weights.txt`,
   fitted by `core.tuning.EvalTuner` to `E:\Chess-Data\tuning\elite2M.txt` (fen;whiteCp;wdl)
 - NNUE (DEFAULT when `core/nnue.bin` is bundled; `-Dcore.useNnue=false` or UCI `UseNNUE false` = hand-crafted):
-  (768->256)x2->1 SCReLU, QA=255/QB=256, trained by `core.nnue.Trainer` (CPU, Java, ~20 s/epoch on 16M positions)
-  on `E:\Chess-Data\tuning\elite2M.txt` + self-play from `core.tools.DataGen` (`E:\Chess-Data\selfplay\sp_all.txt`,
-  13.7M positions, 6000 nodes/move), lambda 0.3, K 230, 15 epochs. Measured at 10+0.1: net on 8.8M positions
-  +38±22 Elo vs hand-crafted (641 games); net on 15.9M (bundled) +39±32 vs that one. More data = next gain.
-  Keep int[] arrays + per-feature weight rows: other layouts do not vectorise.
+  (768->256)x2->1 SCReLU with 8 material output buckets (file version 2), QA=255/QB=256, trained by
+  `core.nnue.Trainer -Dtrain.buckets=8` (CPU, Java, ~70 s/epoch on 66M samples), lambda 0.3, K 230, 15 epochs.
+  Data in `E:\Chess-Data\`: tuning/elite2M.txt, selfplay/sp_all.txt (13.7M, HCE engine), v5b_nnue.txt (17.6M, NNUE
+  engine), v5c_endgame.txt (19.3M: half the games from 8-20-piece starts, 6-man Syzygy results, late adjudication)
+  and eg_extra.txt (13.5M positions with <=10 pieces, i.e. endgames counted twice). That mix matches the real
+  server games (39% endgame positions). History at 10+0.1: first net +38±22 vs hand-crafted; 15.9M-position net
+  +39±32 vs that (4.0.0-4.0.4); bucketed endgame-weighted net (4.0.5) +86±33 vs the 4.0.4 net (SPRT H1, 235 games).
+  Why: Stockfish review of 30 server games found endgame moves lost 26 cp/move vs 14 in middlegames, and the
+  training data had half the deep endgames of real games. Keep int[] arrays + per-feature/per-bucket weight rows:
+  other layouts do not vectorise.
 - Results (10+0.1, 1 thread): 40-0 vs 4.0.0, 40-0 vs 3.6.9, 52-6-2 vs Stockfish UCI_Elo 2600; 4 threads vs 1: +168 Elo
 - Match harness: `E:\ChessEngines\harness\` (sprt.sh, match.sh, vs_sf.sh, smp.sh, snap.sh, elite_openings.epd)
 - Tests: `./mvnw.cmd -Dtest=CoreEngineTest test`
