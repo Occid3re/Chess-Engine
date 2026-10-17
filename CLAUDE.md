@@ -17,12 +17,12 @@ Treat the brain as your primary knowledge store. If you discover something usefu
 
 Java chess engine targeting 2000+ Lichess blitz Elo. Current rating: ~1770.
 
-- **Branch**: v4.0.3
+- **Branch**: v4.0.0 (v4.0.3 is kept identical)
 - **Repo**: github.com/Occid3re/Chess-Engine
 - **Lichess bot**: Alieknek (https://lichess.org/@/Alieknek)
 - **Java**: 25 (preview enabled)
 - **Build**: `./mvnw.cmd -DskipTests package`
-- **UCI JAR**: `target/chess-engine-4.0.3-uci.jar`
+- **UCI JAR**: `target/chess-engine-4.0.4-uci.jar`
 
 ## New core engine (DEFAULT since 2026-10-13)
 
