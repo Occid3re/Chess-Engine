@@ -40,6 +40,8 @@ def main():
     ap.add_argument("sources", nargs="+", help="path or path:start:end; prefix + to also count its endgames twice")
     ap.add_argument("--out", required=True)
     ap.add_argument("--endgame-pieces", type=int, default=10)
+    ap.add_argument("--no-shuffle", action="store_true")
+    ap.add_argument("--seed", type=int, default=1)
     args = ap.parse_args()
     total = 0
     with open(args.out, "wb") as out:
@@ -60,6 +62,13 @@ def main():
             n_extra += len(e)
         total += n_extra
     print(f"wrote {total} positions ({n_extra} endgame positions counted twice) to {args.out}")
+    if not args.no_shuffle:
+        # The trainer streams large sets through the GPU in contiguous chunks: shuffled, every chunk is a random
+        # sample of the whole mix instead of one source (e.g. only the doubled endgames at the end).
+        data = np.fromfile(args.out, dtype=np.uint8).reshape(-1, RECORD)
+        np.random.default_rng(args.seed).shuffle(data)
+        data.tofile(args.out)
+        print("shuffled")
 
 
 if __name__ == "__main__":
