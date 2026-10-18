@@ -269,6 +269,7 @@ public final class Uci {
             totalNodes += manager.totalNodes();
         }
         long ms = Math.max(1, (System.nanoTime() - st) / 1_000_000);
+        if (Boolean.getBoolean("core.verifyNnue")) send("info string verified " + Searcher.VERIFIED.get() + " NNUE evaluations");
         send("bench: " + totalNodes + " nodes " + (totalNodes * 1000 / ms) + " nps " + ms + " ms");
     }
 }

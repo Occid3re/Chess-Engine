@@ -68,6 +68,10 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
   engine silently uses the scalar back end. Plain int16 loops are 25 % SLOWER (C2 cannot vectorise the int16->int32
   widening of the output layer). `-XX:+UseCompactObjectHeaders`: no measurable effect (no objects in the hot path).
   Tried and reverted: TT move before move generation + lazy quiet scoring (+5 % nodes, no nps gain).
+- King buckets (kb8), second try: 114M positions, 4 epochs, row-wise Adam: -33 Elo vs 4.1.0 (78-109-139, 326 games)
+  although its held-out loss was lower. `-Dcore.verifyNnue=true` (checks every 64th evaluation in the real search
+  against a rebuild; `bench` reports the count) verified 30167 evaluations exact: the engine side is correct, the net
+  needs more data (retry at several hundred million positions) or a cheaper layout.
 - Tried, lost: node-effort time management (factor (160 - 100 * best-move node share) / 100): 82-134-314
   (-34 Elo, 530 games) - stopped too early; would need tuning (SPSA) before another try.
 - Tried, no gain: pawn correction history (eval += learnt error per pawn structure): 81-83-294 vs 4.0.9 at

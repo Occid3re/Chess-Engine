@@ -167,8 +167,24 @@ public final class Searcher {
     }
 
     /** Static evaluation for the side to move at the given ply (NNUE when loaded, otherwise hand-crafted). */
+    /** -Dcore.verifyNnue=true: every 64th network evaluation is checked against a from-scratch build (debugging). */
+    private static final boolean VERIFY_NNUE = Boolean.getBoolean("core.verifyNnue");
+    private Accumulators verifier;
+    static final java.util.concurrent.atomic.AtomicLong VERIFIED = new java.util.concurrent.atomic.AtomicLong();
+
     private int evaluate(int ply) {
         int v = acc != null ? acc.evaluate(pos, ply) : eval.evaluate(pos);
+        if (VERIFY_NNUE && acc != null && (nodes & 63) == 0) {
+            if (verifier == null) verifier = Accumulators.create(cachedNet, 1);
+            Accumulators fresh = Accumulators.create(cachedNet, 1); // empty cache: a true rebuild
+            fresh.refresh(pos, 0);
+            int expected = fresh.evaluate(pos, 0);
+            if (expected != v) {
+                throw new IllegalStateException("NNUE mismatch at ply " + ply + ": incremental " + v + " vs rebuilt "
+                        + expected + " in " + pos.toFen());
+            }
+            VERIFIED.incrementAndGet();
+        }
         // Fade the evaluation towards a draw as the fifty-move counter grows.
         v = v * (200 - pos.halfmove) / 200;
         return Math.max(-TB_BOUND + 1, Math.min(TB_BOUND - 1, v));
