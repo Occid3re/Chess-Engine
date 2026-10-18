@@ -23,7 +23,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * Self-play data generator. Plays fixed-node games from randomised openings and writes
  * {@code fen;whiteScore;wdl} lines (wdl: 2 = white won, 1 = draw, 0 = black won) for quiet positions.
  *
- * <p>Usage: {@code DataGen <out> <threads> <positions> [nodesPerMove] [openings.epd]}</p>
+ * <p>Usage: {@code DataGen <out> <threads> <positions> [nodesPerMove] [openings.epd]}; an output file ending in
+ * {@code .bin} gets packed 32-byte records ({@link PackData}) for the GPU trainer instead of text.</p>
  *
  * <p>Optional system properties (endgame coverage):</p>
  * <ul>
@@ -66,15 +67,21 @@ public final class DataGen {
             tablebases = Tablebases.load(tbPaths, System.out::println);
         }
         long seed = System.nanoTime();
-        BufferedWriter writer = Files.newBufferedWriter(out, StandardCharsets.UTF_8,
-                StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        BufferedWriter writer = null;
+        if (out.toString().endsWith(".bin")) {
+            binOut = new java.io.BufferedOutputStream(Files.newOutputStream(out, StandardOpenOption.CREATE,
+                    StandardOpenOption.APPEND), 1 << 20);
+        } else {
+            writer = Files.newBufferedWriter(out, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        }
+        final BufferedWriter textOut = writer;
         long start = System.currentTimeMillis();
         List<Thread> workers = new ArrayList<>();
         for (int t = 0; t < threads; t++) {
             final long s = seed + 7919L * t;
             Thread th = new Thread(() -> {
                 try {
-                    run(writer, target, nodes, openings, new SplittableRandom(s));
+                    run(textOut, target, nodes, openings, new SplittableRandom(s));
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
@@ -96,12 +103,18 @@ public final class DataGen {
         reporter.setDaemon(true);
         reporter.start();
         for (Thread th : workers) th.join();
-        writer.close();
+        if (writer != null) writer.close();
+        if (binOut != null) binOut.close();
         System.out.println("done: " + written.get() + " positions, " + games.get() + " games");
     }
 
+    /** Packed output (.bin), or null for text. */
+    private static java.io.OutputStream binOut;
+
     private static void run(BufferedWriter writer, long target, long nodes, List<String> openings, SplittableRandom rng)
             throws IOException {
+        java.nio.ByteBuffer rec = java.nio.ByteBuffer.allocate(PackData.RECORD).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        java.io.ByteArrayOutputStream records = new java.io.ByteArrayOutputStream();
         SearchManager manager = new SearchManager(16, 1);
         int[] moves = new int[256];
         List<String> fens = new ArrayList<>();
@@ -192,13 +205,24 @@ public final class DataGen {
             if (tbResult >= 0) result = tbResult; // the theoretical value beats how the game happened to end
             if (result < 0) result = 1;
             games.incrementAndGet();
-            sb.setLength(0);
-            for (int i = 0; i < fens.size(); i++) {
-                sb.append(fens.get(i)).append(';').append(scores.get(i)).append(';').append(result).append('\n');
-            }
-            synchronized (writer) {
-                writer.write(sb.toString());
-                writer.flush();
+            if (binOut != null) {
+                records.reset();
+                for (int i = 0; i < fens.size(); i++) {
+                    if (PackData.pack(fens.get(i) + ";" + scores.get(i) + ";" + result, rec)) records.write(rec.array());
+                }
+                synchronized (binOut) {
+                    records.writeTo(binOut);
+                    binOut.flush();
+                }
+            } else {
+                sb.setLength(0);
+                for (int i = 0; i < fens.size(); i++) {
+                    sb.append(fens.get(i)).append(';').append(scores.get(i)).append(';').append(result).append('\n');
+                }
+                synchronized (writer) {
+                    writer.write(sb.toString());
+                    writer.flush();
+                }
             }
             written.addAndGet(fens.size());
         }
