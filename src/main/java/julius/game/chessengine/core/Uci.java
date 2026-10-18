@@ -12,7 +12,7 @@ import java.nio.charset.StandardCharsets;
  */
 public final class Uci {
 
-    public static final String NAME = "Alieknek 4.0.9";
+    public static final String NAME = "Alieknek 4.0.10";
 
     static final String[] BENCH_FENS = {
             "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
