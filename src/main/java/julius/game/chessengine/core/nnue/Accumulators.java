@@ -6,28 +6,41 @@ import julius.game.chessengine.core.Position;
 import static julius.game.chessengine.core.Position.*;
 
 /**
- * Per-ply accumulator stack for a search thread. {@link #push} must be called before the move is
- * made on the position (it needs the pre-move board), {@link #pushNull} before a null move.
+ * Per-ply accumulator stack for a search thread, updated lazily: {@link #push} only records which features
+ * the move changes, and the accumulators are brought up to date when a position is evaluated. Nodes that never
+ * evaluate (TT cutoffs, draws, nodes in check) cost no accumulator work at all.
+ * {@link #push} must be called before the move is made on the position (it needs the pre-move board),
+ * {@link #pushNull} before a null move.
  */
 public final class Accumulators {
 
     private final Network net;
     private final int[][] white;
     private final int[][] black;
+    /** Whether the accumulators of a ply are up to date. */
+    private final boolean[] computed;
+    /**
+     * Feature changes leading to a ply: [white sub1, sub2, add1, add2, black sub1, sub2, add1, add2], -1 = none;
+     * all -1 for a null move (the accumulators are copied unchanged).
+     */
+    private final int[][] delta;
 
     public Accumulators(Network net, int maxPly) {
         this.net = net;
         white = new int[maxPly][net.hidden];
         black = new int[maxPly][net.hidden];
+        computed = new boolean[maxPly];
+        delta = new int[maxPly][8];
     }
 
     public void refresh(Position p, int ply) {
         net.refresh(p, white[ply], black[ply]);
+        computed[ply] = true;
     }
 
     public void pushNull(int ply) {
-        System.arraycopy(white[ply], 0, white[ply + 1], 0, net.hidden);
-        System.arraycopy(black[ply], 0, black[ply + 1], 0, net.hidden);
+        java.util.Arrays.fill(delta[ply + 1], -1);
+        computed[ply + 1] = false;
     }
 
     public void push(Position p, int m, int ply) {
@@ -51,18 +64,38 @@ public final class Accumulators {
             addSq2 = rookTo;
             addPc2 = subPc2;
         }
+        int[] d = delta[ply + 1];
         for (int persp = 0; persp < 2; persp++) {
-            int[][] stack = persp == WHITE ? white : black;
-            int s1 = Network.featureIndex(persp, pc, from);
-            int a1 = Network.featureIndex(persp, addPc1, to);
-            int s2 = subPc2 == NO_PIECE ? -1 : Network.featureIndex(persp, subPc2, subSq2);
-            int a2 = addPc2 == NO_PIECE ? -1 : Network.featureIndex(persp, addPc2, addSq2);
-            net.update(stack[ply], stack[ply + 1], s1, s2, a1, a2);
+            int o = persp * 4;
+            d[o] = Network.featureIndex(persp, pc, from);
+            d[o + 1] = subPc2 == NO_PIECE ? -1 : Network.featureIndex(persp, subPc2, subSq2);
+            d[o + 2] = Network.featureIndex(persp, addPc1, to);
+            d[o + 3] = addPc2 == NO_PIECE ? -1 : Network.featureIndex(persp, addPc2, addSq2);
+        }
+        computed[ply + 1] = false;
+    }
+
+    /** Brings the accumulators of ply up to date from the nearest computed ancestor. */
+    private void ensure(int ply) {
+        if (computed[ply]) return;
+        int k = ply - 1;
+        while (!computed[k]) k--;
+        for (int j = k + 1; j <= ply; j++) {
+            int[] d = delta[j];
+            if (d[0] < 0) {
+                System.arraycopy(white[j - 1], 0, white[j], 0, net.hidden);
+                System.arraycopy(black[j - 1], 0, black[j], 0, net.hidden);
+            } else {
+                net.update(white[j - 1], white[j], d[0], d[1], d[2], d[3]);
+                net.update(black[j - 1], black[j], d[4], d[5], d[6], d[7]);
+            }
+            computed[j] = true;
         }
     }
 
     /** Evaluation in centipawns from the side to move's perspective. */
     public int evaluate(Position p, int ply) {
+        ensure(ply);
         int bucket = Network.bucketFor(Long.bitCount(p.all), net.buckets);
         return p.side == WHITE ? net.evaluate(white[ply], black[ply], bucket) : net.evaluate(black[ply], white[ply], bucket);
     }
