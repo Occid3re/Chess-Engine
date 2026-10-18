@@ -206,79 +206,83 @@ def main():
     ap.add_argument("--valid-data", help="packed file from games NOT in the training data: the honest check")
     ap.add_argument("--layout", choices=sorted(LAYOUTS), default="kb8")
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--chunk", type=int, default=0, help="positions per GPU chunk (default: half the free memory)")
     args = ap.parse_args()
 
     configure(args.layout)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
-    data = np.concatenate([np.fromfile(p, dtype=np.uint8).reshape(-1, RECORD) for p in args.data])
-    n = len(data)
-    # The whole data set in GPU memory when it fits (32 bytes per position): batches are then cut there.
-    if device.type == "cuda" and data.nbytes < 0.6 * torch.cuda.mem_get_info()[0]:
-        data = torch.from_numpy(data).to(device)
-        where = "GPU memory"
-    else:
-        where = "RAM"
-    perm = rng.permutation(n)
-    n_valid = 0 if args.valid_data else int(n * args.valid)
-    valid_idx, train_idx = perm[:n_valid], perm[n_valid:]
-    if args.valid_data:
-        held_out = np.fromfile(args.valid_data, dtype=np.uint8).reshape(-1, RECORD)
-    if isinstance(data, torch.Tensor):
-        valid_idx = torch.from_numpy(np.sort(valid_idx)).to(device)
-        train_idx = torch.from_numpy(train_idx).to(device)
+    # Memory-mapped sources; a file still being written (DataGen) is read up to its last whole record.
+    sources = []
+    for path in args.data:
+        count = Path(path).stat().st_size // RECORD
+        if count:
+            sources.append(np.memmap(path, dtype=np.uint8, mode="r", shape=(count, RECORD)))
+    n = sum(len(src) for src in sources)
     if args.valid_data:
         # validation from other games: positions of a training game never leak into it
-        valid_src = torch.from_numpy(held_out).to(device) if isinstance(data, torch.Tensor) else held_out
-        n_valid = len(held_out)
-        valid_idx = torch.arange(n_valid, device=device) if isinstance(data, torch.Tensor) else np.arange(n_valid)
+        held_out = np.fromfile(args.valid_data, dtype=np.uint8)
+        held_out = held_out[: len(held_out) // RECORD * RECORD].reshape(-1, RECORD)
     else:
-        valid_src = data
-    print(f"{n} positions ({n_valid} validation, data in {where}) on {device}"
+        pick = np.sort(rng.choice(n, size=int(n * args.valid), replace=False))
+        held_out = np.concatenate([src[pick[(pick >= lo) & (pick < lo + len(src))] - lo]
+                                   for src, lo in zip(sources, np.cumsum([0] + [len(x) for x in sources[:-1]]))])
+    valid_gpu = torch.from_numpy(np.ascontiguousarray(held_out)).to(device)
+    # Chunks that fit into GPU memory (32 bytes per position); with one chunk the data stays there for good.
+    budget = int(0.5 * torch.cuda.mem_get_info()[0]) // RECORD if device.type == "cuda" else 50_000_000
+    chunk = max(args.batch, min(budget, args.chunk or budget))
+    chunks = [(i, lo, min(lo + chunk, len(src))) for i, src in enumerate(sources) for lo in range(0, len(src), chunk)]
+    resident = None
+    if len(chunks) == 1:
+        i, lo, hi = chunks[0]
+        resident = torch.from_numpy(np.ascontiguousarray(sources[i][lo:hi])).to(device)
+    print(f"{n} positions in {len(chunks)} chunk(s), {len(held_out)} validation, on {device}"
           f"{' ' + torch.cuda.get_device_name(0) if device.type == 'cuda' else ''}", flush=True)
     kb_map = torch.tensor(KING_BUCKETS, device=device)
     net = Net(args.hidden, args.buckets).to(device)
     opt = torch.optim.Adam(net.parameters(), lr=args.lr)
     scaler = torch.cuda.amp.GradScaler(enabled=device.type == "cuda")
-    steps_per_epoch = len(train_idx) // args.batch
+    steps_per_epoch = sum((hi - lo) // args.batch for _, lo, hi in chunks)
     total = steps_per_epoch * args.epochs
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: 0.1 ** (s / max(1, total - 1)))
     for epoch in range(1, args.epochs + 1):
         started = time.time()
-        if isinstance(train_idx, torch.Tensor):
-            train_idx = train_idx[torch.randperm(len(train_idx), device=device)]
-        else:
-            rng.shuffle(train_idx)
         net.train()
-        running = 0.0
-        for step in range(steps_per_epoch):
-            idx = train_idx[step * args.batch:(step + 1) * args.batch]
-            batch = Batch(data[idx] if isinstance(idx, torch.Tensor) else data[np.sort(idx)], device, kb_map)
-            opt.zero_grad(set_to_none=True)
-            loss = loss_fn(net, batch, args.lam, args.k)
-            scaler.scale(loss).backward()
-            scaler.step(opt)
-            scaler.update()
-            sched.step()
-            net.clip()
-            running += loss.item() if step % 50 == 0 else 0.0
+        running, sampled = 0.0, 0
+        for c in rng.permutation(len(chunks)):
+            i, lo, hi = chunks[c]
+            data = resident if resident is not None else \
+                torch.from_numpy(np.ascontiguousarray(sources[i][lo:hi])).to(device)
+            order = torch.randperm(hi - lo, device=device)
+            for step in range((hi - lo) // args.batch):
+                batch = Batch(data[order[step * args.batch:(step + 1) * args.batch]], device, kb_map)
+                opt.zero_grad(set_to_none=True)
+                loss = loss_fn(net, batch, args.lam, args.k)
+                scaler.scale(loss).backward()
+                scaler.step(opt)
+                scaler.update()
+                sched.step()
+                net.clip()
+                if step % 50 == 0:
+                    running += loss.item()
+                    sampled += 1
+            del data
         net.eval()
         with torch.no_grad():
             vl, vn = 0.0, 0
-            for s in range(0, n_valid, args.batch):
-                vi = valid_idx[s:s + args.batch]
-                batch = Batch(valid_src[vi] if isinstance(vi, torch.Tensor) else valid_src[np.sort(vi)], device, kb_map)
+            for s in range(0, len(valid_gpu), args.batch):
+                batch = Batch(valid_gpu[s:s + args.batch], device, kb_map)
                 m = batch.count.shape[0]
                 vl += loss_fn(net, batch, args.lam, args.k).item() * m
                 vn += m
         took = time.time() - started
-        print(f"epoch {epoch} lr {sched.get_last_lr()[0]:.6f} train {running / max(1, steps_per_epoch // 50):.6f} "
-              f"valid {vl / max(1, vn):.6f} ({took:.0f} s, {len(train_idx) / took / 1e6:.2f} M pos/s)", flush=True)
+        print(f"epoch {epoch} lr {sched.get_last_lr()[0]:.6f} train {running / max(1, sampled):.6f} "
+              f"valid {vl / max(1, vn):.6f} ({took:.0f} s, {steps_per_epoch * args.batch / took / 1e6:.2f} M pos/s)",
+              flush=True)
         export(net, Path(args.out))
         torch.save(net.state_dict(), Path(args.out).with_suffix(".pt"))
     print(f"wrote {args.out}")
-
 
 if __name__ == "__main__":
     main()

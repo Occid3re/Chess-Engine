@@ -35,6 +35,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *       Needs {@code chessengine.syzygy.nativeLibrary}.</li>
  *   <li>{@code gen.winScore}/{@code gen.winPlies} (default 1500/6) and {@code gen.drawPly}/{@code gen.drawPlies}
  *       (default 80/12) – adjudication; higher values play decided games and long draws out further.</li>
+ *   <li>{@code gen.nodeJitter} (default 0.1) – node limit varies by +-10 % per move so repeated starts diverge.</li>
  * </ul>
  */
 public final class DataGen {
@@ -42,6 +43,11 @@ public final class DataGen {
     private static final AtomicLong written = new AtomicLong();
     private static final AtomicLong games = new AtomicLong();
 
+    /**
+     * Node limits vary by +-this share per move: the search is deterministic, so without it a start position or
+     * book opening without random plies would replay the identical game (duplicates at large scale).
+     */
+    private static final double NODE_JITTER = Double.parseDouble(System.getProperty("gen.nodeJitter", "0.1"));
     private static final double START_FRACTION = Double.parseDouble(System.getProperty("gen.startFraction", "0.4"));
     private static final int WIN_SCORE = Integer.getInteger("gen.winScore", 1500);
     private static final int WIN_PLIES = Integer.getInteger("gen.winPlies", 6);
@@ -174,7 +180,7 @@ public final class DataGen {
                     break;
                 }
                 SearchLimits l = new SearchLimits();
-                l.nodes = nodes;
+                l.nodes = Math.max(1, Math.round(nodes * (1 - NODE_JITTER + 2 * NODE_JITTER * rng.nextDouble())));
                 int[] r = manager.searchInThread(p, l);
                 int best = r[0];
                 int score = r[1];
