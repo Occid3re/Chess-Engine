@@ -46,7 +46,9 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
   engine), v5c_endgame.txt (19.3M: half the games from 8-20-piece starts, 6-man Syzygy results, late adjudication)
   and eg_extra.txt (13.5M positions with <=10 pieces, i.e. endgames counted twice). That mix matches the real
   server games (39% endgame positions). History at 10+0.1: first net +38±22 vs hand-crafted; 15.9M-position net
-  +39±32 vs that (4.0.0-4.0.4); bucketed endgame-weighted net (4.0.5) +86±33 vs the 4.0.4 net (SPRT H1, 235 games).
+  +39±32 vs that (4.0.0-4.0.4); bucketed endgame-weighted net (4.0.5) +86±33 vs the 4.0.4 net (SPRT H1, 235 games);
+  generation 1 of `scripts/tuning/generations.py` (4.0.7: +15M self-play positions by the 4.0.5 net, sp_all dropped)
+  +26.7 vs 4.0.5/4.0.6 (SPRT H1, 1682 games). A 384-wide net lost to 256 (-5±12, H0, 1925 games): keep 256.
   Why: Stockfish review of 30 server games found endgame moves lost 26 cp/move vs 14 in middlegames, and the
   training data had half the deep endgames of real games. Keep int[] arrays + per-feature/per-bucket weight rows:
   other layouts do not vectorise.
