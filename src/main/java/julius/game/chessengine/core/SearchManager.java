@@ -188,6 +188,12 @@ public final class SearchManager {
         if (!timeManaged || pondering || limits.movetime > 0) return;
         instability = instability * 0.5 + (bestChanged ? 1.0 : 0.0);
         double factor = 0.75 + instability * 0.6;
+        if (s.completedDepth >= 6 && s.nodes > 0) {
+            // node effort: a best move that took nearly all the work is settled (move sooner); one that took
+            // little of it is contested (think longer)
+            double effort = (double) s.rootEffort[s.bestMove & 4095] / s.nodes;
+            factor *= Math.max(0.5, Math.min(1.5, (Tune.effortBase - Tune.effortMul * effort / 100.0) / 100.0));
+        }
         int drop = lastScore - s.bestScore;
         if (s.completedDepth > 4 && drop > 20) factor *= Math.min(1.6, 1.0 + drop / 100.0);
         lastScore = s.bestScore;

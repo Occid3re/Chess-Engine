@@ -51,6 +51,8 @@ public final class Searcher {
     int bestMove;
     int bestScore;
     int rootUpdatedMove;
+    /** Nodes searched below each root move this search (index from | to << 6): the time manager's effort signal. */
+    final long[] rootEffort = new long[4096];
     int[] bestPv = new int[MAX_PLY + 1];
     int bestPvLength;
     long tbHits;
@@ -97,6 +99,7 @@ public final class Searcher {
         bestScore = -INF;
         bestPvLength = 0;
         rootHistPly = pos.historyPly();
+        java.util.Arrays.fill(rootEffort, 0L);
         acc = mgr.useNnue ? accumulatorsFor(Network.loadDefault()) : null;
         if (acc != null) acc.refresh(pos, 0);
         for (int[] k : killers) {
@@ -533,6 +536,7 @@ public final class Searcher {
             moveStack[ply] = m;
             pieceStack[ply] = pc;
             if (acc != null) acc.push(pos, m, ply);
+            final long nodesBefore = nodes;
             pos.makeMove(m);
             int newDepth = depth - 1 + ext;
             int score = 0;
@@ -556,6 +560,7 @@ public final class Searcher {
                 score = -search(-b, -a, newDepth, ply + 1, false);
             }
             pos.unmakeMove(m);
+            if (root) rootEffort[m & 4095] += nodes - nodesBefore;
             if (mgr.stop) return 0;
             score -= pen;
 
