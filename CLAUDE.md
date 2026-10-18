@@ -65,6 +65,8 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
   engine silently uses the scalar back end. Plain int16 loops are 25 % SLOWER (C2 cannot vectorise the int16->int32
   widening of the output layer). `-XX:+UseCompactObjectHeaders`: no measurable effect (no objects in the hot path).
   Tried and reverted: TT move before move generation + lazy quiet scoring (+5 % nodes, no nps gain).
+- Tried, no gain: pawn correction history (eval += learnt error per pawn structure): 81-83-294 vs 4.0.9 at
+  10+0.1 (458 games, ~0 Elo); kept as refs/backup/local/exp-corrhist.
 - Self-play data: `core.tools.DataGen` (`-Dgen.starts`, `-Dgen.syzygy`, `-Dgen.winScore/winPlies/drawPly/drawPlies`)
 - Results (10+0.1, 1 thread): 40-0 vs 4.0.0, 40-0 vs 3.6.9, 52-6-2 vs Stockfish UCI_Elo 2600; 4 threads vs 1: +168 Elo
 - Gap to Stockfish 19 (2026-10-18, 4.0.9, 1 thread, 64 MB, `E:\ChessEngines\harnesss_sf19.sh`): equal time 10+0.1
