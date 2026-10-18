@@ -18,7 +18,9 @@ Treat the brain as your primary knowledge store. If you discover something usefu
 Java chess engine, plays on Lichess as the bot Alieknek: blitz ~2480 (October 2026, up from ~1770 with the
 legacy AI before the core engine).
 
-- **Branch**: v4.0.0 (v4.0.3 is kept identical)
+- **Branches**: one per release, named after the version (v4.0.0, v4.0.1, ... v4.0.7). Work for the next
+  release goes on a new branch `vX.Y.Z` cut from the previous release branch; never push a newer
+  version onto an older version's branch. Bump `pom.xml` and `Uci.NAME` to the same number.
 - **Repo**: github.com/Occid3re/Chess-Engine
 - **Lichess bot**: Alieknek (https://lichess.org/@/Alieknek)
 - **Java**: 25 (preview enabled)
