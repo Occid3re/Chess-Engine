@@ -37,15 +37,26 @@ CLIP = 1.98
 INPUTS = 768
 # Input bucket of the perspective's own king square (perspective frame, a1 = 0): the castled squares get their
 # own buckets, the rest of the first two ranks share two, the third rank one, everything further up one.
-KING_BUCKETS = [
+KB8 = [
     0, 1, 2, 3, 3, 2, 1, 0,
     4, 4, 5, 5, 5, 5, 4, 4,
     6, 6, 6, 6, 6, 6, 6, 6,
 ] + [7] * 40
-NUM_KB = max(KING_BUCKETS) + 1
-# One embedding table for the trainer: NUM_KB * 768 bucketed rows, then the 768 factoriser rows, then padding.
-FACTOR = NUM_KB * INPUTS
-PAD = FACTOR + INPUTS
+# Input layouts: (king bucket map, mirror, factoriser). "plain" is the Java trainer's 768-input network.
+LAYOUTS = {"kb8": (KB8, True, True), "plain": ([0] * 64, False, False)}
+
+
+def configure(layout):
+    """Sets the module's input layout (king buckets, mirroring, factoriser) before nets and batches are made."""
+    global KING_BUCKETS, NUM_KB, MIRROR, FACTORISER, FACTOR, PAD
+    KING_BUCKETS, MIRROR, FACTORISER = LAYOUTS[layout] if isinstance(layout, str) else layout
+    NUM_KB = max(KING_BUCKETS) + 1
+    # One embedding table: NUM_KB * 768 bucketed rows, then the 768 factoriser rows (if any), then padding.
+    FACTOR = NUM_KB * INPUTS
+    PAD = FACTOR + (INPUTS if FACTORISER else 0)
+
+
+configure("kb8")
 
 
 def output_bucket(pieces: torch.Tensor, buckets: int) -> torch.Tensor:
@@ -90,14 +101,15 @@ class Batch:
             ksq = torch.where(is_king, sqc, torch.zeros_like(sqc)).sum(dim=1)    # exactly one own king
             k = ksq ^ (56 * persp)
             s = sqc ^ (56 * persp)
-            mirror = (k & 7) >= 4
-            s = torch.where(mirror.unsqueeze(1), s ^ 7, s)
+            if MIRROR:
+                mirror = (k & 7) >= 4
+                s = torch.where(mirror.unsqueeze(1), s ^ 7, s)
             rel = torch.where(color == persp, 0, 384)
             f = rel + ptype * 64 + s                                             # factoriser feature (0..767)
             bucket = kb_map[k].unsqueeze(1)
             feats.append(torch.where(valid, bucket * INPUTS + f, PAD))
             facts.append(torch.where(valid, FACTOR + f, PAD))
-        both = [torch.cat([feats[i], facts[i]], dim=1) for i in (0, 1)]           # [B, 64] per perspective
+        both = [torch.cat([feats[i], facts[i]], dim=1) if FACTORISER else feats[i] for i in (0, 1)]
         # one lookup for both sides: side to move first, then the other side
         stm_white = white_stm.unsqueeze(1)
         self.indices = torch.cat([torch.where(stm_white, both[0], both[1]),
@@ -116,7 +128,8 @@ class Net(torch.nn.Module):
             # Java trainer: uniform(-1, 1) * sqrt(1 / 32) for the first layer; the factoriser starts there, the
             # buckets at 0 (they learn the differences); the output layer small and random
             self.ft.weight.zero_()
-            self.ft.weight[FACTOR:PAD].uniform_(-1, 1).mul_((1 / 32) ** 0.5)
+            init = slice(FACTOR, PAD) if FACTORISER else slice(0, FACTOR)
+            self.ft.weight[init].uniform_(-1, 1).mul_((1 / 32) ** 0.5)
             self.w2.uniform_(-1, 1).mul_((1 / hidden) ** 0.5)
 
     def forward(self, batch: Batch) -> torch.Tensor:
@@ -140,14 +153,18 @@ class Net(torch.nn.Module):
 
     def clip(self):
         with torch.no_grad():
-            self.ft.weight.clamp_(-CLIP / 2, CLIP / 2)  # bucket + factoriser stay within CLIP
+            # with a factoriser, bucket + factoriser stay within CLIP
+            limit = CLIP / 2 if FACTORISER else CLIP
+            self.ft.weight.clamp_(-limit, limit)
             self.b1.clamp_(-CLIP, CLIP)
             self.w2.clamp_(-CLIP, CLIP)
 
     def merged_first_layer(self) -> torch.Tensor:
         """[NUM_KB * 768, H]: each bucket's weights plus the shared factoriser."""
         w = self.ft.weight[:FACTOR].view(NUM_KB, INPUTS, self.hidden)
-        return (w + self.ft.weight[FACTOR:PAD].unsqueeze(0)).reshape(NUM_KB * INPUTS, self.hidden)
+        if FACTORISER:
+            w = w + self.ft.weight[FACTOR:PAD].unsqueeze(0)
+        return w.reshape(NUM_KB * INPUTS, self.hidden)
 
 
 def loss_fn(net: Net, batch: Batch, lam: float, k: float) -> torch.Tensor:
@@ -166,7 +183,7 @@ def export(net: Net, path: Path) -> None:
     with open(path, "wb") as f:
         f.write(b"ALNN")
         f.write(struct.pack("<6i", 3, net.hidden, QA, QB, SCALE, net.buckets))
-        f.write(struct.pack("<2i", NUM_KB, 1))
+        f.write(struct.pack("<2i", NUM_KB, 1 if MIRROR else 0))
         f.write(bytes(KING_BUCKETS))
         f.write(w1.astype("<i2").tobytes())
         f.write(b1.astype("<i2").tobytes())
@@ -185,10 +202,13 @@ def main():
     ap.add_argument("--lr", type=float, default=0.001)
     ap.add_argument("--lam", type=float, default=0.3)
     ap.add_argument("--k", type=float, default=230.0)
-    ap.add_argument("--valid", type=float, default=0.01)
+    ap.add_argument("--valid", type=float, default=0.01, help="share held out (ignored with --valid-data)")
+    ap.add_argument("--valid-data", help="packed file from games NOT in the training data: the honest check")
+    ap.add_argument("--layout", choices=sorted(LAYOUTS), default="kb8")
     ap.add_argument("--seed", type=int, default=1)
     args = ap.parse_args()
 
+    configure(args.layout)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
@@ -201,11 +221,20 @@ def main():
     else:
         where = "RAM"
     perm = rng.permutation(n)
-    n_valid = int(n * args.valid)
+    n_valid = 0 if args.valid_data else int(n * args.valid)
     valid_idx, train_idx = perm[:n_valid], perm[n_valid:]
+    if args.valid_data:
+        held_out = np.fromfile(args.valid_data, dtype=np.uint8).reshape(-1, RECORD)
     if isinstance(data, torch.Tensor):
         valid_idx = torch.from_numpy(np.sort(valid_idx)).to(device)
         train_idx = torch.from_numpy(train_idx).to(device)
+    if args.valid_data:
+        # validation from other games: positions of a training game never leak into it
+        valid_src = torch.from_numpy(held_out).to(device) if isinstance(data, torch.Tensor) else held_out
+        n_valid = len(held_out)
+        valid_idx = torch.arange(n_valid, device=device) if isinstance(data, torch.Tensor) else np.arange(n_valid)
+    else:
+        valid_src = data
     print(f"{n} positions ({n_valid} validation, data in {where}) on {device}"
           f"{' ' + torch.cuda.get_device_name(0) if device.type == 'cuda' else ''}", flush=True)
     kb_map = torch.tensor(KING_BUCKETS, device=device)
@@ -239,7 +268,7 @@ def main():
             vl, vn = 0.0, 0
             for s in range(0, n_valid, args.batch):
                 vi = valid_idx[s:s + args.batch]
-                batch = Batch(data[vi] if isinstance(vi, torch.Tensor) else data[np.sort(vi)], device, kb_map)
+                batch = Batch(valid_src[vi] if isinstance(vi, torch.Tensor) else valid_src[np.sort(vi)], device, kb_map)
                 m = batch.count.shape[0]
                 vl += loss_fn(net, batch, args.lam, args.k).item() * m
                 vn += m

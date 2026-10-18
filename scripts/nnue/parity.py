@@ -55,6 +55,10 @@ def main():
     ap.add_argument("--buckets", type=int, default=8)
     args = ap.parse_args()
 
+    header = Path(args.net).read_bytes()[:104]
+    if int.from_bytes(header[4:8], "little") >= 3:  # the layout the file was trained with
+        kb, mirror = int.from_bytes(header[28:32], "little"), int.from_bytes(header[32:36], "little")
+        tg.configure((list(header[36:100]), bool(mirror), kb > 1))
     data = np.fromfile(args.data, dtype=np.uint8).reshape(-1, tg.RECORD)
     sample = data[np.random.default_rng(3).choice(len(data), size=min(args.count, len(data)), replace=False)]
     net = tg.Net(args.hidden, args.buckets)
