@@ -67,6 +67,9 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
   Tried and reverted: TT move before move generation + lazy quiet scoring (+5 % nodes, no nps gain).
 - Self-play data: `core.tools.DataGen` (`-Dgen.starts`, `-Dgen.syzygy`, `-Dgen.winScore/winPlies/drawPly/drawPlies`)
 - Results (10+0.1, 1 thread): 40-0 vs 4.0.0, 40-0 vs 3.6.9, 52-6-2 vs Stockfish UCI_Elo 2600; 4 threads vs 1: +168 Elo
+- Gap to Stockfish 19 (2026-10-18, 4.0.9, 1 thread, 64 MB, `E:\ChessEngines\harnesss_sf19.sh`): equal time 10+0.1
+  0-93-7 (-576 +-160); SF19 at 1/8 time (1.25+0.0125) 1-160-39 (-377 +-56) -> about -580 Elo at equal time.
+  Repeat both after each release to track the gap.
 - Match harness: `E:\ChessEngines\harness\` (sprt.sh, match.sh, vs_sf.sh, smp.sh, snap.sh, elite_openings.epd);
   snapshots in `E:\ChessEngines\v5-dev\<name>\run.bat`
 - Browser UI: `ChessEngineApplication` (Spring Boot) serves `static/` and `/ws/uci`, one core `Uci` per WebSocket
