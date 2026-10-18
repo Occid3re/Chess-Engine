@@ -126,9 +126,10 @@ public final class Uci {
                 send("hce eval (white) " + e.evaluateWhite(position) + "  (side to move) " + e.evaluate(position));
                 julius.game.chessengine.core.nnue.Network net = julius.game.chessengine.core.nnue.Network.loadDefault();
                 if (net != null) {
-                    julius.game.chessengine.core.nnue.Accumulators a = new julius.game.chessengine.core.nnue.Accumulators(net, 1);
+                    julius.game.chessengine.core.nnue.Accumulators a = julius.game.chessengine.core.nnue.Accumulators.create(net, 1);
                     a.refresh(position, 0);
-                    send("nnue eval (side to move) " + a.evaluate(position, 0) + (manager.useNnue ? " [active]" : " [disabled]"));
+                    send("nnue eval (side to move) " + a.evaluate(position, 0) + (manager.useNnue ? " [active]" : " [disabled]")
+                            + " (" + julius.game.chessengine.core.nnue.Accumulators.backend() + ")");
                 }
             }
             case "perft" -> {

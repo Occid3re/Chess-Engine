@@ -52,8 +52,14 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
   generation 1 of `scripts/tuning/generations.py` (4.0.7: +15M self-play positions by the 4.0.5 net, sp_all dropped)
   +26.7 vs 4.0.5/4.0.6 (SPRT H1, 1682 games). A 384-wide net lost to 256 (-5±12, H0, 1925 games): keep 256.
   Why: Stockfish review of 30 server games found endgame moves lost 26 cp/move vs 14 in middlegames, and the
-  training data had half the deep endgames of real games. Keep int[] arrays + per-feature/per-bucket weight rows:
-  other layouts do not vectorise.
+  training data had half the deep endgames of real games. Keep per-feature/per-bucket weight rows (offset 0).
+- NNUE speed (2026-10-18, CPU-time bench, identical trees): accumulators are updated lazily (only when a node
+  evaluates, -3..5 %); the int16 SIMD back end `nnue.VectorAccumulators` (Vector API) is ~5 % faster than the
+  int32 loops C2 auto-vectorises (`ScalarAccumulators`). It needs `--add-modules jdk.incubator.vector` for javac
+  AND java (pom, bot, harness snap.sh, cutechess.py, generations.py, Dockerfile have it); without the flag the
+  engine silently uses the scalar back end. Plain int16 loops are 25 % SLOWER (C2 cannot vectorise the int16->int32
+  widening of the output layer). `-XX:+UseCompactObjectHeaders`: no measurable effect (no objects in the hot path).
+  Tried and reverted: TT move before move generation + lazy quiet scoring (+5 % nodes, no nps gain).
 - Self-play data: `core.tools.DataGen` (`-Dgen.starts`, `-Dgen.syzygy`, `-Dgen.winScore/winPlies/drawPly/drawPlies`)
 - Results (10+0.1, 1 thread): 40-0 vs 4.0.0, 40-0 vs 3.6.9, 52-6-2 vs Stockfish UCI_Elo 2600; 4 threads vs 1: +168 Elo
 - Match harness: `E:\ChessEngines\harness\` (sprt.sh, match.sh, vs_sf.sh, smp.sh, snap.sh, elite_openings.epd);

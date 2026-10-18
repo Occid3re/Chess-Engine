@@ -43,7 +43,7 @@ def compile_core(out: Path) -> Path:
         shutil.rmtree(classes)
     (classes / "core").mkdir(parents=True)
     sources = [str(p) for d in CORE_SOURCES for p in (REPO / d).rglob("*.java")]
-    subprocess.run(["javac", "-nowarn", "-d", str(classes), *sources], check=True)
+    subprocess.run(["javac", "-nowarn", "--add-modules", "jdk.incubator.vector", "-d", str(classes), *sources], check=True)
     shutil.copy(REPO / "src/main/resources/core/eval-weights.txt", classes / "core" / "eval-weights.txt")
     return classes
 
@@ -122,7 +122,8 @@ def main() -> None:
         parent = engine_dir(base, gdir, "parent", best)
         if not data.exists() or sum(1 for _ in open(data, encoding="utf-8")) < args.positions:
             subprocess.run([
-                "java", "-Xmx10g", f"-Dgen.starts={args.starts}", "-Dgen.startFraction=0.5",
+                "java", "-Xmx10g", "--add-modules", "jdk.incubator.vector",
+                f"-Dgen.starts={args.starts}", "-Dgen.startFraction=0.5",
                 f"-Dgen.syzygy={args.syzygy}", f"-Dchessengine.syzygy.nativeLibrary={args.native}",
                 "-Dgen.winScore=2000", "-Dgen.winPlies=8", "-Dgen.drawPly=160", "-Dgen.drawPlies=20",
                 "-cp", str(parent), "julius.game.chessengine.core.tools.DataGen", str(data),
@@ -135,7 +136,8 @@ def main() -> None:
         log(f"generation {gen}: {endgame_extra(window, extra)} endgame positions counted twice")
         child_net = gdir / "child.bin"
         subprocess.run([
-            "java", "-Xmx44g", f"-Dtrain.buckets={args.buckets}", "-cp", str(base),
+            "java", "-Xmx44g", "--add-modules", "jdk.incubator.vector", f"-Dtrain.buckets={args.buckets}",
+            "-cp", str(base),
             "julius.game.chessengine.core.nnue.Trainer", str(child_net), str(args.hidden), str(args.epochs),
             "0.3", "230", args.elite, *window, str(extra),
         ], check=True)

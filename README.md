@@ -8,9 +8,12 @@ Syzygy tablebases through JNI. It plays on Lichess as [Alieknek](https://lichess
 
 ```bash
 ./mvnw package                      # target/chess-engine-<version>-uci.jar (Java 25)
-java -jar target/chess-engine-<version>-uci.jar
-java -jar target/chess-engine-<version>-uci.jar bench
+java --add-modules jdk.incubator.vector -jar target/chess-engine-<version>-uci.jar
+java --add-modules jdk.incubator.vector -jar target/chess-engine-<version>-uci.jar bench
 ```
+
+`--add-modules jdk.incubator.vector` enables the SIMD back end of the neural network (Java's Vector API, about
+5 % faster); without it the engine runs the same evaluation with plain loops.
 
 The jar speaks UCI on standard input/output. UCI options: `Hash`, `Threads`, `Move Overhead`, `SyzygyPath`,
 `Ponder`, `UseNNUE`. The same settings as system properties: `-Dchessengine.tt.mb`, `-Dchessengine.threads`,

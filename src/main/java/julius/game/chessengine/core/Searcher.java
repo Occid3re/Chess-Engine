@@ -161,7 +161,7 @@ public final class Searcher {
         if (net == null) return null;
         if (net != cachedNet) {
             cachedNet = net;
-            cachedAcc = new Accumulators(net, MAX_PLY + 8);
+            cachedAcc = Accumulators.create(net, MAX_PLY + 8);
         }
         return cachedAcc;
     }

@@ -22,7 +22,7 @@
         <!-- Boot uses this to set the compiler release -->
         <java.version>25</java.version>
         <!-- Default preview flag for Surefire's argLine; CLI -DargLine overrides when provided -->
-        <argLine>--enable-preview</argLine>
+        <argLine>--enable-preview --add-modules jdk.incubator.vector</argLine>
     </properties>
 
     <dependencies>
@@ -149,6 +149,18 @@
                         </configuration>
                     </execution>
                 </executions>
+            </plugin>
+
+            <!-- The NNUE's SIMD back end (core.nnue.VectorAccumulators) uses the incubating Vector API -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <compilerArgs>
+                        <arg>--add-modules</arg>
+                        <arg>jdk.incubator.vector</arg>
+                    </compilerArgs>
+                </configuration>
             </plugin>
 
             <!-- Guardrails: fail on version drift and wrong toolchains -->

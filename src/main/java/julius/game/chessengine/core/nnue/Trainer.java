@@ -395,7 +395,7 @@ public final class Trainer {
     /** Mean absolute difference (cp) between the float network and the saved quantised network. */
     private double parity(Path file, int[] idx, Worker w) throws IOException {
         Network net = Network.read(Files.newInputStream(file));
-        Accumulators acc = new Accumulators(net, 1);
+        Accumulators acc = Accumulators.create(net, 1);
         int[] nn = new int[1];
         double diff = 0;
         int n = Math.min(2000, idx.length);

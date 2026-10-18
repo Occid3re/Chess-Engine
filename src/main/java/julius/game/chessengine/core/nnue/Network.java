@@ -38,6 +38,9 @@ public final class Network {
     /** Row {@code bucket * 2 + half} (half 0 = side to move, 1 = other side), each of length hidden. */
     final int[][] l2Weights;
     final int[] l2Bias;
+    /** int16 copies of the first layer for the Vector API back end, built on first use. */
+    private volatile short[][] l1Short;
+    private volatile short[] l1BiasShort;
 
     private Network(int hidden, int qa, int qb, int scale, int buckets, int[] w1, int[] b1, int[] w2, int[] b2) {
         this.hidden = hidden;
@@ -51,6 +54,33 @@ public final class Network {
         this.l2Weights = new int[2 * buckets][];
         for (int r = 0; r < 2 * buckets; r++) l2Weights[r] = java.util.Arrays.copyOfRange(w2, r * hidden, (r + 1) * hidden);
         this.l2Bias = b2;
+    }
+
+    short[][] l1WeightsShort() {
+        short[][] w = l1Short;
+        if (w == null) {
+            synchronized (this) {
+                if (l1Short == null) {
+                    short[][] s = new short[INPUTS][hidden];
+                    for (int f = 0; f < INPUTS; f++) {
+                        for (int i = 0; i < hidden; i++) s[f][i] = (short) l1Weights[f][i];
+                    }
+                    l1Short = s;
+                }
+                w = l1Short;
+            }
+        }
+        return w;
+    }
+
+    short[] l1BiasShort() {
+        short[] b = l1BiasShort;
+        if (b == null) {
+            b = new short[hidden];
+            for (int i = 0; i < hidden; i++) b[i] = (short) l1Bias[i];
+            l1BiasShort = b;
+        }
+        return b;
     }
 
     /** Output bucket for a piece count (2..32): eight buckets of four pieces each, or 0 with one bucket. */
@@ -107,6 +137,13 @@ public final class Network {
             int[] w2 = readShorts(in, 2 * hidden * buckets);
             int[] b2 = new int[buckets];
             for (int b = 0; b < buckets; b++) b2[b] = le(in.readInt());
+            // int16 accumulators (Vector API back end) need bias + 32 weights to fit; the trainer clips to +-505
+            int maxW = 0, maxB = 0;
+            for (int w : w1) maxW = Math.max(maxW, Math.abs(w));
+            for (int b : b1) maxB = Math.max(maxB, Math.abs(b));
+            if (32L * maxW + maxB > Short.MAX_VALUE) {
+                throw new IOException("First-layer weights too large for int16 accumulators: max |w| " + maxW);
+            }
             return new Network(hidden, qa, qb, scale, buckets, w1, b1, w2, b2);
         }
     }

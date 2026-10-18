@@ -3,6 +3,8 @@ package julius.game.chessengine.core.nnue;
 import julius.game.chessengine.core.Move;
 import julius.game.chessengine.core.Position;
 
+import java.lang.reflect.Constructor;
+
 import static julius.game.chessengine.core.Position.*;
 
 /**
@@ -11,12 +13,15 @@ import static julius.game.chessengine.core.Position.*;
  * evaluate (TT cutoffs, draws, nodes in check) cost no accumulator work at all.
  * {@link #push} must be called before the move is made on the position (it needs the pre-move board),
  * {@link #pushNull} before a null move.
+ *
+ * <p>Two storage back ends: {@link VectorAccumulators} (int16, explicit SIMD through the Vector API; needs
+ * {@code --add-modules jdk.incubator.vector}) and {@link ScalarAccumulators} (int32 loops the JIT vectorises).
+ * {@link #create} picks the vector one when the JVM has the module, unless {@code -Dcore.simd=false}. Both
+ * compute exactly the same evaluations.</p>
  */
-public final class Accumulators {
+public abstract class Accumulators {
 
-    private final Network net;
-    private final int[][] white;
-    private final int[][] black;
+    protected final Network net;
     /** Whether the accumulators of a ply are up to date. */
     private final boolean[] computed;
     /**
@@ -25,25 +30,64 @@ public final class Accumulators {
      */
     private final int[][] delta;
 
-    public Accumulators(Network net, int maxPly) {
+    protected Accumulators(Network net, int maxPly) {
         this.net = net;
-        white = new int[maxPly][net.hidden];
-        black = new int[maxPly][net.hidden];
         computed = new boolean[maxPly];
         delta = new int[maxPly][8];
     }
 
-    public void refresh(Position p, int ply) {
-        net.refresh(p, white[ply], black[ply]);
+    /** Constructor of the Vector API back end, or null; looked up reflectively so this class never links it. */
+    private static final Constructor<? extends Accumulators> VECTOR;
+    /** int16 lanes per vector of that back end (0 without it). */
+    private static final int LANES;
+
+    static {
+        Constructor<? extends Accumulators> ctor = null;
+        int lanes = 0;
+        if (!"false".equalsIgnoreCase(System.getProperty("core.simd"))
+                && ModuleLayer.boot().findModule("jdk.incubator.vector").isPresent()) {
+            try {
+                Class<? extends Accumulators> c = Class.forName("julius.game.chessengine.core.nnue.VectorAccumulators")
+                        .asSubclass(Accumulators.class);
+                lanes = (Integer) c.getDeclaredMethod("shortLanes").invoke(null);
+                ctor = c.getDeclaredConstructor(Network.class, int.class);
+            } catch (Throwable e) { // class missing or the module not resolved: use the scalar back end
+                ctor = null;
+                lanes = 0;
+            }
+        }
+        VECTOR = ctor;
+        LANES = lanes;
+    }
+
+    /** Accumulators for a network: the Vector API back end when available and the layer size fits it. */
+    public static Accumulators create(Network net, int maxPly) {
+        if (VECTOR != null && net.hidden % LANES == 0) {
+            try {
+                return VECTOR.newInstance(net, maxPly);
+            } catch (ReflectiveOperationException | LinkageError e) {
+                // fall through to the scalar back end
+            }
+        }
+        return new ScalarAccumulators(net, maxPly);
+    }
+
+    /** Which back end {@link #create} uses, for diagnostics. */
+    public static String backend() {
+        return VECTOR != null ? "Vector API int16, " + LANES + " lanes" : "scalar int32";
+    }
+
+    public final void refresh(Position p, int ply) {
+        refreshPly(p, ply);
         computed[ply] = true;
     }
 
-    public void pushNull(int ply) {
+    public final void pushNull(int ply) {
         java.util.Arrays.fill(delta[ply + 1], -1);
         computed[ply + 1] = false;
     }
 
-    public void push(Position p, int m, int ply) {
+    public final void push(Position p, int m, int ply) {
         int from = Move.from(m), to = Move.to(m), flag = Move.flag(m);
         int pc = p.board[from];
         int us = color(pc);
@@ -82,21 +126,28 @@ public final class Accumulators {
         while (!computed[k]) k--;
         for (int j = k + 1; j <= ply; j++) {
             int[] d = delta[j];
-            if (d[0] < 0) {
-                System.arraycopy(white[j - 1], 0, white[j], 0, net.hidden);
-                System.arraycopy(black[j - 1], 0, black[j], 0, net.hidden);
-            } else {
-                net.update(white[j - 1], white[j], d[0], d[1], d[2], d[3]);
-                net.update(black[j - 1], black[j], d[4], d[5], d[6], d[7]);
-            }
+            if (d[0] < 0) copyPly(j - 1, j);
+            else updatePly(j - 1, j, d);
             computed[j] = true;
         }
     }
 
     /** Evaluation in centipawns from the side to move's perspective. */
-    public int evaluate(Position p, int ply) {
+    public final int evaluate(Position p, int ply) {
         ensure(ply);
         int bucket = Network.bucketFor(Long.bitCount(p.all), net.buckets);
-        return p.side == WHITE ? net.evaluate(white[ply], black[ply], bucket) : net.evaluate(black[ply], white[ply], bucket);
+        return evaluatePly(ply, p.side == WHITE, bucket);
     }
+
+    /** Both perspectives of ply from scratch. */
+    protected abstract void refreshPly(Position p, int ply);
+
+    /** Copies ply {@code from} into ply {@code to} (null move). */
+    protected abstract void copyPly(int from, int to);
+
+    /** Ply {@code to} = ply {@code from} with the feature changes d (see {@link #delta}). */
+    protected abstract void updatePly(int from, int to, int[] d);
+
+    /** Network output for ply, side to move White or Black. */
+    protected abstract int evaluatePly(int ply, boolean whiteToMove, int bucket);
 }

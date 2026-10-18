@@ -110,7 +110,7 @@ class Engine:
     name: str
     classes: str
     options: Dict[str, object] = field(default_factory=dict)
-    jvm: Sequence[str] = ("-Xms256m", "-Xmx512m", "-XX:+UseParallelGC")
+    jvm: Sequence[str] = ("-Xms256m", "-Xmx512m", "-XX:+UseParallelGC", "--add-modules", "jdk.incubator.vector")
     tune: bool = False
 
     def args(self) -> List[str]:

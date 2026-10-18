@@ -192,6 +192,8 @@ def build_engine_cmd() -> List[str]:
         f"-Xmx{JAVA_XMX}",
         gc_flag(JAVA_GC),
         "--enable-native-access=ALL-UNNAMED",
+        # SIMD back end of the NNUE (Vector API); without it the engine falls back to scalar code
+        "--add-modules", "jdk.incubator.vector",
         "-XX:+AlwaysPreTouch",
         # harmless even if JFR off; keeps stacks deep when you enable it
         "-XX:FlightRecorderOptions=stackdepth=256",
