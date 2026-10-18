@@ -23,7 +23,7 @@ legacy AI before the core engine).
   version onto an older version's branch. Bump `pom.xml` and `Uci.NAME` to the same number.
 - **Repo**: github.com/Occid3re/Chess-Engine
 - **Lichess bot**: Alieknek (https://lichess.org/@/Alieknek)
-- **Java**: 25 (preview enabled)
+- **Java**: builds with 25 (preview enabled); the server runs Temurin 27 (measured 2-4 % faster than 25, 2026-10-18)
 - **Build**: `./mvnw.cmd -DskipTests package`
 - **UCI JAR**: `target/chess-engine-<version>-uci.jar` (main class `uci.UciMain` -> `core.Uci`)
 - **Tests**: `./mvnw.cmd test` (CoreEngineTest, TimeManagementTest, Syzygy bridge tests);
