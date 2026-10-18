@@ -181,7 +181,8 @@ class CoreEngineTest {
     void findsMateInTwo() {
         SearchManager manager = new SearchManager(16, 1);
         Position p = new Position("r1b1kb1r/pppp1ppp/5q2/4n3/3KP3/2N3PN/PPP4P/R1BQ1B1R b kq - 0 1");
-        int[] result = manager.searchSync(p, SearchLimits.depth(8));
+        // depth 10: the SPSA-tuned pruning (4.0.9, +28 Elo in self-play) finds this mate at depth 9, not 8
+        int[] result = manager.searchSync(p, SearchLimits.depth(10));
         assertEquals("f8c5", Move.toUci(result[0]));
         assertTrue(result[1] >= Searcher.MATE_BOUND);
     }

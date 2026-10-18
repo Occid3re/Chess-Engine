@@ -51,6 +51,11 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
   +39±32 vs that (4.0.0-4.0.4); bucketed endgame-weighted net (4.0.5) +86±33 vs the 4.0.4 net (SPRT H1, 235 games);
   generation 1 of `scripts/tuning/generations.py` (4.0.7: +15M self-play positions by the 4.0.5 net, sp_all dropped)
   +26.7 vs 4.0.5/4.0.6 (SPRT H1, 1682 games). A 384-wide net lost to 256 (-5±12, H0, 1925 games): keep 256.
+  Generation 2 (4.0.9: window v5c + gen01 + gen02 self-play) +29.8 vs generation 1 (SPRT H1, 1437 games).
+- Search parameters (core/Tune.java) from SPSA, 1500 iterations x 8 games at 6+0.06 (4.0.9): +28.3 vs the old
+  defaults (SPRT H1, 1058 games at 10+0.1). Biggest moves: nmpBaseMargin 150->100, nmpDepthMargin 15->24,
+  aspDelta 15->10, rfpMargin 75->68, qsFutility 160->180. The pruning is more aggressive: CoreEngineTest's mate
+  needs depth 10 instead of 8 (static tests must not veto an SPRT-confirmed gain).
   Why: Stockfish review of 30 server games found endgame moves lost 26 cp/move vs 14 in middlegames, and the
   training data had half the deep endgames of real games. Keep per-feature/per-bucket weight rows (offset 0).
 - NNUE speed (2026-10-18, CPU-time bench, identical trees): accumulators are updated lazily (only when a node

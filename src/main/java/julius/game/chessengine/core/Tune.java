@@ -15,28 +15,30 @@ public final class Tune {
     }
 
     // LMR table: base and divisor, both x100 (0.75 + ln(d) * ln(m) / 2.25)
-    public static int lmrBase = 75;
-    public static int lmrDiv = 225;
-    public static int lmrHistDiv = 6000;
-    public static int aspDelta = 15;
-    public static int rfpMargin = 75;
-    public static int razorMargin = 220;
-    public static int nmpEvalDiv = 200;
-    public static int nmpDepthMargin = 15;
-    public static int nmpBaseMargin = 150;
-    public static int probcutMargin = 200;
-    public static int histPrune = 1500;
-    public static int futBase = 100;
+    // Values from SPSA (1500 iterations, 12000 games at 6+0.06, 2026-10-18); SPRT at 10+0.1 vs the previous
+    // defaults: +28.3 Elo (248-162-648, 1058 games). spsa.py reads the defaults and ranges from this file.
+    public static int lmrBase = 86;
+    public static int lmrDiv = 221;
+    public static int lmrHistDiv = 6867;
+    public static int aspDelta = 10;
+    public static int rfpMargin = 68;
+    public static int razorMargin = 237;
+    public static int nmpEvalDiv = 228;
+    public static int nmpDepthMargin = 24;
+    public static int nmpBaseMargin = 100;
+    public static int probcutMargin = 190;
+    public static int histPrune = 1346;
+    public static int futBase = 99;
     public static int futMul = 100;
-    public static int seeQuiet = 25;
-    public static int seeNoisy = 100;
+    public static int seeQuiet = 22;
+    public static int seeNoisy = 103;
     /** singular beta = ttScore - singularMul * depth / 10 */
-    public static int singularMul = 20;
-    public static int doubleExtMargin = 20;
-    public static int qsFutility = 160;
-    public static int bonusMul = 160;
-    public static int bonusSub = 120;
-    public static int bonusMax = 2000;
+    public static int singularMul = 17;
+    public static int doubleExtMargin = 22;
+    public static int qsFutility = 180;
+    public static int bonusMul = 166;
+    public static int bonusSub = 139;
+    public static int bonusMax = 2119;
 
     private static final Map<String, Param> PARAMS = new LinkedHashMap<>();
 
