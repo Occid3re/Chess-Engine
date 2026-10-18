@@ -71,6 +71,18 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
 - Server deployment (play.juliussze.at, Occid3re/play repo): `alieknek` service with play window, switch and watch page
   (`src/main/resources/py/alieknek_service.py`, `watch/`)
 
+## GPU training (`scripts/nnue`, PyTorch 2.4.1 + CUDA in `E:\Tools	orch-venv`, RTX 2080 Super)
+
+- `core.tools.PackData` packs `fen;score;wdl` text into 32-byte records (`E:\Chess-Data\packed\*.bin`); the trainer
+  keeps them in GPU memory (8 GB: ~150M positions).
+- `train_gpu.py`: king-bucketed nets (format v3: 8 buckets by own king square, castled squares separate, board
+  mirrored for kings on e-h) with a factoriser merged on export; same loss/quantisation as the Java trainer. The
+  feature transformer is a dense 0/1 x weights GEMM in fp16 on the tensor cores (+ loss scaling): ~0.75M pos/s,
+  twice PyTorch's EmbeddingBag (its backward sorts ~2M indices per batch).
+- `parity.py`: float model vs the Java engine's `eval` of the exported file; must stay within quantisation
+  (mean ~2-3 cp). Run it after every architecture change.
+- C: is full (Syzygy 228 GB there): keep venvs, temp files and data on E:.
+
 ## Lichess knowledge (bot, `alieknek_service.py`)
 
 - Game archive in the bot's data volume: `games.jsonl` (every game it plays: moves, its evals per move, opponent,
