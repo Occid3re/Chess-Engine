@@ -15,6 +15,7 @@ A control file (<data>/control.json) written by the CLI overrides the environmen
   python3 alieknek_service.py off | on | auto | hours 01:00-05:00 | play <minutes> | status
 """
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -22,6 +23,7 @@ import sys
 import threading
 import time
 import urllib.request
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional
@@ -45,6 +47,23 @@ HISTORY_DAYS = 120
 HISTORY_MAX_POINTS = 3000
 _moves = {}  # game id -> SAN moves of recently finished games (for the replay)
 _refresh = threading.Event()
+# Every game of the bot: games.jsonl (recorded by the bot, with its own evaluations) and games-lichess.jsonl
+# (one export of the account's earlier games). Opponent statistics and the opening experience are built from it.
+ARCHIVE = "games.jsonl"
+LICHESS_ARCHIVE = "games-lichess.jsonl"
+EXPERIENCE_PLIES = 24  # positions from the first moves only: later ones hardly ever repeat
+CORE_SINCE_MS = 1791849600000  # 2026-10-13: first game of the new core engine
+_archive = {"games": {}, "opponents": {}, "experience": {}, "replies": {}, "ours": {}, "version": 0}
+# Opening experience in play: a move that lost against this opponent here must be this much better to be
+# played again (per net loss, capped); a line that only drew against a clearly weaker opponent a little;
+# a move that went badly against everyone (>= 3 games, score < 30 %) a little as well.
+PENALTY_PER_LOSS = 40
+PENALTY_MAX = 120
+PENALTY_DRAW_WEAKER = 15
+PENALTY_GLOBAL = 20
+_archive_lock = threading.Lock()
+_backfill = {"lastAttempt": 0.0}
+_net = {"loaded": False, "bin": None, "meta": None}
 LICHESS = "https://lichess.org"
 GAME_ID = re.compile(r"^[A-Za-z0-9]{8}$")
 
@@ -322,12 +341,15 @@ def game_started(game_id: str, full_event: dict, me_id: str) -> None:
         _status["game"] = {
             "id": game_id,
             "white": {"name": white.get("name") or white.get("id") or "?", "rating": white.get("rating"),
-                      "title": white.get("title")},
+                      "title": white.get("title"), "id": white.get("id")},
             "black": {"name": black.get("name") or black.get("id") or "?", "rating": black.get("rating"),
-                      "title": black.get("title")},
+                      "title": black.get("title"), "id": black.get("id")},
             "myColor": "white" if white.get("id") == me_id else "black",
             "rated": full_event.get("rated"),
+            "speed": full_event.get("speed"),
             "clock": {"initial": clock.get("initial"), "increment": clock.get("increment")},
+            "moves": [],
+            "evals": [],
         }
 
 
@@ -339,6 +361,7 @@ def game_update(game_id: str, board, state: dict) -> None:
         g["fen"] = board.fen()
         g["lastMove"] = board.peek().uci() if board.move_stack else None
         g["ply"] = len(board.move_stack)
+        g["moves"] = [m.uci() for m in board.move_stack]
         g["wtime"] = _clock_ms(state.get("wtime"))
         g["btime"] = _clock_ms(state.get("btime"))
         g["status"] = state.get("status", "started")
@@ -355,9 +378,14 @@ def engine_info(info: dict) -> None:
         entry["cp"] = pov.score()
     with _lock:
         _status["engine"] = entry
+        g = _status.get("game")
+        if g is not None and info:
+            # [ply searched, cp (White's view), mate, depth] for every move of the bot
+            g.setdefault("evals", []).append([g.get("ply", 0), entry.get("cp"), entry.get("mate"), entry.get("depth")])
 
 
 def game_finished(game_id: str) -> None:
+    record = None
     with _lock:
         g = _status.get("game")
         if g and g.get("id") == game_id:
@@ -372,9 +400,285 @@ def game_finished(game_id: str) -> None:
                      "clock": g.get("clock"), "endedAt": int(time.time() * 1000)}
             _status["recent"] = ([entry] + [r for r in _status["recent"] if r.get("id") != game_id])[:RECENT_LIMIT]
             _save("recent.json", _status["recent"])
+            record = _bot_record(g, entry)
         _status["game"] = None
         _status["state"] = "idle"
+    if record is not None and record["moves"]:
+        _append_archive(record)
     _refresh.set()
+
+
+# ------------------------------------------------------------------ game archive and opponents
+
+def _bot_record(g: dict, entry: dict) -> dict:
+    """The archive line of a game the bot just played (called with _lock held)."""
+    my = g.get("myColor")
+    me, opp = (g["white"], g["black"]) if my == "white" else (g["black"], g["white"])
+    clock = g.get("clock") or {}
+    seconds = (lambda v: v // 1000 if isinstance(v, int) and v >= 1000 else v)
+    return {"id": g["id"], "src": "bot", "endedAt": entry["endedAt"], "speed": g.get("speed"),
+            "rated": g.get("rated"), "clock": {"initial": seconds(clock.get("initial")),
+                                               "increment": seconds(clock.get("increment"))},
+            "color": my, "rating": me.get("rating"),
+            "opponent": {"id": (opp.get("id") or opp.get("name") or "?").lower(), "name": opp.get("name"),
+                         "title": opp.get("title"), "rating": opp.get("rating")},
+            "result": entry["result"], "status": g.get("status"), "engine": _engine.get("name"),
+            "moves": list(g.get("moves") or []), "evals": list(g.get("evals") or [])}
+
+
+def _append_archive(record: dict) -> None:
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        with open(DATA_DIR / ARCHIVE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, separators=(",", ":")) + "\n")
+    except OSError as e:
+        print(f"[archive] could not write {ARCHIVE}: {e}")
+    _index_games([record])
+
+
+def _read_archive(name: str) -> list:
+    games = []
+    try:
+        with open(DATA_DIR / name, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        games.append(json.loads(line))
+                    except ValueError:
+                        pass  # a line cut off by a crash
+    except OSError:
+        pass
+    return games
+
+
+def load_archive() -> int:
+    """Reads both archive files (the bot's own record wins over the Lichess export) and indexes them."""
+    games = {g["id"]: g for g in _read_archive(LICHESS_ARCHIVE) if g.get("id")}
+    games.update({g["id"]: g for g in _read_archive(ARCHIVE) if g.get("id")})
+    with _archive_lock:
+        _archive.update({"games": {}, "opponents": {}, "experience": {}, "replies": {}, "ours": {}})
+    _index_games(sorted(games.values(), key=lambda g: g.get("endedAt") or 0))
+    return len(games)
+
+
+def _position_key(board) -> str:
+    """Piece placement, side to move, castling and en passant: the position without the move counters."""
+    return " ".join(board.fen().split()[:4])
+
+
+def _index_games(records: list) -> None:
+    """Adds games to the opponent statistics and the opening experience (first EXPERIENCE_PLIES plies):
+    experience[position][move] = [wins, draws, losses] of the bot after playing move there,
+    replies[opponent][position][move] = how often that opponent chose move there."""
+    import chess  # python-chess, installed for the bot
+    with _archive_lock:
+        for g in records:
+            if not g.get("id") or g["id"] in _archive["games"] or g.get("result") not in ("win", "draw", "loss"):
+                continue
+            _archive["games"][g["id"]] = {"endedAt": g.get("endedAt"), "opponent": g["opponent"]["id"]}
+            o = g["opponent"]
+            s = _archive["opponents"].setdefault(o["id"], {
+                "id": o["id"], "name": o.get("name") or o["id"], "title": o.get("title"), "rating": None,
+                "games": 0, "wins": 0, "draws": 0, "losses": 0, "lastPlayed": 0,
+                "core": {"games": 0, "wins": 0, "draws": 0, "losses": 0}, "repeated": 0, "sameMove": 0})
+            key = {"win": "wins", "draw": "draws", "loss": "losses"}[g["result"]]
+            s["games"] += 1
+            s[key] += 1
+            if (g.get("endedAt") or 0) >= CORE_SINCE_MS:
+                s["core"]["games"] += 1
+                s["core"][key] += 1
+            if (g.get("endedAt") or 0) >= s["lastPlayed"]:
+                s["lastPlayed"] = g.get("endedAt") or 0
+                s["name"] = o.get("name") or s["name"]
+                s["title"] = o.get("title") or s["title"]
+                s["rating"] = o.get("rating") or s["rating"]
+            outcome = {"win": 0, "draw": 1, "loss": 2}[g["result"]]
+            board = chess.Board()
+            mine = chess.WHITE if g.get("color") == "white" else chess.BLACK
+            replies = _archive["replies"].setdefault(o["id"], {})
+            ours = _archive["ours"].setdefault(o["id"], {})
+            for uci in (g.get("moves") or [])[:EXPERIENCE_PLIES]:
+                try:
+                    move = chess.Move.from_uci(uci)
+                except ValueError:
+                    break
+                if move not in board.legal_moves:
+                    break
+                pos = _position_key(board)
+                if board.turn == mine:
+                    stats = _archive["experience"].setdefault(pos, {}).setdefault(uci, [0, 0, 0])
+                    stats[outcome] += 1
+                    ours.setdefault(pos, {}).setdefault(uci, [0, 0, 0])[outcome] += 1
+                else:
+                    seen = replies.setdefault(pos, {})
+                    if seen:  # the opponent was here before: did it choose the same move again?
+                        s["repeated"] += 1
+                        if uci in seen:
+                            s["sameMove"] += 1
+                    seen[uci] = seen.get(uci, 0) + 1
+                board.push(move)
+        _archive["version"] += 1
+
+
+def opponents(limit: int = 40) -> list:
+    """The most recent opponents with the results against them (all games and since the core engine) and how
+    predictable they are: the share of repeated opening positions in which they played the same move again."""
+    with _archive_lock:
+        rows = sorted(_archive["opponents"].values(), key=lambda o: -o["lastPlayed"])[:limit]
+        rows = json.loads(json.dumps(rows))
+    for o in rows:
+        n = o["games"]
+        o["score"] = (o["wins"] + o["draws"] / 2) / n if n else None
+        o["determinism"] = round(o["sameMove"] / o["repeated"], 3) if o["repeated"] >= 3 else None
+    return rows
+
+
+def experience(board, opponent_id: Optional[str] = None) -> dict:
+    """What the archive knows about this position: the bot's earlier moves with [wins, draws, losses] after
+    them, and (for a known opponent) that opponent's earlier replies when it was to move here."""
+    pos = _position_key(board)
+    with _archive_lock:
+        ours = json.loads(json.dumps(_archive["experience"].get(pos, {})))
+        theirs = dict(_archive["replies"].get((opponent_id or "").lower(), {}).get(pos, {}))
+    return {"moves": ours, "opponentMoves": theirs}
+
+
+def root_penalties(board, opponent_id: Optional[str], my_rating: Optional[int] = None,
+                   opponent_rating: Optional[int] = None) -> dict:
+    """Centipawn penalties for the bot's moves in this opening position (engine option RootPenalty): the engine
+    still plays a penalised move when it is better than the alternatives by more than the penalty, so it leaves
+    a line it lost before only where that is cheap. Empty after the first EXPERIENCE_PLIES plies."""
+    if board.ply() >= EXPERIENCE_PLIES:
+        return {}
+    pos = _position_key(board)
+    weaker = my_rating is not None and opponent_rating is not None and my_rating - opponent_rating >= 100
+    penalties = {}
+    with _archive_lock:
+        for uci, (w, d, l) in _archive["experience"].get(pos, {}).items():
+            n = w + d + l
+            if n >= 3 and (w + d / 2) / n < 0.3:
+                penalties[uci] = PENALTY_GLOBAL
+        for uci, (w, d, l) in _archive["ours"].get((opponent_id or "").lower(), {}).get(pos, {}).items():
+            if l > w:
+                penalties[uci] = max(penalties.get(uci, 0), min(PENALTY_MAX, PENALTY_PER_LOSS * (l - w)))
+            elif d > 0 and w == 0 and l == 0 and weaker:
+                penalties[uci] = max(penalties.get(uci, 0), PENALTY_DRAW_WEAKER)
+    legal = {m.uci() for m in board.legal_moves}
+    return {m: cp for m, cp in penalties.items() if m in legal}
+
+
+def expected_gain(opponent_id: Optional[str], opponent_rating: Optional[int], my_rating: Optional[int]) -> float:
+    """How much better than its rating predicts the bot does against this opponent: the score since the core
+    engine, shrunk towards the rating expectation (4 virtual games), minus that expectation. Positive = a
+    challenge is likely to gain rating; 0 for unknown opponents."""
+    if not opponent_rating or not my_rating:
+        return 0.0
+    expected = 1.0 / (1.0 + 10 ** ((opponent_rating - my_rating) / 400.0))
+    with _archive_lock:
+        row = _archive["opponents"].get((opponent_id or "").lower())
+        core = dict(row["core"]) if row else None
+    if not core or not core["games"]:
+        return 0.0
+    n = core["games"]
+    score = (core["wins"] + core["draws"] / 2) / n
+    return (n * score + 4 * expected) / (n + 4) - expected
+
+
+def backfill_archive() -> int:
+    """Once (when games-lichess.jsonl is missing): the account's earlier games from ONE public export request,
+    so the opponent statistics start with the whole history. Retried at most every six hours on failure."""
+    target = DATA_DIR / LICHESS_ARCHIVE
+    if target.exists() or time.time() - _backfill["lastAttempt"] < 6 * 3600:
+        return 0
+    _backfill["lastAttempt"] = time.time()
+    import chess
+    raw = _get(f"{LICHESS}/api/games/user/{_username()}?moves=true&opening=true",
+               accept="application/x-ndjson", timeout=120).decode("utf-8")
+    records = []
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        g = json.loads(line)
+        entry = _game_entry(g)
+        if not entry or entry["result"] == "aborted":
+            continue
+        players = g.get("players", {})
+        opp = players.get("black" if entry["color"] == "white" else "white", {})
+        board, ucis = chess.Board(), []
+        for san in (g.get("moves") or "").split():
+            try:
+                move = board.parse_san(san)
+            except ValueError:
+                break
+            ucis.append(move.uci())
+            board.push(move)
+        records.append({"id": entry["id"], "src": "lichess", "endedAt": entry["endedAt"], "speed": entry["perf"],
+                        "rated": entry["rated"], "clock": entry["clock"], "color": entry["color"],
+                        "rating": entry["rating"],
+                        "opponent": {"id": ((opp.get("user") or {}).get("id") or entry["opponent"] or "?").lower(),
+                                     "name": entry["opponent"], "title": entry["opponentTitle"],
+                                     "rating": entry["opponentRating"]},
+                        "result": entry["result"], "status": entry["status"], "opening": entry["opening"],
+                        "moves": ucis})
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = DATA_DIR / (LICHESS_ARCHIVE + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        for r in sorted(records, key=lambda r: r.get("endedAt") or 0):
+            f.write(json.dumps(r, separators=(",", ":")) + "\n")
+    tmp.replace(target)
+    load_archive()
+    print(f"[archive] imported {len(records)} earlier games from Lichess")
+    return len(records)
+
+
+# ------------------------------------------------------------------ the engine's network (for the app)
+
+def _engine_jar() -> Optional[Path]:
+    folder = Path(os.environ.get("BOT_JAR_DIR", "") or ".")
+    version = re.compile(r"chess-engine-(\d+(?:\.\d+)*)-uci\.jar$")
+    jars = [p for p in folder.glob("chess-engine-*-uci.jar") if version.search(p.name)]
+    if not jars:
+        return None
+    return max(jars, key=lambda p: tuple(int(x) for x in version.search(p.name).group(1).split(".")))
+
+
+def network():
+    """(bytes, meta) of the NNUE network inside the engine jar (or ALIEKNEK_NNUE_FILE), read once."""
+    with _lock:
+        if _net["loaded"]:
+            return _net["bin"], _net["meta"]
+    data = None
+    override = os.environ.get("ALIEKNEK_NNUE_FILE")
+    try:
+        if override:
+            data = Path(override).read_bytes()
+        else:
+            jar = _engine_jar()
+            if jar is not None:
+                with zipfile.ZipFile(jar) as z:
+                    for name in ("core/nnue.bin", "BOOT-INF/classes/core/nnue.bin"):
+                        if name in z.namelist():
+                            data = z.read(name)
+                            break
+    except (OSError, zipfile.BadZipFile) as e:
+        print(f"[nnue] could not read the network: {e}")
+    meta = _network_meta(data) if data else None
+    with _lock:
+        _net.update({"loaded": True, "bin": data if meta else None, "meta": meta})
+        return _net["bin"], _net["meta"]
+
+
+def _network_meta(data: bytes) -> Optional[dict]:
+    if len(data) < 28 or data[:4] != b"ALNN":
+        return None
+    ints = [int.from_bytes(data[4 + 4 * i:8 + 4 * i], "little", signed=True) for i in range(6)]
+    version, hidden, qa, qb, scale = ints[:5]
+    buckets = ints[5] if version >= 2 else 1
+    inputs = 768
+    return {"version": version, "hidden": hidden, "qa": qa, "qb": qb, "scale": scale, "buckets": buckets,
+            "inputs": inputs, "params": inputs * hidden + hidden + 2 * hidden * buckets + buckets,
+            "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
 
 
 # ------------------------------------------------------------------ Lichess statistics
@@ -383,9 +687,9 @@ def _username() -> str:
     return os.environ.get("ALIEKNEK_NAME", "Alieknek")
 
 
-def _get(url: str, accept: str = "application/json") -> bytes:
+def _get(url: str, accept: str = "application/json", timeout: int = 20) -> bytes:
     request = urllib.request.Request(url, headers={"Accept": accept, "User-Agent": "AlieknekStatus/1.0"})
-    with urllib.request.urlopen(request, timeout=20) as response:
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         return response.read()
 
 
@@ -550,6 +854,11 @@ def _lichess_loop() -> None:
     while True:
         started = time.time()
         try:
+            if backfill_archive():
+                time.sleep(60)  # one request at a time, with a pause before the next
+        except Exception as e:
+            print(f"[archive] import of earlier games failed: {e}")
+        try:
             refresh_lichess()
         except Exception as e:  # network trouble or HTTP 429: keep the last data, try again later
             print(f"[lichess-stats] refresh failed: {e}")
@@ -592,6 +901,9 @@ def snapshot() -> dict:
     snap["last24h"] = _last24h(lichess["games"])
     snap["stats"] = _stats(lichess["games"])
     snap["history"] = _recent_history()
+    snap["opponents"] = opponents()
+    with _archive_lock:
+        snap["archivedGames"] = len(_archive["games"])
     with _lock:
         snap["engineName"] = _engine["name"]
     snap.update({
@@ -635,6 +947,22 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/status.json":
             body = json.dumps(snapshot()).encode("utf-8")
             return self._send(200, "application/json", body, cache=False)
+        if path in ("/nnue.json", "/nnue.bin"):
+            # The engine's network for the app's network view: static per engine version, revalidated by ETag.
+            data, meta = network()
+            if meta is None:
+                return self._send(404, "text/plain", b"no network", cache=False)
+            etag = '"' + meta["sha256"][:32] + '"'
+            if self.headers.get("If-None-Match") == etag:
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                self.end_headers()
+                return None
+            if path == "/nnue.json":
+                with _lock:
+                    body = json.dumps({"engine": _engine["name"], **meta}).encode("utf-8")
+                return self._send(200, "application/json", body, cache=True, etag=etag)
+            return self._send(200, "application/octet-stream", data, cache=True, etag=etag)
         name = path.lstrip("/")
         target = (WATCH_DIR / name).resolve()
         if WATCH_DIR.resolve() not in target.parents or not target.is_file():
@@ -642,10 +970,12 @@ class _Handler(BaseHTTPRequestHandler):
         ctype = self.TYPES.get(target.suffix, "application/octet-stream")
         return self._send(200, ctype, target.read_bytes(), cache=True)
 
-    def _send(self, code, ctype, body, cache):
+    def _send(self, code, ctype, body, cache, etag=None):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        if etag:
+            self.send_header("ETag", etag)
         # Static files are tiny; "no-cache" makes browsers pick up a new release right away.
         self.send_header("Cache-Control", "no-cache" if cache else "no-store")
         self.end_headers()
@@ -727,6 +1057,7 @@ def start_web(port: Optional[int] = None) -> None:
     with _lock:
         _status["recent"] = _load_recent()
         _history.update(_load_history())
+    threading.Thread(target=load_archive, daemon=True, name="archive").start()
     if port <= 0:
         return
     threading.Thread(target=_lichess_loop, daemon=True, name="lichess-stats").start()

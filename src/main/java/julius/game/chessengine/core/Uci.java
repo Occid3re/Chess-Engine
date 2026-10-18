@@ -12,7 +12,7 @@ import java.nio.charset.StandardCharsets;
  */
 public final class Uci {
 
-    public static final String NAME = "Alieknek 4.0.7";
+    public static final String NAME = "Alieknek 4.0.8";
 
     static final String[] BENCH_FENS = {
             "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
@@ -37,6 +37,8 @@ public final class Uci {
     private final SearchManager manager;
     private final Position position = new Position();
     private String syzygyPath = "";
+    /** RootPenalty option, applied to the next "go" (empty = none). */
+    private String rootPenalty = "";
 
     public Uci(PrintStream out) {
         this(out::println);
@@ -94,6 +96,8 @@ public final class Uci {
                 send("option name SyzygyPath type string default <empty>");
                 send("option name Ponder type check default false");
                 send("option name UseNNUE type check default true");
+                send("option name Contempt type spin default 0 min -200 max 200");
+                send("option name RootPenalty type string default <empty>");
                 if (Tune.enabled()) {
                     for (Tune.Param p : Tune.params()) {
                         send("option name " + p.name() + " type spin default " + p.defaultValue()
@@ -153,6 +157,9 @@ public final class Uci {
             case "threads" -> manager.setThreads(Integer.parseInt(value));
             case "move overhead" -> manager.setMoveOverhead(Integer.parseInt(value));
             case "usennue" -> manager.useNnue = Boolean.parseBoolean(value);
+            case "contempt" -> manager.setContempt(Integer.parseInt(value));
+            // "e2e4:25 d2d4:10" (or "none"): root moves that must be this many centipawns better to be chosen
+            case "rootpenalty" -> rootPenalty = value.equalsIgnoreCase("none") || value.equals("<empty>") ? "" : value;
             case "syzygypath" -> {
                 if (!value.equals(syzygyPath)) {
                     syzygyPath = value;
@@ -209,12 +216,44 @@ public final class Uci {
                 case "movetime" -> l.movetime = Long.parseLong(t[++i]);
                 case "infinite" -> l.infinite = true;
                 case "ponder" -> l.ponder = true;
+                case "searchmoves" -> {
+                    java.util.List<Integer> list = new java.util.ArrayList<>();
+                    while (i + 1 < t.length && !GO_KEYWORDS.contains(t[i + 1])) {
+                        int m = position.parseUciMove(t[++i]);
+                        if (m != Move.NONE) list.add(m);
+                    }
+                    if (!list.isEmpty()) l.searchMoves = list.stream().mapToInt(Integer::intValue).toArray();
+                }
                 default -> {
                 }
             }
         }
+        applyRootPenalty(l);
         if (!l.hasClock() && l.movetime == 0 && l.depth == 0 && l.nodes == 0) l.infinite = true;
         manager.go(new Position(position), l, this::send);
+    }
+
+    private static final java.util.Set<String> GO_KEYWORDS = java.util.Set.of("wtime", "btime", "winc", "binc",
+            "movestogo", "depth", "nodes", "mate", "movetime", "infinite", "ponder", "searchmoves");
+
+    /** Resolves the RootPenalty option ("e2e4:25 d2d4:10") against the position about to be searched. */
+    private void applyRootPenalty(SearchLimits l) {
+        if (rootPenalty.isEmpty()) return;
+        java.util.List<int[]> list = new java.util.ArrayList<>();
+        for (String item : rootPenalty.split("[\\s,]+")) {
+            int colon = item.indexOf(':');
+            if (colon <= 0) continue;
+            try {
+                int m = position.parseUciMove(item.substring(0, colon));
+                int cp = Math.max(0, Math.min(1000, Integer.parseInt(item.substring(colon + 1))));
+                if (m != Move.NONE && cp > 0) list.add(new int[]{m, cp});
+            } catch (NumberFormatException ignored) {
+                // a malformed entry is skipped
+            }
+        }
+        if (list.isEmpty()) return;
+        l.penaltyMoves = list.stream().mapToInt(e -> e[0]).toArray();
+        l.penaltyCp = list.stream().mapToInt(e -> e[1]).toArray();
     }
 
     private void bench(int depth) {

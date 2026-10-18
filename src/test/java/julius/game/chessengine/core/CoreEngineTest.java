@@ -112,6 +112,71 @@ class CoreEngineTest {
         }
     }
 
+    /** Sends a "go" and waits for its bestmove; returns all lines the engine printed for it. */
+    private static java.util.List<String> goAndWait(Uci uci, java.util.List<String> out, String go) throws InterruptedException {
+        int from = out.size();
+        assertTrue(uci.handle(go));
+        long deadline = System.currentTimeMillis() + 30_000;
+        while (System.currentTimeMillis() < deadline) {
+            synchronized (out) {
+                for (int i = from; i < out.size(); i++) {
+                    if (out.get(i).startsWith("bestmove")) return new java.util.ArrayList<>(out.subList(from, i + 1));
+                }
+            }
+            Thread.sleep(5);
+        }
+        throw new AssertionError("no bestmove for " + go);
+    }
+
+    private static String bestmove(java.util.List<String> lines) {
+        return lines.get(lines.size() - 1).split(" ")[1];
+    }
+
+    private static int lastScore(java.util.List<String> lines) {
+        for (int i = lines.size() - 1; i >= 0; i--) {
+            String[] t = lines.get(i).split(" ");
+            for (int k = 0; k + 2 < t.length; k++) {
+                if (t[k].equals("score") && t[k + 1].equals("cp")) return Integer.parseInt(t[k + 2]);
+            }
+        }
+        throw new AssertionError("no score in " + lines);
+    }
+
+    @Test
+    void searchmovesRestrictsTheRootMoves() throws InterruptedException {
+        java.util.List<String> out = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        Uci uci = new Uci(out::add);
+        uci.handle("position startpos");
+        String best = bestmove(goAndWait(uci, out, "go depth 6 searchmoves a2a3 h2h3"));
+        assertTrue(best.equals("a2a3") || best.equals("h2h3"), best);
+    }
+
+    @Test
+    void rootPenaltyMakesTheEngineDeviateOnlyWhenItIsLarge() throws InterruptedException {
+        java.util.List<String> out = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        Uci uci = new Uci(out::add);
+        uci.handle("position startpos moves e2e4 e7e5 g1f3");
+        String best = bestmove(goAndWait(uci, out, "go depth 8"));
+        uci.handle("ucinewgame");
+        uci.handle("setoption name RootPenalty value " + best + ":400");
+        assertFalse(best.equals(bestmove(goAndWait(uci, out, "go depth 8"))), "a 400 cp penalty must change the move");
+        uci.handle("ucinewgame");
+        uci.handle("setoption name RootPenalty value none");
+        assertEquals(best, bestmove(goAndWait(uci, out, "go depth 8")));
+    }
+
+    @Test
+    void contemptMakesDrawsWorseForTheRootSide() throws InterruptedException {
+        java.util.List<String> out = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        Uci uci = new Uci(out::add);
+        // King and knight against king: every move leads to a dead draw (insufficient material)
+        uci.handle("position fen 8/8/8/4k3/8/8/8/K6N w - - 0 1");
+        assertTrue(Math.abs(lastScore(goAndWait(uci, out, "go depth 4"))) <= 2);
+        uci.handle("setoption name Contempt value 50");
+        int score = lastScore(goAndWait(uci, out, "go depth 4"));
+        assertTrue(score >= -52 && score <= -48, "draw with contempt 50: " + score);
+    }
+
     @Test
     void findsMateInTwo() {
         SearchManager manager = new SearchManager(16, 1);

@@ -87,6 +87,13 @@ ACCEPT_TC_TYPES = {"bullet", "blitz", "rapid", "classical"}  # which TCs to acce
 USE_ENGINE_CLOCK = os.environ.get("BOT_ENGINE_CLOCK", "1") == "1"
 ENGINE_MOVE_OVERHEAD_MS = int(os.environ.get("BOT_MOVE_OVERHEAD_MS", "150"))
 
+# Rating-aware contempt: centipawns a draw is worth less per 100 rating points the opponent is below the bot
+# (0 = off until a match confirms it helps), capped at BOT_CONTEMPT_MAX.
+CONTEMPT_PER_100 = int(os.environ.get("BOT_CONTEMPT_PER_100", "0"))
+CONTEMPT_MAX = int(os.environ.get("BOT_CONTEMPT_MAX", "30"))
+# Opening experience from the game archive (engine option RootPenalty): leave lines that lost before.
+USE_EXPERIENCE = os.environ.get("BOT_EXPERIENCE", "1") == "1"
+
 # Game concurrency (helps prevent overload)
 MAX_CONCURRENT_GAMES = int(os.environ.get("MAX_CONCURRENT_GAMES", "1"))
 # Think on the opponent's time (only sensible when one game runs at a time)
@@ -674,6 +681,19 @@ def play_game(client: berserk.Client,
     # Our own latency per move, measured as we go: the engine gets that much less clock.
     lag = _LagMeter()
     received = time.monotonic()
+    # Opponent id and both ratings (from gameFull): opening experience and contempt per move.
+    who = {"opponent": None, "me": None, "them": None}
+
+    def _move_options(current_board: chess.Board) -> dict:
+        options = {}
+        if svc is not None and USE_EXPERIENCE and "RootPenalty" in engine.options:
+            penalties = svc.root_penalties(current_board, who["opponent"], who["me"], who["them"])
+            options["RootPenalty"] = " ".join(f"{m}:{cp}" for m, cp in sorted(penalties.items())) or "none"
+            if penalties:
+                print(f"[experience] ply {current_board.ply()} vs {who['opponent']}: penalties {penalties}")
+        if CONTEMPT_PER_100 and "Contempt" in engine.options and who["me"] and who["them"]:
+            options["Contempt"] = max(0, min(CONTEMPT_MAX, round((who["me"] - who["them"]) * CONTEMPT_PER_100 / 100)))
+        return options
 
     def _think_and_send(current_board: chess.Board, current_state: dict, base_slack: float):
         """Search with the measured latency taken off the clocks, post the move, update the latency."""
@@ -681,7 +701,8 @@ def play_game(client: berserk.Client,
         limit = build_limit(current_state, calc_move_time(current_state, my_color_is_white, clock_initial, clock_increment),
                             lag.slack(base_slack))
         started = time.monotonic()
-        result = engine.play(current_board, limit, ponder=USE_PONDER, info=chess.engine.INFO_BASIC | chess.engine.INFO_SCORE)
+        result = engine.play(current_board, limit, ponder=USE_PONDER, info=chess.engine.INFO_BASIC | chess.engine.INFO_SCORE,
+                             options=_move_options(current_board))
         searched = time.monotonic() - started
         if result is None or result.move is None:
             return result, False
@@ -777,6 +798,9 @@ def play_game(client: berserk.Client,
                 white_id = event["white"]["id"]
                 black_id = event["black"]["id"]
                 my_color_is_white = (white_id == me_id)
+                mine, theirs = (event["white"], event["black"]) if my_color_is_white else (event["black"], event["white"])
+                who.update({"opponent": (theirs.get("id") or "").lower() or None,
+                            "me": mine.get("rating"), "them": theirs.get("rating")})
                 if svc is not None:
                     svc.game_started(game_id, event, me_id)
                 state = event.get("state", {})
@@ -1019,7 +1043,12 @@ def find_similar_bots(client: berserk.Client,
             if r and not prov and abs(r - my_rating) <= delta:
                 matches.append((uid, r))
 
-    matches.sort(key=lambda t: abs(t[1] - my_rating))
+    # Best expected rating gain first (how much better than their rating predicts the bot did against them
+    # since the core engine, from the game archive), then the closest rating.
+    if svc is not None:
+        matches.sort(key=lambda t: (-round(svc.expected_gain(t[0], t[1], my_rating), 3), abs(t[1] - my_rating)))
+    else:
+        matches.sort(key=lambda t: abs(t[1] - my_rating))
     chosen = [u for (u, _) in matches[:max_candidates]]
     print(f"[outbound] chosen targets: {chosen}")
     return chosen

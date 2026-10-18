@@ -59,8 +59,24 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
 - Match harness: `E:\ChessEngines\harness\` (sprt.sh, match.sh, vs_sf.sh, smp.sh, snap.sh, elite_openings.epd);
   snapshots in `E:\ChessEngines\v5-dev\<name>\run.bat`
 - Browser UI: `ChessEngineApplication` (Spring Boot) serves `static/` and `/ws/uci`, one core `Uci` per WebSocket
+- UCI extras (all off by default, bench unchanged): `go searchmoves`, `Contempt` (cp a draw is worth less for the
+  root side), `RootPenalty` ("e2e4:40 d2d4:15" or "none": those root moves are searched with the window shifted by
+  the penalty, so they are only played when that much better; no exact TT store at a penalised root)
 - Server deployment (play.juliussze.at, Occid3re/play repo): `alieknek` service with play window, switch and watch page
   (`src/main/resources/py/alieknek_service.py`, `watch/`)
+
+## Lichess knowledge (bot, `alieknek_service.py`)
+
+- Game archive in the bot's data volume: `games.jsonl` (every game it plays: moves, its evals per move, opponent,
+  ratings, clock) and `games-lichess.jsonl` (the account's earlier games, imported ONCE with a single public export
+  request). Indexed at start: opponent stats (all / since the core engine, predictability = share of repeated
+  opening positions where they played the same move again), opening experience per position (first 24 plies).
+- In play: `RootPenalty` from the experience (40 cp per net loss against this opponent in this position, max 120;
+  15 cp for a line that only drew against an opponent >= 100 below; 20 cp for a move scoring < 30 % in >= 3 games
+  overall). Outbound challenges prefer opponents the bot beats more often than their rating predicts.
+  Rating-aware contempt exists (`BOT_CONTEMPT_PER_100`) but is OFF until a match shows it helps.
+- `/alieknek/nnue.json` + `/alieknek/nnue.bin` on the public watch port: the engine's network for the app's
+  network view (read from the jar once, ETag-revalidated); costs nothing during play.
 
 ## Training and tuning (`scripts/tuning`)
 

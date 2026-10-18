@@ -174,8 +174,10 @@ public final class Searcher {
         return Math.max(-TB_BOUND + 1, Math.min(TB_BOUND - 1, v));
     }
 
-    private int drawScore() {
-        return 1 - (int) (nodes & 2);
+    /** A draw, from the side to move's point of view: worth -contempt to the root side, +contempt to the other. */
+    private int drawScore(int ply) {
+        int c = mgr.contempt;
+        return 1 - (int) (nodes & 2) + ((ply & 1) == 0 ? -c : c);
     }
 
     private static int scoreToTT(int score, int ply) {
@@ -320,7 +322,7 @@ public final class Searcher {
 
         if (!root) {
             if (pos.halfmove >= 100 || pos.isInsufficientMaterial() || pos.isRepetition(rootHistPly)) {
-                return drawScore();
+                return drawScore(ply);
             }
             if (ply >= MAX_PLY) return inCheck ? 0 : evaluate(ply);
             alpha = Math.max(alpha, -MATE + ply);
@@ -476,6 +478,11 @@ public final class Searcher {
             boolean quiet = Move.isQuiet(m);
             if (skipQuiets && quiet && m != ttMove) continue;
             if (!pos.isLegal(m)) continue;
+            // Root moves can be restricted (searchmoves) or penalised: a penalised move is searched with the
+            // window shifted up by its penalty, so it is only chosen when it is that much better.
+            if (root && !mgr.rootAllowed(m)) continue;
+            final int pen = root ? mgr.rootPenalty(m) : 0;
+            final int a = alpha + pen, b = beta + pen;
             moveCount++;
             int from = Move.from(m);
             int pc = pos.board[from];
@@ -538,18 +545,19 @@ public final class Searcher {
                 if (m == killers[ply][0] || m == killers[ply][1] || m == counter) rr--;
                 if (quiet) rr -= hist / Tune.lmrHistDiv;
                 int d = Math.max(1, Math.min(newDepth, newDepth - rr));
-                score = -search(-alpha - 1, -alpha, d, ply + 1, true);
-                if (score > alpha && d < newDepth) {
-                    score = -search(-alpha - 1, -alpha, newDepth, ply + 1, !cutNode);
+                score = -search(-a - 1, -a, d, ply + 1, true);
+                if (score > a && d < newDepth) {
+                    score = -search(-a - 1, -a, newDepth, ply + 1, !cutNode);
                 }
             } else if (!pvNode || moveCount > 1) {
-                score = -search(-alpha - 1, -alpha, newDepth, ply + 1, !cutNode);
+                score = -search(-a - 1, -a, newDepth, ply + 1, !cutNode);
             }
-            if (pvNode && (moveCount == 1 || score > alpha)) {
-                score = -search(-beta, -alpha, newDepth, ply + 1, false);
+            if (pvNode && (moveCount == 1 || score > a)) {
+                score = -search(-b, -a, newDepth, ply + 1, false);
             }
             pos.unmakeMove(m);
             if (mgr.stop) return 0;
+            score -= pen;
 
             if (score > bestScore) {
                 bestScore = score;
@@ -591,7 +599,7 @@ public final class Searcher {
             for (int i = 0; i < nc; i++) gravity(captureHistory, captureHistoryIndex(capturesTried[ply][i]), -bonus);
         }
 
-        if (excluded == Move.NONE) {
+        if (excluded == Move.NONE && !(root && mgr.rootPenalised())) {
             int bound = bestScore >= beta ? BOUND_LOWER : (pvNode && bestScore > alphaOrig ? BOUND_EXACT : BOUND_UPPER);
             mgr.tt.store(key, bestMoveHere, scoreToTT(bestScore, ply), staticEval, depth, bound);
         }
@@ -617,7 +625,7 @@ public final class Searcher {
         if (id == 0 && (nodes & 1023) == 0) mgr.checkTime(this);
         if (mgr.stop) return 0;
         if (ply > selDepth) selDepth = ply;
-        if (pos.halfmove >= 100 || pos.isInsufficientMaterial() || pos.isRepetition(rootHistPly)) return drawScore();
+        if (pos.halfmove >= 100 || pos.isInsufficientMaterial() || pos.isRepetition(rootHistPly)) return drawScore(ply);
         final boolean inCheck = pos.inCheck();
         if (ply >= MAX_PLY) return inCheck ? 0 : evaluate(ply);
 

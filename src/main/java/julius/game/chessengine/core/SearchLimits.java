@@ -9,6 +9,11 @@ public final class SearchLimits {
     public long movetime;
     public boolean infinite;
     public boolean ponder;
+    /** "go searchmoves": only these root moves are searched (null = all). */
+    public int[] searchMoves;
+    /** Root moves that must be better than the others by penaltyCp[i] centipawns to be chosen (null = none). */
+    public int[] penaltyMoves;
+    public int[] penaltyCp;
 
     public boolean hasClock() {
         return wtime >= 0 || btime >= 0;

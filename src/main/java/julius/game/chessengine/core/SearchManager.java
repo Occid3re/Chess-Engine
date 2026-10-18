@@ -13,6 +13,8 @@ public final class SearchManager {
     Tablebases tablebases;
     /** Use the bundled NNUE network when one is available (hand-crafted evaluation otherwise). */
     boolean useNnue = !"false".equalsIgnoreCase(System.getProperty("core.useNnue", "true"));
+    /** Centipawns a draw is worth less than equality for the side to move at the root (0 = plain draw score). */
+    volatile int contempt;
 
     private Searcher[] searchers;
     private Thread[] threads;
@@ -55,6 +57,31 @@ public final class SearchManager {
 
     public void setTablebases(Tablebases tb) {
         tablebases = tb;
+    }
+
+    public void setContempt(int cp) {
+        contempt = Math.max(-200, Math.min(200, cp));
+    }
+
+    /** Whether a root move may be searched ("go searchmoves"). */
+    boolean rootAllowed(int move) {
+        int[] allowed = limits.searchMoves;
+        if (allowed == null) return true;
+        for (int m : allowed) if (m == move) return true;
+        return false;
+    }
+
+    /** Penalty in centipawns for a root move (RootPenalty option), 0 for most moves. */
+    int rootPenalty(int move) {
+        int[] moves = limits.penaltyMoves;
+        if (moves == null) return 0;
+        for (int i = 0; i < moves.length; i++) if (moves[i] == move) return limits.penaltyCp[i];
+        return 0;
+    }
+
+    /** True when root scores are shifted by penalties (they must not be stored as exact values). */
+    boolean rootPenalised() {
+        return limits.penaltyMoves != null && limits.penaltyMoves.length > 0;
     }
 
     public void newGame() {
@@ -210,7 +237,7 @@ public final class SearchManager {
         int n = MoveGen.generateAll(root, legal, 0);
         int legalCount = 0, onlyMove = Move.NONE;
         for (int i = 0; i < n; i++) {
-            if (root.isLegal(legal[i])) {
+            if (root.isLegal(legal[i]) && rootAllowed(legal[i])) {
                 legalCount++;
                 onlyMove = legal[i];
             }
@@ -220,7 +247,7 @@ public final class SearchManager {
             output.accept("bestmove 0000");
             return;
         }
-        if (tablebases != null && !l.infinite && l.depth == 0) {
+        if (tablebases != null && !l.infinite && l.depth == 0 && l.searchMoves == null) {
             int[] tb = tablebases.probeRoot(root);
             if (tb != null) {
                 int sc = tb[1] > 0 ? Searcher.TB_WIN - 1 : tb[1] < 0 ? -Searcher.TB_WIN + 1 : 0;
