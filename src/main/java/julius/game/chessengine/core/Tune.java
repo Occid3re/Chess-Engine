@@ -39,9 +39,6 @@ public final class Tune {
     public static int bonusMul = 166;
     public static int bonusSub = 139;
     public static int bonusMax = 2119;
-    /** Time manager: optimum time factor = (effortBase - effortMul * share of nodes on the best move) / 100. */
-    public static int effortBase = 160;
-    public static int effortMul = 100;
 
     private static final Map<String, Param> PARAMS = new LinkedHashMap<>();
 
@@ -67,8 +64,6 @@ public final class Tune {
         add("bonusMul", bonusMul, 50, 400, 15);
         add("bonusSub", bonusSub, 0, 300, 15);
         add("bonusMax", bonusMax, 800, 4000, 150);
-        add("effortBase", effortBase, 100, 250, 8);
-        add("effortMul", effortMul, 0, 200, 8);
     }
 
     private Tune() {
