@@ -24,7 +24,9 @@ Usage (PyTorch with CUDA, e.g. E:/Tools/torch-venv):
       --hidden 256 --epochs 15
 """
 import argparse
+import os
 import struct
+import sys
 import time
 from pathlib import Path
 
@@ -231,7 +233,21 @@ def export(net: Net, path: Path) -> None:
         f.write(b2.astype("<i4").tobytes())
 
 
+def raise_priority() -> None:
+    """Self-play usually fills every core: without a higher priority the Python thread feeding the GPU starves
+    (0.27M instead of 0.8M positions/s measured)."""
+    if sys.platform == "win32":
+        import ctypes
+        ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x8000)  # above normal
+    else:
+        try:
+            os.nice(-5)
+        except OSError:
+            pass
+
+
 def main():
+    raise_priority()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data", nargs="+", required=True, help="packed .bin files (core.tools.PackData)")
     ap.add_argument("--out", required=True)
