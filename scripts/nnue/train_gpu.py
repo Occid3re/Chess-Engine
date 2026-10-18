@@ -57,6 +57,7 @@ def configure(layout):
 
 
 configure("kb8")
+HALF = True  # fp16 tensor-core feature transformer on CUDA (--fp32 turns it off)
 
 
 def output_bucket(pieces: torch.Tensor, buckets: int) -> torch.Tensor:
@@ -125,15 +126,15 @@ class Net(torch.nn.Module):
         self.w2 = torch.nn.Parameter(torch.zeros(buckets, 2, hidden))
         self.b2 = torch.nn.Parameter(torch.zeros(buckets))
         with torch.no_grad():
-            # Java trainer: uniform(-1, 1) * sqrt(1 / 32) for the first layer; the factoriser starts there, the
-            # buckets at 0 (they learn the differences); the output layer small and random
+            # as the Java trainer: first layer uniform(-1, 1) * 0.5 / sqrt(32) (with a factoriser that is where it
+            # starts, the buckets at 0: they learn the differences), output layer uniform(-1, 1) / sqrt(2H)
             self.ft.weight.zero_()
             init = slice(FACTOR, PAD) if FACTORISER else slice(0, FACTOR)
-            self.ft.weight[init].uniform_(-1, 1).mul_((1 / 32) ** 0.5)
-            self.w2.uniform_(-1, 1).mul_((1 / hidden) ** 0.5)
+            self.ft.weight[init].uniform_(-1, 1).mul_(0.5 / 32 ** 0.5)
+            self.w2.uniform_(-1, 1).mul_(1 / (2 * hidden) ** 0.5)
 
     def forward(self, batch: Batch) -> torch.Tensor:
-        if batch.indices.is_cuda:
+        if batch.indices.is_cuda and HALF:
             # dense multi-hot input [2B, rows] x weights in fp16 on the tensor cores
             rows = self.ft.weight.shape[0]
             x = torch.zeros(batch.indices.shape[0], rows, device=batch.indices.device, dtype=torch.float16)
@@ -165,6 +166,45 @@ class Net(torch.nn.Module):
         if FACTORISER:
             w = w + self.ft.weight[FACTOR:PAD].unsqueeze(0)
         return w.reshape(NUM_KB * INPUTS, self.hidden)
+
+
+class RowAdam(torch.optim.Optimizer):
+    """Adam as the Java trainer does it: for the feature-transformer table ("rows" group) only the rows whose
+    features occur in the batch are updated (moments and weights). Dense Adam would keep moving every other row on
+    its stale momentum, which matters for rarely seen features (king buckets make most rows rare)."""
+
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8):
+        super().__init__(params, dict(lr=lr, betas=betas, eps=eps, rows=False))
+
+    @torch.no_grad()
+    def step(self, closure=None):
+        for group in self.param_groups:
+            b1, b2 = group["betas"]
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                st = self.state[p]
+                if not st:
+                    st["step"] = 0
+                    st["m"] = torch.zeros_like(p)
+                    st["v"] = torch.zeros_like(p)
+                st["step"] += 1
+                g, m, v = p.grad, st["m"], st["v"]
+                bc1 = 1 - b1 ** st["step"]
+                bc2 = 1 - b2 ** st["step"]
+                if group["rows"]:
+                    rows = (g != 0).any(dim=1).nonzero().squeeze(1)
+                    gr = g.index_select(0, rows)
+                    mr = m.index_select(0, rows).mul_(b1).add_(gr, alpha=1 - b1)
+                    vr = v.index_select(0, rows).mul_(b2).addcmul_(gr, gr, value=1 - b2)
+                    m.index_copy_(0, rows, mr)
+                    v.index_copy_(0, rows, vr)
+                    upd = (mr / bc1) / ((vr / bc2).sqrt_() + group["eps"])
+                    p.index_add_(0, rows, upd, alpha=-group["lr"])
+                else:
+                    m.mul_(b1).add_(g, alpha=1 - b1)
+                    v.mul_(b2).addcmul_(g, g, value=1 - b2)
+                    p.addcdiv_(m / bc1, (v / bc2).sqrt_().add_(group["eps"]), value=-group["lr"])
 
 
 def loss_fn(net: Net, batch: Batch, lam: float, k: float) -> torch.Tensor:
@@ -205,11 +245,14 @@ def main():
     ap.add_argument("--valid", type=float, default=0.01, help="share held out (ignored with --valid-data)")
     ap.add_argument("--valid-data", help="packed file from games NOT in the training data: the honest check")
     ap.add_argument("--layout", choices=sorted(LAYOUTS), default="kb8")
+    ap.add_argument("--fp32", action="store_true", help="exact EmbeddingBag feature transformer instead of fp16")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--chunk", type=int, default=0, help="positions per GPU chunk (default: half the free memory)")
     args = ap.parse_args()
 
     configure(args.layout)
+    global HALF
+    HALF = not args.fp32
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
@@ -241,8 +284,9 @@ def main():
           f"{' ' + torch.cuda.get_device_name(0) if device.type == 'cuda' else ''}", flush=True)
     kb_map = torch.tensor(KING_BUCKETS, device=device)
     net = Net(args.hidden, args.buckets).to(device)
-    opt = torch.optim.Adam(net.parameters(), lr=args.lr)
-    scaler = torch.cuda.amp.GradScaler(enabled=device.type == "cuda")
+    others = [q for name, q in net.named_parameters() if name != "ft.weight"]
+    opt = RowAdam([{"params": [net.ft.weight], "rows": True}, {"params": others}], lr=args.lr)
+    scaler = torch.cuda.amp.GradScaler(enabled=device.type == "cuda" and HALF)
     steps_per_epoch = sum((hi - lo) // args.batch for _, lo, hi in chunks)
     total = steps_per_epoch * args.epochs
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: 0.1 ** (s / max(1, total - 1)))
