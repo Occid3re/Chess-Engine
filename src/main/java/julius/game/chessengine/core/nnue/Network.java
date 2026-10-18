@@ -9,14 +9,18 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * Quantised (768 -> H) x 2 -> 1 network with SCReLU activation.
+ * Quantised (768 * K -> H) x 2 -> 1 network with SCReLU activation.
  *
- * <p>Feature index for a perspective: side(0 = own, 1 = enemy) * 384 + pieceType * 64 + square,
- * where the square is flipped vertically for the black perspective.</p>
+ * <p>Feature index for a perspective: kingBucket * 768 + side(0 = own, 1 = enemy) * 384 + pieceType * 64 +
+ * square, where the square is flipped vertically for the black perspective and, when the network mirrors,
+ * horizontally while the perspective's own king stands on the e-h files. The king bucket is
+ * {@code kingBucketMap[own king square]} (in the perspective's frame); versions 1 and 2 have one bucket and
+ * no mirroring.</p>
  *
  * <p>File format (little endian): magic "ALNN", int version, int hidden, int qa, int qb, int scale,
- * [version 2: int buckets], then short[768*H] l1 weights (feature-major), short[H] l1 bias, and per output
- * bucket short[2H] l2 weights, then one int l2 bias per bucket. Version 1 has a single bucket.</p>
+ * [version >= 2: int buckets], [version 3: int kingBuckets, int mirror (0/1), byte[64] kingBucketMap], then
+ * short[768*K*H] l1 weights (feature-major), short[H] l1 bias, and per output bucket short[2H] l2 weights,
+ * then one int l2 bias per bucket. Version 1 has a single output bucket.</p>
  *
  * <p>Output buckets: the output layer is chosen by the number of pieces on the board, so endgames get
  * their own weights ({@link #bucketFor}).</p>
@@ -31,6 +35,11 @@ public final class Network {
     public final int qb;
     public final int scale;
     public final int buckets;
+    /** Input buckets by the perspective's own king square (1 for versions 1 and 2). */
+    public final int kingBuckets;
+    /** Mirror the board horizontally while the perspective's king is on the e-h files. */
+    public final boolean mirror;
+    private final byte[] kingBucketMap;
     // Stored widened to int so the JIT can vectorise the accumulator and output loops.
     /** One array per input feature: separate arrays (offset 0) let C2 vectorise the update loops. */
     final int[][] l1Weights;
@@ -42,14 +51,19 @@ public final class Network {
     private volatile short[][] l1Short;
     private volatile short[] l1BiasShort;
 
-    private Network(int hidden, int qa, int qb, int scale, int buckets, int[] w1, int[] b1, int[] w2, int[] b2) {
+    private Network(int hidden, int qa, int qb, int scale, int buckets, int kingBuckets, boolean mirror,
+                    byte[] kingBucketMap, int[] w1, int[] b1, int[] w2, int[] b2) {
         this.hidden = hidden;
         this.qa = qa;
         this.qb = qb;
         this.scale = scale;
         this.buckets = buckets;
-        this.l1Weights = new int[INPUTS][];
-        for (int f = 0; f < INPUTS; f++) l1Weights[f] = java.util.Arrays.copyOfRange(w1, f * hidden, (f + 1) * hidden);
+        this.kingBuckets = kingBuckets;
+        this.mirror = mirror;
+        this.kingBucketMap = kingBucketMap;
+        int inputs = INPUTS * kingBuckets;
+        this.l1Weights = new int[inputs][];
+        for (int f = 0; f < inputs; f++) l1Weights[f] = java.util.Arrays.copyOfRange(w1, f * hidden, (f + 1) * hidden);
         this.l1Bias = b1;
         this.l2Weights = new int[2 * buckets][];
         for (int r = 0; r < 2 * buckets; r++) l2Weights[r] = java.util.Arrays.copyOfRange(w2, r * hidden, (r + 1) * hidden);
@@ -61,8 +75,8 @@ public final class Network {
         if (w == null) {
             synchronized (this) {
                 if (l1Short == null) {
-                    short[][] s = new short[INPUTS][hidden];
-                    for (int f = 0; f < INPUTS; f++) {
+                    short[][] s = new short[l1Weights.length][hidden];
+                    for (int f = 0; f < l1Weights.length; f++) {
                         for (int i = 0; i < hidden; i++) s[f][i] = (short) l1Weights[f][i];
                     }
                     l1Short = s;
@@ -123,7 +137,7 @@ public final class Network {
                 throw new IOException("Not an Alieknek network file");
             }
             int version = le(in.readInt());
-            if (version != 1 && version != 2) throw new IOException("Unsupported network version " + version);
+            if (version < 1 || version > 3) throw new IOException("Unsupported network version " + version);
             int hidden = le(in.readInt());
             int qa = le(in.readInt());
             int qb = le(in.readInt());
@@ -132,7 +146,19 @@ public final class Network {
             if (buckets < 1 || buckets > 32) throw new IOException("Bad bucket count " + buckets);
             if (hidden <= 0 || hidden > 4096 || hidden % 32 != 0) throw new IOException("Bad hidden size " + hidden);
             if (qa > 255 || qb > 512) throw new IOException("Unsupported quantisation qa=" + qa + " qb=" + qb);
-            int[] w1 = readShorts(in, INPUTS * hidden);
+            int kingBuckets = 1;
+            boolean mirror = false;
+            byte[] map = new byte[64];
+            if (version >= 3) {
+                kingBuckets = le(in.readInt());
+                mirror = le(in.readInt()) != 0;
+                in.readFully(map);
+                if (kingBuckets < 1 || kingBuckets > 64) throw new IOException("Bad king bucket count " + kingBuckets);
+                for (byte b : map) {
+                    if (b < 0 || b >= kingBuckets) throw new IOException("Bad king bucket map entry " + b);
+                }
+            }
+            int[] w1 = readShorts(in, INPUTS * kingBuckets * hidden);
             int[] b1 = readShorts(in, hidden);
             int[] w2 = readShorts(in, 2 * hidden * buckets);
             int[] b2 = new int[buckets];
@@ -144,7 +170,7 @@ public final class Network {
             if (32L * maxW + maxB > Short.MAX_VALUE) {
                 throw new IOException("First-layer weights too large for int16 accumulators: max |w| " + maxW);
             }
-            return new Network(hidden, qa, qb, scale, buckets, w1, b1, w2, b2);
+            return new Network(hidden, qa, qb, scale, buckets, kingBuckets, mirror, map, w1, b1, w2, b2);
         }
     }
 
@@ -160,27 +186,42 @@ public final class Network {
         return a;
     }
 
-    public static int featureIndex(int perspective, int piece, int sq) {
+    /** Input feature of a piece for a perspective whose own king stands on {@code ownKingSq}. */
+    public int feature(int perspective, int piece, int sq, int ownKingSq) {
         int color = Position.color(piece);
         int type = Position.type(piece);
-        if (perspective == Position.WHITE) {
-            return (color == Position.WHITE ? 0 : 384) + type * 64 + sq;
-        }
-        return (color == Position.BLACK ? 0 : 384) + type * 64 + (sq ^ 56);
+        int s = perspective == Position.WHITE ? sq : sq ^ 56;
+        int k = perspective == Position.WHITE ? ownKingSq : ownKingSq ^ 56;
+        if (mirror && (k & 7) >= 4) s ^= 7;
+        return kingBucketMap[k] * INPUTS + (color == perspective ? 0 : 384) + type * 64 + s;
     }
 
-    /** Full accumulator refresh for both perspectives. */
-    public void refresh(Position p, int[] accWhite, int[] accBlack) {
-        System.arraycopy(l1Bias, 0, accWhite, 0, hidden);
-        System.arraycopy(l1Bias, 0, accBlack, 0, hidden);
+    /** Whether the perspective's features stay the same frame (bucket and mirroring) when its king moves. */
+    public boolean sameFrame(int perspective, int kingFrom, int kingTo) {
+        int a = perspective == Position.WHITE ? kingFrom : kingFrom ^ 56;
+        int b = perspective == Position.WHITE ? kingTo : kingTo ^ 56;
+        return kingBucketMap[a] == kingBucketMap[b] && (!mirror || ((a & 7) >= 4) == ((b & 7) >= 4));
+    }
+
+    /** Active features of one perspective in a position. */
+    public int features(Position p, int perspective, int[] out) {
+        int king = Long.numberOfTrailingZeros(p.pieces(perspective, Position.KING));
+        int n = 0;
         long occ = p.all;
         while (occ != 0L) {
             int sq = Long.numberOfTrailingZeros(occ);
             occ &= occ - 1;
-            int pc = p.board[sq];
-            add(accWhite, featureIndex(Position.WHITE, pc, sq));
-            add(accBlack, featureIndex(Position.BLACK, pc, sq));
+            out[n++] = feature(perspective, p.board[sq], sq, king);
         }
+        return n;
+    }
+
+    /** Full accumulator refresh of one perspective. */
+    public void refresh(Position p, int perspective, int[] acc) {
+        System.arraycopy(l1Bias, 0, acc, 0, hidden);
+        int[] f = new int[32];
+        int n = features(p, perspective, f);
+        for (int i = 0; i < n; i++) add(acc, f[i]);
     }
 
     void add(int[] acc, int feature) {

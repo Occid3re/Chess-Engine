@@ -37,18 +37,10 @@ final class VectorAccumulators extends Accumulators {
     }
 
     @Override
-    protected void refreshPly(Position p, int ply) {
-        short[] wa = white[ply], ba = black[ply];
-        System.arraycopy(b1, 0, wa, 0, b1.length);
-        System.arraycopy(b1, 0, ba, 0, b1.length);
-        long occ = p.all;
-        while (occ != 0L) {
-            int sq = Long.numberOfTrailingZeros(occ);
-            occ &= occ - 1;
-            int pc = p.board[sq];
-            add(wa, w1[Network.featureIndex(Position.WHITE, pc, sq)]);
-            add(ba, w1[Network.featureIndex(Position.BLACK, pc, sq)]);
-        }
+    protected void refreshPly(int persp, int ply, int[] features, int n) {
+        short[] acc = persp == Position.WHITE ? white[ply] : black[ply];
+        System.arraycopy(b1, 0, acc, 0, b1.length);
+        for (int i = 0; i < n; i++) add(acc, w1[features[i]]);
     }
 
     private static void add(short[] acc, short[] w) {
@@ -58,15 +50,15 @@ final class VectorAccumulators extends Accumulators {
     }
 
     @Override
-    protected void copyPly(int from, int to) {
-        System.arraycopy(white[from], 0, white[to], 0, net.hidden);
-        System.arraycopy(black[from], 0, black[to], 0, net.hidden);
+    protected void copyPly(int persp, int from, int to) {
+        short[][] s = persp == Position.WHITE ? white : black;
+        System.arraycopy(s[from], 0, s[to], 0, net.hidden);
     }
 
     @Override
-    protected void updatePly(int from, int to, int[] d) {
-        update(white[from], white[to], d[0], d[1], d[2], d[3]);
-        update(black[from], black[to], d[4], d[5], d[6], d[7]);
+    protected void updatePly(int persp, int from, int to, int sub1, int sub2, int add1, int add2) {
+        short[][] s = persp == Position.WHITE ? white : black;
+        update(s[from], s[to], sub1, sub2, add1, add2);
     }
 
     private void update(short[] src, short[] dst, int sub1, int sub2, int add1, int add2) {

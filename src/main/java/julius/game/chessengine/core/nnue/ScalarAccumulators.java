@@ -15,20 +15,22 @@ final class ScalarAccumulators extends Accumulators {
     }
 
     @Override
-    protected void refreshPly(Position p, int ply) {
-        net.refresh(p, white[ply], black[ply]);
+    protected void refreshPly(int persp, int ply, int[] features, int n) {
+        int[] acc = persp == Position.WHITE ? white[ply] : black[ply];
+        System.arraycopy(net.l1Bias, 0, acc, 0, net.hidden);
+        for (int i = 0; i < n; i++) net.add(acc, features[i]);
     }
 
     @Override
-    protected void copyPly(int from, int to) {
-        System.arraycopy(white[from], 0, white[to], 0, net.hidden);
-        System.arraycopy(black[from], 0, black[to], 0, net.hidden);
+    protected void copyPly(int persp, int from, int to) {
+        int[][] s = persp == Position.WHITE ? white : black;
+        System.arraycopy(s[from], 0, s[to], 0, net.hidden);
     }
 
     @Override
-    protected void updatePly(int from, int to, int[] d) {
-        net.update(white[from], white[to], d[0], d[1], d[2], d[3]);
-        net.update(black[from], black[to], d[4], d[5], d[6], d[7]);
+    protected void updatePly(int persp, int from, int to, int sub1, int sub2, int add1, int add2) {
+        int[][] s = persp == Position.WHITE ? white : black;
+        net.update(s[from], s[to], sub1, sub2, add1, add2);
     }
 
     @Override

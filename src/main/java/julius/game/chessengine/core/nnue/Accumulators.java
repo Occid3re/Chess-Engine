@@ -22,17 +22,20 @@ import static julius.game.chessengine.core.Position.*;
 public abstract class Accumulators {
 
     protected final Network net;
-    /** Whether the accumulators of a ply are up to date. */
-    private final boolean[] computed;
+    /** Whether the accumulator of a perspective (0 White, 1 Black) at a ply is up to date. */
+    private final boolean[][] computed;
     /**
      * Feature changes leading to a ply: [white sub1, sub2, add1, add2, black sub1, sub2, add1, add2], -1 = none;
-     * all -1 for a null move (the accumulators are copied unchanged).
+     * first entry COPY for a null move (accumulator unchanged), REFRESH when the perspective's king changed its
+     * input bucket or board half (the accumulator is rebuilt from the position).
      */
     private final int[][] delta;
+    private static final int COPY = -1, REFRESH = -2;
+    private final int[] scratch = new int[32];
 
     protected Accumulators(Network net, int maxPly) {
         this.net = net;
-        computed = new boolean[maxPly];
+        computed = new boolean[2][maxPly];
         delta = new int[maxPly][8];
     }
 
@@ -78,13 +81,20 @@ public abstract class Accumulators {
     }
 
     public final void refresh(Position p, int ply) {
-        refreshPly(p, ply);
-        computed[ply] = true;
+        refreshPerspective(p, WHITE, ply);
+        refreshPerspective(p, BLACK, ply);
+    }
+
+    private void refreshPerspective(Position p, int persp, int ply) {
+        int n = net.features(p, persp, scratch);
+        refreshPly(persp, ply, scratch, n);
+        computed[persp][ply] = true;
     }
 
     public final void pushNull(int ply) {
-        java.util.Arrays.fill(delta[ply + 1], -1);
-        computed[ply + 1] = false;
+        java.util.Arrays.fill(delta[ply + 1], COPY);
+        computed[WHITE][ply + 1] = false;
+        computed[BLACK][ply + 1] = false;
     }
 
     public final void push(Position p, int m, int ply) {
@@ -109,44 +119,73 @@ public abstract class Accumulators {
             addPc2 = subPc2;
         }
         int[] d = delta[ply + 1];
+        boolean kingMove = type(pc) == KING;
         for (int persp = 0; persp < 2; persp++) {
             int o = persp * 4;
-            d[o] = Network.featureIndex(persp, pc, from);
-            d[o + 1] = subPc2 == NO_PIECE ? -1 : Network.featureIndex(persp, subPc2, subSq2);
-            d[o + 2] = Network.featureIndex(persp, addPc1, to);
-            d[o + 3] = addPc2 == NO_PIECE ? -1 : Network.featureIndex(persp, addPc2, addSq2);
+            int king = Long.numberOfTrailingZeros(p.pieces(persp, KING));
+            if (kingMove && us == persp && !net.sameFrame(persp, from, to)) {
+                d[o] = REFRESH; // every feature of this perspective changes: rebuild it when needed
+                continue;
+            }
+            if (kingMove && us == persp) {
+                // same bucket and board half: the king's own feature moves like any other piece
+                d[o] = net.feature(persp, pc, from, from);
+                d[o + 1] = subPc2 == NO_PIECE ? -1 : net.feature(persp, subPc2, subSq2, from);
+                d[o + 2] = net.feature(persp, addPc1, to, to);
+                d[o + 3] = addPc2 == NO_PIECE ? -1 : net.feature(persp, addPc2, addSq2, to);
+                continue;
+            }
+            d[o] = net.feature(persp, pc, from, king);
+            d[o + 1] = subPc2 == NO_PIECE ? -1 : net.feature(persp, subPc2, subSq2, king);
+            d[o + 2] = net.feature(persp, addPc1, to, king);
+            d[o + 3] = addPc2 == NO_PIECE ? -1 : net.feature(persp, addPc2, addSq2, king);
         }
-        computed[ply + 1] = false;
+        computed[WHITE][ply + 1] = false;
+        computed[BLACK][ply + 1] = false;
     }
 
-    /** Brings the accumulators of ply up to date from the nearest computed ancestor. */
-    private void ensure(int ply) {
-        if (computed[ply]) return;
+    /**
+     * Brings one perspective's accumulator at ply up to date: incrementally from the nearest computed ancestor,
+     * or rebuilt from the current position when a king bucket change lies on the way.
+     */
+    private void ensure(Position p, int persp, int ply) {
+        boolean[] done = computed[persp];
+        if (done[ply]) return;
+        int o = persp * 4;
         int k = ply - 1;
-        while (!computed[k]) k--;
+        boolean rebuild = delta[ply][o] == REFRESH;
+        while (!done[k]) {
+            if (delta[k][o] == REFRESH) rebuild = true;
+            k--;
+        }
+        if (rebuild) {
+            refreshPerspective(p, persp, ply);
+            return;
+        }
         for (int j = k + 1; j <= ply; j++) {
             int[] d = delta[j];
-            if (d[0] < 0) copyPly(j - 1, j);
-            else updatePly(j - 1, j, d);
-            computed[j] = true;
+            if (d[o] == COPY) copyPly(persp, j - 1, j);
+            else updatePly(persp, j - 1, j, d[o], d[o + 1], d[o + 2], d[o + 3]);
+            done[j] = true;
         }
     }
 
     /** Evaluation in centipawns from the side to move's perspective. */
     public final int evaluate(Position p, int ply) {
-        ensure(ply);
+        ensure(p, WHITE, ply);
+        ensure(p, BLACK, ply);
         int bucket = Network.bucketFor(Long.bitCount(p.all), net.buckets);
         return evaluatePly(ply, p.side == WHITE, bucket);
     }
 
-    /** Both perspectives of ply from scratch. */
-    protected abstract void refreshPly(Position p, int ply);
+    /** One perspective's accumulator at ply from scratch: bias plus the n given features. */
+    protected abstract void refreshPly(int persp, int ply, int[] features, int n);
 
-    /** Copies ply {@code from} into ply {@code to} (null move). */
-    protected abstract void copyPly(int from, int to);
+    /** Copies one perspective's accumulator from ply {@code from} to ply {@code to} (null move). */
+    protected abstract void copyPly(int persp, int from, int to);
 
-    /** Ply {@code to} = ply {@code from} with the feature changes d (see {@link #delta}). */
-    protected abstract void updatePly(int from, int to, int[] d);
+    /** One perspective at ply {@code to} = ply {@code from} minus sub1/sub2 plus add1/add2 (-1 = none). */
+    protected abstract void updatePly(int persp, int from, int to, int sub1, int sub2, int add1, int add2);
 
     /** Network output for ply, side to move White or Black. */
     protected abstract int evaluatePly(int ply, boolean whiteToMove, int bucket);
