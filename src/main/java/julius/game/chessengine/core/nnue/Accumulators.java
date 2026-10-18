@@ -31,12 +31,20 @@ public abstract class Accumulators {
      */
     private final int[][] delta;
     private static final int COPY = -1, REFRESH = -2;
-    private final int[] scratch = new int[32];
+    /**
+     * "Finny tables": per perspective and feature frame, the piece bitboards an accumulator in the back end's
+     * cache was last built from. A refresh starts from that cached accumulator and only applies the pieces
+     * that changed since, usually a handful instead of all ~30.
+     */
+    private final long[][][] cachedPieces;
+    private final int[] adds = new int[32];
+    private final int[] subs = new int[32];
 
     protected Accumulators(Network net, int maxPly) {
         this.net = net;
         computed = new boolean[2][maxPly];
         delta = new int[maxPly][8];
+        cachedPieces = new long[2][net.frames()][12]; // empty boards: the back ends start each cache at the bias
     }
 
     /** Constructor of the Vector API back end, or null; looked up reflectively so this class never links it. */
@@ -86,8 +94,28 @@ public abstract class Accumulators {
     }
 
     private void refreshPerspective(Position p, int persp, int ply) {
-        int n = net.features(p, persp, scratch);
-        refreshPly(persp, ply, scratch, n);
+        int king = Long.numberOfTrailingZeros(p.pieces(persp, KING));
+        int frame = net.frame(persp, king);
+        long[] cached = cachedPieces[persp][frame];
+        int na = 0, ns = 0;
+        for (int pc = 0; pc < 12; pc++) {
+            long now = p.pieces[pc];
+            long gone = cached[pc] & ~now;
+            long come = now & ~cached[pc];
+            while (gone != 0L) {
+                int sq = Long.numberOfTrailingZeros(gone);
+                gone &= gone - 1;
+                subs[ns++] = net.feature(persp, pc, sq, king);
+            }
+            while (come != 0L) {
+                int sq = Long.numberOfTrailingZeros(come);
+                come &= come - 1;
+                adds[na++] = net.feature(persp, pc, sq, king);
+            }
+            cached[pc] = now;
+        }
+        cacheUpdate(persp, frame, subs, ns, adds, na);
+        cacheToPly(persp, frame, ply);
         computed[persp][ply] = true;
     }
 
@@ -178,8 +206,11 @@ public abstract class Accumulators {
         return evaluatePly(ply, p.side == WHITE, bucket);
     }
 
-    /** One perspective's accumulator at ply from scratch: bias plus the n given features. */
-    protected abstract void refreshPly(int persp, int ply, int[] features, int n);
+    /** Cached accumulator of a perspective's frame: minus the ns features in subs, plus the na in adds. */
+    protected abstract void cacheUpdate(int persp, int frame, int[] subs, int ns, int[] adds, int na);
+
+    /** Copies the cached accumulator of a perspective's frame into its accumulator at ply. */
+    protected abstract void cacheToPly(int persp, int frame, int ply);
 
     /** Copies one perspective's accumulator from ply {@code from} to ply {@code to} (null move). */
     protected abstract void copyPly(int persp, int from, int to);

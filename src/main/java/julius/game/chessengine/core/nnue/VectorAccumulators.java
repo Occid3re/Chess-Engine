@@ -24,12 +24,19 @@ final class VectorAccumulators extends Accumulators {
     private final short[][] w1;
     private final short[] b1;
 
+    /** Finny table accumulators [perspective][frame]. */
+    private final short[][][] cache;
+
     VectorAccumulators(Network net, int maxPly) {
         super(net, maxPly);
         white = new short[maxPly][net.hidden];
         black = new short[maxPly][net.hidden];
         w1 = net.l1WeightsShort();
         b1 = net.l1BiasShort();
+        cache = new short[2][net.frames()][];
+        for (short[][] side : cache) {
+            for (int f = 0; f < side.length; f++) side[f] = b1.clone();
+        }
     }
 
     static int shortLanes() {
@@ -37,15 +44,26 @@ final class VectorAccumulators extends Accumulators {
     }
 
     @Override
-    protected void refreshPly(int persp, int ply, int[] features, int n) {
-        short[] acc = persp == Position.WHITE ? white[ply] : black[ply];
-        System.arraycopy(b1, 0, acc, 0, b1.length);
-        for (int i = 0; i < n; i++) add(acc, w1[features[i]]);
+    protected void cacheUpdate(int persp, int frame, int[] subs, int ns, int[] adds, int na) {
+        short[] acc = cache[persp][frame];
+        for (int i = 0; i < ns; i++) sub(acc, w1[subs[i]]);
+        for (int i = 0; i < na; i++) add(acc, w1[adds[i]]);
+    }
+
+    @Override
+    protected void cacheToPly(int persp, int frame, int ply) {
+        System.arraycopy(cache[persp][frame], 0, persp == Position.WHITE ? white[ply] : black[ply], 0, net.hidden);
     }
 
     private static void add(short[] acc, short[] w) {
         for (int i = 0; i < acc.length; i += S.length()) {
             ShortVector.fromArray(S, acc, i).add(ShortVector.fromArray(S, w, i)).intoArray(acc, i);
+        }
+    }
+
+    private static void sub(short[] acc, short[] w) {
+        for (int i = 0; i < acc.length; i += S.length()) {
+            ShortVector.fromArray(S, acc, i).sub(ShortVector.fromArray(S, w, i)).intoArray(acc, i);
         }
     }
 

@@ -203,30 +203,25 @@ public final class Network {
         return kingBucketMap[a] == kingBucketMap[b] && (!mirror || ((a & 7) >= 4) == ((b & 7) >= 4));
     }
 
-    /** Active features of one perspective in a position. */
-    public int features(Position p, int perspective, int[] out) {
-        int king = Long.numberOfTrailingZeros(p.pieces(perspective, Position.KING));
-        int n = 0;
-        long occ = p.all;
-        while (occ != 0L) {
-            int sq = Long.numberOfTrailingZeros(occ);
-            occ &= occ - 1;
-            out[n++] = feature(perspective, p.board[sq], sq, king);
-        }
-        return n;
+    /** Number of feature frames (king bucket, board half) a perspective can be in. */
+    public int frames() {
+        return kingBuckets * (mirror ? 2 : 1);
     }
 
-    /** Full accumulator refresh of one perspective. */
-    public void refresh(Position p, int perspective, int[] acc) {
-        System.arraycopy(l1Bias, 0, acc, 0, hidden);
-        int[] f = new int[32];
-        int n = features(p, perspective, f);
-        for (int i = 0; i < n; i++) add(acc, f[i]);
+    /** The feature frame of a perspective whose own king stands on {@code ownKingSq}. */
+    public int frame(int perspective, int ownKingSq) {
+        int k = perspective == Position.WHITE ? ownKingSq : ownKingSq ^ 56;
+        return mirror ? kingBucketMap[k] * 2 + ((k & 7) >= 4 ? 1 : 0) : kingBucketMap[k];
     }
 
     void add(int[] acc, int feature) {
         int[] w = l1Weights[feature];
         for (int i = 0; i < acc.length; i++) acc[i] += w[i];
+    }
+
+    void sub(int[] acc, int feature) {
+        int[] w = l1Weights[feature];
+        for (int i = 0; i < acc.length; i++) acc[i] -= w[i];
     }
 
     /** Copies src into dst then applies up to two removals and two additions. */

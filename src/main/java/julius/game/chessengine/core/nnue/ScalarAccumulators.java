@@ -7,18 +7,29 @@ final class ScalarAccumulators extends Accumulators {
 
     private final int[][] white;
     private final int[][] black;
+    /** Finny table accumulators [perspective][frame]. */
+    private final int[][][] cache;
 
     ScalarAccumulators(Network net, int maxPly) {
         super(net, maxPly);
         white = new int[maxPly][net.hidden];
         black = new int[maxPly][net.hidden];
+        cache = new int[2][net.frames()][];
+        for (int[][] side : cache) {
+            for (int f = 0; f < side.length; f++) side[f] = net.l1Bias.clone();
+        }
     }
 
     @Override
-    protected void refreshPly(int persp, int ply, int[] features, int n) {
-        int[] acc = persp == Position.WHITE ? white[ply] : black[ply];
-        System.arraycopy(net.l1Bias, 0, acc, 0, net.hidden);
-        for (int i = 0; i < n; i++) net.add(acc, features[i]);
+    protected void cacheUpdate(int persp, int frame, int[] subs, int ns, int[] adds, int na) {
+        int[] acc = cache[persp][frame];
+        for (int i = 0; i < ns; i++) net.sub(acc, subs[i]);
+        for (int i = 0; i < na; i++) net.add(acc, adds[i]);
+    }
+
+    @Override
+    protected void cacheToPly(int persp, int frame, int ply) {
+        System.arraycopy(cache[persp][frame], 0, persp == Position.WHITE ? white[ply] : black[ply], 0, net.hidden);
     }
 
     @Override

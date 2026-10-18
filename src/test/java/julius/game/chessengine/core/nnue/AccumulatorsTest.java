@@ -53,7 +53,6 @@ class AccumulatorsTest {
         Accumulators scalar = new ScalarAccumulators(net, maxPly);
         // the Vector API back end when the test JVM has the module (Maven adds it), else scalar twice
         Accumulators vector = Accumulators.create(net, maxPly);
-        Accumulators fresh = new ScalarAccumulators(net, 1);
         SplittableRandom rng = new SplittableRandom(seed);
         int[] moves = new int[256];
         int checked = 0;
@@ -72,6 +71,8 @@ class AccumulatorsTest {
                 vector.push(p, m, ply);
                 p.makeMove(m);
                 if (evaluate) {
+                    // a new instance has an empty cache: this is a true from-scratch build
+                    Accumulators fresh = new ScalarAccumulators(net, 1);
                     fresh.refresh(p, 0);
                     int expected = fresh.evaluate(p, 0);
                     assertEquals(expected, scalar.evaluate(p, ply + 1), "scalar at ply " + ply + " " + p.toFen());
