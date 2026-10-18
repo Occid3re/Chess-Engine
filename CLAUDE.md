@@ -84,6 +84,8 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
 - `generations.py`: NNUE generations: DataGen self-play with the current best net -> train a child on a window of
   recent data + elite + endgames twice -> SPRT [0,5] child vs parent -> promote to `E:\Chess-Data\nets\best.bin`.
   Resumable (`E:\Chess-Data\generations\state.json`).
+- `archive_starts.py`: self-play start positions from the bot's own Lichess games (archive JSONL from the server's
+  `alieknek-data` volume; lost games x2), mixed with the endgame starts -> `generations.py --starts <file>`.
 - `spsa.py`: Fishtest-style SPSA over `Tune.java` (all parameters at once, game pairs per iteration), resumable
   (`E:\Chess-Data\tuning\spsa-state.json`); `--verify` SPRTs the result against the defaults.
 - No Stockfish-labelled data (user decision 2026-10-18): the engine learns only from its own games and search.

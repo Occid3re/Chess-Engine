@@ -1,5 +1,6 @@
 """Tests for scripts/tuning: the cutechess result parser (moved from the former cutechess_tuning_loop.py),
 the Elo conversion, and that spsa.py reads exactly the tunables core/Tune.java declares."""
+import json
 import math
 import sys
 from pathlib import Path
@@ -65,3 +66,19 @@ def test_spsa_schedules_shrink_and_end_at_c():
     c_last, a_last = spsa.schedules(800, 800, 10.0, 0.002)
     assert c_first > c_last == pytest.approx(10.0)
     assert a_first > a_last
+
+
+def test_archive_starts_weights_lost_games(tmp_path):
+    pytest.importorskip("chess")
+    import archive_starts
+    line = '{"id": "%s", "result": "%s", "moves": %s}\n'
+    moves = ["e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "a7a6", "b5a4", "g8f6", "e1g1", "f8e7"]
+    path = tmp_path / "games.jsonl"
+    path.write_text(line % ("g1", "win", json.dumps(moves)) + line % ("g2", "loss", json.dumps(moves[:9]))
+                    + line % ("g3", "aborted", json.dumps(moves)) + line % ("g1", "win", json.dumps(moves)))
+    games = archive_starts.archive_games([path])
+    assert sorted(g["id"] for g in games) == ["g1", "g2"]  # aborted dropped, duplicate id merged
+    starts = archive_starts.build(games, loss_weight=2)
+    # g1: plies 8..10 -> 3 positions; g2 (lost): plies 8..9 -> 2 positions, twice
+    assert len(starts) == 3 + 2 * 2
+    assert all(len(fen.split()) == 6 for fen in starts)
