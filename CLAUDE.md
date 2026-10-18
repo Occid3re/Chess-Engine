@@ -118,6 +118,12 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
   Resumable (`E:\Chess-Data\generations\state.json`).
 - `archive_starts.py`: self-play start positions from the bot's own Lichess games (archive JSONL from the server's
   `alieknek-data` volume; lost games x2), mixed with the endgame starts -> `generations.py --starts <file>`.
+- `gpu_generations.py` (running since 2026-10-18 21:37, log `E:\Chess-Data\gpugen.log`, state
+  `E:\Chess-Data\gpugen\state.json`): self-play never stops (DataGen below-normal priority, 20 threads); every
+  50M new positions: shuffled mix of the 4 newest self-play files + elite + endgames twice -> GPU training ->
+  parity -> SPRT [0,5] vs `E:\Chess-Data
+etsest.bin` (4 cores) -> on H1 promote and restart self-play with
+  it. Releases to the server stay manual. Stop: kill the python process and the DataGen java it started.
 - `spsa.py`: Fishtest-style SPSA over `Tune.java` (all parameters at once, game pairs per iteration), resumable
   (`E:\Chess-Data\tuning\spsa-state.json`); `--verify` SPRTs the result against the defaults.
 - No Stockfish-labelled data (user decision 2026-10-18): the engine learns only from its own games and search.
