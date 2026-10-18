@@ -289,7 +289,10 @@ def main():
                                    for src, lo in zip(sources, np.cumsum([0] + [len(x) for x in sources[:-1]]))])
     valid_gpu = torch.from_numpy(np.ascontiguousarray(held_out)).to(device)
     # Chunks that fit into GPU memory (32 bytes per position); with one chunk the data stays there for good.
-    budget = int(0.5 * torch.cuda.mem_get_info()[0]) // RECORD if device.type == "cuda" else 50_000_000
+    # At most a quarter of the free GPU memory for data: the dense fp16 input, gradients and the caching allocator
+    # need the rest. With half of it a 114M-position set filled the 8 GB card and Windows spilled to system RAM
+    # (10x slower from the second epoch on).
+    budget = int(0.25 * torch.cuda.mem_get_info()[0]) // RECORD if device.type == "cuda" else 50_000_000
     chunk = max(args.batch, min(budget, args.chunk or budget))
     chunks = [(i, lo, min(lo + chunk, len(src))) for i, src in enumerate(sources) for lo in range(0, len(src), chunk)]
     resident = None
