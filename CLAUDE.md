@@ -18,7 +18,8 @@ Treat the brain as your primary knowledge store. If you discover something usefu
 Java chess engine, plays on Lichess as the bot Alieknek: blitz ~2480 (October 2026, up from ~1770 with the
 legacy AI before the core engine).
 
-- **Branches**: one per release, named after the version (v4.0.0, v4.0.1, ... v4.0.7). Work for the next
+- **Branches**: one per release, named after the version (v4.0.0, v4.0.1, ... v4.0.9, v4.1.0). Each digit runs 0-9:
+  after x.y.9 comes x.(y+1).0 (never 4.0.10). Work for the next
   release goes on a new branch `vX.Y.Z` cut from the previous release branch; never push a newer
   version onto an older version's branch. Bump `pom.xml` and `Uci.NAME` to the same number.
 - **Repo**: github.com/Occid3re/Chess-Engine
@@ -52,7 +53,7 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
   generation 1 of `scripts/tuning/generations.py` (4.0.7: +15M self-play positions by the 4.0.5 net, sp_all dropped)
   +26.7 vs 4.0.5/4.0.6 (SPRT H1, 1682 games). A 384-wide net lost to 256 (-5±12, H0, 1925 games): keep 256.
   Generation 2 (4.0.9: window v5c + gen01 + gen02 self-play) +29.8 vs generation 1 (SPRT H1, 1437 games).
-  Generation 3 (4.0.10, first GPU-trained net, `scripts/nnue/train_gpu.py --layout plain`, mix.py: elite + v5c +
+  Generation 3 (4.1.0, first GPU-trained net, `scripts/nnue/train_gpu.py --layout plain`, mix.py: elite + v5c +
   gen01 + gen02 + 18M of the big run, endgames twice, 91M positions) +24.7 +-12 vs generation 2 (1592 games, H1).
 - Search parameters (core/Tune.java) from SPSA, 1500 iterations x 8 games at 6+0.06 (4.0.9): +28.3 vs the old
   defaults (SPRT H1, 1058 games at 10+0.1). Biggest moves: nmpBaseMargin 150->100, nmpDepthMargin 15->24,
