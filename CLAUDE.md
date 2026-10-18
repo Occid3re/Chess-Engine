@@ -86,7 +86,7 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
   Resumable (`E:\Chess-Data\generations\state.json`).
 - `spsa.py`: Fishtest-style SPSA over `Tune.java` (all parameters at once, game pairs per iteration), resumable
   (`E:\Chess-Data\tuning\spsa-state.json`); `--verify` SPRTs the result against the defaults.
-- `scripts/nn-training/generate_nnue_data.py`: Stockfish labels for PGN positions (npz), if SF-labelled data is wanted.
+- No Stockfish-labelled data (user decision 2026-10-18): the engine learns only from its own games and search.
 - The former evolve*/genetic loops are gone: they picked the best of a few mutants after ~40 games each, i.e. noise.
 
 ## Key Decisions & Lessons (IMPORTANT — read before making changes)

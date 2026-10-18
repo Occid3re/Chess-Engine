@@ -50,4 +50,4 @@ separator.
 This project vendors MIT-licensed code from [Laurens Winkelhagen's syzygy-bridge project](https://github.com/ljgw/syzygy-bridge).
 The Java classes `julius.game.chessengine.syzygy.bridge.SyzygyBridge` and `julius.game.chessengine.syzygy.bridge.SyzygyConstants`,
 along with the JNI shim in `src/main/native`, originate from that repository and are used under the terms of the MIT License.
-Place the corresponding native binaries in `src/main/resources/natives/<platform>/` before packaging the engine.
+The Maven build compiles the JNI library with CMake and bundles it under `natives/<platform>/` in the jar.

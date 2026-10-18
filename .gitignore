@@ -21,8 +21,6 @@ target/
 *.ipr
 *.log
 
-/profiles
-
 ### NetBeans ###
 /nbproject/private/
 /nbbuild/
@@ -37,3 +35,6 @@ build/
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Local preview config of the Claude desktop app (points at the current jar)
+.claude/launch.json
