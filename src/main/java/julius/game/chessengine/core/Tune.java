@@ -39,6 +39,14 @@ public final class Tune {
     public static int bonusMul = 166;
     public static int bonusSub = 139;
     public static int bonusMax = 2119;
+    /**
+     * Uncertainty-aware reductions (off with uncDepth 0): at nodes with at least uncDepth plies left, the network's
+     * uncertainty head rates the position; below uncLo / 1000 (the network is sure) late moves are reduced one ply
+     * more, above uncHi / 1000 (unclear) one ply less. Needs core/nnue-unc.bin for the loaded network.
+     */
+    public static int uncDepth = 0;
+    public static int uncLo = 25;
+    public static int uncHi = 70;
 
     private static final Map<String, Param> PARAMS = new LinkedHashMap<>();
 
@@ -64,6 +72,9 @@ public final class Tune {
         add("bonusMul", bonusMul, 50, 400, 15);
         add("bonusSub", bonusSub, 0, 300, 15);
         add("bonusMax", bonusMax, 800, 4000, 150);
+        add("uncDepth", uncDepth, 0, 20, 1);
+        add("uncLo", uncLo, 0, 100, 4);
+        add("uncHi", uncHi, 20, 200, 6);
     }
 
     private Tune() {
@@ -108,6 +119,9 @@ public final class Tune {
             case "bonusMul" -> bonusMul = v;
             case "bonusSub" -> bonusSub = v;
             case "bonusMax" -> bonusMax = v;
+            case "uncDepth" -> uncDepth = v;
+            case "uncLo" -> uncLo = v;
+            case "uncHi" -> uncHi = v;
             default -> {
                 return false;
             }

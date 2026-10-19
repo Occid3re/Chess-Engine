@@ -206,6 +206,18 @@ public abstract class Accumulators {
         return evaluatePly(ply, p.side == WHITE, bucket);
     }
 
+    /**
+     * SCReLU activations clamp(acc / QA, 0, 1)^2 at ply: the side to move's in out[0, hidden), the other side's in
+     * out[hidden, 2 * hidden) - the input of the {@link UncertaintyHead}.
+     */
+    public final void activations(Position p, int ply, float[] out) {
+        ensure(p, WHITE, ply);
+        ensure(p, BLACK, ply);
+        activationsPly(ply, p.side == WHITE, out);
+    }
+
+    protected abstract void activationsPly(int ply, boolean whiteToMove, float[] out);
+
     /** Cached accumulator of a perspective's frame: minus the ns features in subs, plus the na in adds. */
     protected abstract void cacheUpdate(int persp, int frame, int[] subs, int ns, int[] adds, int na);
 

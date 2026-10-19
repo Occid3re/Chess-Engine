@@ -111,7 +111,21 @@ public final class UncertaintyHead {
         float[] x = new float[inputs];
         activations(p, p.side, x, 0);
         activations(p, p.side ^ 1, x, hidden);
-        x[2 * hidden + Network.bucketFor(Long.bitCount(p.all), buckets)] = 1f;
+        return predict(x, Long.bitCount(p.all));
+    }
+
+    /** Input size for {@link #predict(float[], int)}: both perspectives' activations plus the bucket one-hot. */
+    public int inputs() {
+        return inputs;
+    }
+
+    /**
+     * From activations the search already has ({@link Accumulators#activations}: x[0, 2 * hidden) filled; the
+     * bucket part of x is overwritten here).
+     */
+    public double predict(float[] x, int pieceCount) {
+        java.util.Arrays.fill(x, 2 * hidden, inputs, 0f);
+        x[2 * hidden + Network.bucketFor(pieceCount, buckets)] = 1f;
         double out = b2;
         for (int j = 0, row = 0; j < size; j++, row += inputs) {
             double s = b1[j];

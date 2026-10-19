@@ -42,6 +42,12 @@ public final class Searcher {
     private Accumulators acc;
     private Accumulators cachedAcc;
     private Network cachedNet;
+    /** The network's uncertainty head while Tune.uncDepth > 0, else null. */
+    private julius.game.chessengine.core.nnue.UncertaintyHead uncHead;
+    private float[] uncInput;
+    /** Uncertainty (x 1000) per position key, direct mapped: deep nodes come back in every iteration. */
+    private final long[] uncKeys = new long[1 << 15];
+    private final short[] uncValues = new short[1 << 15];
 
     long nodes;
     int selDepth;
@@ -98,6 +104,8 @@ public final class Searcher {
         bestPvLength = 0;
         rootHistPly = pos.historyPly();
         acc = mgr.useNnue ? accumulatorsFor(Network.loadDefault()) : null;
+        uncHead = acc != null && Tune.uncDepth > 0 ? julius.game.chessengine.core.nnue.UncertaintyHead.loadDefault() : null;
+        if (uncHead != null && (uncInput == null || uncInput.length != uncHead.inputs())) uncInput = new float[uncHead.inputs()];
         if (acc != null) acc.refresh(pos, 0);
         for (int[] k : killers) {
             k[0] = k[1] = 0;
@@ -413,6 +421,21 @@ public final class Searcher {
         }
         killers[ply + 2][0] = killers[ply + 2][1] = Move.NONE;
         excludedStack[ply + 1] = Move.NONE;
+        // How sure the network is here (Tune.uncDepth): sure -> reduce late moves more, unclear -> less
+        int uncAdjust = 0;
+        if (uncHead != null && !inCheck && depth >= Tune.uncDepth) {
+            int slot = (int) (pos.key & (uncKeys.length - 1));
+            int u;
+            if (uncKeys[slot] == pos.key) {
+                u = uncValues[slot];
+            } else {
+                acc.activations(pos, ply, uncInput);
+                u = (int) Math.min(Short.MAX_VALUE, uncHead.predict(uncInput, Long.bitCount(pos.all)) * 1000);
+                uncKeys[slot] = pos.key;
+                uncValues[slot] = (short) u;
+            }
+            uncAdjust = u < Tune.uncLo ? 1 : u > Tune.uncHi ? -1 : 0;
+        }
 
         if (!pvNode && !inCheck && excluded == Move.NONE) {
             // Reverse futility pruning
@@ -560,6 +583,7 @@ public final class Searcher {
                 if (givesCheck) rr--;
                 if (m == killers[ply][0] || m == killers[ply][1] || m == counter) rr--;
                 if (quiet) rr -= hist / Tune.lmrHistDiv;
+                rr += uncAdjust;
                 int d = Math.max(1, Math.min(newDepth, newDepth - rr));
                 score = -search(-a - 1, -a, d, ply + 1, true);
                 if (score > a && d < newDepth) {

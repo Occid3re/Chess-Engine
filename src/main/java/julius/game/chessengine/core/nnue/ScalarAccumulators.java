@@ -45,6 +45,20 @@ final class ScalarAccumulators extends Accumulators {
     }
 
     @Override
+    protected void activationsPly(int ply, boolean whiteToMove, float[] out) {
+        int[] us = whiteToMove ? white[ply] : black[ply];
+        int[] them = whiteToMove ? black[ply] : white[ply];
+        int h = us.length, q = net.qa;
+        float inv = 1f / q;
+        for (int i = 0; i < h; i++) {
+            float a = Math.min(Math.max(us[i], 0), q) * inv;
+            float b = Math.min(Math.max(them[i], 0), q) * inv;
+            out[i] = a * a;
+            out[h + i] = b * b;
+        }
+    }
+
+    @Override
     protected int evaluatePly(int ply, boolean whiteToMove, int bucket) {
         return whiteToMove ? net.evaluate(white[ply], black[ply], bucket) : net.evaluate(black[ply], white[ply], bucket);
     }

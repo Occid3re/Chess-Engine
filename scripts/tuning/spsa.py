@@ -73,10 +73,26 @@ def load_state(path: Path, params: list) -> dict:
     return {"k": 0, "theta": {p["name"]: float(p["default"]) for p in params}, "history": []}
 
 
-def tune(args) -> None:
+def select(args) -> list:
+    """The parameters to tune: all of Tune.java, or only --only (names, comma separated)."""
     params = read_params()
+    if args.only:
+        names = {n.strip() for n in args.only.split(",")}
+        params = [p for p in params if p["name"] in names]
+        if len(params) != len(names):
+            raise SystemExit(f"unknown parameter in --only {args.only}")
+    return params
+
+
+def tune(args) -> None:
+    params = select(args)
     state_path = Path(args.state)
     state = load_state(state_path, params)
+    if state["k"] == 0 and args.start:
+        # where a new run starts instead of the defaults (e.g. a feature that is off by default)
+        for item in args.start.split(","):
+            name, value = item.split("=")
+            state["theta"][name.strip()] = float(value)
     rng = random.Random(args.seed + state["k"])
     print(f"SPSA over {len(params)} parameters, iteration {state['k']} of {args.iterations}")
     while state["k"] < args.iterations:
@@ -110,7 +126,7 @@ def tune(args) -> None:
 
 def verify(args) -> None:
     """SPRT of the tuned values against the defaults (both engines from the same classes)."""
-    params = read_params()
+    params = select(args)
     state = load_state(Path(args.state), params)
     tuned = {p["name"]: int(round(state["theta"][p["name"]])) for p in params}
     changed = {n: v for n, v in tuned.items() if v != next(p["default"] for p in params if p["name"] == n)}
@@ -133,6 +149,8 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--verify", action="store_true")
     ap.add_argument("--verify-rounds", type=int, default=2000)
+    ap.add_argument("--only", help="tune only these parameters (comma separated), the rest stay at their defaults")
+    ap.add_argument("--start", help="starting values of a new run, e.g. uncDepth=7,uncLo=14,uncHi=65")
     args = ap.parse_args()
     verify(args) if args.verify else tune(args)
 
