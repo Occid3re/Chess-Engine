@@ -22,6 +22,7 @@ State: <dir>/hosts.json.
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import time
@@ -140,6 +141,23 @@ class Burst:
         self.start(host, Path(self.args.net))
 
     def sync(self):
+        # Two syncs at once would append the same bytes twice (gpu_generations.py syncs every pass): one at a time.
+        lock = self.dir / "sync.lock"
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            if time.time() - lock.stat().st_mtime < 3600:
+                log("sync: another sync is running - skipped")
+                return
+            lock.unlink()  # left over by a killed sync
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+        try:
+            self._sync()
+        finally:
+            lock.unlink(missing_ok=True)
+
+    def _sync(self):
         total = 0
         for host, h in self.state.items():
             for run in h["runs"]:

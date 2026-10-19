@@ -262,6 +262,9 @@ def main() -> None:
                     subprocess.run([PY, str(BURST), "net", "all", "--net", args.best, "--unc", args.unc_file,
                                     "--unc-nodes", str(args.unc_nodes), "--unc-fork", str(args.unc_fork),
                                     "--dir", str(cloud)], capture_output=True, timeout=600)
+                # the next candidate waits for 50M positions of the new best: what came in during the SPRT is old
+                for f in cloud_base:
+                    cloud_base[f] = positions(Path(f))
                 state["generation"] = gen
                 record["promoted"] = True
         state["history"].append(record)
