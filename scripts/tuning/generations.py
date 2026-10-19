@@ -92,7 +92,7 @@ def main() -> None:
     ap.add_argument("--starts", default=r"E:\Chess-Data\selfplay\starts_8_20.txt")
     ap.add_argument("--syzygy", default=r"C:\Syzygy")
     ap.add_argument("--native", default=str(REPO / r"target\native\Release\JSyzygy.dll"))
-    ap.add_argument("--elite", default=r"E:\Chess-Data\tuning\elite2M.txt")
+    ap.add_argument("--elite", default=r"E:\Chess-Data\tuning\elite2M-own.txt")
     ap.add_argument("--window", nargs="*", default=[r"E:\Chess-Data\selfplay\v5b_nnue.txt", r"E:\Chess-Data\selfplay\v5c_endgame.txt"],
                     help="earlier self-play sets kept in the training window")
     ap.add_argument("--window-size", type=int, default=3, help="how many self-play sets to train on")

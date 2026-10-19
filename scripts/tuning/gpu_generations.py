@@ -127,7 +127,8 @@ def main() -> None:
                                                        r"E:\Chess-Data\bigdata\sp-g2-a.bin",
                                                        r"E:\Chess-Data\bigdata\sp-g3-a.bin"],
                     help="self-play files the window starts with (oldest first)")
-    ap.add_argument("--elite", default=r"E:\Chess-Data\packed\gen1mix.bin:0:2200000")
+    # Positions from Lichess elite games scored by our own search (core.tools.Relabel)
+    ap.add_argument("--elite", default=r"E:\Chess-Data\packed\elite2M-own.bin")
     ap.add_argument("--window", type=int, default=4, help="newest self-play files per mix")
     ap.add_argument("--positions", type=int, default=50_000_000, help="new positions per candidate")
     ap.add_argument("--layout", default="plain", choices=["plain", "kb8"])

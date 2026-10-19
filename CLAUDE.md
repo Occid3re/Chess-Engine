@@ -138,6 +138,8 @@ etsest.bin` (4 cores) -> on H1 promote and restart self-play with
 - `spsa.py`: Fishtest-style SPSA over `Tune.java` (all parameters at once, game pairs per iteration), resumable
   (`E:\Chess-Data\tuning\spsa-state.json`); `--verify` SPRTs the result against the defaults.
 - No Stockfish-labelled data (user decision 2026-10-18): the engine learns only from its own games and search.
+  The elite positions (Lichess elite games) are scored by our own search: `core.tools.Relabel` (6000 nodes, game
+  results kept) -> `E:\Chess-Data\packed\elite2M-own.bin`.
 - The former evolve*/genetic loops are gone: they picked the best of a few mutants after ~40 games each, i.e. noise.
 
 ## Key Decisions & Lessons (IMPORTANT — read before making changes)

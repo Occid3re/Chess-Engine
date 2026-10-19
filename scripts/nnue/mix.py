@@ -7,7 +7,7 @@ have far more endgame positions than self-play from the start position produces)
 
 Usage:
   python scripts/nnue/mix.py --out E:/Chess-Data/packed/gen3mix.bin \\
-      E:/Chess-Data/packed/gen1mix.bin:0:2200000 +E:/Chess-Data/packed/gen02.bin +E:/Chess-Data/bigdata/sp-g2-a.bin
+      E:/Chess-Data/packed/elite2M-own.bin +E:/Chess-Data/packed/gen02.bin +E:/Chess-Data/bigdata/sp-g2-a.bin
 """
 import argparse
 from pathlib import Path
