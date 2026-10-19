@@ -20,6 +20,7 @@ Usage (PyTorch venv for the GPU steps, Python with numpy for the rest; run from 
   E:/Tools/torch-venv/Scripts/python.exe scripts/tuning/gpu_generations.py --threads 20 --concurrency 4
 """
 import argparse
+import hashlib
 import json
 import shutil
 import subprocess
@@ -245,13 +246,16 @@ def main() -> None:
             record["verdict"] = verdict
             log(f"generation {gen}: {verdict}")
             if verdict == "H1":
+                # burst.py names cloud files after the first 8 hex digits of their network's SHA-1
+                previous = hashlib.sha1(Path(args.best).read_bytes()).hexdigest()[:8]
                 shutil.copy(args.best, gdir / "previous_best.bin")
                 shutil.copy(net, args.best)
                 compile_engine(best_dir, Path(args.best))
                 stop(dg["pid"])  # self-play continues with the new best (new file) on the next pass
                 state["datagen"] = None
                 # its uncertainty head, on the self-play of the previous best (the new one has none yet)
-                head_data = max([current, *map(Path, cloud_base)], key=positions)
+                own = [current, *(Path(f) for f in cloud_base if f"-{previous}-" in Path(f).name)]
+                head_data = max(own, key=positions)
                 ok = train_head(args, net.with_suffix(".pt"), head_data, gdir / "unc.log")
                 log(f"generation {gen}: uncertainty head {'trained' if ok else 'FAILED - focus off'}")
                 if (cloud / "hosts.json").exists():
