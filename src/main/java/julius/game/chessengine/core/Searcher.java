@@ -217,13 +217,12 @@ public final class Searcher {
         return pieceStack[ply] * 64 + Move.to(m);
     }
 
-    private int quietHistory(int side, int m, int pc, int c1, int c2, int c4) {
+    private int quietHistory(int side, int m, int pc, int c1, int c2) {
         int from = Move.from(m), to = Move.to(m);
         int h = mainHistory[side * 4096 + from * 64 + to];
         int pt = pc * 64 + to;
         if (c1 >= 0) h += contHistory[c1 * 768 + pt];
         if (c2 >= 0) h += contHistory[c2 * 768 + pt];
-        if (c4 >= 0) h += contHistory[c4 * 768 + pt]; // our own move two turns ago
         return h;
     }
 
@@ -249,7 +248,7 @@ public final class Searcher {
         int[] moves = moveBuf[ply], scores = scoreBuf[ply];
         int side = pos.side;
         int k1 = killers[ply][0], k2 = killers[ply][1];
-        int c1 = contIdx(ply - 1), c2 = contIdx(ply - 2), c4 = contIdx(ply - 4);
+        int c1 = contIdx(ply - 1), c2 = contIdx(ply - 2);
         int counter = c1 >= 0 ? counterMoves[c1] : Move.NONE;
         for (int i = 0; i < n; i++) {
             int m = moves[i];
@@ -273,7 +272,7 @@ public final class Searcher {
             } else if (m == counter) {
                 s = 880_000;
             } else {
-                s = quietHistory(side, m, pos.board[Move.from(m)], c1, c2, c4);
+                s = quietHistory(side, m, pos.board[Move.from(m)], c1, c2);
             }
             scores[i] = s;
         }
@@ -317,10 +316,9 @@ public final class Searcher {
         int from = Move.from(m), to = Move.to(m);
         gravity(mainHistory, pos.side * 4096 + from * 64 + to, bonus);
         int pt = pos.board[from] * 64 + to;
-        int c1 = contIdx(ply - 1), c2 = contIdx(ply - 2), c4 = contIdx(ply - 4);
+        int c1 = contIdx(ply - 1), c2 = contIdx(ply - 2);
         if (c1 >= 0) gravity(contHistory, c1 * 768 + pt, bonus);
         if (c2 >= 0) gravity(contHistory, c2 * 768 + pt, bonus);
-        if (c4 >= 0) gravity(contHistory, c4 * 768 + pt, bonus / 2);
     }
 
     // ------------------------------------------------------------------ main search
@@ -480,7 +478,7 @@ public final class Searcher {
         final int n = MoveGen.generateAll(pos, moves, 0);
         scoreMoves(ply, n, ttMove, false);
         final int side = pos.side;
-        final int c1 = contIdx(ply - 1), c2 = contIdx(ply - 2), c4 = contIdx(ply - 4);
+        final int c1 = contIdx(ply - 1), c2 = contIdx(ply - 2);
         final int counter = c1 >= 0 ? counterMoves[c1] : Move.NONE;
         final int[] scores = scoreBuf[ply];
 
@@ -505,7 +503,7 @@ public final class Searcher {
             int from = Move.from(m);
             int pc = pos.board[from];
             boolean givesCheck = pos.givesCheck(m);
-            int hist = quiet ? quietHistory(side, m, pc, c1, c2, c4) : 0;
+            int hist = quiet ? quietHistory(side, m, pc, c1, c2) : 0;
             int r = LMR[Math.min(depth, 63)][Math.min(moveCount, 63)];
 
             if (!root && bestScore > -TB_BOUND && pos.hasNonPawnMaterial(side)) {
