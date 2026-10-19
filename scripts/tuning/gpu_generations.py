@@ -34,16 +34,31 @@ def log(msg: str) -> None:
     print(f"[{time.strftime('%Y-%m-%d %H:%M')}] {msg}", flush=True)
 
 
+# Engines are built from a fixed git ref checked out in a worktree, never from the live working tree: experiments
+# lying there must not leak into the network SPRTs (set by main from --engine-ref).
+SOURCE = REPO
+
+
+def checkout(ref: str, work: Path) -> Path:
+    """A detached worktree of ref under work/src (re-created on every start)."""
+    src = work / "src"
+    subprocess.run(["git", "-C", str(REPO), "worktree", "remove", "--force", str(src)], capture_output=True)
+    subprocess.run(["git", "-C", str(REPO), "worktree", "prune"], capture_output=True)
+    subprocess.run(["git", "-C", str(REPO), "worktree", "add", "--detach", str(src), ref], check=True,
+                   capture_output=True)
+    return src
+
+
 def compile_engine(target: Path, net: Path) -> Path:
     """javac the core (with the Vector API module) into target/classes with net as core/nnue.bin, plus run.bat."""
     classes = target / "classes"
     if classes.exists():
         shutil.rmtree(classes)
     (classes / "core").mkdir(parents=True)
-    sources = [str(p) for d in CORE_SOURCES for p in (REPO / d).rglob("*.java")]
+    sources = [str(p) for d in CORE_SOURCES for p in (SOURCE / d).rglob("*.java")]
     subprocess.run(["javac", "-nowarn", "--add-modules", "jdk.incubator.vector", "-d", str(classes), *sources],
                    check=True, capture_output=True)
-    shutil.copy(REPO / "src/main/resources/core/eval-weights.txt", classes / "core" / "eval-weights.txt")
+    shutil.copy(SOURCE / "src/main/resources/core/eval-weights.txt", classes / "core" / "eval-weights.txt")
     shutil.copy(net, classes / "core" / "nnue.bin")
     (target / "run.bat").write_text(
         "@echo off\r\njava -Xms256m -Xmx512m -XX:+UseParallelGC --add-modules jdk.incubator.vector "
@@ -124,10 +139,14 @@ def main() -> None:
     ap.add_argument("--syzygy", default=r"C:\Syzygy")
     ap.add_argument("--openings", default=r"E:\ChessEngines\harness\elite_openings.epd")
     ap.add_argument("--valid-data", default=r"E:\Chess-Data\packed\val_f256.bin")
+    ap.add_argument("--engine-ref", default="v4.1.0", help="git ref the engines are compiled from")
     args = ap.parse_args()
 
     work = Path(args.work)
     work.mkdir(parents=True, exist_ok=True)
+    global SOURCE
+    SOURCE = checkout(args.engine_ref, work)
+    log(f"engines from {args.engine_ref} ({SOURCE})")
     state_path = Path(args.state)
     state = json.loads(state_path.read_text()) if state_path.exists() else {
         "generation": 0, "data": list(args.seed_data), "datagen": None, "trainedAt": 0, "history": []}
