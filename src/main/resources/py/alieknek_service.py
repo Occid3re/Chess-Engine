@@ -369,9 +369,22 @@ def game_update(game_id: str, board, state: dict) -> None:
         g["updatedAt"] = int(time.time() * 1000)
 
 
+def _uncertainty(info: dict):
+    """The engine's 'info string unc 0.042' (from 4.1.2 on): how unclear the position is for its network, as the
+    expected error of its evaluation in win probability (0.02 sure .. 0.10 and more very unclear); else None."""
+    text = info.get("string") if info else None
+    if isinstance(text, str) and text.startswith("unc "):
+        try:
+            return round(float(text.split()[1]), 3)
+        except (IndexError, ValueError):
+            return None
+    return None
+
+
 def engine_info(info: dict) -> None:
     score = info.get("score") if info else None
-    entry = {"depth": info.get("depth") if info else None, "nps": info.get("nps") if info else None}
+    entry = {"depth": info.get("depth") if info else None, "nps": info.get("nps") if info else None,
+             "unc": _uncertainty(info)}
     if score is not None:
         pov = score.white()
         entry["mate"] = pov.mate()
@@ -380,8 +393,9 @@ def engine_info(info: dict) -> None:
         _status["engine"] = entry
         g = _status.get("game")
         if g is not None and info:
-            # [ply searched, cp (White's view), mate, depth] for every move of the bot
-            g.setdefault("evals", []).append([g.get("ply", 0), entry.get("cp"), entry.get("mate"), entry.get("depth")])
+            # [ply searched, cp (White's view), mate, depth, uncertainty] for every move of the bot
+            g.setdefault("evals", []).append([g.get("ply", 0), entry.get("cp"), entry.get("mate"), entry.get("depth"),
+                                              entry.get("unc")])
 
 
 def game_finished(game_id: str) -> None:

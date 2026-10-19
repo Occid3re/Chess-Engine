@@ -267,6 +267,12 @@ public final class SearchManager {
 
         int maxDepth = l.depth > 0 ? Math.min(l.depth, Searcher.MAX_PLY - 1) : Searcher.MAX_PLY - 1;
         final int fallback = onlyMove;
+        // How unclear the root is for the network (expected error of its evaluation as a win probability), reported
+        // before bestmove for the bot and the play app; the search itself does not use it.
+        julius.game.chessengine.core.nnue.UncertaintyHead head = useNnue
+                ? julius.game.chessengine.core.nnue.UncertaintyHead.loadDefault() : null;
+        final String uncertainty = head == null ? null
+                : String.format(java.util.Locale.ROOT, "info string unc %.3f", head.predict(root));
         threads = new Thread[searchers.length];
         for (int i = 1; i < searchers.length; i++) {
             Searcher s = searchers[i];
@@ -300,6 +306,7 @@ public final class SearchManager {
             int best = main.bestMove != Move.NONE ? main.bestMove : fallback;
             StringBuilder sb = new StringBuilder("bestmove ").append(Move.toUci(best));
             if (main.bestPvLength > 1 && main.bestPv[0] == best) sb.append(" ponder ").append(Move.toUci(main.bestPv[1]));
+            if (uncertainty != null) output.accept(uncertainty);
             output.accept(sb.toString());
         }, "search-main");
         mainThread.setDaemon(true);

@@ -70,6 +70,14 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
   engine silently uses the scalar back end. Plain int16 loops are 25 % SLOWER (C2 cannot vectorise the int16->int32
   widening of the output layer). `-XX:+UseCompactObjectHeaders`: no measurable effect (no objects in the hot path).
   Tried and reverted: TT move before move generation + lazy quiet scoring (+5 % nodes, no nps gain).
+- Uncertainty head (4.1.2, `core.nnue.UncertaintyHead`, `core/nnue-unc.bin`): a 16-neuron head on the network's own
+  SCReLU activations predicts |6000-node search - static eval| as a win probability. On 2M held-out self-play
+  positions of generation 4 the 10 % it rates most uncertain hold 39 % of the large errors (> 0.10), simple rules
+  (piece count, |eval|, p(1-p), a regression on them) 20 %, a linear head 29 % (`scripts/nnue/uncertainty_probe.py`).
+  The file is bound to its network by CRC32: retrain it for every new network (`uncertainty_probe.py --export`,
+  on that network's self-play), else the engine ignores it. Today it is only reported (`info string unc 0.042`
+  before bestmove, `eval` prints it) for the bot and the play app; the search does not use it yet (bench unchanged).
+  Next: search/time management and self-play focus (more nodes / extra games on uncertain positions), SPRT-gated.
 - King buckets (kb8), second try: 114M positions, 4 epochs, row-wise Adam: -33 Elo vs 4.1.0 (78-109-139, 326 games)
   although its held-out loss was lower. `-Dcore.verifyNnue=true` (checks every 64th evaluation in the real search
   against a rebuild; `bench` reports the count) verified 30167 evaluations exact: the engine side is correct, the net

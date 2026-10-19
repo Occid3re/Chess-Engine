@@ -66,6 +66,20 @@ def test_finished_games_are_archived_with_moves_and_evals(svc, tmp_path):
     assert [e[0] for e in record["evals"]] == [0, 2, 4] and record["evals"][0][3] == 12
 
 
+def test_engine_uncertainty_is_kept_live_and_per_move(svc, tmp_path):
+    me = {"id": "alieknek", "name": "Alieknek", "rating": 2500}
+    opp = {"id": "somebot", "name": "Somebot", "rating": 2400}
+    svc.game_started("game0009", {"white": me, "black": opp, "clock": {}}, "alieknek")
+    score = chess.engine.PovScore(chess.engine.Cp(35), chess.WHITE)
+    svc.engine_info({"depth": 14, "score": score, "string": "unc 0.0614"})
+    assert svc._status["engine"]["unc"] == pytest.approx(0.061)
+    assert svc._status["game"]["evals"][-1] == [0, 35, None, 14, 0.061]
+    # older engines (no info string) and other info strings: no uncertainty
+    svc.engine_info({"depth": 14, "score": score})
+    svc.engine_info({"depth": 14, "score": score, "string": "Syzygy tablebases loaded"})
+    assert svc._status["game"]["evals"][-2][4] is None and svc._status["engine"]["unc"] is None
+
+
 def test_opponent_statistics_and_determinism(svc):
     play(svc, "game0001", ITALIAN, "white")
     play(svc, "game0002", ITALIAN, "black")
