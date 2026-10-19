@@ -2,13 +2,16 @@
 """Continuous, SPRT-gated network generations on this PC: self-play never stops, the GPU trains, cutechess judges.
 
 Loop:
-  1. DataGen (packed .bin) plays with the current best network on --threads cores, all the time.
+  1. DataGen (packed .bin) plays with the current best network on --threads cores, all the time. With the best
+     network's uncertainty head (--unc-file) it searches positions the network is unsure about --unc-nodes times
+     deeper and starts --unc-fork of its games from such positions; rented servers (--cloud) add their self-play.
   2. Once the running data file has --positions new positions since the last candidate, a mix is built (the newest
      --window self-play files incl. the running one, the elite games, endgames twice; shuffled, scripts/nnue/mix.py)
      and a candidate is trained on the GPU (scripts/nnue/train_gpu.py) while self-play continues.
   3. parity.py checks the exported file against the Java engine; then the candidate plays an SPRT [0, 5] against the
      best (10+0.1, --concurrency cores next to self-play).
-  4. H1: the candidate becomes the best, self-play restarts with it (into a new file). H0: more data, next round.
+  4. H1: the candidate becomes the best, its uncertainty head is trained (scripts/nnue/uncertainty_probe.py), self-play
+     here and on the servers restarts with both (into new files). H0: more data, next round.
 Releases to the server stay manual (the best network is E:/Chess-Data/nets/best.bin; history in --state).
 
 State is saved after every step; restarting the script resumes (it adopts nothing it did not start itself).
@@ -77,6 +80,24 @@ def alive(pid: int) -> bool:
     return str(pid).encode() in out
 
 
+def focus_options(args) -> list:
+    """DataGen's uncertainty focus (deeper searches and extra games where the best network is unsure), if the best
+    network has its uncertainty head (written on every promotion by train_head)."""
+    if not Path(args.unc_file).exists() or (args.unc_nodes <= 1 and args.unc_fork <= 0):
+        return []
+    return [f"-Dcore.uncFile={args.unc_file}", f"-Dgen.uncNodes={args.unc_nodes}", f"-Dgen.uncFork={args.unc_fork}"]
+
+
+def train_head(args, pt: Path, data: Path, log_path: Path) -> bool:
+    """Trains the uncertainty head of the (new) best network on recent self-play and writes it to --unc-file."""
+    with open(log_path, "w", encoding="utf-8") as f:
+        r = subprocess.run([PY, str(REPO / "scripts/nnue/uncertainty_probe.py"), "--pt", str(pt), "--data", str(data),
+                            "--net", args.best, "--export", args.unc_file], stdout=f, stderr=subprocess.STDOUT)
+    if r.returncode != 0:
+        Path(args.unc_file).unlink(missing_ok=True)  # no head is better than one of another network
+    return r.returncode == 0
+
+
 def start_datagen(args, classes: Path, out: Path) -> int:
     dll = Path(args.work) / "JSyzygy.dll"
     if not dll.exists():
@@ -84,6 +105,7 @@ def start_datagen(args, classes: Path, out: Path) -> int:
     cmd = ["java", "-Xmx6g", "--add-modules", "jdk.incubator.vector", f"-Dgen.starts={args.starts}",
            "-Dgen.startFraction=0.4", f"-Dgen.syzygy={args.syzygy}", f"-Dchessengine.syzygy.nativeLibrary={dll}",
            "-Dgen.winScore=2000", "-Dgen.winPlies=8", "-Dgen.drawPly=160", "-Dgen.drawPlies=20",
+           *focus_options(args),
            "-cp", str(classes), "julius.game.chessengine.core.tools.DataGen", str(out), str(args.threads),
            "1000000000", str(args.nodes), args.openings]
     logf = open(out.with_suffix(".log"), "a", encoding="utf-8")
@@ -142,6 +164,10 @@ def main() -> None:
     ap.add_argument("--openings", default=r"E:\ChessEngines\harness\elite_openings.epd")
     ap.add_argument("--valid-data", default=r"E:\Chess-Data\packed\val_f256.bin")
     ap.add_argument("--engine-ref", default="v4.1.0", help="git ref the engines are compiled from")
+    ap.add_argument("--unc-file", default=r"E:\Chess-Data\nets\best-unc.bin",
+                    help="uncertainty head of the best network (retrained on every promotion)")
+    ap.add_argument("--unc-nodes", type=float, default=3.0, help="node multiplier for uncertain positions (1 = off)")
+    ap.add_argument("--unc-fork", type=float, default=0.2, help="share of games started from uncertain positions")
     ap.add_argument("--cloud", default=r"E:\Chess-Data\cloud",
                     help="self-play of rented servers (scripts/cloud/burst.py): synced every pass, counted and mixed")
     args = ap.parse_args()
@@ -224,9 +250,14 @@ def main() -> None:
                 compile_engine(best_dir, Path(args.best))
                 stop(dg["pid"])  # self-play continues with the new best (new file) on the next pass
                 state["datagen"] = None
+                # its uncertainty head, on the self-play of the previous best (the new one has none yet)
+                head_data = max([current, *map(Path, cloud_base)], key=positions)
+                ok = train_head(args, net.with_suffix(".pt"), head_data, gdir / "unc.log")
+                log(f"generation {gen}: uncertainty head {'trained' if ok else 'FAILED - focus off'}")
                 if (cloud / "hosts.json").exists():
-                    subprocess.run([PY, str(BURST), "net", "all", "--net", args.best, "--dir", str(cloud)],
-                                   capture_output=True, timeout=600)
+                    subprocess.run([PY, str(BURST), "net", "all", "--net", args.best, "--unc", args.unc_file,
+                                    "--unc-nodes", str(args.unc_nodes), "--unc-fork", str(args.unc_fork),
+                                    "--dir", str(cloud)], capture_output=True, timeout=600)
                 state["generation"] = gen
                 record["promoted"] = True
         state["history"].append(record)

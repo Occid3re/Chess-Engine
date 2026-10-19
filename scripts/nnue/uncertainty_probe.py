@@ -105,7 +105,8 @@ def main():
         p.requires_grad_(False)
     raw = np.memmap(args.data, dtype=np.uint8, mode="r")
     data = raw[:len(raw) // tg.RECORD * tg.RECORD].reshape(-1, tg.RECORD)
-    train, test = data[:args.train], data[-args.test:]  # the file is written game by game: the tail = other games
+    # the file is written game by game: the tail holds other games than the head
+    train, test = data[:max(0, min(args.train, len(data) - args.test))], data[-args.test:]
 
     wu = torch.zeros(args.buckets, 2, args.hidden, device=device, requires_grad=True)
     bu = torch.zeros(args.buckets, device=device, requires_grad=True)

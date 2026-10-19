@@ -7,6 +7,7 @@ import julius.game.chessengine.core.SearchLimits;
 import julius.game.chessengine.core.SearchManager;
 import julius.game.chessengine.core.Searcher;
 import julius.game.chessengine.core.Tablebases;
+import julius.game.chessengine.core.nnue.UncertaintyHead;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -14,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.SplittableRandom;
@@ -37,6 +39,18 @@ import java.util.concurrent.atomic.AtomicLong;
  *       (default 80/12) – adjudication; higher values play decided games and long draws out further.</li>
  *   <li>{@code gen.nodeJitter} (default 0.1) – node limit varies by +-10 % per move so repeated starts diverge.</li>
  * </ul>
+ *
+ * <p>Focus on what the network knows least (needs the network's uncertainty head, {@code -Dcore.uncFile} or the
+ * bundled one; off by default):</p>
+ * <ul>
+ *   <li>{@code gen.uncThreshold} (default 0.07) – positions the head rates at least this uncertain (expected error of
+ *       the static evaluation as a win probability; 0.07 = the most uncertain ~13 % of self-play positions, whose
+ *       actual error is 2.7 times the others').</li>
+ *   <li>{@code gen.uncNodes} (default 1) – node multiplier for those positions: their labels come from a deeper
+ *       search.</li>
+ *   <li>{@code gen.uncFork} (default 0) – share of games that start from such a position seen earlier (each thread
+ *       keeps the last 512), with 0-1 random plies: more games around the network's blind spots.</li>
+ * </ul>
  */
 public final class DataGen {
 
@@ -54,8 +68,15 @@ public final class DataGen {
     private static final int DRAW_PLY = Integer.getInteger("gen.drawPly", 80);
     private static final int DRAW_PLIES = Integer.getInteger("gen.drawPlies", 12);
     private static final int TB_EXTRA_PLIES = Integer.getInteger("gen.tbExtraPlies", 40);
+    private static final double UNC_THRESHOLD = Double.parseDouble(System.getProperty("gen.uncThreshold", "0.07"));
+    private static final double UNC_NODES = Double.parseDouble(System.getProperty("gen.uncNodes", "1"));
+    private static final double UNC_FORK = Double.parseDouble(System.getProperty("gen.uncFork", "0"));
+    private static final int FORK_POOL = 512;
+    private static final AtomicLong uncertain = new AtomicLong();
+    private static final AtomicLong searched = new AtomicLong();
     private static List<String> starts = List.of();
     private static Tablebases tablebases;
+    private static UncertaintyHead head;
 
     public static void main(String[] args) throws Exception {
         Path out = Path.of(args[0]);
@@ -71,6 +92,12 @@ public final class DataGen {
         String tbPaths = System.getProperty("gen.syzygy");
         if (tbPaths != null) {
             tablebases = Tablebases.load(tbPaths, System.out::println);
+        }
+        if (UNC_NODES > 1 || UNC_FORK > 0) {
+            head = UncertaintyHead.loadDefault();
+            System.out.println(head == null ? "uncertainty focus OFF: no head for this network"
+                    : String.format(java.util.Locale.ROOT, "uncertainty focus: >= %.3f gets %.1fx nodes, %.0f %% of games start there",
+                    UNC_THRESHOLD, UNC_NODES, 100 * UNC_FORK));
         }
         long seed = System.nanoTime();
         BufferedWriter writer = null;
@@ -103,7 +130,10 @@ public final class DataGen {
                     return;
                 }
                 long el = Math.max(1, (System.currentTimeMillis() - start) / 1000);
-                System.out.printf("positions %d games %d (%d pos/s)%n", written.get(), games.get(), written.get() / el);
+                String focus = head == null ? "" : String.format(java.util.Locale.ROOT, " uncertain %.1f %%",
+                        100.0 * uncertain.get() / Math.max(1, searched.get()));
+                System.out.printf("positions %d games %d (%d pos/s)%s%n", written.get(), games.get(),
+                        written.get() / el, focus);
             }
         });
         reporter.setDaemon(true);
@@ -123,13 +153,19 @@ public final class DataGen {
         java.io.ByteArrayOutputStream records = new java.io.ByteArrayOutputStream();
         SearchManager manager = new SearchManager(16, 1);
         int[] moves = new int[256];
+        ArrayDeque<String> forks = new ArrayDeque<>();
         List<String> fens = new ArrayList<>();
         List<Integer> scores = new ArrayList<>();
         StringBuilder sb = new StringBuilder();
         while (written.get() < target) {
             Position p;
             int randomPlies;
-            if (!starts.isEmpty() && rng.nextDouble() < START_FRACTION) {
+            if (!forks.isEmpty() && rng.nextDouble() < UNC_FORK) {
+                // a position the network was unsure about, picked at random from the pool
+                String fen = forks.toArray(new String[0])[rng.nextInt(forks.size())];
+                p = new Position(fen);
+                randomPlies = rng.nextInt(2);
+            } else if (!starts.isEmpty() && rng.nextDouble() < START_FRACTION) {
                 String line = starts.get(rng.nextInt(starts.size()));
                 int semi = line.indexOf(';');
                 try {
@@ -180,7 +216,19 @@ public final class DataGen {
                     break;
                 }
                 SearchLimits l = new SearchLimits();
-                l.nodes = Math.max(1, Math.round(nodes * (1 - NODE_JITTER + 2 * NODE_JITTER * rng.nextDouble())));
+                double factor = 1;
+                if (head != null) {
+                    searched.incrementAndGet();
+                    if (head.predict(p) >= UNC_THRESHOLD) {
+                        uncertain.incrementAndGet();
+                        factor = UNC_NODES;
+                        if (UNC_FORK > 0 && rng.nextInt(4) == 0) {  // a sample, neighbours are alike
+                            if (forks.size() >= FORK_POOL) forks.pollFirst();
+                            forks.addLast(p.toFen());
+                        }
+                    }
+                }
+                l.nodes = Math.max(1, Math.round(factor * nodes * (1 - NODE_JITTER + 2 * NODE_JITTER * rng.nextDouble())));
                 int[] r = manager.searchInThread(p, l);
                 int best = r[0];
                 int score = r[1];

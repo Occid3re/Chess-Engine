@@ -6,7 +6,10 @@
                                                    library, start DataGen on all threads
   burst.py sync                                    append the new positions of every host to E:/Chess-Data/cloud/
   burst.py status                                  positions, rate and load per host
-  burst.py net <host|all> --net FILE               restart self-play with another network (new output file)
+  burst.py net <host|all> --net FILE [--unc HEAD]  restart self-play with another network (new output file); with
+                                                   the network's uncertainty head (default nets/best-unc.bin) it
+                                                   searches uncertain positions --unc-nodes x deeper and starts
+                                                   --unc-fork of the games there
   burst.py stop <host>                             final sync, stop self-play, forget the host
                                                    (cancel / delete the server yourself afterwards)
 
@@ -56,7 +59,7 @@ echo "setup ok: $(jdk/bin/java -version 2>&1 | head -1), $(ls syzygy | wc -l) ta
 START = r"""set -e
 cd /root/alieknek
 for f in data/*.pid; do [ -f "$f" ] && kill "$(cat "$f")" 2>/dev/null || true; rm -f "$f"; done
-setsid nohup jdk/bin/java -Xmx16g --add-modules jdk.incubator.vector -Dcore.nnueFile={net} \
+setsid nohup jdk/bin/java -Xmx16g --add-modules jdk.incubator.vector -Dcore.nnueFile={net} {focus} \
   -Dgen.starts=starts.txt -Dgen.startFraction=0.4 -Dgen.syzygy={remote}/syzygy \
   -Dchessengine.syzygy.nativeLibrary={remote}/libJSyzygy.so -Dgen.winScore=2000 -Dgen.winPlies=8 \
   -Dgen.drawPly=160 -Dgen.drawPlies=20 -cp classes julius.game.chessengine.core.tools.DataGen \
@@ -109,10 +112,17 @@ class Burst:
     def start(self, host: str, net: Path):
         name = self.net_name(net)
         self.upload(host, net, f"nets/{name}.bin")
+        # uncertainty focus: the head must belong to this network (the engine checks its CRC and else plays without)
+        focus = ""
+        unc = Path(self.args.unc) if self.args.unc else None
+        if unc and unc.exists() and (self.args.unc_nodes > 1 or self.args.unc_fork > 0):
+            self.upload(host, unc, f"nets/{name}-unc.bin")
+            focus = (f"-Dcore.uncFile={REMOTE}/nets/{name}-unc.bin -Dgen.uncNodes={self.args.unc_nodes} "
+                     f"-Dgen.uncFork={self.args.unc_fork}")
         out = f"sp-{name}-{time.strftime('%m%d%H%M')}"
-        out_line = self.script(host, START.format(net=f"{REMOTE}/nets/{name}.bin", remote=REMOTE, out=out,
-                                                  nodes=self.args.nodes), timeout=120)
-        log(f"{host}: {out_line} with net {name}")
+        out_line = self.script(host, START.format(net=f"{REMOTE}/nets/{name}.bin", focus=focus, remote=REMOTE,
+                                                  out=out, nodes=self.args.nodes), timeout=120)
+        log(f"{host}: {out_line} with net {name}{' + uncertainty focus' if focus else ''}")
         h = self.state.setdefault(host, {"runs": []})
         h["runs"].append({"remote": f"data/{out}.bin", "local": str(self.dir / f"cloud-{host.replace('.', '-')}-{out}.bin"),
                           "net": name})
@@ -187,6 +197,9 @@ def main():
     ap.add_argument("--net", default=r"E:\Chess-Data\nets\best.bin")
     ap.add_argument("--ref", default="v4.1.1", help="git ref of the engine sources (as gpu_generations --engine-ref)")
     ap.add_argument("--nodes", type=int, default=6000)
+    ap.add_argument("--unc", default=r"E:\Chess-Data\nets\best-unc.bin", help="uncertainty head of --net")
+    ap.add_argument("--unc-nodes", type=float, default=3.0, help="node multiplier for uncertain positions (1 = off)")
+    ap.add_argument("--unc-fork", type=float, default=0.2, help="share of games started from uncertain positions")
     ap.add_argument("--starts", default=r"E:\Chess-Data\selfplay\starts_lichess_mix.txt")
     ap.add_argument("--openings", default=r"E:\ChessEngines\harness\elite_openings.epd")
     args = ap.parse_args()
