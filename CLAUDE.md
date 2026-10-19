@@ -63,6 +63,9 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
   defaults (SPRT H1, 1058 games at 10+0.1). Biggest moves: nmpBaseMargin 150->100, nmpDepthMargin 15->24,
   aspDelta 15->10, rfpMargin 75->68, qsFutility 160->180. The pruning is more aggressive: CoreEngineTest's mate
   needs depth 10 instead of 8 (static tests must not veto an SPRT-confirmed gain).
+  SPSA round 2 (1200 iterations from the round-1 values, gen3 net; state `E:\Chess-Data\tuning\spsa-411.json`):
+  small moves (nmpBaseMargin 100->91, qsFutility 180->196, histPrune 1346->1244, lmrBase 86->93); verified with the
+  gen4 net 660-626-2714 (+3.0 Elo, 4000 games, SPRT undecided) - not shipped: round 1 is at the optimum within noise.
   Why: Stockfish review of 30 server games found endgame moves lost 26 cp/move vs 14 in middlegames, and the
   training data had half the deep endgames of real games. Keep per-feature/per-bucket weight rows (offset 0).
 - NNUE speed (2026-10-18, CPU-time bench, identical trees): accumulators are updated lazily (only when a node
