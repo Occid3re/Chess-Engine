@@ -55,6 +55,8 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
   Generation 2 (4.0.9: window v5c + gen01 + gen02 self-play) +29.8 vs generation 1 (SPRT H1, 1437 games).
   Generation 3 (4.1.0, first GPU-trained net, `scripts/nnue/train_gpu.py --layout plain`, mix.py: elite + v5c +
   gen01 + gen02 + 18M of the big run, endgames twice, 91M positions) +24.7 +-12 vs generation 2 (1592 games, H1).
+  Generation 4 (4.1.1, first one from gpu_generations.py: 149M positions incl. 50.5M self-play of generation 3)
+  +74.1 +-22.2 vs generation 3 (136-49-229, 414 games, H1) - fresh self-play of the current best is what counts.
 - Search parameters (core/Tune.java) from SPSA, 1500 iterations x 8 games at 6+0.06 (4.0.9): +28.3 vs the old
   defaults (SPRT H1, 1058 games at 10+0.1). Biggest moves: nmpBaseMargin 150->100, nmpDepthMargin 15->24,
   aspDelta 15->10, rfpMargin 75->68, qsFutility 160->180. The pruning is more aggressive: CoreEngineTest's mate
