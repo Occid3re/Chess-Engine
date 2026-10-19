@@ -89,6 +89,8 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
 - UCI extras (all off by default, bench unchanged): `go searchmoves`, `Contempt` (cp a draw is worth less for the
   root side), `RootPenalty` ("e2e4:40 d2d4:15" or "none": those root moves are searched with the window shifted by
   the penalty, so they are only played when that much better; no exact TT store at a penalised root)
+- Server releases: push branch vX.Y.Z, set ENGINE_REF/ENGINE_JAR in play/alieknek/Dockerfile, push play main, then
+  `scripts/release/deploy_server.sh` (pause bot until no game, deploy.sh, bot on again in any case; ssh timeouts).
 - Server deployment (play.juliussze.at, Occid3re/play repo): `alieknek` service with play window, switch and watch page
   (`src/main/resources/py/alieknek_service.py`, `watch/`)
 
