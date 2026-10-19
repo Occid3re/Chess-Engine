@@ -135,6 +135,14 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
   parity -> SPRT [0,5] vs `E:\Chess-Data
 etsest.bin` (4 cores) -> on H1 promote and restart self-play with
   it. Releases to the server stay manual. Stop: kill the python process and the DataGen java it started.
+- `scripts/cloud/burst.py`: self-play on rented Linux servers (root ssh with the Hetzner key): `setup <ip>` copies
+  the engine sources of a git ref + the best net, installs Temurin 27, the 3-4-5 Syzygy tables (sesse mirror, one
+  file at a time - parallel downloads get 403) and the JNI library, starts DataGen on all threads; `sync` appends
+  new positions to `E:\Chess-Data\cloud\`, `status`, `net all --net` (new network), `stop <ip>` (then cancel the
+  server in Robot / console - billing runs until then). gpu_generations.py syncs every pass, counts the cloud
+  positions towards `--positions`, mixes the files and switches the servers to a promoted net.
+  2026-10-19: Hetzner auction EPYC 7502P (64 threads, 0.58 EUR/h incl. VAT, hourly, cancel immediately):
+  4720 pos/s = 3.1x this PC (Ryzen 9 3900X, 20 threads: 1515 pos/s).
 - `spsa.py`: Fishtest-style SPSA over `Tune.java` (all parameters at once, game pairs per iteration), resumable
   (`E:\Chess-Data\tuning\spsa-state.json`); `--verify` SPRTs the result against the defaults.
 - No Stockfish-labelled data (user decision 2026-10-18): the engine learns only from its own games and search.

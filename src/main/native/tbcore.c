@@ -191,7 +191,7 @@ static char *map_file(const char *name, const char *suffix, uint64 *mapping)
 static void unmap_file(char *data, uint64 size)
 {
   if (!data) return;
-  if (!munmap(data, size)) {
+  if (munmap(data, size) != 0) {
 	  perror("munmap");
   }
 }

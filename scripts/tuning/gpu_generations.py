@@ -27,6 +27,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 CORE_SOURCES = ["src/main/java/julius/game/chessengine/core", "src/main/java/julius/game/chessengine/syzygy/bridge"]
 PY = sys.executable
+BURST = REPO / "scripts/cloud/burst.py"
 RECORD = 32
 
 
@@ -141,6 +142,8 @@ def main() -> None:
     ap.add_argument("--openings", default=r"E:\ChessEngines\harness\elite_openings.epd")
     ap.add_argument("--valid-data", default=r"E:\Chess-Data\packed\val_f256.bin")
     ap.add_argument("--engine-ref", default="v4.1.0", help="git ref the engines are compiled from")
+    ap.add_argument("--cloud", default=r"E:\Chess-Data\cloud",
+                    help="self-play of rented servers (scripts/cloud/burst.py): synced every pass, counted and mixed")
     args = ap.parse_args()
 
     work = Path(args.work)
@@ -167,7 +170,17 @@ def main() -> None:
             state["data"].append(str(out))
             save()
         current = Path(dg["file"])
-        new = positions(current) - dg.get("base", 0)
+        cloud = Path(args.cloud)
+        cloud_base = state.setdefault("cloudBase", {})
+        if (cloud / "hosts.json").exists():
+            subprocess.run([PY, str(BURST), "sync", "--dir", str(cloud)], capture_output=True, timeout=3600)
+            for f in sorted(cloud.glob("cloud-*.bin"), key=lambda p: p.stat().st_ctime):
+                if str(f) not in state["data"]:
+                    state["data"].append(str(f))
+                    cloud_base[str(f)] = 0
+                    log(f"cloud self-play: {f.name}")
+                    save()
+        new = positions(current) - dg.get("base", 0) + sum(positions(Path(f)) - b for f, b in cloud_base.items())
         if new < args.positions:
             time.sleep(600)
             continue
@@ -195,6 +208,8 @@ def main() -> None:
         record = {"attempt": attempt, "generation": gen, "window": window, "net": str(net), "positions": new,
                   "parity": parity.stdout.strip().splitlines()[-1] if parity.stdout else parity.stderr[-300:]}
         dg["base"] = positions(current)
+        for f in cloud_base:
+            cloud_base[f] = positions(Path(f))
         if parity.returncode != 0:
             log(f"generation {gen}: parity failed - {record['parity']}")
             record["verdict"] = "parity failed"
@@ -209,6 +224,9 @@ def main() -> None:
                 compile_engine(best_dir, Path(args.best))
                 stop(dg["pid"])  # self-play continues with the new best (new file) on the next pass
                 state["datagen"] = None
+                if (cloud / "hosts.json").exists():
+                    subprocess.run([PY, str(BURST), "net", "all", "--net", args.best, "--dir", str(cloud)],
+                                   capture_output=True, timeout=600)
                 state["generation"] = gen
                 record["promoted"] = True
         state["history"].append(record)
