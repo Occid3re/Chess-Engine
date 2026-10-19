@@ -76,6 +76,8 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
   needs more data (retry at several hundred million positions) or a cheaper layout.
 - Tried, lost: node-effort time management (factor (160 - 100 * best-move node share) / 100): 82-134-314
   (-34 Elo, 530 games) - stopped too early; would need tuning (SPSA) before another try.
+- Tried, no gain: continuation history of ply - 4 in quiet ordering (bench -16 % nodes, but 188-191-617 vs 4.1.0,
+  996 games, ~0 Elo); pawn history (bench +27 % nodes, not played).
 - Tried, no gain: pawn correction history (eval += learnt error per pawn structure): 81-83-294 vs 4.0.9 at
   10+0.1 (458 games, ~0 Elo); kept as refs/backup/local/exp-corrhist.
 - Self-play data: `core.tools.DataGen` (`-Dgen.starts`, `-Dgen.syzygy`, `-Dgen.winScore/winPlies/drawPly/drawPlies`)
