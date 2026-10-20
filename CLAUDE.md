@@ -138,6 +138,11 @@ etsest-unc.bin`, retrained on every promotion).
 - In play: `RootPenalty` from the experience (40 cp per net loss against this opponent in this position, max 120;
   15 cp for a line that only drew against an opponent >= 100 below; 20 cp for a move scoring < 30 % in >= 3 games
   overall). Outbound challenges prefer opponents the bot beats more often than their rating predicts.
+  Outbound pacing (4.1.3): one challenge at a time while idle - 20 s after a game (incoming first), 90 s after a
+  challenge nobody took (cancelled after 45 s, so no second game), 300 s when no bot fits; time controls rotate
+  (`OUTBOUND_TCS`, default bullet 2+1 / blitz 3+2 / rapid 10+5, weight 1 / (1 + games of the last 24 h));
+  rating window +-200; online bots cached 5 min, ratings 30 min (a challenge usually costs one request, it used
+  to cost four every 10 min). 429 still parks the loop for Retry-After.
   Rating-aware contempt exists (`BOT_CONTEMPT_PER_100`) but is OFF until a match shows it helps.
 - `/alieknek/nnue.json` + `/alieknek/nnue.bin` on the public watch port: the engine's network for the app's
   network view (read from the jar once, ETag-revalidated); costs nothing during play.

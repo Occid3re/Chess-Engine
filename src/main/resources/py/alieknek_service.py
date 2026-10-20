@@ -490,7 +490,8 @@ def _index_games(records: list) -> None:
         for g in records:
             if not g.get("id") or g["id"] in _archive["games"] or g.get("result") not in ("win", "draw", "loss"):
                 continue
-            _archive["games"][g["id"]] = {"endedAt": g.get("endedAt"), "opponent": g["opponent"]["id"]}
+            _archive["games"][g["id"]] = {"endedAt": g.get("endedAt"), "opponent": g["opponent"]["id"],
+                                          "speed": g.get("speed")}
             o = g["opponent"]
             s = _archive["opponents"].setdefault(o["id"], {
                 "id": o["id"], "name": o.get("name") or o["id"], "title": o.get("title"), "rating": None,
@@ -533,6 +534,18 @@ def _index_games(records: list) -> None:
                     seen[uci] = seen.get(uci, 0) + 1
                 board.push(move)
         _archive["version"] += 1
+
+
+def recent_games_by_speed(hours: float = 24) -> dict:
+    """{'bullet': n, 'blitz': n, ...}: the bot's finished games of the last hours per time control (the outbound
+    challenges play the least played one most often)."""
+    since = int(time.time() * 1000) - int(hours * 3600 * 1000)
+    counts = {}
+    with _archive_lock:
+        for g in _archive["games"].values():
+            if (g.get("endedAt") or 0) >= since and g.get("speed"):
+                counts[g["speed"]] = counts.get(g["speed"], 0) + 1
+    return counts
 
 
 def opponents(limit: int = 40) -> list:

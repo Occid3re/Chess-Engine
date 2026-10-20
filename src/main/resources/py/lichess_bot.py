@@ -122,10 +122,18 @@ OUTBOUND_RATED = os.environ.get("OUTBOUND_RATED", "1") == "1"
 OUTBOUND_CLOCK_LIMIT = int(os.environ.get("OUTBOUND_CLOCK_LIMIT", "180"))  # seconds (3+2 default)
 OUTBOUND_INCREMENT = int(os.environ.get("OUTBOUND_INCREMENT", "2"))
 OUTBOUND_BLOCKLIST = {"implosio", "demolito_l1", "demolito_l2", "lunanetengine", "hummus-bot", "honzovy-sachy"}
-RATING_DELTA = int(os.environ.get("OUTBOUND_RATING_DELTA", "100"))  # ± rating window
-# Make the scanner very gentle by default
-OUTBOUND_MAX_PER_CYCLE = int(os.environ.get("OUTBOUND_MAX_PER_CYCLE", "1"))  # how many to try per cycle
-OUTBOUND_PERIOD_SEC = int(os.environ.get("OUTBOUND_PERIOD_SEC", "600"))  # how often to try (idle-only)
+RATING_DELTA = int(os.environ.get("OUTBOUND_RATING_DELTA", "200"))  # ± rating window
+# Time controls of outbound challenges, "perf:seconds+increment" (the least played in the last 24 h most often)
+OUTBOUND_TCS_SPEC = os.environ.get("OUTBOUND_TCS") or \
+    f"bullet:120+1,blitz:{OUTBOUND_CLOCK_LIMIT}+{OUTBOUND_INCREMENT},rapid:600+5"
+# Pacing (Lichess rate limits): one challenge at a time, OUTBOUND_AFTER_GAME_SEC after a game (incoming challenges
+# first), OUTBOUND_RETRY_SEC after a challenge nobody took (it is cancelled after OUTBOUND_WAIT_ACCEPT_SEC),
+# OUTBOUND_PERIOD_SEC when no bot fits. Online bots and ratings come from a cache (OUTBOUND_CACHE_SEC).
+OUTBOUND_PERIOD_SEC = int(os.environ.get("OUTBOUND_PERIOD_SEC", "300"))
+OUTBOUND_AFTER_GAME_SEC = int(os.environ.get("OUTBOUND_AFTER_GAME_SEC", "20"))
+OUTBOUND_RETRY_SEC = int(os.environ.get("OUTBOUND_RETRY_SEC", "90"))
+OUTBOUND_WAIT_ACCEPT_SEC = int(os.environ.get("OUTBOUND_WAIT_ACCEPT_SEC", "45"))
+OUTBOUND_CACHE_SEC = int(os.environ.get("OUTBOUND_CACHE_SEC", "300"))
 OUTBOUND_COOLDOWN_SEC = int(os.environ.get("OUTBOUND_COOLDOWN_SEC", "9000"))  # avoid re-challenging too soon
 # Inspect only a small random subset of online bots for rating lookups
 OUTBOUND_INSPECT_LIMIT = int(os.environ.get("OUTBOUND_INSPECT_LIMIT", "20"))
@@ -965,7 +973,64 @@ def classify_tc_from_challenge(chal: dict) -> str:
     return bucket or "bullet"
 
 
-def find_similar_bots(client: berserk.Client,
+def parse_outbound_tcs(spec: str) -> List[tuple]:
+    """'bullet:120+1,blitz:180+2' -> [('bullet', 120, 1), ('blitz', 180, 2)]."""
+    tcs = []
+    for item in spec.split(","):
+        perf, clock = item.strip().split(":")
+        limit, inc = clock.split("+")
+        tcs.append((perf.strip(), int(limit), int(inc)))
+    return tcs
+
+
+OUTBOUND_TCS = parse_outbound_tcs(OUTBOUND_TCS_SPEC)
+
+
+def outbound_tc_weights(counts: dict, tcs: List[tuple] = None) -> List[float]:
+    """Weight 1 / (1 + games in the last 24 h) per time control: the least played comes up most, none is starved."""
+    return [1.0 / (1 + counts.get(perf, 0)) for perf, _, _ in (tcs or OUTBOUND_TCS)]
+
+
+def pick_outbound_tc() -> tuple:
+    counts = svc.recent_games_by_speed(24) if svc is not None else {}
+    return random.choices(OUTBOUND_TCS, weights=outbound_tc_weights(counts))[0]
+
+
+class LichessCache:
+    """Lichess lookups for the outbound search, reused for OUTBOUND_CACHE_SEC (ratings six times as long):
+    a challenge then usually costs one request instead of four."""
+
+    def __init__(self, client: berserk.Client, my_username: str):
+        self.client = client
+        self.my_username = my_username
+        self._me = (0.0, None)
+        self._bots = (0.0, [])
+        self._users: Dict[str, tuple] = {}
+
+    def me(self) -> Optional[dict]:
+        if time.time() - self._me[0] > 6 * OUTBOUND_CACHE_SEC:
+            self._me = (time.time(), self.client.users.get_public_data(self.my_username))
+            time.sleep(API_REQUEST_DELAY)
+        return self._me[1]
+
+    def online_bots(self) -> list:
+        if time.time() - self._bots[0] > OUTBOUND_CACHE_SEC:
+            self._bots = (time.time(), list(self.client.bots.get_online_bots()))
+            time.sleep(API_REQUEST_DELAY)
+        return self._bots[1]
+
+    def users(self, ids: List[str]) -> Dict[str, dict]:
+        now = time.time()
+        missing = [u for u in ids if now - self._users.get(u, (0.0, None))[0] > 6 * OUTBOUND_CACHE_SEC]
+        if missing:
+            for u in self.client.users.get_by_id(*missing[:20]):  # one request for up to 20 users
+                if u.get("id"):
+                    self._users[u["id"]] = (now, u)
+            time.sleep(API_REQUEST_DELAY)
+        return {u: self._users[u][1] for u in ids if u in self._users}
+
+
+def find_similar_bots(cache: LichessCache,
                       my_username: str,
                       tc_type: str = "blitz",
                       delta: int = RATING_DELTA,
@@ -976,32 +1041,21 @@ def find_similar_bots(client: berserk.Client,
     exclude |= {u.lower() for u in OUTBOUND_BLOCKLIST}  # <- permanent exclusions
     perf_key = PERF_FOR_TC.get(tc_type, "blitz")
 
-    # (1) My rating
+    # (1) My rating in this time control (provisional counts too: a new one has to get played)
     try:
-        me = client.users.get_public_data(my_username)
+        my_rating, _ = _get_perf_rating(cache.me(), perf_key)
     except Exception as e:
-        print(f"[outbound] get_public_data({my_username}) failed: {e}")
+        print(f"[outbound] my rating lookup failed: {e}")
         return []
-    time.sleep(API_REQUEST_DELAY)
-    my_rating, _ = _get_perf_rating(me, perf_key)
-    if not my_rating:
-        my_rating = 1200
+    my_rating = my_rating or 1500
     print(f"[outbound] my {perf_key} rating: {my_rating}")
 
-    # (2) Online bots
+    # (2) Online bots (their perfs usually come with the list)
     try:
-        bots = list(client.bots.get_online_bots())
-        source = "bots.get_online_bots"
-    except AttributeError:
-        try:
-            bots = list(client.users.get_online_bots())
-            source = "users.get_online_bots"
-        except Exception as e:
-            print(f"[outbound] get_online_bots failed: {e}")
-            bots = []
-            source = "unknown"
-    time.sleep(API_REQUEST_DELAY)
-    print(f"[outbound] {source} returned {len(bots)} entries")
+        bots = cache.online_bots()
+    except Exception as e:
+        print(f"[outbound] get_online_bots failed: {e}")
+        return []
 
     # (3) Filter + matches
     matches: List[tuple[str, int]] = []
@@ -1010,37 +1064,24 @@ def find_similar_bots(client: berserk.Client,
         uid = b.get("id")
         if not uid or uid.lower() in exclude:
             continue
-        perfs = b.get("perfs") or {}
-        perf = perfs.get(perf_key) or {}
+        perf = (b.get("perfs") or {}).get(perf_key) or {}
         r = perf.get("rating")
-        prov = perf.get("prov", False)
-        if r and not prov and abs(r - my_rating) <= delta:
-            matches.append((uid, r))
-        else:
+        if r and not perf.get("prov", False):
+            if abs(r - my_rating) <= delta:
+                matches.append((uid, r))
+        elif not perf:
             ids_needing_lookup.append(uid)
+    print(f"[outbound] {len(bots)} bots online, {len(matches)} fit; {len(ids_needing_lookup)} without {perf_key} perf")
 
-    print(
-        f"[outbound] initial matches (from online list perfs): {len(matches)} ; need lookup for {len(ids_needing_lookup)}")
-
-    # (4) If still short, ONE bulk lookup for a tiny random subset
+    # (4) If still short, ONE bulk lookup (cached) for a small random subset
     if len(matches) < max_candidates and ids_needing_lookup:
         random.shuffle(ids_needing_lookup)
-        ids_sample = ids_needing_lookup[:max(1, min(OUTBOUND_INSPECT_LIMIT, 20))]
         try:
-            # ONE request for up to ~20 users
-            bulk = list(client.users.get_by_id(*ids_sample))
-            print(f"[outbound] bulk lookup for {len(ids_sample)} users returned {len(bulk)}")
+            users = cache.users(ids_needing_lookup[:max(1, min(OUTBOUND_INSPECT_LIMIT, 20))])
         except Exception as e:
             print(f"[outbound] bulk get_by_id failed: {e}")
-            bulk = []
-        time.sleep(API_REQUEST_DELAY)
-
-        # index by id
-        idx = {u.get("id"): u for u in bulk if u.get("id")}
-        for uid in ids_sample:
-            u = idx.get(uid)
-            if not u:
-                continue
+            users = {}
+        for uid, u in users.items():
             r, prov = _get_perf_rating(u, perf_key)
             if r and not prov and abs(r - my_rating) <= delta:
                 matches.append((uid, r))
@@ -1061,11 +1102,11 @@ def challenge_user(client: berserk.Client,
                    rated: bool,
                    clock_limit: int,
                    clock_increment: int,
-                   color: str = "random") -> "tuple[bool, int]":
-    """Returns (sent, seconds to leave this opponent alone). Lichess tells how long, e.g. when the
+                   color: str = "random") -> "tuple[bool, int, Optional[str]]":
+    """Returns (sent, seconds to leave this opponent alone, challenge id). Lichess tells how long, e.g. when the
     opponent has reached its daily bot-game limit; otherwise the normal cooldown applies."""
     try:
-        client.challenges.create(
+        resp = client.challenges.create(
             opponent,
             rated=rated,
             variant="standard",
@@ -1073,17 +1114,18 @@ def challenge_user(client: berserk.Client,
             clock_increment=clock_increment,
             color=color,
         )
+        cid = None
+        if isinstance(resp, dict):
+            cid = resp.get("id") or (resp.get("challenge") or {}).get("id")
         print(f"[+] Challenged {opponent} (rated={rated}, {clock_limit}+{clock_increment})")
-        return True, OUTBOUND_COOLDOWN_SEC
+        return True, OUTBOUND_COOLDOWN_SEC, cid
     except (berserk.exceptions.ResponseError, berserk.exceptions.ApiError) as e:
         status = getattr(getattr(e, "response", None), "status_code", None)
         if status == 429:
-            # Back off hard if challenge creation is rate-limited
-            print("[warn] Challenge creation hit 429; backing off 60s.")
-            _GLOBAL_RL.bump(60)
+            raise  # the loop parks itself for Retry-After
         print(f"[-] Challenge to {opponent} rejected: {e}")
         wait = re.search(r"'seconds':\s*(\d+)", str(e))
-        return False, max(OUTBOUND_COOLDOWN_SEC, int(wait.group(1)) if wait else 0)
+        return False, max(OUTBOUND_COOLDOWN_SEC, int(wait.group(1)) if wait else 0), None
 
 
 class ActiveCounter:
@@ -1125,8 +1167,10 @@ def outbound_challenge_loop(stop_event: threading.Event,
                             base_token: str,
                             active_counter: ActiveCounter):
     """
-    Periodically find similar-rated online bots and challenge a few.
-    IDLE-ONLY. Honors Retry-After by parking the loop for that duration.
+    While the bot is idle (in its play window), challenges one similar-rated online bot at a time: right after a
+    game (after OUTBOUND_AFTER_GAME_SEC, so incoming challenges come first), again OUTBOUND_RETRY_SEC after a
+    challenge nobody took (cancelled after OUTBOUND_WAIT_ACCEPT_SEC), every OUTBOUND_PERIOD_SEC when no bot fits.
+    Time controls rotate (OUTBOUND_TCS, the least played of the last 24 h most often). Honors Retry-After (429).
     """
     if not ENABLE_OUTBOUND_CHALLENGES:
         print("[outbound] disabled via OUTBOUND_ENABLED=0")
@@ -1134,89 +1178,71 @@ def outbound_challenge_loop(stop_event: threading.Event,
 
     session = make_hardened_session(base_token)
     client = berserk.Client(session=session)
-
+    cache = LichessCache(client, my_username)
     recently_challenged: Dict[str, float] = {}
-    period = max(300, OUTBOUND_PERIOD_SEC)  # gentle default
-    max_per_cycle = max(1, OUTBOUND_MAX_PER_CYCLE)
-
     penalty_until = 0.0
+    tcs = ", ".join(f"{p} {lim}+{inc}" for p, lim, inc in OUTBOUND_TCS)
+    print(f"[outbound] started: {tcs}; after a game {OUTBOUND_AFTER_GAME_SEC}s, retry {OUTBOUND_RETRY_SEC}s, "
+          f"no target {OUTBOUND_PERIOD_SEC}s, cooldown per bot {OUTBOUND_COOLDOWN_SEC}s")
 
-    print(f"[outbound] started. period={period}s, max_per_cycle={max_per_cycle}, cooldown={OUTBOUND_COOLDOWN_SEC}s")
+    def pause(seconds: float, until_game: bool = False) -> None:
+        """Sleeps, waking early on stop (and, with until_game, when a game starts)."""
+        end = time.time() + seconds
+        while time.time() < end and not stop_event.is_set():
+            if until_game and active_counter.get() != 0:
+                return
+            time.sleep(1)
 
     while not stop_event.is_set():
         try:
             now = time.time()
-
-            # Penalty box
             if now < penalty_until:
-                sleep_for = int(penalty_until - now) + 1
-                print(f"[outbound] penalty box. sleeping {sleep_for}s")
-                for _ in range(sleep_for):
-                    if stop_event.is_set():
-                        return
-                    time.sleep(1)
+                print(f"[outbound] penalty box. sleeping {int(penalty_until - now) + 1}s")
+                pause(penalty_until - now + 1)
                 continue
 
-            # Prune cooldown map
-            before = len(recently_challenged)
             recently_challenged = {u: ts for u, ts in recently_challenged.items() if now - ts < OUTBOUND_COOLDOWN_SEC}
-            after = len(recently_challenged)
-            if before != after:
-                print(f"[outbound] pruned cooldown list: {before} -> {after}")
 
             # Only inside the configured play window / while switched on
             if svc is not None and not svc.accepting():
-                for _ in range(60):
-                    if stop_event.is_set():
-                        return
-                    time.sleep(1)
+                pause(60)
                 continue
 
-            # Idle-only
+            # A game is running: wait for its end, then give incoming challenges a moment
             if active_counter.get() != 0:
-                print("[outbound] a game is active -> skipping this cycle")
-                for _ in range(period):
-                    if stop_event.is_set():
-                        return
-                    if active_counter.get() == 0:
-                        print("[outbound] no active games detected; resuming outbound scans")
-                        break
+                while active_counter.get() != 0 and not stop_event.is_set():
                     time.sleep(1)
-                else:
-                    continue
+                pause(OUTBOUND_AFTER_GAME_SEC, until_game=True)
                 continue
 
-            print("[outbound] scanning for targets...")
-            targets = find_similar_bots(
-                client,
-                my_username=my_username,
-                tc_type=OUTBOUND_TC,
-                delta=RATING_DELTA,
-                max_candidates=max_per_cycle,
-                exclude=list(recently_challenged.keys()),
-            )
-
+            perf, clock_limit, increment = pick_outbound_tc()
+            print(f"[outbound] looking for a {perf} opponent ({clock_limit}+{increment})")
+            targets = find_similar_bots(cache, my_username=my_username, tc_type=perf, delta=RATING_DELTA,
+                                        max_candidates=1, exclude=list(recently_challenged.keys()))
             if not targets:
-                print("[outbound] no targets this cycle")
-            for opp in targets:
+                print(f"[outbound] no {perf} target; next look in {OUTBOUND_PERIOD_SEC}s")
+                pause(OUTBOUND_PERIOD_SEC, until_game=True)
+                continue
+
+            opp = targets[0]
+            sent, leave_alone, challenge_id = challenge_user(client, opponent=opp, rated=OUTBOUND_RATED,
+                                                            clock_limit=clock_limit, clock_increment=increment,
+                                                            color="random")
+            # Successful or not: do not ask the same bot again for a while. The map keeps entries for
+            # OUTBOUND_COOLDOWN_SEC after their timestamp, so a later timestamp means a longer pause.
+            recently_challenged[opp] = time.time() + leave_alone - OUTBOUND_COOLDOWN_SEC
+            started = time.time()
+            if sent:
+                pause(OUTBOUND_WAIT_ACCEPT_SEC, until_game=True)
                 if active_counter.get() != 0:
-                    print("[outbound] game became active; stopping send loop")
-                    break
-
-                print(f"[outbound] challenging {opp} ({OUTBOUND_TC} {OUTBOUND_CLOCK_LIMIT}+{OUTBOUND_INCREMENT})")
-                ok, leave_alone = challenge_user(
-                    client,
-                    opponent=opp,
-                    rated=OUTBOUND_RATED,
-                    clock_limit=OUTBOUND_CLOCK_LIMIT,
-                    clock_increment=OUTBOUND_INCREMENT,
-                    color="random",
-                )
-                # Successful or not: do not ask the same bot again for a while. The map keeps entries for
-                # OUTBOUND_COOLDOWN_SEC after their timestamp, so a later timestamp means a longer pause.
-                recently_challenged[opp] = time.time() + leave_alone - OUTBOUND_COOLDOWN_SEC
-
-                time.sleep(max(0.5, API_REQUEST_DELAY))
+                    continue  # accepted (or another game started)
+                if challenge_id:
+                    try:
+                        client.challenges.cancel(challenge_id)  # no second game later on
+                        print(f"[outbound] {opp} did not answer; challenge cancelled")
+                    except Exception as e:
+                        print(f"[outbound] cancel {challenge_id} failed: {e}")
+            pause(max(0.0, OUTBOUND_RETRY_SEC - (time.time() - started)), until_game=True)
 
         except (berserk.exceptions.ResponseError, berserk.exceptions.ApiError) as e:
             status = getattr(getattr(e, "response", None), "status_code", None)
@@ -1225,23 +1251,12 @@ def outbound_challenge_loop(stop_event: threading.Event,
                 print(f"[warn] outbound 429. backing off {delay}s.")
                 _GLOBAL_RL.bump(delay)
                 penalty_until = time.time() + delay
-                for _ in range(delay):
-                    if stop_event.is_set():
-                        return
-                    time.sleep(1)
-                continue
             else:
                 print(f"[warn] outbound loop API error: {e}")
+                pause(OUTBOUND_RETRY_SEC)
         except Exception as e:
             print(f"[warn] outbound loop error: {e}")
-
-        # Base period + jitter
-        total = period + random.randint(0, 30)
-        print(f"[outbound] sleeping {total}s until next cycle")
-        for _ in range(total):
-            if stop_event.is_set():
-                break
-            time.sleep(1)
+            pause(OUTBOUND_RETRY_SEC)
 
 
 def safe_accept_challenge(client: berserk.Client, chal_id: str) -> bool:
