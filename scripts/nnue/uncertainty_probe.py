@@ -96,6 +96,11 @@ def main():
         return torch.log1p(err / 50) if args.space == "cp" else err * 10
 
     tg.configure("plain")
+    if args.net:  # the layout the file was trained with (king buckets, mirroring), as parity.py reads it
+        header = Path(args.net).read_bytes()[:104]
+        if int.from_bytes(header[4:8], "little") >= 3:
+            kb, mirror = int.from_bytes(header[28:32], "little"), int.from_bytes(header[32:36], "little")
+            tg.configure((list(header[36:100]), bool(mirror), kb > 1))
     device = torch.device("cuda")
     kb = torch.tensor(tg.KING_BUCKETS, device=device)
     net = tg.Net(args.hidden, args.buckets).to(device)
