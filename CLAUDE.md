@@ -63,6 +63,10 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
   Hetzner server with 3x nodes on uncertain positions) +32.2 +-11.4 vs generation 5 (423-277-882, 1582 games, H1;
   the first SPRT on the server with fastchess, 30 games at once: 28 minutes). The attempt before it (gen5 data
   without the focus, 128M) reached only +8 in 4000 games (undecided).
+  A plain candidate from gen6 self-play (374M mix) was equal to gen6 (+1.6 +-6.7, 4000 games): the 768x256 net is
+  saturated. Generation 7 (4.1.4) is the first king-bucket net (kb8: 8 own-king buckets, mirrored, factoriser,
+  file v3, 3.2 MB): 463M-position mix with fresh gen6 self-play, 10 epochs, +22.1 +-9.3 vs generation 6
+  (573-426-1315, 2314 games, H1); bench nps -2 % (Finny tables). The loop now runs with --layout kb8 --epochs 10.
 - Search parameters (core/Tune.java) from SPSA, 1500 iterations x 8 games at 6+0.06 (4.0.9): +28.3 vs the old
   defaults (SPRT H1, 1058 games at 10+0.1). Biggest moves: nmpBaseMargin 150->100, nmpDepthMargin 15->24,
   aspDelta 15->10, rfpMargin 75->68, qsFutility 160->180. The pruning is more aggressive: CoreEngineTest's mate
