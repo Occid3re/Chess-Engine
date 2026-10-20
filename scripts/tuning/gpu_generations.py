@@ -205,6 +205,10 @@ def main() -> None:
                     help="uncertainty head of the best network (retrained on every promotion)")
     ap.add_argument("--unc-nodes", type=float, default=3.0, help="node multiplier for uncertain positions (1 = off)")
     ap.add_argument("--unc-fork", type=float, default=0.2, help="share of games started from uncertain positions")
+    ap.add_argument("--warm-start", action="store_true",
+                    help="train candidates from the best network's float model (best.pt) instead of from scratch")
+    ap.add_argument("--warm-epochs", type=int, default=4)
+    ap.add_argument("--warm-lr", type=float, default=0.0005)
     ap.add_argument("--sprt-host", help="run the SPRTs with fastchess on this burst.py server (many games at once)")
     ap.add_argument("--sprt-concurrency", type=int, default=30)
     ap.add_argument("--ssh-key", default=str(Path.home() / ".ssh" / "id_ed25519_hetzner"))
@@ -250,6 +254,8 @@ def main() -> None:
             previous = hashlib.sha1(Path(args.best).read_bytes()).hexdigest()[:8]
             shutil.copy(args.best, gdir / "previous_best.bin")
             shutil.copy(net, args.best)
+            if net.with_suffix(".pt").exists():  # the float model, for --warm-start
+                shutil.copy(net.with_suffix(".pt"), Path(args.best).with_suffix(".pt"))
             compile_engine(best_dir, Path(args.best))
             if dg:
                 stop(dg["pid"])  # self-play continues with the new best (new file) on the next pass
@@ -324,10 +330,14 @@ def main() -> None:
         subprocess.run([PY, str(REPO / "scripts/nnue/mix.py"), "--out", str(mix), args.elite,
                         *["+" + w for w in window]], check=True)
         net = gdir / "candidate.bin"
-        log(f"generation {gen}: training {args.layout} on the GPU")
+        best_pt = Path(args.best).with_suffix(".pt")
+        warm = args.warm_start and best_pt.exists()
+        extra = ["--init", str(best_pt), "--lr", str(args.warm_lr)] if warm else []
+        log(f"generation {gen}: training {args.layout} on the GPU" + (" from the best network" if warm else ""))
         with open(gdir / "train.log", "w", encoding="utf-8") as f:
             subprocess.run([PY, str(REPO / "scripts/nnue/train_gpu.py"), "--layout", args.layout, "--data", str(mix),
-                            "--valid-data", args.valid_data, "--out", str(net), "--epochs", str(args.epochs)],
+                            "--valid-data", args.valid_data, "--out", str(net), "--epochs",
+                            str(args.warm_epochs if warm else args.epochs), *extra],
                            stdout=f, stderr=subprocess.STDOUT, check=True)
         mix.unlink()  # several GB; the sources stay
         cand_dir = gdir / "engine"

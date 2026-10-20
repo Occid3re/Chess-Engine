@@ -264,6 +264,7 @@ def main():
     ap.add_argument("--fp32", action="store_true", help="exact EmbeddingBag feature transformer instead of fp16")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--chunk", type=int, default=0, help="positions per GPU chunk (default: half the free memory)")
+    ap.add_argument("--init", help="start from this float model (.pt of the same layout and size): fine-tuning")
     args = ap.parse_args()
 
     configure(args.layout)
@@ -303,6 +304,9 @@ def main():
           f"{' ' + torch.cuda.get_device_name(0) if device.type == 'cuda' else ''}", flush=True)
     kb_map = torch.tensor(KING_BUCKETS, device=device)
     net = Net(args.hidden, args.buckets).to(device)
+    if args.init:
+        net.load_state_dict(torch.load(args.init, map_location=device))
+        print(f"starting from {args.init}", flush=True)
     others = [q for name, q in net.named_parameters() if name != "ft.weight"]
     opt = RowAdam([{"params": [net.ft.weight], "rows": True}, {"params": others}], lr=args.lr)
     scaler = torch.cuda.amp.GradScaler(enabled=device.type == "cuda" and HALF)
