@@ -270,20 +270,26 @@ def main() -> None:
         state["history"].append(record)
         save()
 
+    def ensure_datagen() -> dict:
+        """Self-play with the best network runs here (restarted into a new file if it is not)."""
+        dg = state.get("datagen")
+        if not dg or not alive(dg["pid"]):
+            out = work / f"sp-gen{state['generation'] + 1:02d}-{time.strftime('%m%d%H%M')}.bin"
+            classes = compile_engine(work / "datagen", Path(args.best))
+            state["datagen"] = dg = {"pid": start_datagen(args, classes, out), "file": str(out), "base": 0}
+            state["data"].append(str(out))
+            save()
+        return dg
+
     pending = state.get("pending")
     if pending:
+        ensure_datagen()  # self-play goes on during the SPRT
         log(f"resuming the SPRT of {pending['net']}")
         gdir = Path(pending["net"]).parent
         judge(pending, gdir, Path(pending["net"]), gdir / "engine")
     while True:
         gen = state["generation"] + 1
-        dg = state.get("datagen")
-        if not dg or not alive(dg["pid"]):
-            out = work / f"sp-gen{gen:02d}-{time.strftime('%m%d%H%M')}.bin"
-            classes = compile_engine(work / "datagen", Path(args.best))
-            state["datagen"] = dg = {"pid": start_datagen(args, classes, out), "file": str(out), "base": 0}
-            state["data"].append(str(out))
-            save()
+        dg = ensure_datagen()
         current = Path(dg["file"])
         if (cloud / "hosts.json").exists():
             subprocess.run([PY, str(BURST), "sync", "--dir", str(cloud)], capture_output=True, timeout=3600)
