@@ -142,6 +142,41 @@ def sprt(name: str, a: Path, b: Path, conc: int) -> str:
     return scores[-1] if scores else "no result"
 
 
+REMOTE_ENGINE = ("#!/bin/sh\nexec /root/alieknek/jdk/bin/java -Xms128m -Xmx256m -XX:+UseParallelGC "
+                 "--add-modules jdk.incubator.vector -Dcore.nnueFile=/root/sprt/{tag}.bin -cp /root/alieknek/classes "
+                 "julius.game.chessengine.core.Uci\n")
+
+
+def remote_sprt(args, name: str, candidate: Path, best: Path) -> str:
+    """The same SPRT [0, 5] at 10+0.1 with fastchess on a burst.py server (--sprt-host): /root/fastchess/fastchess
+    and the engine classes of burst.py setup, which must come from the same git ref as --engine-ref. Many games at
+    once instead of --concurrency here; returns 'H1', 'H0' or the last result line."""
+    ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", "-o", "ServerAliveInterval=30", "-o",
+           "ServerAliveCountMax=6", "-i", args.ssh_key, f"root@{args.sprt_host}"]
+    for tag, net in (("cand", candidate), ("best", best)):
+        with open(net, "rb") as f:
+            subprocess.run(ssh + [f"mkdir -p /root/sprt && cat > /root/sprt/{tag}.bin"], stdin=f, check=True,
+                           timeout=600)
+        subprocess.run(ssh + [f"cat > /root/sprt/{tag}.sh && chmod +x /root/sprt/{tag}.sh"],
+                       input=REMOTE_ENGINE.format(tag=tag).encode(), check=True, timeout=120)
+    cmd = ("/root/fastchess/fastchess -engine cmd=/root/sprt/cand.sh name=engine -engine cmd=/root/sprt/best.sh "
+           "name=best -each proto=uci tc=10+0.1 option.Hash=32 option.Threads=1 timemargin=300 "
+           "-openings file=/root/alieknek/openings.epd format=epd order=random -repeat -rounds 2000 -games 2 "
+           f"-concurrency {args.sprt_concurrency} -sprt elo0=0 elo1=5 alpha=0.05 beta=0.05 "
+           "-draw movenumber=40 movecount=8 score=8 -resign movecount=4 score=800 twosided=true -recover 2>&1 "
+           "| grep -v -e '^Started game' -e '^Position;' -e '^Moves;' -e '^Warning;' -e '^Info;'")
+    log_path = Path(r"E:\ChessEngines\harness\results") / f"{name}.log"
+    with open(log_path, "w", encoding="utf-8") as f:
+        subprocess.run(ssh + [cmd], stdout=f, stderr=subprocess.STDOUT, timeout=12 * 3600)
+    text = log_path.read_text(encoding="utf-8", errors="replace")
+    if "H1 was accepted" in text:
+        return "H1"
+    if "H0 was accepted" in text:
+        return "H0"
+    games = [line.strip() for line in text.splitlines() if line.startswith("Games:")]
+    return games[-1] if games else "no result"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--work", default=r"E:\Chess-Data\gpugen")
@@ -169,6 +204,9 @@ def main() -> None:
                     help="uncertainty head of the best network (retrained on every promotion)")
     ap.add_argument("--unc-nodes", type=float, default=3.0, help="node multiplier for uncertain positions (1 = off)")
     ap.add_argument("--unc-fork", type=float, default=0.2, help="share of games started from uncertain positions")
+    ap.add_argument("--sprt-host", help="run the SPRTs with fastchess on this burst.py server (many games at once)")
+    ap.add_argument("--sprt-concurrency", type=int, default=30)
+    ap.add_argument("--ssh-key", default=str(Path.home() / ".ssh" / "id_ed25519_hetzner"))
     ap.add_argument("--cloud", default=r"E:\Chess-Data\cloud",
                     help="self-play of rented servers (scripts/cloud/burst.py): synced every pass, counted and mixed")
     args = ap.parse_args()
@@ -187,6 +225,56 @@ def main() -> None:
 
     best_dir = work / "best"
     compile_engine(best_dir, Path(args.best))
+    cloud = Path(args.cloud)
+    cloud_base = state.setdefault("cloudBase", {})
+
+    def judge(record: dict, gdir: Path, net: Path, cand_dir: Path) -> None:
+        """SPRT of a trained candidate against the best and its promotion on H1. state['pending'] holds the
+        candidate meanwhile, so a restarted loop tests it again instead of dropping it."""
+        gen = record["generation"]
+        state["pending"] = record
+        save()
+        log(f"generation {gen}: SPRT against the best" + (f" on {args.sprt_host}" if args.sprt_host else ""))
+        name = f"gpugen-cand{record['attempt']:02d}"
+        if args.sprt_host:
+            verdict = remote_sprt(args, name, net, Path(args.best))
+        else:
+            verdict = sprt(name, cand_dir / "run.bat", best_dir / "run.bat", args.concurrency)
+        record["verdict"] = verdict
+        log(f"generation {gen}: {verdict}")
+        if verdict == "H1":
+            dg = state.get("datagen")
+            current = Path(dg["file"]) if dg else None
+            # burst.py names cloud files after the first 8 hex digits of their network's SHA-1
+            previous = hashlib.sha1(Path(args.best).read_bytes()).hexdigest()[:8]
+            shutil.copy(args.best, gdir / "previous_best.bin")
+            shutil.copy(net, args.best)
+            compile_engine(best_dir, Path(args.best))
+            if dg:
+                stop(dg["pid"])  # self-play continues with the new best (new file) on the next pass
+            state["datagen"] = None
+            # its uncertainty head, on the self-play of the previous best (the new one has none yet)
+            own = [*([current] if current else []), *(Path(f) for f in cloud_base if f"-{previous}-" in Path(f).name)]
+            ok = bool(own) and train_head(args, net.with_suffix(".pt"), max(own, key=positions), gdir / "unc.log")
+            log(f"generation {gen}: uncertainty head {'trained' if ok else 'FAILED - focus off'}")
+            if (cloud / "hosts.json").exists():
+                subprocess.run([PY, str(BURST), "net", "all", "--net", args.best, "--unc", args.unc_file,
+                                "--unc-nodes", str(args.unc_nodes), "--unc-fork", str(args.unc_fork),
+                                "--dir", str(cloud)], capture_output=True, timeout=600)
+            # the next candidate waits for 50M positions of the new best: what came in during the SPRT is old
+            for f in cloud_base:
+                cloud_base[f] = positions(Path(f))
+            state["generation"] = gen
+            record["promoted"] = True
+        state.pop("pending", None)
+        state["history"].append(record)
+        save()
+
+    pending = state.get("pending")
+    if pending:
+        log(f"resuming the SPRT of {pending['net']}")
+        gdir = Path(pending["net"]).parent
+        judge(pending, gdir, Path(pending["net"]), gdir / "engine")
     while True:
         gen = state["generation"] + 1
         dg = state.get("datagen")
@@ -197,8 +285,6 @@ def main() -> None:
             state["data"].append(str(out))
             save()
         current = Path(dg["file"])
-        cloud = Path(args.cloud)
-        cloud_base = state.setdefault("cloudBase", {})
         if (cloud / "hosts.json").exists():
             subprocess.run([PY, str(BURST), "sync", "--dir", str(cloud)], capture_output=True, timeout=3600)
             for f in sorted(cloud.glob("cloud-*.bin"), key=lambda p: p.stat().st_ctime):
@@ -240,35 +326,10 @@ def main() -> None:
         if parity.returncode != 0:
             log(f"generation {gen}: parity failed - {record['parity']}")
             record["verdict"] = "parity failed"
+            state["history"].append(record)
+            save()
         else:
-            log(f"generation {gen}: SPRT against the best")
-            verdict = sprt(f"gpugen-cand{attempt:02d}", cand_dir / "run.bat", best_dir / "run.bat", args.concurrency)
-            record["verdict"] = verdict
-            log(f"generation {gen}: {verdict}")
-            if verdict == "H1":
-                # burst.py names cloud files after the first 8 hex digits of their network's SHA-1
-                previous = hashlib.sha1(Path(args.best).read_bytes()).hexdigest()[:8]
-                shutil.copy(args.best, gdir / "previous_best.bin")
-                shutil.copy(net, args.best)
-                compile_engine(best_dir, Path(args.best))
-                stop(dg["pid"])  # self-play continues with the new best (new file) on the next pass
-                state["datagen"] = None
-                # its uncertainty head, on the self-play of the previous best (the new one has none yet)
-                own = [current, *(Path(f) for f in cloud_base if f"-{previous}-" in Path(f).name)]
-                head_data = max(own, key=positions)
-                ok = train_head(args, net.with_suffix(".pt"), head_data, gdir / "unc.log")
-                log(f"generation {gen}: uncertainty head {'trained' if ok else 'FAILED - focus off'}")
-                if (cloud / "hosts.json").exists():
-                    subprocess.run([PY, str(BURST), "net", "all", "--net", args.best, "--unc", args.unc_file,
-                                    "--unc-nodes", str(args.unc_nodes), "--unc-fork", str(args.unc_fork),
-                                    "--dir", str(cloud)], capture_output=True, timeout=600)
-                # the next candidate waits for 50M positions of the new best: what came in during the SPRT is old
-                for f in cloud_base:
-                    cloud_base[f] = positions(Path(f))
-                state["generation"] = gen
-                record["promoted"] = True
-        state["history"].append(record)
-        save()
+            judge(record, gdir, net, cand_dir)
 
 
 if __name__ == "__main__":
