@@ -143,7 +143,7 @@ def sprt(name: str, a: Path, b: Path, conc: int) -> str:
 
 
 REMOTE_ENGINE = ("#!/bin/sh\nexec /root/alieknek/jdk/bin/java -Xms128m -Xmx256m -XX:+UseParallelGC "
-                 "--add-modules jdk.incubator.vector -Dcore.nnueFile=/root/sprt/{tag}.bin -cp /root/alieknek/classes "
+                 "--add-modules jdk.incubator.vector -Dcore.nnueFile={net} -cp /root/alieknek/classes "
                  "julius.game.chessengine.core.Uci\n")
 
 
@@ -153,13 +153,13 @@ def remote_sprt(args, name: str, candidate: Path, best: Path) -> str:
     once instead of --concurrency here; returns 'H1', 'H0' or the last result line."""
     ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", "-o", "ServerAliveInterval=30", "-o",
            "ServerAliveCountMax=6", "-i", args.ssh_key, f"root@{args.sprt_host}"]
+    d = f"/root/sprt/{name}"
     for tag, net in (("cand", candidate), ("best", best)):
         with open(net, "rb") as f:
-            subprocess.run(ssh + [f"mkdir -p /root/sprt && cat > /root/sprt/{tag}.bin"], stdin=f, check=True,
-                           timeout=600)
-        subprocess.run(ssh + [f"cat > /root/sprt/{tag}.sh && chmod +x /root/sprt/{tag}.sh"],
-                       input=REMOTE_ENGINE.format(tag=tag).encode(), check=True, timeout=120)
-    cmd = ("/root/fastchess/fastchess -engine cmd=/root/sprt/cand.sh name=engine -engine cmd=/root/sprt/best.sh "
+            subprocess.run(ssh + [f"mkdir -p {d} && cat > {d}/{tag}.bin"], stdin=f, check=True, timeout=600)
+        subprocess.run(ssh + [f"cat > {d}/{tag}.sh && chmod +x {d}/{tag}.sh"],
+                       input=REMOTE_ENGINE.format(net=f"{d}/{tag}.bin").encode(), check=True, timeout=120)
+    cmd = (f"/root/fastchess/fastchess -engine cmd={d}/cand.sh name=engine -engine cmd={d}/best.sh "
            "name=best -each proto=uci tc=10+0.1 option.Hash=32 option.Threads=1 timemargin=300 "
            "-openings file=/root/alieknek/openings.epd format=epd order=random -repeat -rounds 2000 -games 2 "
            f"-concurrency {args.sprt_concurrency} -sprt elo0=0 elo1=5 alpha=0.05 beta=0.05 "
@@ -188,7 +188,8 @@ def main() -> None:
                     help="self-play files the window starts with (oldest first)")
     # Positions from Lichess elite games scored by our own search (core.tools.Relabel)
     ap.add_argument("--elite", default=r"E:\Chess-Data\packed\elite2M-own.bin")
-    ap.add_argument("--window", type=int, default=4, help="newest self-play files per mix")
+    ap.add_argument("--window", type=int, default=200_000_000,
+                    help="newest self-play files per mix, until they hold at least this many positions")
     ap.add_argument("--positions", type=int, default=50_000_000, help="new positions per candidate")
     ap.add_argument("--layout", default="plain", choices=["plain", "kb8"])
     ap.add_argument("--epochs", type=int, default=15)
@@ -261,9 +262,9 @@ def main() -> None:
                 subprocess.run([PY, str(BURST), "net", "all", "--net", args.best, "--unc", args.unc_file,
                                 "--unc-nodes", str(args.unc_nodes), "--unc-fork", str(args.unc_fork),
                                 "--dir", str(cloud)], capture_output=True, timeout=600)
-            # the next candidate waits for 50M positions of the new best: what came in during the SPRT is old
-            for f in cloud_base:
-                cloud_base[f] = positions(Path(f))
+            # the next candidate waits for 50M positions of the new best: the cloud data still on the servers was
+            # played by the previous best, so the counters restart after the next sync (main loop)
+            state["rebase"] = True
             state["generation"] = gen
             record["promoted"] = True
         state.pop("pending", None)
@@ -299,6 +300,11 @@ def main() -> None:
                     cloud_base[str(f)] = 0
                     log(f"cloud self-play: {f.name}")
                     save()
+        if state.pop("rebase", False):
+            dg["base"] = positions(current)
+            for f in cloud_base:
+                cloud_base[f] = positions(Path(f))
+            save()
         new = positions(current) - dg.get("base", 0) + sum(positions(Path(f)) - b for f, b in cloud_base.items())
         if new < args.positions:
             time.sleep(600)
@@ -307,7 +313,12 @@ def main() -> None:
         attempt = len(state["history"]) + 1
         gdir = work / f"cand{attempt:02d}"
         gdir.mkdir(exist_ok=True)
-        window = state["data"][-args.window:]
+        window, held = [], 0
+        for f in reversed(state["data"]):  # newest first, until the window holds enough positions
+            if held >= args.window:
+                break
+            window.insert(0, f)
+            held += positions(Path(f))
         mix = gdir / "mix.bin"
         log(f"generation {gen}: mixing {', '.join(Path(w).name for w in window)}")
         subprocess.run([PY, str(REPO / "scripts/nnue/mix.py"), "--out", str(mix), args.elite,
