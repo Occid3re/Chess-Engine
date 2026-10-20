@@ -697,13 +697,20 @@ def network():
 
 
 def _network_meta(data: bytes) -> Optional[dict]:
+    """Header of the network file: v1 (no output buckets), v2 (output buckets), v3 (+ king buckets of the own king's
+    square: count, mirroring of kings on files e-h, the square -> bucket map; the first layer has one 768-input
+    block per king bucket)."""
     if len(data) < 28 or data[:4] != b"ALNN":
         return None
-    ints = [int.from_bytes(data[4 + 4 * i:8 + 4 * i], "little", signed=True) for i in range(6)]
+    ints = [int.from_bytes(data[4 + 4 * i:8 + 4 * i], "little", signed=True) for i in range(8)]
     version, hidden, qa, qb, scale = ints[:5]
     buckets = ints[5] if version >= 2 else 1
-    inputs = 768
+    king_buckets, mirror, bucket_map = 1, False, [0] * 64
+    if version >= 3 and len(data) >= 100:
+        king_buckets, mirror, bucket_map = ints[6], bool(ints[7]), list(data[36:100])
+    inputs = 768 * king_buckets
     return {"version": version, "hidden": hidden, "qa": qa, "qb": qb, "scale": scale, "buckets": buckets,
+            "kingBuckets": king_buckets, "mirror": mirror, "kingBucketMap": bucket_map,
             "inputs": inputs, "params": inputs * hidden + hidden + 2 * hidden * buckets + buckets,
             "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
 

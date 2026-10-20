@@ -176,6 +176,20 @@ def test_network_file_and_meta_are_served_with_etag(svc, tmp_path, monkeypatch):
         server.shutdown()
 
 
+def test_king_bucket_network_meta(svc):
+    hidden, buckets, kb = 16, 8, 8
+    bucket_map = bytes([0, 1, 2, 3, 3, 2, 1, 0] + [4] * 8 + [6] * 8 + [7] * 40)
+    header = b"ALNN" + struct.pack("<6i", 3, hidden, 255, 256, 400, buckets) + struct.pack("<2i", kb, 1) + bucket_map
+    body = bytes(2 * (768 * kb * hidden + hidden + 2 * hidden * buckets)) + bytes(4 * buckets)
+    meta = svc._network_meta(header + body)
+    assert (meta["version"], meta["kingBuckets"], meta["mirror"], meta["inputs"]) == (3, 8, True, 768 * 8)
+    assert meta["kingBucketMap"][:8] == [0, 1, 2, 3, 3, 2, 1, 0]
+    assert meta["params"] == 768 * 8 * hidden + hidden + 2 * hidden * buckets + buckets
+    # a plain net in the v3 format (king buckets 1) is the old 768-input layout
+    plain = b"ALNN" + struct.pack("<6i", 3, hidden, 255, 256, 400, buckets) + struct.pack("<2i", 1, 0) + bytes(64)
+    assert svc._network_meta(plain + bytes(10))["inputs"] == 768
+
+
 def test_no_network_means_404(svc, tmp_path, monkeypatch):
     monkeypatch.delenv("ALIEKNEK_NNUE_FILE", raising=False)
     monkeypatch.setenv("BOT_JAR_DIR", str(tmp_path))
