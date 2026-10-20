@@ -99,6 +99,10 @@ etsest-unc.bin`, retrained on every promotion).
   although its held-out loss was lower. `-Dcore.verifyNnue=true` (checks every 64th evaluation in the real search
   against a rebuild; `bench` reports the count) verified 30167 evaluations exact: the engine side is correct, the net
   needs more data (retry at several hundred million positions) or a cheaper layout.
+  Third try (2026-10-20): 365M positions (gen4/gen5 self-play, 300M of it uncertainty-focused; 464M with endgames
+  twice), 5 epochs, held-out loss still falling (0.00957 -> 0.00938, gen6 plain 0.00926): equal to generation 6
+  (509-506-1363, 2378 games on the server, +0.4 +-8.8, stopped undecided). Data fixed the overfitting; it was
+  trained on older data than gen6 used. Next: kb8 from fresh generation-6 self-play (the loop with --layout kb8).
 - Tried, lost: node-effort time management (factor (160 - 100 * best-move node share) / 100): 82-134-314
   (-34 Elo, 530 games) - stopped too early; would need tuning (SPSA) before another try.
 - Tried, no gain: continuation history of ply - 4 in quiet ordering (bench -16 % nodes, but 188-191-617 vs 4.1.0,
