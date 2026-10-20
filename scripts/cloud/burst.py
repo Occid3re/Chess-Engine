@@ -61,7 +61,7 @@ echo "setup ok: $(jdk/bin/java -version 2>&1 | head -1), $(ls syzygy | wc -l) ta
 START = r"""set -e
 cd /root/alieknek
 # the whole process group (setsid): systemd-inhibit / nice / java
-for f in data/*.pid; do [ -f "$f" ] && { kill -- -"$(cat "$f")" 2>/dev/null || kill "$(cat "$f")" 2>/dev/null || true; }; rm -f "$f"; done
+for f in data/*.pid; do [ -f "$f" ] && {{ kill -- -"$(cat "$f")" 2>/dev/null || kill "$(cat "$f")" 2>/dev/null || true; }}; rm -f "$f"; done
 # a quarter of the memory (at most 16 GB: 64 threads need ~1.5 GB), lowest CPU priority, and on machines with
 # systemd-logind (laptops) no sleep or lid suspend while it runs
 heap=$(awk '/MemTotal/ {{m = int($2 / 4096); print (m > 16384 ? 16384 : m)}}' /proc/meminfo)
