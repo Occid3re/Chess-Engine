@@ -49,6 +49,7 @@ if [ "$(ls syzygy 2>/dev/null | grep -c rtb)" -lt 290 ]; then
     | (cd syzygy && while read f; do [ -s "$f" ] || curl -fsS --retry 3 --retry-delay 2 -o "$f" "$tb/$f" || true; done)
   [ "$(ls syzygy | grep -c rtb)" -ge 290 ] || { echo "syzygy download incomplete"; exit 1; }
 fi
+command -v gcc >/dev/null || { apt-get update -qq && apt-get install -y -qq gcc libc6-dev >/dev/null; }
 rm -rf classes && mkdir -p classes/core data nets
 jdk/bin/javac -nowarn --add-modules jdk.incubator.vector -d classes $(find src/main/java -name '*.java')
 cp src/main/resources/core/eval-weights.txt classes/core/
@@ -59,8 +60,16 @@ echo "setup ok: $(jdk/bin/java -version 2>&1 | head -1), $(ls syzygy | wc -l) ta
 
 START = r"""set -e
 cd /root/alieknek
-for f in data/*.pid; do [ -f "$f" ] && kill "$(cat "$f")" 2>/dev/null || true; rm -f "$f"; done
-setsid nohup jdk/bin/java -Xmx16g --add-modules jdk.incubator.vector -Dcore.nnueFile={net} {focus} \
+# the whole process group (setsid): systemd-inhibit / nice / java
+for f in data/*.pid; do [ -f "$f" ] && { kill -- -"$(cat "$f")" 2>/dev/null || kill "$(cat "$f")" 2>/dev/null || true; }; rm -f "$f"; done
+# a quarter of the memory (at most 16 GB: 64 threads need ~1.5 GB), lowest CPU priority, and on machines with
+# systemd-logind (laptops) no sleep or lid suspend while it runs
+heap=$(awk '/MemTotal/ {{m = int($2 / 4096); print (m > 16384 ? 16384 : m)}}' /proc/meminfo)
+inhibit=""
+if command -v systemd-inhibit >/dev/null && systemctl is-active -q systemd-logind 2>/dev/null; then
+  inhibit="systemd-inhibit --what=sleep:idle:handle-lid-switch --who=alieknek --why=self-play"
+fi
+setsid nohup $inhibit nice -n 19 jdk/bin/java -Xmx${{heap}}m --add-modules jdk.incubator.vector -Dcore.nnueFile={net} {focus} \
   -Dgen.starts=starts.txt -Dgen.startFraction=0.4 -Dgen.syzygy={remote}/syzygy \
   -Dchessengine.syzygy.nativeLibrary={remote}/libJSyzygy.so -Dgen.winScore=2000 -Dgen.winPlies=8 \
   -Dgen.drawPly=160 -Dgen.drawPlies=20 -cp classes julius.game.chessengine.core.tools.DataGen \
@@ -199,7 +208,7 @@ class Burst:
 
     def stop(self, host: str):
         self.sync()
-        r = self.ssh(host, f"cd {REMOTE}; for f in data/*.pid; do kill $(cat $f) 2>/dev/null; rm -f $f; done; echo stopped",
+        r = self.ssh(host, f"cd {REMOTE}; for f in data/*.pid; do kill -- -$(cat $f) 2>/dev/null || kill $(cat $f) 2>/dev/null; rm -f $f; done; echo stopped",
                      timeout=60)
         log(f"{host}: {r.stdout.decode().strip()} - now cancel / delete the server")
         self.state.pop(host, None)
