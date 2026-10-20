@@ -59,6 +59,10 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
   +74.1 +-22.2 vs generation 3 (136-49-229, 414 games, H1) - fresh self-play of the current best is what counts.
   Generation 5 (4.1.2; mix: elite positions re-scored by our own search + gen3/gen4 self-play incl. 9.8M from the
   first cloud server) +34.0 +-14.4 vs generation 4 (240-149-544, 933 games, H1).
+  Generation 6 (4.1.3; first net from uncertainty-focused self-play: 392M positions, mostly gen5 self-play of the
+  Hetzner server with 3x nodes on uncertain positions) +32.2 +-11.4 vs generation 5 (423-277-882, 1582 games, H1;
+  the first SPRT on the server with fastchess, 30 games at once: 28 minutes). The attempt before it (gen5 data
+  without the focus, 128M) reached only +8 in 4000 games (undecided).
 - Search parameters (core/Tune.java) from SPSA, 1500 iterations x 8 games at 6+0.06 (4.0.9): +28.3 vs the old
   defaults (SPRT H1, 1058 games at 10+0.1). Biggest moves: nmpBaseMargin 150->100, nmpDepthMargin 15->24,
   aspDelta 15->10, rfpMargin 75->68, qsFutility 160->180. The pruning is more aggressive: CoreEngineTest's mate

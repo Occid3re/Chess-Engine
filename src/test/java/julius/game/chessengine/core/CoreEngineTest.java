@@ -181,8 +181,10 @@ class CoreEngineTest {
     void findsMateInTwo() {
         SearchManager manager = new SearchManager(16, 1);
         Position p = new Position("r1b1kb1r/pppp1ppp/5q2/4n3/3KP3/2N3PN/PPP4P/R1BQ1B1R b kq - 0 1");
-        // depth 10: the SPSA-tuned pruning (4.0.9, +28 Elo in self-play) finds this mate at depth 9, not 8
-        int[] result = manager.searchSync(p, SearchLimits.depth(10));
+        // A mate in three behind a bishop sacrifice (Bc5+ Kxc5 Qb6+ Kd5 Qd6#) the network rates low at first: the
+        // SPSA-tuned pruning (4.0.9) found it at depth 9, the generation 5 net at 10, generation 6 (+32 Elo in
+        // self-play) at 11. Depth 12 keeps the test about mate finding, not about one net's move ordering.
+        int[] result = manager.searchSync(p, SearchLimits.depth(12));
         assertEquals("f8c5", Move.toUci(result[0]));
         assertTrue(result[1] >= Searcher.MATE_BOUND);
     }
