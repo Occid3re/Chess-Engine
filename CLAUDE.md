@@ -86,7 +86,11 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
   13 % most uncertain positions (actual error 2.7x the rest, half of all large errors) get 3x nodes, 20 % of
   the games start from such positions; gpu_generations.py and burst.py turn it on when the best network has its
   head (`E:\Chess-Data
-etsest-unc.bin`, retrained on every promotion). Next: search/time management, SPRT-gated.
+etsest-unc.bin`, retrained on every promotion).
+  Tried, lost: uncertainty-aware LMR (`Tune.uncDepth/uncLo/uncHi`, off by default; head from the search's own
+  activations, cached per key: no nps cost). The search meets far more 'unclear' nodes than self-play has, so
+  the tree grows (+13..40 % nodes); SPSA (200 iterations, 3200 games) did not move from 8/14/65, and that
+  setting lost 129-165-706 vs off (-12.5 Elo, 1000 games at 10+0.1). Time management is the untested use left.
 - King buckets (kb8), second try: 114M positions, 4 epochs, row-wise Adam: -33 Elo vs 4.1.0 (78-109-139, 326 games)
   although its held-out loss was lower. `-Dcore.verifyNnue=true` (checks every 64th evaluation in the real search
   against a rebuild; `bench` reports the count) verified 30167 evaluations exact: the engine side is correct, the net
