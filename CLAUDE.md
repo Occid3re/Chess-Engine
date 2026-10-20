@@ -118,6 +118,10 @@ etsest-unc.bin`, retrained on every promotion).
 - Gap to Stockfish 19 (2026-10-18, 4.0.9, 1 thread, 64 MB, `E:\ChessEngines\harnesss_sf19.sh`): equal time 10+0.1
   0-93-7 (-576 +-160); SF19 at 1/8 time (1.25+0.0125) 1-160-39 (-377 +-56) -> about -580 Elo at equal time.
   Repeat both after each release to track the gap.
+  4.1.5 (2026-10-20, generation 7 kb8; on the Hetzner EPYC with fastchess, 20 games at once, self-play at nice 19
+  beside it; script in the session, engine wrapper /root/sf19/alieknek.sh): equal time 0-176-24 (-478 +-67, 200
+  games); SF19 at 1/8 time 37-212-151 (-163 +-27, 400 games) -> +214 Elo closer at time odds than 4.0.9, about
+  -400..-450 at equal time.
 - Match harness: `E:\ChessEngines\harness\` (sprt.sh, match.sh, vs_sf.sh, smp.sh, snap.sh, elite_openings.epd);
   snapshots in `E:\ChessEngines\v5-dev\<name>\run.bat`
 - Browser UI: `ChessEngineApplication` (Spring Boot) serves `static/` and `/ws/uci`, one core `Uci` per WebSocket
