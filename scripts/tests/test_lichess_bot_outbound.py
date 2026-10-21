@@ -116,3 +116,36 @@ def test_chat_is_sent_in_the_background_and_can_be_switched_off(bot, monkeypatch
     bot.send_chat(Client(), "abcd1234", "quiet")
     time.sleep(0.1)
     assert len(sent) == 1
+
+
+def test_refusals_escalate_1_day_7_days_30_days_and_survive_a_restart(bot, tmp_path):
+    path = tmp_path / "outbound-blocks.json"
+    blocks = bot.OutboundBlocks(path)
+    assert blocks.strike("SomeBot", "no answer") == 24 * 3600
+    assert blocks.strike("somebot", "declined: later") == 7 * 86400
+    assert blocks.strike("somebot", "429") == 30 * 86400
+    assert blocks.strike("somebot", "no answer") == 30 * 86400  # stays at a month
+    again = bot.OutboundBlocks(path)  # after a restart / deploy
+    assert again.blocked() == ["somebot"] and again.data["somebot"]["strikes"] == 4
+    again.clear("SomeBot")  # a game was played after all
+    assert again.blocked() == [] and bot.OutboundBlocks(path).blocked() == []
+
+
+def test_blocked_bots_are_not_challenged(bot, monkeypatch):
+    class Users:
+        def get_public_data(self, name):
+            return {"id": name, "perfs": {"blitz": {"rating": 2500}}}
+
+    class Bots:
+        def get_online_bots(self):
+            return [{"id": "a", "perfs": {"blitz": {"rating": 2450}}}, {"id": "b", "perfs": {"blitz": {"rating": 2480}}}]
+
+    class Client:
+        users = Users()
+        bots = Bots()
+
+    monkeypatch.setattr(bot, "API_REQUEST_DELAY", 0)
+    monkeypatch.setattr(bot, "svc", None)
+    cache = bot.LichessCache(Client(), "alieknek")
+    assert bot.find_similar_bots(cache, "alieknek", "blitz", exclude=["b"]) == ["a"]
+    assert bot.find_similar_bots(cache, "alieknek", "blitz", exclude=["a", "b"]) == []

@@ -11,6 +11,7 @@ Lichess bot runner with strict API compliance:
 - Measures its own latency per move and hands the engine that much less clock
 """
 
+import json
 import os
 import sys
 import re
@@ -1031,6 +1032,59 @@ def classify_tc_from_challenge(chal: dict) -> str:
     return bucket or "bullet"
 
 
+BLOCK_STEPS = [24 * 3600, 7 * 86400, 30 * 86400]  # 1st, 2nd, 3rd+ time a bot does not take our challenge
+
+
+class OutboundBlocks:
+    """Bots that declined, ignored or rate-limited (429) a challenge of ours are not asked again for a day, after
+    a second time for 7 days, from the third time on for 30 days. A game against them clears the record. Kept as
+    JSON in the bot's data folder, so restarts and deploys do not forget it."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.lock = threading.Lock()
+        try:
+            self.data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            self.data = {}
+
+    def _save(self) -> None:
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self.data, indent=1), encoding="utf-8")
+            tmp.replace(self.path)
+        except OSError as e:
+            print(f"[outbound] could not save the block list: {e}")
+
+    def strike(self, bot_id: str, reason: str) -> int:
+        """Counts a refusal; returns how long the bot is left alone (seconds)."""
+        bot_id = bot_id.lower()
+        with self.lock:
+            entry = self.data.get(bot_id, {"strikes": 0})
+            entry["strikes"] = entry.get("strikes", 0) + 1
+            seconds = BLOCK_STEPS[min(entry["strikes"], len(BLOCK_STEPS)) - 1]
+            entry.update({"until": time.time() + seconds, "reason": reason})
+            self.data[bot_id] = entry
+            self._save()
+        print(f"[outbound] {bot_id} not asked again for {seconds // 3600} h (refusal {entry['strikes']}: {reason})")
+        return seconds
+
+    def clear(self, bot_id: str) -> None:
+        """A game was played against this bot: forget its refusals."""
+        with self.lock:
+            if self.data.pop((bot_id or "").lower(), None) is not None:
+                self._save()
+
+    def blocked(self) -> List[str]:
+        now = time.time()
+        with self.lock:
+            return [b for b, e in self.data.items() if e.get("until", 0) > now]
+
+
+BLOCKS = OutboundBlocks((svc.DATA_DIR if svc is not None else Path(".")) / "outbound-blocks.json")
+
+
 def parse_outbound_tcs(spec: str) -> List[tuple]:
     """'bullet:120+1,blitz:180+2' -> [('bullet', 120, 1), ('blitz', 180, 2)]."""
     tcs = []
@@ -1283,7 +1337,8 @@ def outbound_challenge_loop(stop_event: threading.Event,
                 for delta in (RATING_DELTA, 2 * RATING_DELTA):
                     print(f"[outbound] looking for a {perf} opponent ({clock_limit}+{increment}, +-{delta})")
                     targets = find_similar_bots(cache, my_username=my_username, tc_type=perf, delta=delta,
-                                                max_candidates=1, exclude=list(recently_challenged.keys()))
+                                                max_candidates=1,
+                                                exclude=list(recently_challenged.keys()) + BLOCKS.blocked())
                     if targets:
                         break
                 if targets:
@@ -1312,6 +1367,7 @@ def outbound_challenge_loop(stop_event: threading.Event,
                         print(f"[outbound] {opp} did not answer; challenge cancelled")
                     except Exception as e:
                         print(f"[outbound] cancel {challenge_id} failed: {e}")
+                BLOCKS.strike(opp, "no answer")
             pause(max(0.0, OUTBOUND_RETRY_SEC - (time.time() - started)), until_game=True)
 
         except (berserk.exceptions.ResponseError, berserk.exceptions.ApiError) as e:
@@ -1322,6 +1378,7 @@ def outbound_challenge_loop(stop_event: threading.Event,
                 delay = _retry_after_from_exc(e, default_sec=OUTBOUND_429_PAUSE_SEC)
                 if last_target:
                     recently_challenged[last_target] = time.time() + OUTBOUND_429_TARGET_SEC - OUTBOUND_COOLDOWN_SEC
+                    BLOCKS.strike(last_target, "429")
                 print(f"[warn] outbound 429 (target {last_target}): {str(e)[:160]}; pausing {delay}s")
                 _GLOBAL_RL.bump(delay)
                 penalty_until = time.time() + delay
@@ -1432,10 +1489,15 @@ def run_bot():
             elif et == "challengeDeclined":
                 chal = event.get("challenge", {})
                 print(f"[event] Challenge declined (by other side?): {chal.get('id', '?')}")
+                challenger = ((chal.get("challenger") or {}).get("id") or "").lower()
+                dest = ((chal.get("destUser") or {}).get("id") or "").lower()
+                if challenger == me_id.lower() and dest:
+                    BLOCKS.strike(dest, "declined: " + str(chal.get("declineReasonKey") or chal.get("declineReason") or "?"))
 
             elif et == "gameStart":
                 game_id = event["game"]["id"]
                 print(f"[event] Game start: {game_id}")
+                BLOCKS.clear(((event["game"].get("opponent") or {}).get("id") or ""))
                 active_counter.inc()
                 engine = play_game(client, engine, game_id, me_id, active_counter)
 
