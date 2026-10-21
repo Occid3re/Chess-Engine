@@ -161,8 +161,9 @@ def remote_sprt(args, name: str, candidate: Path, best: Path) -> str:
                        input=REMOTE_ENGINE.format(net=f"{d}/{tag}.bin").encode(), check=True, timeout=120)
     cmd = (f"/root/fastchess/fastchess -engine cmd={d}/cand.sh name=engine -engine cmd={d}/best.sh "
            "name=best -each proto=uci tc=10+0.1 option.Hash=32 option.Threads=1 timemargin=300 "
-           "-openings file=/root/alieknek/openings.epd format=epd order=random -repeat -rounds 2000 -games 2 "
-           f"-concurrency {args.sprt_concurrency} -sprt elo0=0 elo1=5 alpha=0.05 beta=0.05 "
+           "-openings file=/root/alieknek/openings.epd format=epd order=random -repeat "
+           f"-rounds {args.sprt_rounds} -games 2 "
+           f"-concurrency {args.sprt_concurrency} -sprt elo0=0 elo1={args.sprt_elo1} alpha=0.05 beta=0.05 "
            "-draw movenumber=40 movecount=8 score=8 -resign movecount=4 score=800 twosided=true -recover 2>&1 "
            "| grep -v -e '^Started game' -e '^Position;' -e '^Moves;' -e '^Warning;' -e '^Info;'")
     log_path = Path(r"E:\ChessEngines\harness\results") / f"{name}.log"
@@ -211,6 +212,9 @@ def main() -> None:
     ap.add_argument("--warm-lr", type=float, default=0.0005)
     ap.add_argument("--sprt-host", help="run the SPRTs with fastchess on this burst.py server (many games at once)")
     ap.add_argument("--sprt-concurrency", type=int, default=30)
+    ap.add_argument("--sprt-elo1", type=float, default=5,
+                    help="upper SPRT bound of the server test (3 detects the small steps of warm-started nets)")
+    ap.add_argument("--sprt-rounds", type=int, default=2000, help="game pairs at most in the server test")
     ap.add_argument("--ssh-key", default=str(Path.home() / ".ssh" / "id_ed25519_hetzner"))
     ap.add_argument("--cloud", default=r"E:\Chess-Data\cloud",
                     help="self-play of rented servers (scripts/cloud/burst.py): synced every pass, counted and mixed")
