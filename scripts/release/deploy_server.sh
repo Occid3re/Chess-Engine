@@ -28,6 +28,32 @@ bot_on() {
 }
 trap bot_on EXIT
 
+# Always the newest Alieknek release: the play repo's alieknek/Dockerfile is pinned to the head of the highest
+# vX.Y.Z branch on GitHub (pushed only when a version is released) - updated, committed and pushed here if not.
+PLAY="${PLAY:-/c/Development/Play/play}"
+ENGINE_REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+latest=$(git -C "$ENGINE_REPO" ls-remote --heads origin 'v*' | sed 's#.*refs/heads/##' \
+  | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -t. -k1.2,1n -k2,2n -k3,3n | tail -1)
+if [ -n "$latest" ] && [ -f "$PLAY/alieknek/Dockerfile" ]; then
+  git -C "$ENGINE_REPO" fetch -q origin "$latest" || { echo "[deploy] fetch $latest failed"; exit 1; }
+  ref=$(git -C "$ENGINE_REPO" rev-parse FETCH_HEAD)
+  version=$(git -C "$ENGINE_REPO" show "$ref:src/main/java/julius/game/chessengine/core/Uci.java" \
+    | sed -n 's/.*NAME = "Alieknek \([0-9.]*\)".*/\1/p' | head -1)
+  git -C "$PLAY" pull -q --ff-only origin main || { echo "[deploy] play repo pull failed"; exit 1; }
+  pinned=$(sed -n 's/^ARG ENGINE_REF=//p' "$PLAY/alieknek/Dockerfile")
+  if [ -n "$version" ] && [ "$pinned" != "$ref" ]; then
+    echo "[deploy] pinning the play repo to Alieknek $version ($latest ${ref:0:8})"
+    sed -i "s#^ARG ENGINE_REF=.*#ARG ENGINE_REF=$ref#; s#^ARG ENGINE_JAR=.*#ARG ENGINE_JAR=chess-engine-$version-uci.jar#" \
+      "$PLAY/alieknek/Dockerfile"
+    sed -i "s#Versionsplakette \`v[0-9.]*\`#Versionsplakette \`v$version\`#" "$PLAY/CLAUDE.md"
+    git -C "$PLAY" add alieknek/Dockerfile CLAUDE.md
+    git -C "$PLAY" commit -q -m "Alieknek: Engine $version (neueste Version, beim Einspielen automatisch gesetzt)" \
+      && git -C "$PLAY" push -q origin main || { echo "[deploy] pinning failed"; exit 1; }
+  else
+    echo "[deploy] play repo already on the newest Alieknek ($latest)"
+  fi
+fi
+
 echo "[deploy] pausing the bot"
 timeout 120 "${SSH[@]}" 'docker exec lostopf-alieknek-1 botctl off' >/dev/null || { echo "[deploy] botctl off failed"; exit 1; }
 deadline=$(( $(date +%s) + WAIT_MIN * 60 ))
