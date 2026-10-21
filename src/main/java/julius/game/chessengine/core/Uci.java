@@ -98,6 +98,7 @@ public final class Uci {
                 send("option name UseNNUE type check default true");
                 send("option name Contempt type spin default 0 min -200 max 200");
                 send("option name RootPenalty type string default <empty>");
+                send("option name UCI_Chess960 type check default false");
                 if (Tune.enabled()) {
                     for (Tune.Param p : Tune.params()) {
                         send("option name " + p.name() + " type spin default " + p.defaultValue()
@@ -161,6 +162,7 @@ public final class Uci {
             case "move overhead" -> manager.setMoveOverhead(Integer.parseInt(value));
             case "usennue" -> manager.useNnue = Boolean.parseBoolean(value);
             case "contempt" -> manager.setContempt(Integer.parseInt(value));
+            case "uci_chess960" -> manager.chess960 = Boolean.parseBoolean(value);
             // "e2e4:25 d2d4:10" (or "none"): root moves that must be this many centipawns better to be chosen
             case "rootpenalty" -> rootPenalty = value.equalsIgnoreCase("none") || value.equals("<empty>") ? "" : value;
             case "syzygypath" -> {
@@ -195,7 +197,7 @@ public final class Uci {
         }
         if (i < t.length && t[i].equals("moves")) {
             for (i++; i < t.length; i++) {
-                int m = position.parseUciMove(t[i]);
+                int m = position.parseUciMove(t[i], manager.chess960);
                 if (m == Move.NONE) {
                     send("info string illegal move " + t[i]);
                     break;
@@ -222,7 +224,7 @@ public final class Uci {
                 case "searchmoves" -> {
                     java.util.List<Integer> list = new java.util.ArrayList<>();
                     while (i + 1 < t.length && !GO_KEYWORDS.contains(t[i + 1])) {
-                        int m = position.parseUciMove(t[++i]);
+                        int m = position.parseUciMove(t[++i], manager.chess960);
                         if (m != Move.NONE) list.add(m);
                     }
                     if (!list.isEmpty()) l.searchMoves = list.stream().mapToInt(Integer::intValue).toArray();
@@ -247,7 +249,7 @@ public final class Uci {
             int colon = item.indexOf(':');
             if (colon <= 0) continue;
             try {
-                int m = position.parseUciMove(item.substring(0, colon));
+                int m = position.parseUciMove(item.substring(0, colon), manager.chess960);
                 int cp = Math.max(0, Math.min(1000, Integer.parseInt(item.substring(colon + 1))));
                 if (m != Move.NONE && cp > 0) list.add(new int[]{m, cp});
             } catch (NumberFormatException ignored) {

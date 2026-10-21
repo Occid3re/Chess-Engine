@@ -93,16 +93,6 @@ public final class MoveGen {
                 push2 &= push2 - 1;
                 moves[n++] = Move.make(to - 16, to, Move.DOUBLE_PUSH);
             }
-            if ((p.castling & (WK_CASTLE | WQ_CASTLE)) != 0 && p.checkers == 0L) {
-                if ((p.castling & WK_CASTLE) != 0 && (p.all & 0x60L) == 0L
-                        && !p.isAttacked(5, BLACK, p.all) && !p.isAttacked(6, BLACK, p.all)) {
-                    moves[n++] = Move.make(4, 6, Move.KING_CASTLE);
-                }
-                if ((p.castling & WQ_CASTLE) != 0 && (p.all & 0x0EL) == 0L
-                        && !p.isAttacked(3, BLACK, p.all) && !p.isAttacked(2, BLACK, p.all)) {
-                    moves[n++] = Move.make(4, 2, Move.QUEEN_CASTLE);
-                }
-            }
         } else {
             long push1 = (pawns >>> 8) & empty & ~Attacks.RANK_1;
             long push2 = ((push1 & Attacks.RANK_6) >>> 8) & empty;
@@ -116,18 +106,27 @@ public final class MoveGen {
                 push2 &= push2 - 1;
                 moves[n++] = Move.make(to + 16, to, Move.DOUBLE_PUSH);
             }
-            if ((p.castling & (BK_CASTLE | BQ_CASTLE)) != 0 && p.checkers == 0L) {
-                if ((p.castling & BK_CASTLE) != 0 && (p.all & 0x6000000000000000L) == 0L
-                        && !p.isAttacked(61, WHITE, p.all) && !p.isAttacked(62, WHITE, p.all)) {
-                    moves[n++] = Move.make(60, 62, Move.KING_CASTLE);
-                }
-                if ((p.castling & BQ_CASTLE) != 0 && (p.all & 0x0E00000000000000L) == 0L
-                        && !p.isAttacked(59, WHITE, p.all) && !p.isAttacked(58, WHITE, p.all)) {
-                    moves[n++] = Move.make(60, 58, Move.QUEEN_CASTLE);
-                }
+        }
+        n = generateCastling(p, moves, n);
+        return generatePieces(p, moves, n, empty, Move.QUIET);
+    }
+
+    /**
+     * Castling (Chess960 rules, standard chess included): king "takes" its own rook when the right is there, the
+     * king is not in check, both pieces' paths are empty and the king crosses no attacked square (isLegal; as the
+     * move list's length and order steer the search, only legal castling moves are generated).
+     */
+    private static int generateCastling(Position p, int[] moves, int n) {
+        int us = p.side;
+        if ((p.castling & (3 << (us * 2))) == 0 || p.checkers != 0L) return n;
+        int ksq = p.kingSquare(us);
+        for (int r = us * 2; r < us * 2 + 2; r++) {
+            if ((p.castling & (1 << r)) != 0 && (p.all & p.castleEmpty[r]) == 0L) {
+                int m = Move.make(ksq, p.castleRookSq[r], (r & 1) == 0 ? Move.KING_CASTLE : Move.QUEEN_CASTLE);
+                if (p.isLegal(m)) moves[n++] = m;
             }
         }
-        return generatePieces(p, moves, n, empty, Move.QUIET);
+        return n;
     }
 
     private static int generatePieces(Position p, int[] moves, int n, long targets, int flag) {

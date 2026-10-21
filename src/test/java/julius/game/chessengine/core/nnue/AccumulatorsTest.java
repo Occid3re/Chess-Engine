@@ -33,6 +33,19 @@ class AccumulatorsTest {
     }
 
     @Test
+    void chess960CastlingUpdatesAgreeWithRefresh() throws IOException {
+        // king and rooks start anywhere: castling may put king and rook on each other's squares
+        Network net = Network.read(new ByteArrayInputStream(randomVersion3(64, 8, 5)));
+        String[] starts = {
+                "5rkr/pppppppp/8/8/8/8/PPPPPPPP/5RKR w HFhf - 0 1",
+                "rk4r1/pppppppp/8/8/8/8/PPPPPPPP/RK4R1 w GAga - 0 1",
+                "1r2k1r1/pppppppp/8/8/8/8/PPPPPPPP/1R2K1R1 w GBgb - 0 1",
+                "bbqnnrkr/pppppppp/8/8/8/8/PPPPPPPP/BBQNNRKR w HFhf - 0 1"};
+        assertTrue(compareAlongRandomGames(net, 13, starts) > 1000);
+        assertTrue(compareAlongRandomGames(Network.loadDefault(), 17, starts) > 1000);
+    }
+
+    @Test
     void kingBucketFeaturesMirrorAndBucket() throws IOException {
         Network net = Network.read(new ByteArrayInputStream(randomVersion3(64, 8, 3)));
         // White king g1 (file >= e): squares mirrored, bucket of g1 = bucket of b1 = 1
@@ -49,6 +62,10 @@ class AccumulatorsTest {
 
     /** Random games: incremental (scalar and vector back end) vs full refresh at every evaluated ply. */
     private static int compareAlongRandomGames(Network net, long seed) {
+        return compareAlongRandomGames(net, seed, new String[]{Position.START_FEN});
+    }
+
+    private static int compareAlongRandomGames(Network net, long seed, String[] starts) {
         int maxPly = 128;
         Accumulators scalar = new ScalarAccumulators(net, maxPly);
         // the Vector API back end when the test JVM has the module (Maven adds it), else scalar twice
@@ -57,7 +74,7 @@ class AccumulatorsTest {
         int[] moves = new int[256];
         int checked = 0;
         for (int game = 0; game < 40; game++) {
-            Position p = new Position();
+            Position p = new Position(starts[game % starts.length]);
             scalar.refresh(p, 0);
             vector.refresh(p, 0);
             for (int ply = 0; ply < 100; ply++) {
@@ -66,6 +83,9 @@ class AccumulatorsTest {
                 for (int i = 0; i < n; i++) if (p.isLegal(moves[i])) moves[legal++] = moves[i];
                 if (legal == 0) break;
                 int m = moves[rng.nextInt(legal)];
+                for (int i = 0; i < legal; i++) {
+                    if (julius.game.chessengine.core.Move.isCastle(moves[i]) && rng.nextInt(2) == 0) m = moves[i];
+                }
                 boolean evaluate = rng.nextInt(3) != 0; // skip some plies: the lazy path must catch up
                 scalar.push(p, m, ply);
                 vector.push(p, m, ply);

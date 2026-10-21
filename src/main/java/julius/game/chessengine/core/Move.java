@@ -69,10 +69,17 @@ public final class Move {
         return isPromotion(move) ? Position.KNIGHT + (flag(move) & 3) : -1;
     }
 
+    /** UCI notation; castling as the king's move to the g/c file (standard chess). */
     public static String toUci(int move) {
+        return toUci(move, false);
+    }
+
+    /** UCI notation; castling as king takes own rook with chess960Notation (UCI_Chess960), else king to g/c file. */
+    public static String toUci(int move, boolean chess960Notation) {
         if (move == NONE) return "0000";
         StringBuilder sb = new StringBuilder(5);
-        sb.append(squareName(from(move))).append(squareName(to(move)));
+        int to = isCastle(move) && !chess960Notation ? Position.castleKingTo(move) : to(move);
+        sb.append(squareName(from(move))).append(squareName(to));
         if (isPromotion(move)) sb.append("nbrq".charAt(flag(move) & 3));
         return sb.toString();
     }

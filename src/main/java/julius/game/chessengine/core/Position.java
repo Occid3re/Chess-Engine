@@ -3,6 +3,11 @@ package julius.game.chessengine.core;
 /**
  * Mutable board state with incremental Zobrist hashing and an allocation-free make/unmake stack.
  * Pieces are encoded as color * 6 + type; empty squares hold {@link #NO_PIECE}.
+ *
+ * <p>Castling follows Chess960 rules for any king and rook start squares (standard chess is the special case
+ * king e1/e8, rooks a/h). A castling move is encoded as the king "capturing" its own rook (from = king square,
+ * to = rook square, flag KING_CASTLE or QUEEN_CASTLE); the king ends on the g/c file, the rook on the f/d file.
+ * FENs take KQkq (X-FEN: the outermost rook on that side) or rook files (Shredder-FEN, HAha).</p>
  */
 public final class Position {
 
@@ -23,7 +28,6 @@ public final class Position {
     static final long[] CASTLE_KEYS = new long[16];
     static final long[] EP_KEYS = new long[8];
     static final long SIDE_KEY;
-    private static final int[] CASTLE_MASK = new int[64];
 
     static {
         long[] s = {0x2545F4914F6CDD1DL};
@@ -33,13 +37,6 @@ public final class Position {
         for (int i = 0; i < 16; i++) CASTLE_KEYS[i] = rnd(s);
         for (int i = 0; i < 8; i++) EP_KEYS[i] = rnd(s);
         SIDE_KEY = rnd(s);
-        for (int i = 0; i < 64; i++) CASTLE_MASK[i] = 15;
-        CASTLE_MASK[0] &= ~WQ_CASTLE;
-        CASTLE_MASK[7] &= ~WK_CASTLE;
-        CASTLE_MASK[4] &= ~(WK_CASTLE | WQ_CASTLE);
-        CASTLE_MASK[56] &= ~BQ_CASTLE;
-        CASTLE_MASK[63] &= ~BK_CASTLE;
-        CASTLE_MASK[60] &= ~(BK_CASTLE | BQ_CASTLE);
     }
 
     private static long rnd(long[] s) {
@@ -62,6 +59,17 @@ public final class Position {
     public long key;
     public long pawnKey;
     public long checkers;
+    /** A Chess960 position (castling from other squares than e1/a1/h1): FEN output names the rook files. */
+    public boolean chess960;
+
+    // Castling by right index r (bit 1 << r of castling: 0 white king side, 1 white queen side, 2 black king side,
+    // 3 black queen side), fixed for a game: the rook's start square, the squares that must be empty (both pieces'
+    // paths without the two pieces themselves) and the squares the king crosses including its destination.
+    final int[] castleRookSq = {-1, -1, -1, -1};
+    final long[] castleEmpty = new long[4];
+    final long[] castleKingPath = new long[4];
+    /** castling &= castleMask[from] & castleMask[to] on every move: kings and rooks leaving (or captured on) their squares. */
+    private final int[] castleMask = new int[64];
 
     private long pinned;
     private boolean pinnedValid;
@@ -104,6 +112,11 @@ public final class Position {
         key = o.key;
         pawnKey = o.pawnKey;
         checkers = o.checkers;
+        chess960 = o.chess960;
+        System.arraycopy(o.castleRookSq, 0, castleRookSq, 0, 4);
+        System.arraycopy(o.castleEmpty, 0, castleEmpty, 0, 4);
+        System.arraycopy(o.castleKingPath, 0, castleKingPath, 0, 4);
+        System.arraycopy(o.castleMask, 0, castleMask, 0, 64);
         pinnedValid = false;
         histPly = o.histPly;
         System.arraycopy(o.keyHist, 0, keyHist, 0, histPly);
@@ -177,25 +190,35 @@ public final class Position {
         }
         side = parts.length > 1 && parts[1].equals("b") ? BLACK : WHITE;
         castling = 0;
+        chess960 = false;
+        java.util.Arrays.fill(castleRookSq, -1);
+        java.util.Arrays.fill(castleEmpty, 0L);
+        java.util.Arrays.fill(castleKingPath, 0L);
+        java.util.Arrays.fill(castleMask, 15);
         if (parts.length > 2) {
             for (char c : parts[2].toCharArray()) {
-                switch (c) {
-                    case 'K' -> castling |= WK_CASTLE;
-                    case 'Q' -> castling |= WQ_CASTLE;
-                    case 'k' -> castling |= BK_CASTLE;
-                    case 'q' -> castling |= BQ_CASTLE;
-                    default -> {
-                    }
+                int color = Character.isUpperCase(c) ? WHITE : BLACK;
+                char u = Character.toUpperCase(c);
+                int rank = color == WHITE ? 0 : 56;
+                long king = pieces[piece(color, KING)] & (0xFFL << rank);
+                if (king == 0L) continue;  // rights without a king on the back rank are dropped
+                int ksq = Long.numberOfTrailingZeros(king);
+                long rooks = pieces[piece(color, ROOK)] & (0xFFL << rank);
+                int rsq = -1;
+                if (u == 'K') {  // X-FEN: the outermost rook on the h side of the king
+                    long beyond = rooks & ~((2L << ksq) - 1);
+                    if (beyond != 0L) rsq = 63 - Long.numberOfLeadingZeros(beyond);
+                } else if (u == 'Q') {  // the outermost rook on the a side
+                    long below = rooks & ((1L << ksq) - 1);
+                    if (below != 0L) rsq = Long.numberOfTrailingZeros(below);
+                } else if (u >= 'A' && u <= 'H') {  // Shredder-FEN: the rook's file
+                    int sq0 = rank + (u - 'A');
+                    if ((rooks & (1L << sq0)) != 0L) rsq = sq0;
+                    chess960 = true;
                 }
+                if (rsq >= 0) addCastlingRight(color, ksq, rsq);
             }
         }
-        // Drop castling rights that are inconsistent with the piece placement.
-        if (board[4] != piece(WHITE, KING)) castling &= ~(WK_CASTLE | WQ_CASTLE);
-        if (board[7] != piece(WHITE, ROOK)) castling &= ~WK_CASTLE;
-        if (board[0] != piece(WHITE, ROOK)) castling &= ~WQ_CASTLE;
-        if (board[60] != piece(BLACK, KING)) castling &= ~(BK_CASTLE | BQ_CASTLE);
-        if (board[63] != piece(BLACK, ROOK)) castling &= ~BK_CASTLE;
-        if (board[56] != piece(BLACK, ROOK)) castling &= ~BQ_CASTLE;
         ep = -1;
         if (parts.length > 3 && !parts[3].equals("-")) {
             int epSq = Move.parseSquare(parts[3]);
@@ -211,6 +234,32 @@ public final class Position {
         histPly = 0;
         checkers = pieces[side * 6 + KING] != 0L ? attackersTo(kingSquare(side), all) & occ[side ^ 1] : 0L;
         pinnedValid = false;
+    }
+
+    private void addCastlingRight(int color, int ksq, int rsq) {
+        boolean kingSide = rsq > ksq;
+        int r = color * 2 + (kingSide ? 0 : 1);
+        if ((castling & (1 << r)) != 0) return;
+        int rank = color == WHITE ? 0 : 56;
+        int kto = rank + (kingSide ? 6 : 2), rto = rank + (kingSide ? 5 : 3);
+        castling |= 1 << r;
+        castleRookSq[r] = rsq;
+        castleMask[ksq] &= ~(3 << (color * 2));
+        castleMask[rsq] &= ~(1 << r);
+        long pieces2 = (1L << ksq) | (1L << rsq);
+        castleEmpty[r] = (Attacks.BETWEEN[ksq][kto] | Attacks.BETWEEN[rsq][rto] | (1L << kto) | (1L << rto)) & ~pieces2;
+        castleKingPath[r] = Attacks.BETWEEN[ksq][kto] | (1L << kto);
+        if (ksq != rank + 4 || rsq != rank + (kingSide ? 7 : 0)) chess960 = true;
+    }
+
+    /** The king's destination of a castling move (g or c file). */
+    public static int castleKingTo(int move) {
+        return (Move.from(move) & 56) + (Move.flag(move) == Move.KING_CASTLE ? 6 : 2);
+    }
+
+    /** The rook's destination of a castling move (f or d file). */
+    public static int castleRookTo(int move) {
+        return (Move.from(move) & 56) + (Move.flag(move) == Move.KING_CASTLE ? 5 : 3);
     }
 
     /** Exactly one king per side and the side not to move is not in check. */
@@ -240,10 +289,15 @@ public final class Position {
         }
         sb.append(side == WHITE ? " w " : " b ");
         if (castling == 0) sb.append('-');
-        if ((castling & WK_CASTLE) != 0) sb.append('K');
-        if ((castling & WQ_CASTLE) != 0) sb.append('Q');
-        if ((castling & BK_CASTLE) != 0) sb.append('k');
-        if ((castling & BQ_CASTLE) != 0) sb.append('q');
+        for (int r = 0; r < 4; r++) {
+            if ((castling & (1 << r)) == 0) continue;
+            if (chess960) {
+                char file = (char) ('A' + (castleRookSq[r] & 7));
+                sb.append(r < 2 ? file : Character.toLowerCase(file));
+            } else {
+                sb.append("KQkq".charAt(r));
+            }
+        }
         sb.append(' ').append(ep >= 0 ? Move.squareName(ep) : "-");
         sb.append(' ').append(halfmove).append(' ').append(fullmove);
         return sb.toString();
@@ -337,18 +391,27 @@ public final class Position {
 
         int captured = NO_PIECE;
         int pc = board[from];
-        if (flag == Move.EP_CAPTURE) {
-            int capSq = to ^ 8;
-            captured = board[capSq];
-            removePiece(capSq);
-        } else if ((flag & Move.CAPTURE) != 0) {
-            captured = board[to];
+        if (flag == Move.KING_CASTLE || flag == Move.QUEEN_CASTLE) {
+            // king and rook may land on each other's squares (Chess960): lift both, then set both down
+            int rook = board[to];
             removePiece(to);
+            removePiece(from);
+            addPiece(pc, castleKingTo(move));
+            addPiece(rook, castleRookTo(move));
+            capturedHist[h] = NO_PIECE;
+        } else {
+            if (flag == Move.EP_CAPTURE) {
+                int capSq = to ^ 8;
+                captured = board[capSq];
+                removePiece(capSq);
+            } else if ((flag & Move.CAPTURE) != 0) {
+                captured = board[to];
+                removePiece(to);
+            }
+            capturedHist[h] = captured;
+            if (captured != NO_PIECE) halfmove = 0;
+            movePiece(from, to);
         }
-        capturedHist[h] = captured;
-        if (captured != NO_PIECE) halfmove = 0;
-
-        movePiece(from, to);
         if (type(pc) == PAWN) {
             halfmove = 0;
             if (flag == Move.DOUBLE_PUSH) {
@@ -361,13 +424,9 @@ public final class Position {
                 removePiece(to);
                 addPiece(piece(us, KNIGHT + (flag & 3)), to);
             }
-        } else if (flag == Move.KING_CASTLE) {
-            movePiece(to + 1, to - 1);
-        } else if (flag == Move.QUEEN_CASTLE) {
-            movePiece(to - 2, to + 1);
         }
 
-        int newCastling = castling & CASTLE_MASK[from] & CASTLE_MASK[to];
+        int newCastling = castling & castleMask[from] & castleMask[to];
         if (newCastling != castling) {
             key ^= CASTLE_KEYS[castling] ^ CASTLE_KEYS[newCastling];
             castling = newCastling;
@@ -386,19 +445,23 @@ public final class Position {
         int us = side;
         if (us == BLACK) fullmove--;
 
-        if ((flag & Move.PROMO_N) != 0) {
-            removePieceRaw(to);
-            addPieceRaw(piece(us, PAWN), to);
-        }
-        movePieceRaw(to, from);
-        if (flag == Move.KING_CASTLE) {
-            movePieceRaw(to - 1, to + 1);
-        } else if (flag == Move.QUEEN_CASTLE) {
-            movePieceRaw(to + 1, to - 2);
-        }
-        int captured = capturedHist[h];
-        if (captured != NO_PIECE) {
-            addPieceRaw(captured, flag == Move.EP_CAPTURE ? (to ^ 8) : to);
+        if (flag == Move.KING_CASTLE || flag == Move.QUEEN_CASTLE) {
+            int kto = castleKingTo(move), rto = castleRookTo(move);
+            int king = board[kto], rook = board[rto];
+            removePieceRaw(kto);
+            removePieceRaw(rto);
+            addPieceRaw(king, from);
+            addPieceRaw(rook, to);
+        } else {
+            if ((flag & Move.PROMO_N) != 0) {
+                removePieceRaw(to);
+                addPieceRaw(piece(us, PAWN), to);
+            }
+            movePieceRaw(to, from);
+            int captured = capturedHist[h];
+            if (captured != NO_PIECE) {
+                addPieceRaw(captured, flag == Move.EP_CAPTURE ? (to ^ 8) : to);
+            }
         }
 
         key = keyHist[h];
@@ -517,11 +580,15 @@ public final class Position {
         if (from == ksq) {
             if (flag == Move.KING_CASTLE || flag == Move.QUEEN_CASTLE) {
                 if (checkers != 0L) return false;
-                int step = flag == Move.KING_CASTLE ? 1 : -1;
-                for (int s = from + step; s != to + step; s += step) {
-                    if (isAttacked(s, them, all)) return false;
+                long path = castleKingPath[us * 2 + (flag == Move.KING_CASTLE ? 0 : 1)];
+                while (path != 0L) {
+                    if (isAttacked(Long.numberOfTrailingZeros(path), them, all)) return false;
+                    path &= path - 1;
                 }
-                return true;
+                // Chess960: the castling rook may have shielded the king's destination along the back rank
+                int kto = castleKingTo(move);
+                long after = (all ^ (1L << from) ^ (1L << to)) | (1L << kto) | (1L << castleRookTo(move));
+                return !isAttacked(kto, them, after);
             }
             return !isAttacked(to, them, all ^ (1L << from));
         }
@@ -543,6 +610,11 @@ public final class Position {
         int pc = board[from];
         if (pc == NO_PIECE || color(pc) != side) return false;
         int us = side;
+        if (flag == Move.KING_CASTLE || flag == Move.QUEEN_CASTLE) {
+            int r = us * 2 + (flag == Move.KING_CASTLE ? 0 : 1);
+            return type(pc) == KING && checkers == 0L && (castling & (1 << r)) != 0 && castleRookSq[r] == to
+                    && board[to] == piece(us, ROOK) && (all & castleEmpty[r]) == 0L;
+        }
         int target = board[to];
         if (target != NO_PIECE && (color(target) == us || type(target) == KING)) return false;
         int pt = type(pc);
@@ -551,25 +623,6 @@ public final class Position {
         }
         boolean capFlag = (flag & Move.CAPTURE) != 0;
         if (capFlag != (target != NO_PIECE)) return false;
-        if (flag == Move.KING_CASTLE || flag == Move.QUEEN_CASTLE) {
-            if (pt != KING || checkers != 0L) return false;
-            if (us == WHITE) {
-                if (from != 4) return false;
-                if (flag == Move.KING_CASTLE) {
-                    return to == 6 && (castling & WK_CASTLE) != 0 && (all & 0x60L) == 0L
-                            && !isAttacked(5, BLACK, all) && !isAttacked(6, BLACK, all);
-                }
-                return to == 2 && (castling & WQ_CASTLE) != 0 && (all & 0x0EL) == 0L
-                        && !isAttacked(3, BLACK, all) && !isAttacked(2, BLACK, all);
-            }
-            if (from != 60) return false;
-            if (flag == Move.KING_CASTLE) {
-                return to == 62 && (castling & BK_CASTLE) != 0 && (all & 0x6000000000000000L) == 0L
-                        && !isAttacked(61, WHITE, all) && !isAttacked(62, WHITE, all);
-            }
-            return to == 58 && (castling & BQ_CASTLE) != 0 && (all & 0x0E00000000000000L) == 0L
-                    && !isAttacked(59, WHITE, all) && !isAttacked(58, WHITE, all);
-        }
         if (pt == PAWN) {
             boolean lastRank = us == WHITE ? to >= 56 : to < 8;
             if (lastRank != ((flag & Move.PROMO_N) != 0)) return false;
@@ -610,10 +663,11 @@ public final class Position {
         long rq = pieces[b + ROOK] | pieces[b + QUEEN];
         long bq = pieces[b + BISHOP] | pieces[b + QUEEN];
         if (flag == Move.KING_CASTLE || flag == Move.QUEEN_CASTLE) {
-            int rookTo = flag == Move.KING_CASTLE ? to - 1 : to + 1;
-            int rookFrom = flag == Move.KING_CASTLE ? to + 1 : to - 2;
-            long occC = (all ^ (1L << from) ^ (1L << rookFrom)) | (1L << to) | (1L << rookTo);
-            return (Attacks.rook(rookTo, occC) & (1L << eksq)) != 0L;
+            // to = the rook's start square; the rook's check from its new square and anything the move uncovers
+            int rookTo = castleRookTo(move);
+            long occC = (all ^ (1L << from) ^ (1L << to)) | (1L << castleKingTo(move)) | (1L << rookTo);
+            long rooks = (pieces[b + ROOK] ^ (1L << to)) | (1L << rookTo) | pieces[b + QUEEN];
+            return (Attacks.rook(eksq, occC) & rooks) != 0L || (Attacks.bishop(eksq, occC) & bq) != 0L;
         }
         long movedMask = ~(1L << from);
         if ((Attacks.rook(eksq, occAfter) & rq & movedMask) != 0L) return true;
@@ -728,12 +782,26 @@ public final class Position {
 
     // ------------------------------------------------------------------ UCI helpers
 
-    /** Parses a UCI move string against the legal moves of this position; returns NONE if illegal. */
+    /** Parses a UCI move string (standard castling notation) against the legal moves; returns NONE if illegal. */
     public int parseUciMove(String uci) {
+        return parseUciMove(uci, false);
+    }
+
+    /**
+     * Parses a UCI move string against the legal moves of this position; returns NONE if illegal. Castling is
+     * read in the given notation first (Chess960: king takes own rook, else king to g/c file) and then in the
+     * other one, which is unambiguous there (a king never takes its own rook; in Chess960 the exact notation wins).
+     */
+    public int parseUciMove(String uci, boolean chess960Notation) {
         int[] moves = new int[256];
         int n = MoveGen.generateAll(this, moves, 0);
         for (int i = 0; i < n; i++) {
-            if (Move.toUci(moves[i]).equals(uci) && isLegal(moves[i])) return moves[i];
+            if (Move.toUci(moves[i], chess960Notation).equals(uci) && isLegal(moves[i])) return moves[i];
+        }
+        for (int i = 0; i < n; i++) {
+            if (Move.isCastle(moves[i]) && Move.toUci(moves[i], !chess960Notation).equals(uci) && isLegal(moves[i])) {
+                return moves[i];
+            }
         }
         return Move.NONE;
     }

@@ -18,11 +18,45 @@ class CoreEngineTest {
             "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1;4;422333",
             "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8;3;62379",
             "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10;3;89890",
+            // Chess960 (Shredder-FEN; counts checked against a reference engine with UCI_Chess960)
+            "bbqnnrkr/pppppppp/8/8/8/8/PPPPPPPP/BBQNNRKR w HFhf - 0 1;4;201143",
+            "5rkr/pppppppp/8/8/8/8/PPPPPPPP/5RKR w HFhf - 0 1;4;236411",
+            "n1kbbqrn/1rppppp1/p7/1p6/1P3Pp1/1N6/P1PPP2P/R1KBBQRN w Gg - 0 6;4;337244",
+            "brnbkq1r/p1pN2pp/3p3n/1p2pp1P/8/1P6/P1PPPPP1/BR1BKQNR b HBhb - 1 6;4;1093153",
     })
     void perftMatchesReferenceCounts(String fen, int depth, long expected) {
         Position p = new Position(fen);
         assertEquals(expected, MoveGen.perft(p, depth));
         assertEquals(fen, p.toFen(), "make/unmake must restore the position");
+    }
+
+    @Test
+    void chess960CastlingNotationFenAndKeys() {
+        // king g1, rooks f1 (queen side) and h1: castling queen side puts the king on c1 and the rook on d1
+        Position p = new Position("5rkr/pppppppp/8/8/8/8/PPPPPPPP/5RKR w HFhf - 0 1");
+        assertTrue(p.chess960);
+        int ooo = p.parseUciMove("g1f1", true);
+        assertTrue(Move.isCastle(ooo));
+        assertEquals("g1c1", Move.toUci(ooo));
+        assertEquals(ooo, p.parseUciMove("g1c1", false));
+        assertEquals(Move.NONE, p.parseUciMove("g1h1", true), "king side is blocked by the f1 rook");
+        p.makeMove(ooo);
+        assertEquals("5rkr/pppppppp/8/8/8/8/PPPPPPPP/2KR3R b hf - 1 1", p.toFen());
+        assertEquals(new Position(p.toFen()).key, p.key, "incremental key after castling");
+        p.unmakeMove(ooo);
+        assertEquals("5rkr/pppppppp/8/8/8/8/PPPPPPPP/5RKR w HFhf - 0 1", p.toFen());
+
+        // standard chess reads both notations and keeps KQkq
+        Position s = new Position("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1");
+        int oo = s.parseUciMove("e1g1");
+        assertEquals(oo, s.parseUciMove("e1h1"));
+        assertEquals("e1h1", Move.toUci(oo, true));
+        assertEquals("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", s.toFen());
+        assertFalse(s.chess960);
+
+        // X-FEN KQkq on a Chess960 setup means the outermost rooks
+        Position x = new Position("rkr5/pppppppp/8/8/8/8/PPPPPPPP/RKR5 w KQkq - 0 1");
+        assertEquals("rkr5/pppppppp/8/8/8/8/PPPPPPPP/RKR5 w CAca - 0 1", x.toFen());
     }
 
     @Test

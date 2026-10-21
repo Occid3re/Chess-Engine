@@ -15,6 +15,8 @@ public final class SearchManager {
     boolean useNnue = !"false".equalsIgnoreCase(System.getProperty("core.useNnue", "true"));
     /** Centipawns a draw is worth less than equality for the side to move at the root (0 = plain draw score). */
     volatile int contempt;
+    /** UCI_Chess960: castling moves are written (and read first) as king takes own rook. */
+    public volatile boolean chess960;
 
     private Searcher[] searchers;
     private Thread[] threads;
@@ -211,7 +213,7 @@ public final class SearchManager {
         sb.append(" hashfull ").append(tt.hashfull());
         if (tablebases != null) sb.append(" tbhits ").append(totalTbHits());
         sb.append(" time ").append(elapsed).append(" pv");
-        for (int i = 0; i < s.bestPvLength; i++) sb.append(' ').append(Move.toUci(s.bestPv[i]));
+        for (int i = 0; i < s.bestPvLength; i++) sb.append(' ').append(Move.toUci(s.bestPv[i], chess960));
         out.accept(sb.toString());
     }
 
@@ -257,11 +259,11 @@ public final class SearchManager {
             int[] tb = tablebases.probeRoot(root);
             if (tb != null) {
                 int sc = tb[1] > 0 ? Searcher.TB_WIN - 1 : tb[1] < 0 ? -Searcher.TB_WIN + 1 : 0;
-                output.accept("info depth 1 score cp " + sc + " nodes 0 tbhits 1 pv " + Move.toUci(tb[0]));
+                output.accept("info depth 1 score cp " + sc + " nodes 0 tbhits 1 pv " + Move.toUci(tb[0], chess960));
                 if (l.ponder || l.infinite) {
                     finishLater(tb[0]);
                 } else {
-                    output.accept("bestmove " + Move.toUci(tb[0]));
+                    output.accept("bestmove " + Move.toUci(tb[0], chess960));
                 }
                 return;
             }
@@ -309,8 +311,8 @@ public final class SearchManager {
                 }
             }
             int best = main.bestMove != Move.NONE ? main.bestMove : fallback;
-            StringBuilder sb = new StringBuilder("bestmove ").append(Move.toUci(best));
-            if (main.bestPvLength > 1 && main.bestPv[0] == best) sb.append(" ponder ").append(Move.toUci(main.bestPv[1]));
+            StringBuilder sb = new StringBuilder("bestmove ").append(Move.toUci(best, chess960));
+            if (main.bestPvLength > 1 && main.bestPv[0] == best) sb.append(" ponder ").append(Move.toUci(main.bestPv[1], chess960));
             if (uncertainty != null) output.accept(uncertainty);
             output.accept(sb.toString());
         }, "search-main");
@@ -329,7 +331,7 @@ public final class SearchManager {
                     }
                 }
             }
-            out.accept("bestmove " + Move.toUci(move));
+            out.accept("bestmove " + Move.toUci(move, chess960));
         }, "search-main");
         mainThread.setDaemon(true);
         mainThread.start();
@@ -389,7 +391,7 @@ public final class SearchManager {
     public int[] searchSync(Position root, SearchLimits l) {
         final int[] result = new int[2];
         go(root, l, line -> {
-            if (line.startsWith("bestmove")) result[0] = root.parseUciMove(line.split(" ")[1]);
+            if (line.startsWith("bestmove")) result[0] = root.parseUciMove(line.split(" ")[1], chess960);
         });
         waitForFinish();
         result[1] = searchers[0].bestScore;

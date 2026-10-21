@@ -232,15 +232,20 @@ public final class Searcher {
         return score;
     }
 
+    /** The square a move's piece lands on: for castling the king's g/c square (the move itself names the rook). */
+    private static int target(int m) {
+        return Move.isCastle(m) ? Position.castleKingTo(m) : Move.to(m);
+    }
+
     private int contIdx(int ply) {
         if (ply < 0) return -1;
         int m = moveStack[ply];
         if (m == Move.NONE) return -1;
-        return pieceStack[ply] * 64 + Move.to(m);
+        return pieceStack[ply] * 64 + target(m);
     }
 
     private int quietHistory(int side, int m, int pc, int c1, int c2) {
-        int from = Move.from(m), to = Move.to(m);
+        int from = Move.from(m), to = target(m);
         int h = mainHistory[side * 4096 + from * 64 + to];
         int pt = pc * 64 + to;
         if (c1 >= 0) h += contHistory[c1 * 768 + pt];
@@ -335,7 +340,7 @@ public final class Searcher {
     }
 
     private void updateQuiet(int ply, int m, int bonus) {
-        int from = Move.from(m), to = Move.to(m);
+        int from = Move.from(m), to = target(m);
         gravity(mainHistory, pos.side * 4096 + from * 64 + to, bonus);
         int pt = pos.board[from] * 64 + to;
         int c1 = contIdx(ply - 1), c2 = contIdx(ply - 2);

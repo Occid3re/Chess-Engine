@@ -130,7 +130,7 @@ public abstract class Accumulators {
         int pc = p.board[from];
         int us = color(pc);
         int subPc2 = NO_PIECE, subSq2 = -1, addPc2 = NO_PIECE, addSq2 = -1;
-        int addPc1 = pc;
+        int addPc1 = pc, addSq1 = to;
         if ((flag & Move.PROMO_N) != 0) addPc1 = piece(us, KNIGHT + (flag & 3));
         if (flag == Move.EP_CAPTURE) {
             subSq2 = to ^ 8;
@@ -139,11 +139,11 @@ public abstract class Accumulators {
             subSq2 = to;
             subPc2 = p.board[to];
         } else if (flag == Move.KING_CASTLE || flag == Move.QUEEN_CASTLE) {
-            int rookFrom = flag == Move.KING_CASTLE ? to + 1 : to - 2;
-            int rookTo = flag == Move.KING_CASTLE ? to - 1 : to + 1;
-            subSq2 = rookFrom;
-            subPc2 = p.board[rookFrom];
-            addSq2 = rookTo;
+            // to = the rook's start square (Chess960 encoding)
+            addSq1 = Position.castleKingTo(m);
+            subSq2 = to;
+            subPc2 = p.board[to];
+            addSq2 = Position.castleRookTo(m);
             addPc2 = subPc2;
         }
         int[] d = delta[ply + 1];
@@ -151,7 +151,7 @@ public abstract class Accumulators {
         for (int persp = 0; persp < 2; persp++) {
             int o = persp * 4;
             int king = Long.numberOfTrailingZeros(p.pieces(persp, KING));
-            if (kingMove && us == persp && !net.sameFrame(persp, from, to)) {
+            if (kingMove && us == persp && !net.sameFrame(persp, from, addSq1)) {
                 d[o] = REFRESH; // every feature of this perspective changes: rebuild it when needed
                 continue;
             }
@@ -159,13 +159,13 @@ public abstract class Accumulators {
                 // same bucket and board half: the king's own feature moves like any other piece
                 d[o] = net.feature(persp, pc, from, from);
                 d[o + 1] = subPc2 == NO_PIECE ? -1 : net.feature(persp, subPc2, subSq2, from);
-                d[o + 2] = net.feature(persp, addPc1, to, to);
-                d[o + 3] = addPc2 == NO_PIECE ? -1 : net.feature(persp, addPc2, addSq2, to);
+                d[o + 2] = net.feature(persp, addPc1, addSq1, addSq1);
+                d[o + 3] = addPc2 == NO_PIECE ? -1 : net.feature(persp, addPc2, addSq2, addSq1);
                 continue;
             }
             d[o] = net.feature(persp, pc, from, king);
             d[o + 1] = subPc2 == NO_PIECE ? -1 : net.feature(persp, subPc2, subSq2, king);
-            d[o + 2] = net.feature(persp, addPc1, to, king);
+            d[o + 2] = net.feature(persp, addPc1, addSq1, king);
             d[o + 3] = addPc2 == NO_PIECE ? -1 : net.feature(persp, addPc2, addSq2, king);
         }
         computed[WHITE][ply + 1] = false;
