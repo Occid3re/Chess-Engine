@@ -67,6 +67,10 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
   saturated. Generation 7 (4.1.4) is the first king-bucket net (kb8: 8 own-king buckets, mirrored, factoriser,
   file v3, 3.2 MB): 463M-position mix with fresh gen6 self-play, 10 epochs, +22.1 +-9.3 vs generation 6
   (573-426-1315, 2314 games, H1); bench nps -2 % (Finny tables). The loop now runs with --layout kb8 --epochs 10.
+  The next kb8 net from scratch on a 319M mix lost (-13.1 +-7.9, H0). Generation 8 (4.1.6) is the first WARM START
+  (`gpu_generations.py --warm-start --window 400000000`: continue from best.pt, 4 epochs at lr 0.0005, mix of the
+  newest 400M+ positions): +22.4 +-9.2 vs generation 7 (477-340-1311, 2128 games, H1) after 1 h 45 min of training
+  and testing - continue training, do not restart.
 - Search parameters (core/Tune.java) from SPSA, 1500 iterations x 8 games at 6+0.06 (4.0.9): +28.3 vs the old
   defaults (SPRT H1, 1058 games at 10+0.1). Biggest moves: nmpBaseMargin 150->100, nmpDepthMargin 15->24,
   aspDelta 15->10, rfpMargin 75->68, qsFutility 160->180. The pruning is more aggressive: CoreEngineTest's mate
