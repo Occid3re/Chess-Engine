@@ -46,6 +46,27 @@ public final class UncertaintyHead {
     }
 
     /** The head for the default network, or null if there is none or it belongs to another network. */
+    /**
+     * How unsure the default network is about p (its expected error against a search, as a win probability): the
+     * network's own uncertainty output (version 4), else the head bound to it, else -1.
+     */
+    public static double estimate(Position p) {
+        Network net = Network.loadDefault();
+        if (net != null && net.hasUncertainty()) {
+            Accumulators a = Accumulators.create(net, 1);
+            a.refresh(p, 0);
+            return a.uncertainty(p, 0) / 1000.0;
+        }
+        UncertaintyHead head = loadDefault();
+        return head == null ? -1 : head.predict(p);
+    }
+
+    /** Whether {@link #estimate} has something to go on for the default network. */
+    public static boolean available() {
+        Network net = Network.loadDefault();
+        return net != null && (net.hasUncertainty() || loadDefault() != null);
+    }
+
     public static UncertaintyHead loadDefault() {
         if (!defaultLoaded) {
             synchronized (UncertaintyHead.class) {

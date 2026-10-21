@@ -125,6 +125,14 @@ final class VectorAccumulators extends Accumulators {
         return (int) (out * net.scale / ((long) net.qa * net.qb));
     }
 
+    @Override
+    protected int uncertaintyPly(int ply, boolean whiteToMove, int bucket) {
+        short[] us = whiteToMove ? white[ply] : black[ply];
+        short[] them = whiteToMove ? black[ply] : white[ply];
+        return net.uncertaintyOf((long) screluDot(us, net.uncWeights[2 * bucket])
+                + screluDot(them, net.uncWeights[2 * bucket + 1]), bucket);
+    }
+
     /** Sum of (v * w * v) >> 8 per neuron with v = clamp(acc, 0, QA), exactly as {@link Network#evaluate}. */
     private int screluDot(short[] acc, int[] w) {
         short qa = (short) net.qa;

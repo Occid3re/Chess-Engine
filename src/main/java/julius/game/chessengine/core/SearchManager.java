@@ -275,10 +275,8 @@ public final class SearchManager {
         final int fallback = onlyMove;
         // How unclear the root is for the network (expected error of its evaluation as a win probability), reported
         // before bestmove for the bot and the play app; the search itself does not use it.
-        julius.game.chessengine.core.nnue.UncertaintyHead head = useNnue
-                ? julius.game.chessengine.core.nnue.UncertaintyHead.loadDefault() : null;
-        rootUncertainty = head == null ? -1 : head.predict(root);
-        final String uncertainty = head == null ? null
+        rootUncertainty = useNnue ? julius.game.chessengine.core.nnue.UncertaintyHead.estimate(root) : -1;
+        final String uncertainty = rootUncertainty < 0 ? null
                 : String.format(java.util.Locale.ROOT, "info string unc %.3f", rootUncertainty);
         threads = new Thread[searchers.length];
         for (int i = 1; i < searchers.length; i++) {

@@ -57,6 +57,19 @@ public final class Tune {
     public static int uncDepth = 0;
     public static int uncLo = 25;
     public static int uncHi = 70;
+    /**
+     * Doubt extension (off with doubtThr 0): a PV node at the horizon whose uncertainty is at least doubtThr / 1000
+     * is searched doubtDepth plies deeper instead of going into quiescence, at most doubtMax times along a path.
+     */
+    public static int doubtThr = 0;
+    public static int doubtDepth = 1;
+    public static int doubtMax = 1;
+    /**
+     * Risk steering (off with 0; needs a network with its own uncertainty output, file version 4): every evaluation
+     * moves by riskCp * u / 0.1 centipawns against the root side, u = that output: positive values avoid unclear
+     * positions (against stronger opponents), negative values seek them (against weaker ones).
+     */
+    public static int riskCp = 0;
 
     private static final Map<String, Param> PARAMS = new LinkedHashMap<>();
 
@@ -89,6 +102,10 @@ public final class Tune {
         add("uncDepth", uncDepth, 0, 20, 1);
         add("uncLo", uncLo, 0, 100, 4);
         add("uncHi", uncHi, 20, 200, 6);
+        add("doubtThr", doubtThr, 0, 200, 8);
+        add("doubtDepth", doubtDepth, 1, 4, 1);
+        add("doubtMax", doubtMax, 1, 4, 1);
+        add("riskCp", riskCp, -100, 100, 6);
     }
 
     private Tune() {
@@ -140,6 +157,10 @@ public final class Tune {
             case "uncDepth" -> uncDepth = v;
             case "uncLo" -> uncLo = v;
             case "uncHi" -> uncHi = v;
+            case "doubtThr" -> doubtThr = v;
+            case "doubtDepth" -> doubtDepth = v;
+            case "doubtMax" -> doubtMax = v;
+            case "riskCp" -> riskCp = v;
             default -> {
                 return false;
             }

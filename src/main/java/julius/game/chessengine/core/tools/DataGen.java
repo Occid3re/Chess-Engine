@@ -40,8 +40,8 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>{@code gen.nodeJitter} (default 0.1) – node limit varies by +-10 % per move so repeated starts diverge.</li>
  * </ul>
  *
- * <p>Focus on what the network knows least (needs the network's uncertainty head, {@code -Dcore.uncFile} or the
- * bundled one; off by default):</p>
+ * <p>Focus on what the network knows least (needs its own uncertainty output, version 4, or its uncertainty head,
+ * {@code -Dcore.uncFile} or the bundled one; off by default):</p>
  * <ul>
  *   <li>{@code gen.uncThreshold} (default 0.07) – positions the head rates at least this uncertain (expected error of
  *       the static evaluation as a win probability; 0.07 = the most uncertain ~13 % of self-play positions, whose
@@ -76,7 +76,7 @@ public final class DataGen {
     private static final AtomicLong searched = new AtomicLong();
     private static List<String> starts = List.of();
     private static Tablebases tablebases;
-    private static UncertaintyHead head;
+    private static boolean focus;  // uncertainty focus: the network has an uncertainty output or head
 
     public static void main(String[] args) throws Exception {
         Path out = Path.of(args[0]);
@@ -94,8 +94,8 @@ public final class DataGen {
             tablebases = Tablebases.load(tbPaths, System.out::println);
         }
         if (UNC_NODES > 1 || UNC_FORK > 0) {
-            head = UncertaintyHead.loadDefault();
-            System.out.println(head == null ? "uncertainty focus OFF: no head for this network"
+            focus = UncertaintyHead.available();
+            System.out.println(!focus ? "uncertainty focus OFF: no uncertainty output or head for this network"
                     : String.format(java.util.Locale.ROOT, "uncertainty focus: >= %.3f gets %.1fx nodes, %.0f %% of games start there",
                     UNC_THRESHOLD, UNC_NODES, 100 * UNC_FORK));
         }
@@ -130,10 +130,10 @@ public final class DataGen {
                     return;
                 }
                 long el = Math.max(1, (System.currentTimeMillis() - start) / 1000);
-                String focus = head == null ? "" : String.format(java.util.Locale.ROOT, " uncertain %.1f %%",
+                String share = !focus ? "" : String.format(java.util.Locale.ROOT, " uncertain %.1f %%",
                         100.0 * uncertain.get() / Math.max(1, searched.get()));
                 System.out.printf("positions %d games %d (%d pos/s)%s%n", written.get(), games.get(),
-                        written.get() / el, focus);
+                        written.get() / el, share);
             }
         });
         reporter.setDaemon(true);
@@ -217,9 +217,9 @@ public final class DataGen {
                 }
                 SearchLimits l = new SearchLimits();
                 double factor = 1;
-                if (head != null) {
+                if (focus) {
                     searched.incrementAndGet();
-                    if (head.predict(p) >= UNC_THRESHOLD) {
+                    if (UncertaintyHead.estimate(p) >= UNC_THRESHOLD) {
                         uncertain.incrementAndGet();
                         factor = UNC_NODES;
                         if (UNC_FORK > 0 && rng.nextInt(4) == 0) {  // a sample, neighbours are alike

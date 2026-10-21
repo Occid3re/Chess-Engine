@@ -44,10 +44,14 @@ public final class Searcher {
     private Network cachedNet;
     /** The network's uncertainty head while Tune.uncDepth > 0, else null. */
     private julius.game.chessengine.core.nnue.UncertaintyHead uncHead;
+    /** The network has its own uncertainty output (version 4): cheaper than the head, used instead of it. */
+    private boolean netUnc;
     private float[] uncInput;
     /** Uncertainty (x 1000) per position key, direct mapped: deep nodes come back in every iteration. */
     private final long[] uncKeys = new long[1 << 15];
     private final short[] uncValues = new short[1 << 15];
+    /** Doubt extensions (Tune.doubtThr) on the path to each ply. */
+    private final int[] doubtPath = new int[MAX_PLY + 8];
 
     long nodes;
     int selDepth;
@@ -104,7 +108,9 @@ public final class Searcher {
         bestPvLength = 0;
         rootHistPly = pos.historyPly();
         acc = mgr.useNnue ? accumulatorsFor(Network.loadDefault()) : null;
-        uncHead = acc != null && Tune.uncDepth > 0 ? julius.game.chessengine.core.nnue.UncertaintyHead.loadDefault() : null;
+        netUnc = acc != null && cachedNet.hasUncertainty();
+        uncHead = acc != null && !netUnc && (Tune.uncDepth > 0 || Tune.doubtThr > 0)
+                ? julius.game.chessengine.core.nnue.UncertaintyHead.loadDefault() : null;
         if (uncHead != null && (uncInput == null || uncInput.length != uncHead.inputs())) uncInput = new float[uncHead.inputs()];
         if (acc != null) acc.refresh(pos, 0);
         for (int[] k : killers) {
@@ -192,6 +198,14 @@ public final class Searcher {
                         + expected + " in " + pos.toFen());
             }
             VERIFIED.incrementAndGet();
+        }
+        // Risk steering (Tune.riskCp, networks with their own uncertainty output only: the separate head made
+        // the search 3x slower): positions the network is unsure about are worth less to the root side (riskCp > 0,
+        // against stronger opponents) or more (riskCp < 0, against weaker ones). The side to move is the root side
+        // exactly at even plies, normal and null moves alike.
+        if (Tune.riskCp != 0 && netUnc) {
+            int risk = Tune.riskCp * acc.uncertainty(pos, ply) / 100;
+            v += (ply & 1) == 0 ? -risk : risk;
         }
         // Fade the evaluation towards a draw as the fifty-move counter grows.
         v = v * (200 - pos.halfmove) / 200;
@@ -331,13 +345,36 @@ public final class Searcher {
 
     // ------------------------------------------------------------------ main search
 
+    /** The uncertainty head's estimate for the position at ply, in thousandths of a win probability (cached per key). */
+    private int uncertainty(int ply) {
+        if (netUnc) return acc.uncertainty(pos, ply);
+        int slot = (int) (pos.key & (uncKeys.length - 1));
+        if (uncKeys[slot] == pos.key) return uncValues[slot];
+        acc.activations(pos, ply, uncInput);
+        int u = (int) Math.min(Short.MAX_VALUE, uncHead.predict(uncInput, Long.bitCount(pos.all)) * 1000);
+        uncKeys[slot] = pos.key;
+        uncValues[slot] = (short) u;
+        return u;
+    }
+
     int search(int alpha, int beta, int depth, int ply, boolean cutNode) {
         final boolean pvNode = beta - alpha > 1;
         final boolean root = ply == 0;
         pvLength[ply] = ply;
         final boolean inCheck = pos.inCheck();
         if (inCheck && ply < 2 * rootDepth + 8) depth++;
-        if (depth <= 0) return qsearch(alpha, beta, ply);
+        doubtPath[ply] = root ? 0 : doubtPath[ply - 1];
+        if (depth <= 0) {
+            // Doubt extension (Tune.doubtThr): a PV horizon the network is unsure about is searched doubtDepth plies
+            // deeper instead of ending in quiescence, at most doubtMax times along a path. PV nodes only: the
+            // uncertainty-aware LMR touched the whole tree and grew it 13-40 %.
+            if (!pvNode || (uncHead == null && !netUnc) || Tune.doubtThr == 0 || doubtPath[ply] >= Tune.doubtMax
+                    || ply >= 2 * rootDepth || uncertainty(ply) < Tune.doubtThr) {
+                return qsearch(alpha, beta, ply);
+            }
+            depth = Tune.doubtDepth;
+            doubtPath[ply]++;
+        }
 
         nodes++;
         if (id == 0 && (nodes & 1023) == 0) mgr.checkTime(this);
@@ -423,17 +460,8 @@ public final class Searcher {
         excludedStack[ply + 1] = Move.NONE;
         // How sure the network is here (Tune.uncDepth): sure -> reduce late moves more, unclear -> less
         int uncAdjust = 0;
-        if (uncHead != null && !inCheck && depth >= Tune.uncDepth) {
-            int slot = (int) (pos.key & (uncKeys.length - 1));
-            int u;
-            if (uncKeys[slot] == pos.key) {
-                u = uncValues[slot];
-            } else {
-                acc.activations(pos, ply, uncInput);
-                u = (int) Math.min(Short.MAX_VALUE, uncHead.predict(uncInput, Long.bitCount(pos.all)) * 1000);
-                uncKeys[slot] = pos.key;
-                uncValues[slot] = (short) u;
-            }
+        if ((uncHead != null || netUnc) && Tune.uncDepth > 0 && !inCheck && depth >= Tune.uncDepth) {
+            int u = uncertainty(ply);
             uncAdjust = u < Tune.uncLo ? 1 : u > Tune.uncHi ? -1 : 0;
         }
 

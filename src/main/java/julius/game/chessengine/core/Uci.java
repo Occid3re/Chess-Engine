@@ -130,11 +130,8 @@ public final class Uci {
                     a.refresh(position, 0);
                     send("nnue eval (side to move) " + a.evaluate(position, 0) + (manager.useNnue ? " [active]" : " [disabled]")
                             + " (" + julius.game.chessengine.core.nnue.Accumulators.backend() + ")");
-                    julius.game.chessengine.core.nnue.UncertaintyHead head =
-                            julius.game.chessengine.core.nnue.UncertaintyHead.loadDefault();
-                    if (head != null) {
-                        send(String.format(java.util.Locale.ROOT, "nnue uncertainty %.4f", head.predict(position)));
-                    }
+                    double u = julius.game.chessengine.core.nnue.UncertaintyHead.estimate(position);
+                    if (u >= 0) send(String.format(java.util.Locale.ROOT, "nnue uncertainty %.4f", u));
                 }
             }
             case "perft" -> {

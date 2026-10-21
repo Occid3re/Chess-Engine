@@ -111,6 +111,19 @@ etsest-unc.bin`, retrained on every promotion).
   activations, cached per key: no nps cost). The search meets far more 'unclear' nodes than self-play has, so
   the tree grows (+13..40 % nodes); SPSA (200 iterations, 3200 games) did not move from 8/14/65, and that
   setting lost 129-165-706 vs off (-12.5 Elo, 1000 games at 10+0.1). Time management is the untested use left.
+  Time management with it (tmUnc 30 plus tmMtg 55 / tmMtgMin 22 / tmInc 95) vs the defaults at 18+0.2: -1.0 +-9.4
+  after 1362 games (stopped): no gain.
+  Tried, lost (2026-10-21): doubt extension (`Tune.doubtThr/doubtDepth/doubtMax`, off): a PV node at the horizon
+  with uncertainty >= the threshold is searched deeper instead of quiescence. 0.07 / 1 ply: -17.8 +-12.3 (920
+  games); 0.04 / 2 plies: -24.5 +-15.3 (596 games).
+  Own uncertainty output (file format v4, `train_gpu.py --unc-weight W`, `--unc-only` trains it on a frozen
+  network whose evaluation stays bit for bit the same): a second linear output on the same activations learns
+  |sigmoid(eval) - sigmoid(search score)|; one more dot product per evaluation, no measurable nps cost. On gen9
+  (frozen) it ranks 31.8 % of the large errors into its top 10 % (16-neuron head 40.3 %, simple rules 20 %).
+  The search, the bot's `info string unc` and DataGen's focus use it when the network has it (else the head).
+  Calling the 16-neuron head at every evaluation made the search 3x slower: per-node uses need the v4 output.
+  Risk steering (`Tune.riskCp`, v4 networks only): evaluation -= riskCp * u / 0.1 cp for the root side. Against
+  SF19 at 1/8 time after ~240 games each: riskCp 30 21-107-112 (-130 +-34) vs 0 18-126-98 (-167 +-34).
 - King buckets (kb8), second try: 114M positions, 4 epochs, row-wise Adam: -33 Elo vs 4.1.0 (78-109-139, 326 games)
   although its held-out loss was lower. `-Dcore.verifyNnue=true` (checks every 64th evaluation in the real search
   against a rebuild; `bench` reports the count) verified 30167 evaluations exact: the engine side is correct, the net

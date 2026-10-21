@@ -207,6 +207,17 @@ public abstract class Accumulators {
     }
 
     /**
+     * The network's own uncertainty output at ply in thousandths of a win probability (version 4 networks,
+     * {@link Network#hasUncertainty}): one more dot product on the accumulators the evaluation already needs.
+     */
+    public final int uncertainty(Position p, int ply) {
+        ensure(p, WHITE, ply);
+        ensure(p, BLACK, ply);
+        int bucket = Network.bucketFor(Long.bitCount(p.all), net.buckets);
+        return uncertaintyPly(ply, p.side == WHITE, bucket);
+    }
+
+    /**
      * SCReLU activations clamp(acc / QA, 0, 1)^2 at ply: the side to move's in out[0, hidden), the other side's in
      * out[hidden, 2 * hidden) - the input of the {@link UncertaintyHead}.
      */
@@ -232,4 +243,6 @@ public abstract class Accumulators {
 
     /** Network output for ply, side to move White or Black. */
     protected abstract int evaluatePly(int ply, boolean whiteToMove, int bucket);
+
+    protected abstract int uncertaintyPly(int ply, boolean whiteToMove, int bucket);
 }

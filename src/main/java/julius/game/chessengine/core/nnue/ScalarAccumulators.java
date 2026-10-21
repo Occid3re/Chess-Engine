@@ -62,4 +62,10 @@ final class ScalarAccumulators extends Accumulators {
     protected int evaluatePly(int ply, boolean whiteToMove, int bucket) {
         return whiteToMove ? net.evaluate(white[ply], black[ply], bucket) : net.evaluate(black[ply], white[ply], bucket);
     }
+
+    @Override
+    protected int uncertaintyPly(int ply, boolean whiteToMove, int bucket) {
+        return whiteToMove ? net.uncertainty(white[ply], black[ply], bucket)
+                : net.uncertainty(black[ply], white[ply], bucket);
+    }
 }

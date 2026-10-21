@@ -12,8 +12,16 @@ castled kings apart, see KING_BUCKETS) and the board is mirrored horizontally wh
 files. A factoriser (one shared 768-input layer added to every bucket during training, merged on export)
 lets the buckets learn from the data each of them shares.
 
+Uncertainty output (--unc-weight > 0, file format v4): a second linear output on the same activations,
+  unc = v_us . w3[bucket, 0] + v_them . w3[bucket, 1] + b3[bucket],
+learns the network's own error |sigmoid(out * 400 / K) - sigmoid(score / K)| (detached, a win probability): the
+distance between its static evaluation and the search that labelled the position. Trained jointly, the feature
+transformer also learns what makes a position hard (an auxiliary task); in the engine it costs one more dot
+product per evaluation instead of the separate 16-neuron head (core/nnue-unc.bin).
+
 Input: 32-byte records from core.tools.PackData (one or more .bin files, loaded into RAM).
-Output: a v3 network file for the engine (-Dcore.nnueFile=... or src/main/resources/core/nnue.bin).
+Output: a v3 network file for the engine (-Dcore.nnueFile=... or src/main/resources/core/nnue.bin), v4 with the
+uncertainty output.
 
 Speed: the feature transformer runs as a dense 0/1 matrix times the weights in half precision on the tensor
 cores (with loss scaling). PyTorch's sparse EmbeddingBag needs a sort of ~2M indices per batch for its gradient
@@ -120,13 +128,16 @@ class Batch:
 
 
 class Net(torch.nn.Module):
-    def __init__(self, hidden: int, buckets: int):
+    def __init__(self, hidden: int, buckets: int, unc: bool = False):
         super().__init__()
-        self.hidden, self.buckets = hidden, buckets
+        self.hidden, self.buckets, self.unc = hidden, buckets, unc
         self.ft = torch.nn.EmbeddingBag(PAD + 1, hidden, mode="sum", padding_idx=PAD)
         self.b1 = torch.nn.Parameter(torch.zeros(hidden))
         self.w2 = torch.nn.Parameter(torch.zeros(buckets, 2, hidden))
         self.b2 = torch.nn.Parameter(torch.zeros(buckets))
+        if unc:
+            self.w3 = torch.nn.Parameter(torch.zeros(buckets, 2, hidden))
+            self.b3 = torch.nn.Parameter(torch.full((buckets,), 0.03))  # about the mean error
         with torch.no_grad():
             # as the Java trainer: first layer uniform(-1, 1) * 0.5 / sqrt(32) (with a factoriser that is where it
             # starts, the buckets at 0: they learn the differences), output layer uniform(-1, 1) / sqrt(2H)
@@ -136,6 +147,11 @@ class Net(torch.nn.Module):
             self.w2.uniform_(-1, 1).mul_(1 / (2 * hidden) ** 0.5)
 
     def forward(self, batch: Batch) -> torch.Tensor:
+        out, _ = self.both(batch)
+        return out
+
+    def both(self, batch: Batch):
+        """(evaluation, uncertainty or None)."""
         if batch.indices.is_cuda and HALF:
             # dense multi-hot input [2B, rows] x weights in fp16 on the tensor cores
             rows = self.ft.weight.shape[0]
@@ -152,7 +168,11 @@ class Net(torch.nn.Module):
         v_us, v_them = v[:b], v[b:]
         ob = output_bucket(batch.count, self.buckets)
         w = self.w2[ob]                                                         # [B, 2, H]
-        return (v_us * w[:, 0]).sum(1) + (v_them * w[:, 1]).sum(1) + self.b2[ob]
+        out = (v_us * w[:, 0]).sum(1) + (v_them * w[:, 1]).sum(1) + self.b2[ob]
+        if not self.unc:
+            return out, None
+        u = self.w3[ob]
+        return out, (v_us * u[:, 0]).sum(1) + (v_them * u[:, 1]).sum(1) + self.b3[ob]
 
     def clip(self):
         with torch.no_grad():
@@ -161,6 +181,8 @@ class Net(torch.nn.Module):
             self.ft.weight.clamp_(-limit, limit)
             self.b1.clamp_(-CLIP, CLIP)
             self.w2.clamp_(-CLIP, CLIP)
+            if self.unc:
+                self.w3.clamp_(-CLIP, CLIP)
 
     def merged_first_layer(self) -> torch.Tensor:
         """[NUM_KB * 768, H]: each bucket's weights plus the shared factoriser."""
@@ -209,10 +231,19 @@ class RowAdam(torch.optim.Optimizer):
                     p.addcdiv_(m / bc1, (v / bc2).sqrt_().add_(group["eps"]), value=-group["lr"])
 
 
-def loss_fn(net: Net, batch: Batch, lam: float, k: float) -> torch.Tensor:
-    pred = torch.sigmoid(net(batch) * SCALE / k)
+def loss_fn(net: Net, batch: Batch, lam: float, k: float, unc_weight: float = 0.0, parts: list = None):
+    """Evaluation loss (+ unc_weight x the uncertainty output's loss); parts collects (evaluation, uncertainty)."""
+    out, unc = net.both(batch)
+    pred = torch.sigmoid(out * SCALE / k)
     target = lam * batch.wdl + (1 - lam) * torch.sigmoid(batch.score / k)
-    return torch.mean((pred - target) ** 2)
+    loss = torch.mean((pred - target) ** 2)
+    if unc is None:
+        return loss
+    error = (pred - torch.sigmoid(batch.score / k)).abs().detach()
+    unc_loss = torch.mean((unc - error) ** 2)
+    if parts is not None:
+        parts.append((loss.item(), unc_loss.item()))
+    return loss + unc_weight * unc_loss
 
 
 def export(net: Net, path: Path) -> None:
@@ -222,15 +253,21 @@ def export(net: Net, path: Path) -> None:
         b1 = torch.round(net.b1 * QA).to(torch.int16).cpu().numpy()
         w2 = torch.round(net.w2 * QB).to(torch.int16).cpu().numpy().reshape(-1)  # row bucket * 2 + half
         b2 = torch.round(net.b2 * QA * QB).to(torch.int32).cpu().numpy()
+        if net.unc:
+            w3 = torch.round(net.w3 * QB).to(torch.int16).cpu().numpy().reshape(-1)
+            b3 = torch.round(net.b3 * QA * QB).to(torch.int32).cpu().numpy()
     with open(path, "wb") as f:
         f.write(b"ALNN")
-        f.write(struct.pack("<6i", 3, net.hidden, QA, QB, SCALE, net.buckets))
+        f.write(struct.pack("<6i", 4 if net.unc else 3, net.hidden, QA, QB, SCALE, net.buckets))
         f.write(struct.pack("<2i", NUM_KB, 1 if MIRROR else 0))
         f.write(bytes(KING_BUCKETS))
         f.write(w1.astype("<i2").tobytes())
         f.write(b1.astype("<i2").tobytes())
         f.write(w2.astype("<i2").tobytes())
         f.write(b2.astype("<i4").tobytes())
+        if net.unc:  # v4: the uncertainty output, laid out like the evaluation output
+            f.write(w3.astype("<i2").tobytes())
+            f.write(b3.astype("<i4").tobytes())
 
 
 def raise_priority() -> None:
@@ -265,6 +302,10 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--chunk", type=int, default=0, help="positions per GPU chunk (default: half the free memory)")
     ap.add_argument("--init", help="start from this float model (.pt of the same layout and size): fine-tuning")
+    ap.add_argument("--unc-weight", type=float, default=0.0,
+                    help="> 0: learn the uncertainty output too (file format v4), its loss weighted so")
+    ap.add_argument("--unc-only", action="store_true",
+                    help="with --init and --unc-weight: train only the uncertainty output, the network stays as it is")
     args = ap.parse_args()
 
     configure(args.layout)
@@ -303,12 +344,23 @@ def main():
     print(f"{n} positions in {len(chunks)} chunk(s), {len(held_out)} validation, on {device}"
           f"{' ' + torch.cuda.get_device_name(0) if device.type == 'cuda' else ''}", flush=True)
     kb_map = torch.tensor(KING_BUCKETS, device=device)
-    net = Net(args.hidden, args.buckets).to(device)
+    net = Net(args.hidden, args.buckets, unc=args.unc_weight > 0).to(device)
     if args.init:
-        net.load_state_dict(torch.load(args.init, map_location=device))
+        # a v3 model has no uncertainty output yet: it starts at zero weights and the mean error
+        missing, unexpected = net.load_state_dict(torch.load(args.init, map_location=device), strict=False)
+        if unexpected or any(m not in ("w3", "b3") for m in missing):
+            raise SystemExit(f"--init does not fit: missing {missing}, unexpected {unexpected}")
         print(f"starting from {args.init}", flush=True)
-    others = [q for name, q in net.named_parameters() if name != "ft.weight"]
-    opt = RowAdam([{"params": [net.ft.weight], "rows": True}, {"params": others}], lr=args.lr)
+    if args.unc_only:
+        # the evaluation stays bit for bit the --init network's; only w3/b3 learn
+        if not (args.init and net.unc):
+            raise SystemExit("--unc-only needs --init and --unc-weight")
+        for name, q in net.named_parameters():
+            q.requires_grad_(name in ("w3", "b3"))
+        opt = RowAdam([{"params": [net.w3, net.b3]}], lr=args.lr)
+    else:
+        others = [q for name, q in net.named_parameters() if name != "ft.weight"]
+        opt = RowAdam([{"params": [net.ft.weight], "rows": True}, {"params": others}], lr=args.lr)
     scaler = torch.cuda.amp.GradScaler(enabled=device.type == "cuda" and HALF)
     steps_per_epoch = sum((hi - lo) // args.batch for _, lo, hi in chunks)
     total = steps_per_epoch * args.epochs
@@ -325,7 +377,7 @@ def main():
             for step in range((hi - lo) // args.batch):
                 batch = Batch(data[order[step * args.batch:(step + 1) * args.batch]], device, kb_map)
                 opt.zero_grad(set_to_none=True)
-                loss = loss_fn(net, batch, args.lam, args.k)
+                loss = loss_fn(net, batch, args.lam, args.k, args.unc_weight)
                 scaler.scale(loss).backward()
                 scaler.step(opt)
                 scaler.update()
@@ -337,15 +389,21 @@ def main():
             del data
         net.eval()
         with torch.no_grad():
-            vl, vn = 0.0, 0
+            vl, vn, vu = 0.0, 0, 0.0
             for s in range(0, len(valid_gpu), args.batch):
                 batch = Batch(valid_gpu[s:s + args.batch], device, kb_map)
                 m = batch.count.shape[0]
-                vl += loss_fn(net, batch, args.lam, args.k).item() * m
+                if net.unc:
+                    parts = []
+                    loss_fn(net, batch, args.lam, args.k, args.unc_weight, parts)
+                    vl += parts[0][0] * m
+                    vu += parts[0][1] * m
+                else:
+                    vl += loss_fn(net, batch, args.lam, args.k).item() * m
                 vn += m
         took = time.time() - started
         print(f"epoch {epoch} lr {sched.get_last_lr()[0]:.6f} train {running / max(1, sampled):.6f} "
-              f"valid {vl / max(1, vn):.6f} ({took:.0f} s, {steps_per_epoch * args.batch / took / 1e6:.2f} M pos/s)",
+              f"valid {vl / max(1, vn):.6f}{f' unc {vu / max(1, vn):.6f}' if net.unc else ''} ({took:.0f} s, {steps_per_epoch * args.batch / took / 1e6:.2f} M pos/s)",
               flush=True)
         export(net, Path(args.out))
         torch.save(net.state_dict(), Path(args.out).with_suffix(".pt"))

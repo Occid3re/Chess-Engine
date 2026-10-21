@@ -20,7 +20,9 @@ import java.nio.file.Path;
  * <p>File format (little endian): magic "ALNN", int version, int hidden, int qa, int qb, int scale,
  * [version >= 2: int buckets], [version 3: int kingBuckets, int mirror (0/1), byte[64] kingBucketMap], then
  * short[768*K*H] l1 weights (feature-major), short[H] l1 bias, and per output bucket short[2H] l2 weights,
- * then one int l2 bias per bucket. Version 1 has a single output bucket.</p>
+ * then one int l2 bias per bucket. Version 1 has a single output bucket. Version 4 (otherwise as 3) appends a
+ * second output laid out like the first, the network's uncertainty (its expected error against a search, as a
+ * win probability; scripts/nnue/train_gpu.py --unc-weight).</p>
  *
  * <p>Output buckets: the output layer is chosen by the number of pieces on the board, so endgames get
  * their own weights ({@link #bucketFor}).</p>
@@ -47,12 +49,15 @@ public final class Network {
     /** Row {@code bucket * 2 + half} (half 0 = side to move, 1 = other side), each of length hidden. */
     final int[][] l2Weights;
     final int[] l2Bias;
+    /** The uncertainty output (version 4), laid out like l2Weights / l2Bias; null without it. */
+    final int[][] uncWeights;
+    final int[] uncBias;
     /** int16 copies of the first layer for the Vector API back end, built on first use. */
     private volatile short[][] l1Short;
     private volatile short[] l1BiasShort;
 
     private Network(int hidden, int qa, int qb, int scale, int buckets, int kingBuckets, boolean mirror,
-                    byte[] kingBucketMap, int[] w1, int[] b1, int[] w2, int[] b2) {
+                    byte[] kingBucketMap, int[] w1, int[] b1, int[] w2, int[] b2, int[] w3, int[] b3) {
         this.hidden = hidden;
         this.qa = qa;
         this.qb = qb;
@@ -68,6 +73,19 @@ public final class Network {
         this.l2Weights = new int[2 * buckets][];
         for (int r = 0; r < 2 * buckets; r++) l2Weights[r] = java.util.Arrays.copyOfRange(w2, r * hidden, (r + 1) * hidden);
         this.l2Bias = b2;
+        if (w3 != null) {
+            this.uncWeights = new int[2 * buckets][];
+            for (int r = 0; r < 2 * buckets; r++) uncWeights[r] = java.util.Arrays.copyOfRange(w3, r * hidden, (r + 1) * hidden);
+            this.uncBias = b3;
+        } else {
+            this.uncWeights = null;
+            this.uncBias = null;
+        }
+    }
+
+    /** Whether the network has the uncertainty output (version 4). */
+    public boolean hasUncertainty() {
+        return uncWeights != null;
     }
 
     short[][] l1WeightsShort() {
@@ -137,7 +155,7 @@ public final class Network {
                 throw new IOException("Not an Alieknek network file");
             }
             int version = le(in.readInt());
-            if (version < 1 || version > 3) throw new IOException("Unsupported network version " + version);
+            if (version < 1 || version > 4) throw new IOException("Unsupported network version " + version);
             int hidden = le(in.readInt());
             int qa = le(in.readInt());
             int qb = le(in.readInt());
@@ -163,6 +181,12 @@ public final class Network {
             int[] w2 = readShorts(in, 2 * hidden * buckets);
             int[] b2 = new int[buckets];
             for (int b = 0; b < buckets; b++) b2[b] = le(in.readInt());
+            int[] w3 = null, b3 = null;
+            if (version >= 4) {
+                w3 = readShorts(in, 2 * hidden * buckets);
+                b3 = new int[buckets];
+                for (int b = 0; b < buckets; b++) b3[b] = le(in.readInt());
+            }
             // int16 accumulators (Vector API back end) need bias + 32 weights to fit; the trainer clips to +-505
             int maxW = 0, maxB = 0;
             for (int w : w1) maxW = Math.max(maxW, Math.abs(w));
@@ -170,7 +194,7 @@ public final class Network {
             if (32L * maxW + maxB > Short.MAX_VALUE) {
                 throw new IOException("First-layer weights too large for int16 accumulators: max |w| " + maxW);
             }
-            return new Network(hidden, qa, qb, scale, buckets, kingBuckets, mirror, map, w1, b1, w2, b2);
+            return new Network(hidden, qa, qb, scale, buckets, kingBuckets, mirror, map, w1, b1, w2, b2, w3, b3);
         }
     }
 
@@ -254,6 +278,18 @@ public final class Network {
         long sum = (long) screluDot(us, l2Weights[2 * bucket]) + screluDot(them, l2Weights[2 * bucket + 1]);
         long out = sum * 256 / qa + l2Bias[bucket];
         return (int) (out * scale / ((long) qa * qb));
+    }
+
+    /** The uncertainty output in thousandths of a win probability (0 or more); needs {@link #hasUncertainty}. */
+    public int uncertainty(int[] us, int[] them, int bucket) {
+        long sum = (long) screluDot(us, uncWeights[2 * bucket]) + screluDot(them, uncWeights[2 * bucket + 1]);
+        return uncertaintyOf(sum, bucket);
+    }
+
+    /** The uncertainty output from the activations' dot products (sum of both halves, each / 256). */
+    int uncertaintyOf(long sum, int bucket) {
+        long out = sum * 256 / qa + uncBias[bucket];
+        return (int) Math.max(0, out * 1000 / ((long) qa * qb));
     }
 
     /**

@@ -2,6 +2,7 @@
 """Checks that the engine evaluates an exported network like the trainer: float model (train_gpu.py, .pt) vs the
 Java engine's quantised evaluation ("eval" command with -Dcore.nnueFile) on positions from packed data.
 Differences of a few centipawns are quantisation; anything larger means the two disagree about features.
+A version 4 network's uncertainty output is compared too (the engine's "nnue uncertainty" line).
 
 Usage: python scripts/nnue/parity.py --net E:/Chess-Data/nets/kb256.bin --data E:/Chess-Data/packed/sample.bin \\
            --classes <compiled core classes> [--count 200]
@@ -56,17 +57,19 @@ def main():
     args = ap.parse_args()
 
     header = Path(args.net).read_bytes()[:104]
-    if int.from_bytes(header[4:8], "little") >= 3:  # the layout the file was trained with
+    version = int.from_bytes(header[4:8], "little")
+    if version >= 3:  # the layout the file was trained with
         kb, mirror = int.from_bytes(header[28:32], "little"), int.from_bytes(header[32:36], "little")
         tg.configure((list(header[36:100]), bool(mirror), kb > 1))
     data = np.fromfile(args.data, dtype=np.uint8).reshape(-1, tg.RECORD)
     sample = data[np.random.default_rng(3).choice(len(data), size=min(args.count, len(data)), replace=False)]
-    net = tg.Net(args.hidden, args.buckets)
+    net = tg.Net(args.hidden, args.buckets, unc=version >= 4)
     net.load_state_dict(torch.load(Path(args.net).with_suffix(".pt"), map_location="cpu"))
     net.eval()
     kb = torch.tensor(tg.KING_BUCKETS)
     with torch.no_grad():
-        floats = (net(tg.Batch(sample, torch.device("cpu"), kb)) * tg.SCALE).numpy()
+        out, unc = net.both(tg.Batch(sample, torch.device("cpu"), kb))
+        floats = (out * tg.SCALE).numpy()
     fens = [fen_of(r) for r in sample]
     script = "".join(f"position fen {f}\neval\n" for f in fens) + "quit\n"
     out = subprocess.run(["java", "--add-modules", "jdk.incubator.vector", f"-Dcore.nnueFile={args.net}",
@@ -82,6 +85,16 @@ def main():
     print(f"worst: {fens[worst]} java {java[worst]} float {floats[worst]:.1f}")
     if diff.mean() > 5 or diff.max() > 40:  # quantisation: ~2-4 cp mean, up to ~20 on large evals
         raise SystemExit("PARITY FAILED")
+    if unc is not None:
+        java_u = [float(line.split()[2]) for line in out.splitlines() if line.startswith("nnue uncertainty")]
+        if len(java_u) != len(fens):
+            raise SystemExit(f"engine answered {len(java_u)} of {len(fens)} uncertainties")
+        # the engine reports max(0, u) in thousandths
+        du = np.abs(np.array(java_u) - np.maximum(unc.numpy(), 0)) * 1000
+        print(f"uncertainty: mean |java - float| {du.mean():.2f}, max {du.max():.1f} thousandths "
+              f"(range {unc.min().item():.3f}..{unc.max().item():.3f})")
+        if du.mean() > 6 or du.max() > 35:  # quantisation as for the evaluation (5 cp / 400 = 12 thousandths)
+            raise SystemExit("UNCERTAINTY PARITY FAILED")
     print("parity ok")
 
 
