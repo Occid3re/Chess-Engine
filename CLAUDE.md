@@ -71,6 +71,14 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
   (`gpu_generations.py --warm-start --window 400000000`: continue from best.pt, 4 epochs at lr 0.0005, mix of the
   newest 400M+ positions): +22.4 +-9.2 vs generation 7 (477-340-1311, 2128 games, H1) after 1 h 45 min of training
   and testing - continue training, do not restart.
+  Two more warm starts scored +5/+6 over 4000 games without a verdict at [0, 5]; the server test now runs [0, 3]
+  with up to 10000 games (`--sprt-elo1 3 --sprt-rounds 5000`). Generation 9 (4.1.7): +9.3 +-4.4 vs generation 8
+  (1616-1396-5254, 8266 games, H1).
+- Time management on Lichess (exported clocks of 148 games, 2026-10-21): the bot spends most per move in the
+  opening (3+2: 6.3 s for moves 1-10), its lowest clock is a median 5 % of the initial time in blitz (3 % rapid,
+  10 % bullet), below 10 s in 56 of 79 blitz games, then it lives on the increment; flag losses ~0. The allocation
+  is tunable since 4.1.7 (`Tune.tmMtg/tmMtgMin/tmInc`, defaults 40/16/80 = old behaviour) and `tmUnc` stretches
+  the budget by the root's uncertainty (factor 1 + tmUnc/100 * (u/0.04 - 1), 0.6..1.6, off by default).
 - Search parameters (core/Tune.java) from SPSA, 1500 iterations x 8 games at 6+0.06 (4.0.9): +28.3 vs the old
   defaults (SPRT H1, 1058 games at 10+0.1). Biggest moves: nmpBaseMargin 150->100, nmpDepthMargin 15->24,
   aspDelta 15->10, rfpMargin 75->68, qsFutility 160->180. The pruning is more aggressive: CoreEngineTest's mate
@@ -163,6 +171,11 @@ etsest-unc.bin`, retrained on every promotion).
   (`OUTBOUND_TCS`, default bullet 2+1 / blitz 3+2 / rapid 10+5, weight 1 / (1 + games of the last 24 h));
   rating window +-200; online bots cached 5 min, ratings 30 min (a challenge usually costs one request, it used
   to cost four every 10 min). 429 still parks the loop for Retry-After.
+  4.1.7: a 429 on challenging one bot had paused the loop 10 min and then picked the same bot again (17x in 12 h).
+  Bots that refuse (decline, no answer in 45 s, 429) are blocked 1 day / 7 days / 30 days (`outbound-blocks.json`
+  in the data folder, cleared by a game); Lichess' daily bot-game limit only waits until the named time. Without a
+  fitting bot the other time controls and a doubled rating window are tried before a 2-min pause. One greeting and
+  one goodbye per game in the player chat (alien style, no analysis; `BOT_CHAT=0` off).
   Rating-aware contempt exists (`BOT_CONTEMPT_PER_100`) but is OFF until a match shows it helps.
 - `/alieknek/nnue.json` + `/alieknek/nnue.bin` on the public watch port: the engine's network for the app's
   network view (read from the jar once, ETag-revalidated); costs nothing during play.
