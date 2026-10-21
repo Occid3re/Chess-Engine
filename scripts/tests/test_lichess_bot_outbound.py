@@ -197,15 +197,19 @@ def test_chess960_is_its_own_outbound_perf(bot):
     assert w[1] > w[0]  # no Chess960 game yet: it comes up more often
 
 
-def test_chess960_search_starts_near_the_blitz_rating_while_provisional(bot, monkeypatch):
+def test_chess960_opponents_by_blitz_strength_among_bots_that_play_it(bot, monkeypatch):
     class Users:
         def get_public_data(self, name):
-            return {"id": name, "perfs": {"blitz": {"rating": 2500}, "chess960": {"rating": 1500, "prov": True}}}
+            return {"id": name, "perfs": {"blitz": {"rating": 2750}, "chess960": {"rating": 1500, "prov": True}}}
+
+        def get_by_id(self, *ids):
+            return [{"id": i, "perfs": {"blitz": {"rating": 2700}}} for i in ids]  # never played Chess960
 
     class Bots:
         def get_online_bots(self):
-            return [{"id": "weak", "perfs": {"chess960": {"rating": 1550}}},
-                    {"id": "strong", "perfs": {"chess960": {"rating": 2450}}}]
+            return [{"id": "weak", "perfs": {"blitz": {"rating": 1900}, "chess960": {"rating": 1700}}},
+                    {"id": "strong", "perfs": {"blitz": {"rating": 2650}, "chess960": {"rating": 1900, "prov": True}}},
+                    {"id": "standardonly", "perfs": {"blitz": {"rating": 2740}}}]
 
     class Client:
         users = Users()
@@ -215,6 +219,16 @@ def test_chess960_search_starts_near_the_blitz_rating_while_provisional(bot, mon
     monkeypatch.setattr(bot, "svc", None)
     cache = bot.LichessCache(Client(), "alieknek")
     assert bot.find_similar_bots(cache, "alieknek", "chess960") == ["strong"]
+    assert bot.find_similar_bots(cache, "alieknek", "blitz") == ["standardonly"]
+
+
+def test_a_decline_is_one_strike_and_nobot_blocks_for_a_month(bot, tmp_path):
+    blocks = bot.OutboundBlocks(tmp_path / "outbound-blocks.json")
+    started = time.time() - 1
+    assert not blocks.struck_since("rudebot", started)
+    assert blocks.strike("rudebot", "declined: generic") == 24 * 3600
+    assert blocks.struck_since("RudeBot", started)  # the loop then skips its "no answer" strike
+    assert blocks.strike("maia", "declined: nobot", at_least=bot.BLOCK_STEPS[-1]) == 30 * 86400
 
 
 def test_chess960_challenge_names_the_variant(bot):

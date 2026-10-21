@@ -1079,18 +1079,23 @@ class OutboundBlocks:
         except OSError as e:
             print(f"[outbound] could not save the block list: {e}")
 
-    def strike(self, bot_id: str, reason: str) -> int:
-        """Counts a refusal; returns how long the bot is left alone (seconds)."""
+    def strike(self, bot_id: str, reason: str, at_least: int = 0) -> int:
+        """Counts a refusal; returns how long the bot is left alone (seconds, at least at_least)."""
         bot_id = bot_id.lower()
         with self.lock:
             entry = self.data.get(bot_id, {"strikes": 0})
             entry["strikes"] = entry.get("strikes", 0) + 1
-            seconds = BLOCK_STEPS[min(entry["strikes"], len(BLOCK_STEPS)) - 1]
-            entry.update({"until": time.time() + seconds, "reason": reason})
+            seconds = max(at_least, BLOCK_STEPS[min(entry["strikes"], len(BLOCK_STEPS)) - 1])
+            entry.update({"until": time.time() + seconds, "reason": reason, "at": time.time()})
             self.data[bot_id] = entry
             self._save()
         print(f"[outbound] {bot_id} not asked again for {seconds // 3600} h (refusal {entry['strikes']}: {reason})")
         return seconds
+
+    def struck_since(self, bot_id: str, since: float) -> bool:
+        """Whether the bot was struck at or after since (e.g. it declined the challenge we are waiting on)."""
+        with self.lock:
+            return self.data.get((bot_id or "").lower(), {}).get("at", 0) >= since
 
     def clear(self, bot_id: str) -> None:
         """A game was played against this bot: forget its refusals."""
@@ -1203,18 +1208,19 @@ def find_similar_bots(cache: LichessCache,
     exclude.add(my_username.lower())
     exclude |= {u.lower() for u in OUTBOUND_BLOCKLIST}  # <- permanent exclusions
     perf_key = PERF_FOR_TC.get(tc_type, "blitz")
+    # Chess960: strength compared by the blitz ratings (960 ratings of bots are few and often provisional);
+    # an opponent must have played Chess960 (a chess960 perf), i.e. it takes such games at all
+    strength_key = "blitz" if perf_key == "chess960" else perf_key
+
+    def plays_variant(user: dict) -> bool:
+        return perf_key != "chess960" or bool((user.get("perfs") or {}).get("chess960"))
 
     # (1) My rating in this time control (provisional counts too: a new one has to get played)
     try:
-        my_rating, _ = _get_perf_rating(cache.me(), perf_key)
+        my_rating, _ = _get_perf_rating(cache.me(), strength_key)
     except Exception as e:
         print(f"[outbound] my rating lookup failed: {e}")
         return []
-    if perf_key == "chess960":
-        # a new (provisional) Chess960 rating says little yet: look for opponents around the blitz strength
-        rating_960, prov = _get_perf_rating(cache.me(), "chess960")
-        if not rating_960 or prov:
-            my_rating = _get_perf_rating(cache.me(), "blitz")[0] or rating_960
     my_rating = my_rating or 1500
     print(f"[outbound] my {perf_key} rating: {my_rating}")
 
@@ -1232,7 +1238,10 @@ def find_similar_bots(cache: LichessCache,
         uid = b.get("id")
         if not uid or uid.lower() in exclude:
             continue
-        perf = (b.get("perfs") or {}).get(perf_key) or {}
+        if not plays_variant(b):
+            ids_needing_lookup.append(uid)  # the online list may leave out perfs: one lookup tells
+            continue
+        perf = (b.get("perfs") or {}).get(strength_key) or {}
         r = perf.get("rating")
         if r and not perf.get("prov", False):
             if abs(r - my_rating) <= delta:
@@ -1250,7 +1259,9 @@ def find_similar_bots(cache: LichessCache,
             print(f"[outbound] bulk get_by_id failed: {e}")
             users = {}
         for uid, u in users.items():
-            r, prov = _get_perf_rating(u, perf_key)
+            if not plays_variant(u):
+                continue
+            r, prov = _get_perf_rating(u, strength_key)
             if r and not prov and abs(r - my_rating) <= delta:
                 matches.append((uid, r))
 
@@ -1430,7 +1441,10 @@ def outbound_challenge_loop(stop_event: threading.Event,
             if sent:
                 _ob_event("challenged", opp, tc_text)
                 _ob("waiting", until=started + OUTBOUND_WAIT_ACCEPT_SEC, target=opp, tc=tc_text)
-                pause(OUTBOUND_WAIT_ACCEPT_SEC, until_game=True)
+                while time.time() < started + OUTBOUND_WAIT_ACCEPT_SEC and not stop_event.is_set():
+                    if active_counter.get() != 0 or BLOCKS.struck_since(opp, started):
+                        break  # a game started, or it declined (the decline event struck it already)
+                    time.sleep(1)
                 if active_counter.get() != 0:
                     _ob_event("accepted", opp, tc_text)
                     continue  # accepted (or another game started)
@@ -1440,8 +1454,9 @@ def outbound_challenge_loop(stop_event: threading.Event,
                         print(f"[outbound] {opp} did not answer; challenge cancelled")
                     except Exception as e:
                         print(f"[outbound] cancel {challenge_id} failed: {e}")
-                hours = BLOCKS.strike(opp, "no answer") // 3600
-                _ob_event("no-answer", opp, tc_text, f"blocked for {hours} h")
+                if not BLOCKS.struck_since(opp, started):  # a decline already counted as this challenge's refusal
+                    hours = BLOCKS.strike(opp, "no answer") // 3600
+                    _ob_event("no-answer", opp, tc_text, f"blocked for {hours} h")
             _ob("pause", until=started + OUTBOUND_RETRY_SEC)
             pause(max(0.0, OUTBOUND_RETRY_SEC - (time.time() - started)), until_game=True)
 
@@ -1569,7 +1584,9 @@ def run_bot():
                 dest = ((chal.get("destUser") or {}).get("id") or "").lower()
                 if challenger == me_id.lower() and dest:
                     reason = str(chal.get("declineReasonKey") or chal.get("declineReason") or "?")
-                    hours = BLOCKS.strike(dest, "declined: " + reason) // 3600
+                    # "nobot": it never plays bots - the longest block right away
+                    longest = BLOCK_STEPS[-1] if reason.lower() == "nobot" else 0
+                    hours = BLOCKS.strike(dest, "declined: " + reason, at_least=longest) // 3600
                     _ob_event("declined", dest, detail=f"{reason}; blocked for {hours} h")
 
             elif et == "gameStart":

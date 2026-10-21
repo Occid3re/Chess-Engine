@@ -204,6 +204,10 @@ etsest-unc.bin`, retrained on every promotion).
   uses the blitz rating), python-chess boards start from gameFull's initialFen with chess960=True. The archive
   keeps variant/perf/initialFen; opening experience and replies come from standard games only; ratings,
   rating history and per-perf game counts include chess960.
+  4.2.0: Chess960 opponents are chosen by blitz strength among bots that have a chess960 perf (4.1.9 compared
+  the blitz rating with their 960 ratings: "0 fit"); a decline is the challenge's only strike (4.1.8/4.1.9 added
+  a "no answer" strike 45 s later: one refusal blocked for 7 days) and ends the wait at once; "nobot" declines
+  block for 30 days right away.
   Rating-aware contempt exists (`BOT_CONTEMPT_PER_100`) but is OFF until a match shows it helps.
 - `/alieknek/nnue.json` + `/alieknek/nnue.bin` on the public watch port: the engine's network for the app's
   network view (read from the jar once, ETag-revalidated); costs nothing during play.
