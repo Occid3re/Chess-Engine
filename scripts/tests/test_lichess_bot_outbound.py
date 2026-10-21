@@ -86,3 +86,33 @@ def test_recent_games_by_speed(tmp_path, monkeypatch):
         "g4": {"endedAt": now - 30 * 3600_000, "speed": "rapid"},  # older than a day
     }, "opponents": {}, "experience": {}, "replies": {}, "ours": {}, "version": 0})
     assert svc.recent_games_by_speed(24) == {"blitz": 2, "bullet": 1}
+
+
+def test_chat_lines_are_short_friendly_and_never_analysis(bot):
+    for line in bot.ALIEN_GREETINGS + [l for v in bot.ALIEN_GOODBYES.values() for l in v]:
+        assert len(line) <= 140 and not any(w in line.lower() for w in ("blunder", "mistake", "eval", "+0."))
+    bye = bot.goodbye_line("win", 12_400_000)
+    assert bye.startswith(tuple(bot.ALIEN_GOODBYES["win"])) and "12 million positions" in bye
+    assert "million" not in bot.goodbye_line("loss", 50_000)  # small numbers are not worth a mention
+
+
+def test_chat_is_sent_in_the_background_and_can_be_switched_off(bot, monkeypatch):
+    sent = []
+
+    class Bots:
+        def post_message(self, game_id, text, spectator=False):
+            sent.append((game_id, text, spectator))
+
+    class Client:
+        bots = Bots()
+
+    bot.send_chat(Client(), "abcd1234", "hello")
+    for _ in range(50):
+        if sent:
+            break
+        time.sleep(0.02)
+    assert sent == [("abcd1234", "hello", False)]
+    monkeypatch.setattr(bot, "CHAT_ENABLED", False)
+    bot.send_chat(Client(), "abcd1234", "quiet")
+    time.sleep(0.1)
+    assert len(sent) == 1

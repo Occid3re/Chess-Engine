@@ -129,7 +129,10 @@ OUTBOUND_TCS_SPEC = os.environ.get("OUTBOUND_TCS") or \
 # Pacing (Lichess rate limits): one challenge at a time, OUTBOUND_AFTER_GAME_SEC after a game (incoming challenges
 # first), OUTBOUND_RETRY_SEC after a challenge nobody took (it is cancelled after OUTBOUND_WAIT_ACCEPT_SEC),
 # OUTBOUND_PERIOD_SEC when no bot fits. Online bots and ratings come from a cache (OUTBOUND_CACHE_SEC).
-OUTBOUND_PERIOD_SEC = int(os.environ.get("OUTBOUND_PERIOD_SEC", "300"))
+OUTBOUND_PERIOD_SEC = int(os.environ.get("OUTBOUND_PERIOD_SEC", "120"))
+# A 429 on challenging one bot: that bot is left alone this long, the loop pauses for Retry-After (else this long)
+OUTBOUND_429_TARGET_SEC = int(os.environ.get("OUTBOUND_429_TARGET_SEC", "21600"))
+OUTBOUND_429_PAUSE_SEC = int(os.environ.get("OUTBOUND_429_PAUSE_SEC", "300"))
 OUTBOUND_AFTER_GAME_SEC = int(os.environ.get("OUTBOUND_AFTER_GAME_SEC", "20"))
 OUTBOUND_RETRY_SEC = int(os.environ.get("OUTBOUND_RETRY_SEC", "90"))
 OUTBOUND_WAIT_ACCEPT_SEC = int(os.environ.get("OUTBOUND_WAIT_ACCEPT_SEC", "45"))
@@ -667,6 +670,48 @@ def safe_make_move(client: berserk.Client, game_id: str, uci: str) -> bool:
     return False
 
 
+# ---------- Game chat: one greeting, one goodbye per game (alien style, no analysis) ----------
+CHAT_ENABLED = os.environ.get("BOT_CHAT", "1") == "1"
+ALIEN_GREETINGS = [
+    "👽 Greetings, Earthling. Alieknek has landed - may your clock never flag.",
+    "🛸 Transmission from orbit: Alieknek online. Let the pieces speak.",
+    "👽 Hello from a 3 MB brain that learned chess only by playing itself. No humans were harmed in training.",
+    "🛸 Fun fact from the mothership: there are more possible chess games than atoms in the observable universe.",
+    "👽 Greetings! My network splits the board into 8 king zones. Where will your king live today?",
+    "🛸 Alieknek here, trained on a living-room GPU and a server in Helsinki. Good luck, good game.",
+    "👽 Fun fact: the longest possible chess game is 5949 moves. Let's keep it a little shorter.",
+    "🛸 Earth chess - how charming. Warming up my neurons.",
+    "👽 Did you know? The word 'checkmate' comes from Persian 'shah mat': the king is helpless.",
+    "🛸 Signal received. Alieknek plays every move fresh - no opening book, just neurons.",
+]
+ALIEN_GOODBYES = {
+    "win": ["👽 gg! Beaming the point back to the mothership.", "🛸 gg - thanks for the game, Earthling."],
+    "draw": ["🛸 gg - the universe stays in balance.", "👽 gg - peace between the planets."],
+    "loss": ["👽 gg, well played! Recalibrating my neurons...", "🛸 gg - you won this one, Earthling. Respect."],
+}
+
+
+def send_chat(client: berserk.Client, game_id: str, text: str) -> None:
+    """Posts to the player chat in the background: a chat line must never cost clock time."""
+    if not CHAT_ENABLED:
+        return
+
+    def _send():
+        try:
+            client.bots.post_message(game_id, text)
+        except Exception as e:
+            print(f"[chat] not sent: {e}")
+    threading.Thread(target=_send, daemon=True).start()
+
+
+def goodbye_line(result: str, positions: int) -> str:
+    """The closing line: a goodbye plus how much the bot looked at (no evaluation, no analysis)."""
+    line = random.choice(ALIEN_GOODBYES.get(result, ALIEN_GOODBYES["draw"]))
+    if positions >= 1_000_000:
+        line += f" ({positions / 1_000_000:.0f} million positions explored this game.)"
+    return line
+
+
 def play_game(client: berserk.Client,
               engine: chess.engine.SimpleEngine,
               game_id: str,
@@ -693,6 +738,8 @@ def play_game(client: berserk.Client,
     received = time.monotonic()
     # Opponent id and both ratings (from gameFull): opening experience and contempt per move.
     who = {"opponent": None, "me": None, "them": None}
+    # For the goodbye line: positions searched, the last status/winner seen, whether we greeted
+    chat = {"nodes": 0, "status": None, "winner": None, "greeted": False}
 
     def _move_options(current_board: chess.Board) -> dict:
         options = {}
@@ -718,6 +765,7 @@ def play_game(client: berserk.Client,
             return result, False
         if svc is not None:
             svc.engine_info(result.info)
+        chat["nodes"] += int((result.info or {}).get("nodes") or 0)
         sent = safe_make_move(client, game_id, result.move.uci())
         if not sent:
             print("[warn] Move send failed, retrying once")
@@ -814,6 +862,9 @@ def play_game(client: berserk.Client,
                 if svc is not None:
                     svc.game_started(game_id, event, me_id)
                 state = event.get("state", {})
+                if not chat["greeted"] and len((state.get("moves") or "").split()) < 2:
+                    chat["greeted"] = True
+                    send_chat(client, game_id, random.choice(ALIEN_GREETINGS))
                 clock = event.get("clock") or {}
                 if "initial" in clock:
                     clock_initial = clock.get("initial")
@@ -862,6 +913,7 @@ def play_game(client: berserk.Client,
 
             elif t == "gameState":
                 state = event
+                chat["status"], chat["winner"] = state.get("status"), state.get("winner")
                 moves = state.get("moves", "")
                 board = chess.Board()
                 if moves:
@@ -935,6 +987,12 @@ def play_game(client: berserk.Client,
                 break
     finally:
         _cancel_abort_timer()
+        # The goodbye, once the game is over (the stream ends after the final state, with or without gameFinish)
+        if chat["greeted"] and chat["status"] not in (None, "created", "started", "aborted", "noStart") \
+                and my_color_is_white is not None:
+            winner = chat["winner"]
+            result = "draw" if not winner else ("win" if (winner == "white") == my_color_is_white else "loss")
+            send_chat(client, game_id, goodbye_line(result, chat["nodes"]))
         if svc is not None:
             svc.game_finished(game_id)
 
@@ -1193,7 +1251,9 @@ def outbound_challenge_loop(stop_event: threading.Event,
                 return
             time.sleep(1)
 
+    last_target = None
     while not stop_event.is_set():
+        last_target = None
         try:
             now = time.time()
             if now < penalty_until:
@@ -1215,16 +1275,26 @@ def outbound_challenge_loop(stop_event: threading.Event,
                 pause(OUTBOUND_AFTER_GAME_SEC, until_game=True)
                 continue
 
-            perf, clock_limit, increment = pick_outbound_tc()
-            print(f"[outbound] looking for a {perf} opponent ({clock_limit}+{increment})")
-            targets = find_similar_bots(cache, my_username=my_username, tc_type=perf, delta=RATING_DELTA,
-                                        max_candidates=1, exclude=list(recently_challenged.keys()))
+            # The preferred time control first, then the others; the rating window doubles if nobody fits
+            first = pick_outbound_tc()
+            order = [first] + [t for t in OUTBOUND_TCS if t != first]
+            targets, opp = [], None
+            for perf, clock_limit, increment in order:
+                for delta in (RATING_DELTA, 2 * RATING_DELTA):
+                    print(f"[outbound] looking for a {perf} opponent ({clock_limit}+{increment}, +-{delta})")
+                    targets = find_similar_bots(cache, my_username=my_username, tc_type=perf, delta=delta,
+                                                max_candidates=1, exclude=list(recently_challenged.keys()))
+                    if targets:
+                        break
+                if targets:
+                    break
             if not targets:
-                print(f"[outbound] no {perf} target; next look in {OUTBOUND_PERIOD_SEC}s")
+                print(f"[outbound] no target in any time control; next look in {OUTBOUND_PERIOD_SEC}s")
                 pause(OUTBOUND_PERIOD_SEC, until_game=True)
                 continue
 
             opp = targets[0]
+            last_target = opp
             sent, leave_alone, challenge_id = challenge_user(client, opponent=opp, rated=OUTBOUND_RATED,
                                                             clock_limit=clock_limit, clock_increment=increment,
                                                             color="random")
@@ -1247,8 +1317,12 @@ def outbound_challenge_loop(stop_event: threading.Event,
         except (berserk.exceptions.ResponseError, berserk.exceptions.ApiError) as e:
             status = getattr(getattr(e, "response", None), "status_code", None)
             if status == 429:
-                delay = _retry_after_from_exc(e, default_sec=600)
-                print(f"[warn] outbound 429. backing off {delay}s.")
+                # Usually about one bot (it takes no more challenges now): leave it alone for hours and pause
+                # as long as Lichess asks (Retry-After), else a few minutes - never pick the same bot right away.
+                delay = _retry_after_from_exc(e, default_sec=OUTBOUND_429_PAUSE_SEC)
+                if last_target:
+                    recently_challenged[last_target] = time.time() + OUTBOUND_429_TARGET_SEC - OUTBOUND_COOLDOWN_SEC
+                print(f"[warn] outbound 429 (target {last_target}): {str(e)[:160]}; pausing {delay}s")
                 _GLOBAL_RL.bump(delay)
                 penalty_until = time.time() + delay
             else:
