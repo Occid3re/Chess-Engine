@@ -222,6 +222,10 @@ etsest-unc.bin`, retrained on every promotion).
   parity -> SPRT [0,5] vs `E:\Chess-Data
 etsest.bin` (4 cores) -> on H1 promote and restart self-play with
   it. Releases to the server stay manual. Stop: kill the python process and the DataGen java it started.
+  Since 2026-10-21 16:01 the loop (`--engine-ref dc6b01b3`) and the EPYC self-play run 4.1.9 code with
+  `E:\Chess-Data\selfplay\starts_mix_960.txt`: the 443k Lichess/endgame starts plus 125k Chess960 setups (22 %
+  of the lines; ~9 % of all games at gen.startFraction 0.4), each setup repeated in proportion to the v4
+  uncertainty output of gen9 (0.006..0.077: the least understood setups come up 12x as often as the best known).
 - `scripts/cloud/burst.py`: self-play on rented Linux servers (root ssh with the Hetzner key): `setup <ip>` copies
   the engine sources of a git ref + the best net, installs Temurin 27, the 3-4-5 Syzygy tables (sesse mirror, one
   file at a time - parallel downloads get 403) and the JNI library, starts DataGen on all threads; `sync` appends
