@@ -229,3 +229,37 @@ def test_expected_gain_prefers_opponents_we_beat_more_than_expected(svc):
     assert svc.expected_gain("nemesis", 2500, 2500) < 0
     assert svc.expected_gain("unknown", 2500, 2500) == 0.0
     assert svc.expected_gain("somebot", None, 2500) == 0.0
+
+
+START_960 = "5rkr/pppppppp/8/8/8/8/PPPPPPPP/5RKR w HFhf - 0 1"
+
+
+def test_chess960_games_are_archived_counted_but_teach_no_openings(svc, tmp_path):
+    me = {"id": "alieknek", "name": "Alieknek", "rating": 2500}
+    opp = {"id": "somebot", "name": "Somebot", "rating": 2400, "title": "BOT"}
+    svc.game_started("game0960", {"white": me, "black": opp, "rated": True, "speed": "blitz",
+                                  "variant": {"key": "chess960"}, "initialFen": START_960,
+                                  "clock": {"initial": 180000, "increment": 2000}}, "alieknek")
+    board = chess.Board(START_960, chess960=True)
+    for uci in ["g1f1", "g8f8", "e2e4"]:  # both castle queen side (king takes own rook)
+        board.push_uci(uci)
+        svc.game_update("game0960", board, {"status": "started"})
+    assert svc._status["game"]["fen"].startswith("2kr3r/") and svc._status["game"]["variant"] == "chess960"
+    svc.game_update("game0960", board, {"status": "resign", "winner": "white"})
+    svc.game_finished("game0960")
+    record = json.loads((tmp_path / "games.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert record["variant"] == "chess960" and record["perf"] == "chess960"
+    assert record["initialFen"] == START_960 and record["moves"] == ["g1f1", "g8f8", "e2e4"]
+    [row] = svc.opponents()
+    assert row["games"] == 1 and row["wins"] == 1
+    assert svc._archive["experience"] == {}  # Chess960 positions are no opening knowledge for standard chess
+    assert svc.recent_games_by_speed(1) == {"chess960": 1}
+
+
+def test_chess960_replay_starts_from_its_position(svc, monkeypatch):
+    monkeypatch.setattr(svc, "_moves", {"abcd1234": "O-O-O O-O-O e4"})
+    monkeypatch.setattr(svc, "_starts", {"abcd1234": START_960})
+    monkeypatch.setattr(svc, "_lichess", {"ratings": {}, "games": [], "updated": None})
+    replay = svc.replay("abcd1234")
+    assert replay["ucis"] == ["g1f1", "g8f8", "e2e4"]
+    assert replay["fens"][0].startswith("5rkr/") and replay["fens"][2].startswith("2kr3r/")

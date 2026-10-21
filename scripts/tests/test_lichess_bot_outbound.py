@@ -186,3 +186,47 @@ def test_service_reports_the_outbound_loop_and_unblocks(tmp_path, monkeypatch):
     for i in range(20):
         svc.outbound_event("no-target")
     assert len(svc._outbound_view()["history"]) == 15
+
+
+def test_chess960_is_its_own_outbound_perf(bot):
+    tcs = bot.parse_outbound_tcs("blitz:180+2,chess960:180+2")
+    assert tcs[1] == ("chess960", 180, 2)
+    assert bot.variant_for_perf("chess960") == "chess960" and bot.variant_for_perf("blitz") == "standard"
+    assert "chess960" in bot.ACCEPT_VARIANTS and "standard" in bot.ACCEPT_VARIANTS
+    w = bot.outbound_tc_weights({"blitz": 10}, tcs)
+    assert w[1] > w[0]  # no Chess960 game yet: it comes up more often
+
+
+def test_chess960_search_starts_near_the_blitz_rating_while_provisional(bot, monkeypatch):
+    class Users:
+        def get_public_data(self, name):
+            return {"id": name, "perfs": {"blitz": {"rating": 2500}, "chess960": {"rating": 1500, "prov": True}}}
+
+    class Bots:
+        def get_online_bots(self):
+            return [{"id": "weak", "perfs": {"chess960": {"rating": 1550}}},
+                    {"id": "strong", "perfs": {"chess960": {"rating": 2450}}}]
+
+    class Client:
+        users = Users()
+        bots = Bots()
+
+    monkeypatch.setattr(bot, "API_REQUEST_DELAY", 0)
+    monkeypatch.setattr(bot, "svc", None)
+    cache = bot.LichessCache(Client(), "alieknek")
+    assert bot.find_similar_bots(cache, "alieknek", "chess960") == ["strong"]
+
+
+def test_chess960_challenge_names_the_variant(bot):
+    seen = {}
+
+    class Challenges:
+        def create(self, opponent, **kwargs):
+            seen.update(kwargs)
+            return {"id": "XyZ960"}
+
+    class Client:
+        challenges = Challenges()
+
+    sent, _, cid = bot.challenge_user(Client(), "somebot", True, 180, 2, variant="chess960")
+    assert sent and cid == "XyZ960" and seen["variant"] == "chess960"

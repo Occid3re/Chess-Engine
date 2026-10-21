@@ -123,7 +123,8 @@ etsest-unc.bin`, retrained on every promotion).
   The search, the bot's `info string unc` and DataGen's focus use it when the network has it (else the head).
   Calling the 16-neuron head at every evaluation made the search 3x slower: per-node uses need the v4 output.
   Risk steering (`Tune.riskCp`, v4 networks only): evaluation -= riskCp * u / 0.1 cp for the root side. Against
-  SF19 at 1/8 time after ~240 games each: riskCp 30 21-107-112 (-130 +-34) vs 0 18-126-98 (-167 +-34).
+  SF19 at 1/8 time, 600 games each (gen9 + frozen v4 output): riskCp 30 44-289-267 (-150.7 +-21.4) vs 0
+  43-306-251 (-163.4 +-20.5): +13 and more draws, within noise (difference +-30). Off by default.
 - King buckets (kb8), second try: 114M positions, 4 epochs, row-wise Adam: -33 Elo vs 4.1.0 (78-109-139, 326 games)
   although its held-out loss was lower. `-Dcore.verifyNnue=true` (checks every 64th evaluation in the real search
   against a rebuild; `bench` reports the count) verified 30167 evaluations exact: the engine side is correct, the net
@@ -138,6 +139,13 @@ etsest-unc.bin`, retrained on every promotion).
   996 games, ~0 Elo); pawn history (bench +27 % nodes, not played).
 - Tried, no gain: pawn correction history (eval += learnt error per pawn structure): 81-83-294 vs 4.0.9 at
   10+0.1 (458 games, ~0 Elo); kept as refs/backup/local/exp-corrhist.
+- Chess960 (4.1.9): castling is encoded as the king taking its own rook (from = king, to = rook square, flag
+  KING_CASTLE/QUEEN_CASTLE; king lands on g/c, rook on f/d), castling masks/paths/rook squares per position from
+  the FEN (X-FEN KQkq = outermost rook, Shredder HAha = rook files; `Position.chess960` writes Shredder),
+  `UCI_Chess960` switches the notation (both are read). Only legal castling moves are generated and the history
+  tables key castling by the king's destination: standard chess searches exactly as before (bench unchanged).
+  Perft equals a reference engine on all 960 starts (depth 3), stripped back ranks and positions with castling
+  rights in play (depth 4); `CoreEngineTest` / `AccumulatorsTest` keep 960 cases.
 - Self-play data: `core.tools.DataGen` (`-Dgen.starts`, `-Dgen.syzygy`, `-Dgen.winScore/winPlies/drawPly/drawPlies`)
 - Results (10+0.1, 1 thread): 40-0 vs 4.0.0, 40-0 vs 3.6.9, 52-6-2 vs Stockfish UCI_Elo 2600; 4 threads vs 1: +168 Elo
 - Gap to Stockfish 19 (2026-10-18, 4.0.9, 1 thread, 64 MB, `E:\ChessEngines\harnesss_sf19.sh`): equal time 10+0.1
@@ -191,6 +199,11 @@ etsest-unc.bin`, retrained on every promotion).
   one goodbye per game in the player chat (alien style, no analysis; `BOT_CHAT=0` off).
   4.1.8: the control status carries `outbound` (current step with deadline, last challenge, the last 15 events,
   active blocks) for the app's "Gegnersuche" card; the control POST takes `unblock` (bot id, idempotent).
+  Chess960 (4.1.9): `BOT_VARIANTS` (default standard,chess960; Chess960 only when the engine offers
+  UCI_Chess960), outbound `chess960:180+2` (its own Lichess perf; while that rating is provisional the search
+  uses the blitz rating), python-chess boards start from gameFull's initialFen with chess960=True. The archive
+  keeps variant/perf/initialFen; opening experience and replies come from standard games only; ratings,
+  rating history and per-perf game counts include chess960.
   Rating-aware contempt exists (`BOT_CONTEMPT_PER_100`) but is OFF until a match shows it helps.
 - `/alieknek/nnue.json` + `/alieknek/nnue.bin` on the public watch port: the engine's network for the app's
   network view (read from the jar once, ETag-revalidated); costs nothing during play.

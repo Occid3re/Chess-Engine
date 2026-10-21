@@ -46,6 +46,7 @@ _history = {}  # perf -> [[epochMs, rating], ...]; kept in DATA_DIR/rating-histo
 HISTORY_DAYS = 120
 HISTORY_MAX_POINTS = 3000
 _moves = {}  # game id -> SAN moves of recently finished games (for the replay)
+_starts = {}  # game id -> start FEN of recently finished Chess960 games (standard games start normally)
 _refresh = threading.Event()
 # Every game of the bot: games.jsonl (recorded by the bot, with its own evaluations) and games-lichess.jsonl
 # (one export of the account's earlier games). Opponent statistics and the opening experience are built from it.
@@ -347,6 +348,8 @@ def game_started(game_id: str, full_event: dict, me_id: str) -> None:
             "myColor": "white" if white.get("id") == me_id else "black",
             "rated": full_event.get("rated"),
             "speed": full_event.get("speed"),
+            "variant": (full_event.get("variant") or {}).get("key") or "standard",
+            "initialFen": None if full_event.get("initialFen") in (None, "startpos") else full_event.get("initialFen"),
             "clock": {"initial": clock.get("initial"), "increment": clock.get("increment")},
             "moves": [],
             "evals": [],
@@ -411,6 +414,7 @@ def game_finished(game_id: str) -> None:
                 result = "aborted"
             entry = {"id": game_id, "opponent": opp.get("name"), "opponentRating": opp.get("rating"),
                      "color": my, "result": result, "status": g.get("status"),
+                     "variant": g.get("variant") or "standard", "perf": _perf_of(g),
                      "clock": g.get("clock"), "endedAt": int(time.time() * 1000)}
             _status["recent"] = ([entry] + [r for r in _status["recent"] if r.get("id") != game_id])[:RECENT_LIMIT]
             _save("recent.json", _status["recent"])
@@ -424,6 +428,11 @@ def game_finished(game_id: str) -> None:
 
 # ------------------------------------------------------------------ game archive and opponents
 
+def _perf_of(g: dict) -> Optional[str]:
+    """Lichess rates Chess960 in one pool for all speeds: its perf is the variant, else the speed."""
+    return "chess960" if g.get("variant") == "chess960" else g.get("speed")
+
+
 def _bot_record(g: dict, entry: dict) -> dict:
     """The archive line of a game the bot just played (called with _lock held)."""
     my = g.get("myColor")
@@ -431,6 +440,7 @@ def _bot_record(g: dict, entry: dict) -> dict:
     clock = g.get("clock") or {}
     seconds = (lambda v: v // 1000 if isinstance(v, int) and v >= 1000 else v)
     return {"id": g["id"], "src": "bot", "endedAt": entry["endedAt"], "speed": g.get("speed"),
+            "variant": g.get("variant") or "standard", "perf": _perf_of(g), "initialFen": g.get("initialFen"),
             "rated": g.get("rated"), "clock": {"initial": seconds(clock.get("initial")),
                                                "increment": seconds(clock.get("increment"))},
             "color": my, "rating": me.get("rating"),
@@ -491,7 +501,7 @@ def _index_games(records: list) -> None:
             if not g.get("id") or g["id"] in _archive["games"] or g.get("result") not in ("win", "draw", "loss"):
                 continue
             _archive["games"][g["id"]] = {"endedAt": g.get("endedAt"), "opponent": g["opponent"]["id"],
-                                          "speed": g.get("speed")}
+                                          "speed": g.get("speed"), "perf": g.get("perf") or g.get("speed")}
             o = g["opponent"]
             s = _archive["opponents"].setdefault(o["id"], {
                 "id": o["id"], "name": o.get("name") or o["id"], "title": o.get("title"), "rating": None,
@@ -509,6 +519,8 @@ def _index_games(records: list) -> None:
                 s["title"] = o.get("title") or s["title"]
                 s["rating"] = o.get("rating") or s["rating"]
             outcome = {"win": 0, "draw": 1, "loss": 2}[g["result"]]
+            if (g.get("variant") or "standard") != "standard":
+                continue  # opening experience and replies: standard chess only (Chess960 starts elsewhere)
             board = chess.Board()
             mine = chess.WHITE if g.get("color") == "white" else chess.BLACK
             replies = _archive["replies"].setdefault(o["id"], {})
@@ -537,14 +549,15 @@ def _index_games(records: list) -> None:
 
 
 def recent_games_by_speed(hours: float = 24) -> dict:
-    """{'bullet': n, 'blitz': n, ...}: the bot's finished games of the last hours per time control (the outbound
-    challenges play the least played one most often)."""
+    """{"bullet": n, "blitz": n, "chess960": n, ...}: the bot's finished games of the last hours per perf (Chess960
+    counts as "chess960"; the outbound challenges play the least played one most often)."""
     since = int(time.time() * 1000) - int(hours * 3600 * 1000)
     counts = {}
     with _archive_lock:
         for g in _archive["games"].values():
-            if (g.get("endedAt") or 0) >= since and g.get("speed"):
-                counts[g["speed"]] = counts.get(g["speed"], 0) + 1
+            perf = g.get("perf") or g.get("speed")
+            if (g.get("endedAt") or 0) >= since and perf:
+                counts[perf] = counts.get(perf, 0) + 1
     return counts
 
 
@@ -633,7 +646,8 @@ def backfill_archive() -> int:
         players = g.get("players", {})
         opp = players.get("black" if entry["color"] == "white" else "white", {})
         board, ucis = chess.Board(), []
-        for san in (g.get("moves") or "").split():
+        variant = g.get("variant") or "standard"
+        for san in ((g.get("moves") or "") if variant == "standard" else "").split():
             try:
                 move = board.parse_san(san)
             except ValueError:
@@ -641,6 +655,7 @@ def backfill_archive() -> int:
             ucis.append(move.uci())
             board.push(move)
         records.append({"id": entry["id"], "src": "lichess", "endedAt": entry["endedAt"], "speed": entry["perf"],
+                        "variant": variant, "perf": entry["perf"],
                         "rated": entry["rated"], "clock": entry["clock"], "color": entry["color"],
                         "rating": entry["rating"],
                         "opponent": {"id": ((opp.get("user") or {}).get("id") or entry["opponent"] or "?").lower(),
@@ -755,6 +770,7 @@ def _game_entry(g: dict) -> Optional[dict]:
         "status": status,
         "rated": g.get("rated"),
         "perf": g.get("perf") or g.get("speed"),
+        "variant": g.get("variant") or "standard",
         "clock": {"initial": clock.get("initial"), "increment": clock.get("increment")},
         "opening": (g.get("opening") or {}).get("name"),
         "plies": len((g.get("moves") or "").split()),
@@ -811,14 +827,14 @@ def refresh_lichess() -> None:
     name = _username()
     user = json.loads(_get(f"{LICHESS}/api/user/{name}"))
     ratings = {}
-    for perf in ("bullet", "blitz", "rapid", "classical"):
+    for perf in ("bullet", "blitz", "rapid", "classical", "chess960"):
         data = (user.get("perfs") or {}).get(perf)
         if data and data.get("games"):
             ratings[perf] = {"rating": data.get("rating"), "games": data.get("games"), "rd": data.get("rd"),
                              "prov": data.get("prov", False)}
     raw = _get(f"{LICHESS}/api/games/user/{name}?max={RECENT_LIMIT}&moves=true&opening=true",
                accept="application/x-ndjson").decode("utf-8")
-    games, moves = [], {}
+    games, moves, starts = [], {}, {}
     for line in raw.splitlines():
         if not line.strip():
             continue
@@ -827,10 +843,14 @@ def refresh_lichess() -> None:
         if entry:
             games.append(entry)
             moves[entry["id"]] = g.get("moves") or ""
+            if g.get("variant") == "chess960" and g.get("initialFen"):
+                starts[entry["id"]] = g["initialFen"]
     with _lock:
         _lichess.update({"ratings": ratings, "games": games, "updated": int(time.time() * 1000)})
         _moves.clear()
         _moves.update(moves)
+        _starts.clear()
+        _starts.update(starts)
     _record_history(ratings, games)
 
 
@@ -907,11 +927,12 @@ def replay(game_id: str) -> Optional[dict]:
         return None
     with _lock:
         sans = _moves.get(game_id)
+        start = _starts.get(game_id)
         entry = next((g for g in _lichess["games"] if g["id"] == game_id), None)
     if sans is None:
         return None
     import chess  # python-chess, installed for the bot
-    board = chess.Board()
+    board = chess.Board(start, chess960=True) if start else chess.Board()
     fens, ucis = [board.fen()], []
     for san in sans.split():
         try:

@@ -77,7 +77,9 @@ ESTIMATED_GAME_MOVES = int(os.environ.get("BOT_GAME_MOVES", "40"))
 ABORT_NO_MOVE_AFTER = float(os.environ.get("BOT_ABORT_NO_MOVE_AFTER", "45"))
 
 # Accept/decline policy
-ACCEPT_VARIANTS = {"standard"}  # e.g. {"standard","chess960"}
+# Variants played (incoming and outbound); Chess960 needs an engine with UCI_Chess960 (Alieknek 4.1.9 on)
+ACCEPT_VARIANTS = {v.strip() for v in os.environ.get("BOT_VARIANTS", "standard,chess960").split(",") if v.strip()}
+ENGINE_960 = {"ok": False}  # set when the engine starts: it offers UCI_Chess960
 ALLOW_RATED = True  # accept rated games?
 ALLOW_CASUAL = False  # accept casual games?
 ALLOW_CORRESPONDENCE = False  # accept correspondence TC?
@@ -125,8 +127,9 @@ OUTBOUND_INCREMENT = int(os.environ.get("OUTBOUND_INCREMENT", "2"))
 OUTBOUND_BLOCKLIST = {"implosio", "demolito_l1", "demolito_l2", "lunanetengine", "hummus-bot", "honzovy-sachy"}
 RATING_DELTA = int(os.environ.get("OUTBOUND_RATING_DELTA", "200"))  # ± rating window
 # Time controls of outbound challenges, "perf:seconds+increment" (the least played in the last 24 h most often)
+# perf:limit+increment; the perf "chess960" challenges to Chess960 (one Lichess rating for all speeds)
 OUTBOUND_TCS_SPEC = os.environ.get("OUTBOUND_TCS") or \
-    f"bullet:120+1,blitz:{OUTBOUND_CLOCK_LIMIT}+{OUTBOUND_INCREMENT},rapid:600+5"
+    f"bullet:120+1,blitz:{OUTBOUND_CLOCK_LIMIT}+{OUTBOUND_INCREMENT},rapid:600+5,chess960:180+2"
 # Pacing (Lichess rate limits): one challenge at a time, OUTBOUND_AFTER_GAME_SEC after a game (incoming challenges
 # first), OUTBOUND_RETRY_SEC after a challenge nobody took (it is cancelled after OUTBOUND_WAIT_ACCEPT_SEC),
 # OUTBOUND_PERIOD_SEC when no bot fits. Online bots and ratings come from a cache (OUTBOUND_CACHE_SEC).
@@ -453,6 +456,7 @@ def start_engine():
         fail(f"[-] Could not start engine: {e}")
 
     print("[+] Engine started successfully")
+    ENGINE_960["ok"] = "UCI_Chess960" in engine.options
     if svc is not None:
         svc.engine_started(engine.id.get("name"))
     return engine
@@ -722,6 +726,14 @@ def play_game(client: berserk.Client,
 
     my_color_is_white = None
     board = chess.Board()
+    # Chess960: Lichess names the start position in gameFull; python-chess then speaks UCI_Chess960 to the engine
+    start = {"fen": None, "chess960": False}
+
+    def _new_board() -> chess.Board:
+        if start["chess960"]:
+            return chess.Board(start["fen"], chess960=True)
+        return chess.Board(start["fen"]) if start["fen"] else chess.Board()
+
     clock_initial = None
     clock_increment = None
     tc_bucket = None
@@ -872,8 +884,12 @@ def play_game(client: berserk.Client,
                 if "increment" in clock:
                     clock_increment = clock.get("increment")
                 tc_bucket = _estimate_tc_bucket(clock_initial, clock_increment)
+                variant = (event.get("variant") or {}).get("key") or "standard"
+                initial_fen = event.get("initialFen")
+                start["chess960"] = variant == "chess960"
+                start["fen"] = initial_fen if initial_fen and initial_fen != "startpos" else None
                 moves = state.get("moves", "")
-                board = chess.Board()
+                board = _new_board()
                 if moves:
                     for mv in moves.split():
                         board.push_uci(mv)
@@ -916,7 +932,7 @@ def play_game(client: berserk.Client,
                 state = event
                 chat["status"], chat["winner"] = state.get("status"), state.get("winner")
                 moves = state.get("moves", "")
-                board = chess.Board()
+                board = _new_board()
                 if moves:
                     for mv in moves.split():
                         board.push_uci(mv)
@@ -1006,7 +1022,13 @@ PERF_FOR_TC = {
     "blitz": "blitz",
     "rapid": "rapid",
     "classical": "classical",
+    "chess960": "chess960",
 }
+
+
+def variant_for_perf(perf: str) -> str:
+    """Lichess variant of an outbound time control: the perf "chess960" is the variant, all others are standard."""
+    return "chess960" if perf == "chess960" else "standard"
 
 
 def _get_perf_rating(user_json: dict, perf_key: str):
@@ -1188,6 +1210,11 @@ def find_similar_bots(cache: LichessCache,
     except Exception as e:
         print(f"[outbound] my rating lookup failed: {e}")
         return []
+    if perf_key == "chess960":
+        # a new (provisional) Chess960 rating says little yet: look for opponents around the blitz strength
+        rating_960, prov = _get_perf_rating(cache.me(), "chess960")
+        if not rating_960 or prov:
+            my_rating = _get_perf_rating(cache.me(), "blitz")[0] or rating_960
     my_rating = my_rating or 1500
     print(f"[outbound] my {perf_key} rating: {my_rating}")
 
@@ -1243,14 +1270,15 @@ def challenge_user(client: berserk.Client,
                    rated: bool,
                    clock_limit: int,
                    clock_increment: int,
-                   color: str = "random") -> "tuple[bool, int, Optional[str]]":
+                   color: str = "random",
+                   variant: str = "standard") -> "tuple[bool, int, Optional[str]]":
     """Returns (sent, seconds to leave this opponent alone, challenge id). Lichess tells how long, e.g. when the
     opponent has reached its daily bot-game limit; otherwise the normal cooldown applies."""
     try:
         resp = client.challenges.create(
             opponent,
             rated=rated,
-            variant="standard",
+            variant=variant,
             clock_limit=clock_limit,
             clock_increment=clock_increment,
             color=color,
@@ -1258,7 +1286,7 @@ def challenge_user(client: berserk.Client,
         cid = None
         if isinstance(resp, dict):
             cid = resp.get("id") or (resp.get("challenge") or {}).get("id")
-        print(f"[+] Challenged {opponent} (rated={rated}, {clock_limit}+{clock_increment})")
+        print(f"[+] Challenged {opponent} ({variant}, rated={rated}, {clock_limit}+{clock_increment})")
         return True, OUTBOUND_COOLDOWN_SEC, cid
     except (berserk.exceptions.ResponseError, berserk.exceptions.ApiError) as e:
         status = getattr(getattr(e, "response", None), "status_code", None)
@@ -1368,6 +1396,8 @@ def outbound_challenge_loop(stop_event: threading.Event,
             # The preferred time control first, then the others; the rating window doubles if nobody fits
             first = pick_outbound_tc()
             order = [first] + [t for t in OUTBOUND_TCS if t != first]
+            order = [t for t in order if variant_for_perf(t[0]) in ACCEPT_VARIANTS
+                     and (t[0] != "chess960" or ENGINE_960["ok"])] or order[:1]
             _ob("searching", tc=f"{first[0]} {first[1] // 60 if first[1] >= 60 else first[1] / 60:g}+{first[2]}")
             targets, opp = [], None
             for perf, clock_limit, increment in order:
@@ -1391,7 +1421,7 @@ def outbound_challenge_loop(stop_event: threading.Event,
             last_target = opp
             sent, leave_alone, challenge_id = challenge_user(client, opponent=opp, rated=OUTBOUND_RATED,
                                                             clock_limit=clock_limit, clock_increment=increment,
-                                                            color="random")
+                                                            color="random", variant=variant_for_perf(perf))
             # Successful or not: do not ask the same bot again for a while. The map keeps entries for
             # OUTBOUND_COOLDOWN_SEC after their timestamp, so a later timestamp means a longer pause.
             recently_challenged[opp] = time.time() + leave_alone - OUTBOUND_COOLDOWN_SEC
@@ -1505,7 +1535,7 @@ def run_bot():
                 print(f"[event] Challenge from {challenger} | variant={variant} | tc={tc_bucket} | rated={rated}")
 
                 accept = True
-                if variant not in ACCEPT_VARIANTS:
+                if variant not in ACCEPT_VARIANTS or (variant == "chess960" and not ENGINE_960["ok"]):
                     accept = False
                 elif rated and not ALLOW_RATED:
                     accept = False
