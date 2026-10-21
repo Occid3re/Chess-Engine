@@ -29,6 +29,8 @@ public final class SearchManager {
     private boolean timeManaged;
     private SearchLimits limits;
     private double instability;
+    /** The root's uncertainty (expected evaluation error as a win probability), -1 without an uncertainty head. */
+    private double rootUncertainty = -1;
     private int lastScore;
     private final Object finishLock = new Object();
 
@@ -145,8 +147,8 @@ public final class SearchManager {
             opt = Math.min(opt, left * (mtg == 1 ? 0.8 : 0.6));
             max = Math.min(opt * 3.0, left * 0.8);
         } else {
-            int mtg = Math.max(16, 40 - Math.max(0, fullmove - 1) / 2);
-            opt = (double) left / mtg + inc * 0.8;
+            int mtg = Math.max(Tune.tmMtgMin, Tune.tmMtg - Math.max(0, fullmove - 1) / 2);
+            opt = (double) left / mtg + inc * (Tune.tmInc / 100.0);
             opt = Math.min(opt, left * 0.20);
             max = Math.min(opt * 3.0, left * 0.40);
             if (left < 10_000) {
@@ -190,6 +192,10 @@ public final class SearchManager {
         double factor = 0.75 + instability * 0.6;
         int drop = lastScore - s.bestScore;
         if (s.completedDepth > 4 && drop > 20) factor *= Math.min(1.6, 1.0 + drop / 100.0);
+        if (Tune.tmUnc > 0 && rootUncertainty >= 0) {
+            // unclear positions get more of the budget, clear ones less (Tune.tmUnc)
+            factor *= Math.max(0.6, Math.min(1.6, 1.0 + Tune.tmUnc / 100.0 * (rootUncertainty / 0.04 - 1.0)));
+        }
         lastScore = s.bestScore;
         long elapsed = elapsedMs();
         if (elapsed >= optimumMs * factor || elapsed >= maximumMs * 0.9) stop = true;
@@ -271,8 +277,9 @@ public final class SearchManager {
         // before bestmove for the bot and the play app; the search itself does not use it.
         julius.game.chessengine.core.nnue.UncertaintyHead head = useNnue
                 ? julius.game.chessengine.core.nnue.UncertaintyHead.loadDefault() : null;
+        rootUncertainty = head == null ? -1 : head.predict(root);
         final String uncertainty = head == null ? null
-                : String.format(java.util.Locale.ROOT, "info string unc %.3f", head.predict(root));
+                : String.format(java.util.Locale.ROOT, "info string unc %.3f", rootUncertainty);
         threads = new Thread[searchers.length];
         for (int i = 1; i < searchers.length; i++) {
             Searcher s = searchers[i];

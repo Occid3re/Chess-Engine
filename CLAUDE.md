@@ -176,6 +176,8 @@ etsest-unc.bin`, retrained on every promotion).
   in the data folder, cleared by a game); Lichess' daily bot-game limit only waits until the named time. Without a
   fitting bot the other time controls and a doubled rating window are tried before a 2-min pause. One greeting and
   one goodbye per game in the player chat (alien style, no analysis; `BOT_CHAT=0` off).
+  4.1.8: the control status carries `outbound` (current step with deadline, last challenge, the last 15 events,
+  active blocks) for the app's "Gegnersuche" card; the control POST takes `unblock` (bot id, idempotent).
   Rating-aware contempt exists (`BOT_CONTEMPT_PER_100`) but is OFF until a match shows it helps.
 - `/alieknek/nnue.json` + `/alieknek/nnue.bin` on the public watch port: the engine's network for the app's
   network view (read from the jar once, ETag-revalidated); costs nothing during play.

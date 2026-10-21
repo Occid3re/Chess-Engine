@@ -940,6 +940,7 @@ def snapshot() -> dict:
         snap["archivedGames"] = len(_archive["games"])
     with _lock:
         snap["engineName"] = _engine["name"]
+    snap["outbound"] = _outbound_view()
     snap.update({
         "name": _username(),
         "enabled": enabled(),
@@ -961,6 +962,64 @@ def snapshot() -> dict:
     elif snap["state"] == "idle" and not snap["inWindow"] and not snap["playUntil"]:
         snap["state"] = "sleeping"
     return snap
+
+
+# ------------------------------------------------------------------ outbound challenges (for the app)
+
+_outbound = {"activity": "starting", "since": None, "until": None, "target": None, "tc": None,
+             "lastChallengeAt": None, "history": []}
+_outbound_hooks = {"blocks": None, "unblock": None}
+OUTBOUND_ACTIVITIES = ("starting", "off", "playing", "after-game", "searching", "waiting", "pause", "backoff")
+
+
+def outbound_update(activity: str, until: Optional[float] = None, target: Optional[str] = None,
+                    tc: Optional[str] = None) -> None:
+    """The outbound loop's current step: searching; waiting (a challenge to target is out, until = its deadline);
+    pause (until = the next look); after-game (incoming challenges first, until = the next look); playing; off
+    (outside the play window or switched off); backoff (Lichess answered 429, until = end of the pause)."""
+    with _lock:
+        _outbound.update({"activity": activity, "since": int(time.time() * 1000),
+                          "until": int(until * 1000) if until else None, "target": target, "tc": tc})
+
+
+def outbound_event(kind: str, target: Optional[str] = None, tc: Optional[str] = None, detail: str = "") -> None:
+    """A step for the app's list (newest first, 15 kept): challenged, accepted, declined, no-answer,
+    rate-limited, refused (Lichess refused the challenge, e.g. the daily bot-game limit), no-target, unblocked."""
+    with _lock:
+        now_ms = int(time.time() * 1000)
+        if kind == "challenged":
+            _outbound["lastChallengeAt"] = now_ms
+        entry = {"at": now_ms, "kind": kind, "target": target, "tc": tc, "detail": (detail or "")[:160]}
+        _outbound["history"] = ([entry] + _outbound["history"])[:15]
+
+
+def register_outbound_blocks(blocks, unblock) -> None:
+    """The bot's block list: blocks() -> [{id, strikes, until (ms), reason}], unblock(id) lifts one."""
+    _outbound_hooks.update({"blocks": blocks, "unblock": unblock})
+
+
+def _outbound_view() -> dict:
+    with _lock:
+        view = dict(_outbound)
+        view["history"] = list(_outbound["history"])
+    blocks = _outbound_hooks["blocks"]
+    try:
+        view["blocks"] = blocks() if blocks else []
+    except Exception as e:  # the status must never fail because of the list
+        print(f"[outbound] block list unavailable: {e}")
+        view["blocks"] = []
+    return view
+
+
+def unblock(bot_id: str) -> bool:
+    """Lifts a bot's block (app: "Sperre aufheben"); False if there is no block list or no such entry."""
+    hook = _outbound_hooks["unblock"]
+    if not hook or not re.fullmatch(r"[a-z0-9_-]{1,40}", bot_id or ""):
+        return False
+    lifted = bool(hook(bot_id))
+    if lifted:
+        outbound_event("unblocked", bot_id)
+    return lifted
 
 
 # ------------------------------------------------------------------ watch page
@@ -1022,7 +1081,7 @@ class _ControlHandler(BaseHTTPRequestHandler):
     Body fields (all optional): enabled (bool), hours ("Mo-Fr 01:00-05:00; Sa-So 00:00-08:00", "" = always,
     "never"), schedule (seven lists of [start, end] minute pairs, Monday first – stored as the hours text),
     playForMinutes (int, plays now for that long and switches the bot on; 0 ends it), reset (true = back to
-    the environment).
+    the environment), unblock (a bot id: lifts its outbound block).
     Only reachable inside the Docker network; the play API forwards requests of logged-in users.
     """
 
@@ -1048,6 +1107,8 @@ class _ControlHandler(BaseHTTPRequestHandler):
                 raise ValueError("object expected")
         except (ValueError, TypeError):
             return self._send(400, {"error": "invalid JSON"})
+        if "unblock" in body:  # idempotent: a block that already ran out is simply gone
+            unblock(str(body["unblock"] or "").lower())
         update = {}
         if body.get("reset"):
             update.update({"enabled": None, "hours": None, "playUntil": None})

@@ -1081,8 +1081,37 @@ class OutboundBlocks:
         with self.lock:
             return [b for b, e in self.data.items() if e.get("until", 0) > now]
 
+    def snapshot(self) -> List[dict]:
+        """The active blocks for the app: [{id, strikes, until (ms), reason}], the soonest to expire first."""
+        now = time.time()
+        with self.lock:
+            rows = [{"id": b, "strikes": e.get("strikes", 1), "until": int(e["until"] * 1000),
+                     "reason": e.get("reason", "")} for b, e in self.data.items() if e.get("until", 0) > now]
+        return sorted(rows, key=lambda r: r["until"])
+
+    def unblock(self, bot_id: str) -> bool:
+        """The app's "Sperre aufheben": forgets the bot's refusals; False if it had none."""
+        with self.lock:
+            found = self.data.pop((bot_id or "").lower(), None) is not None
+            if found:
+                self._save()
+        return found
+
 
 BLOCKS = OutboundBlocks((svc.DATA_DIR if svc is not None else Path(".")) / "outbound-blocks.json")
+if svc is not None:
+    svc.register_outbound_blocks(BLOCKS.snapshot, BLOCKS.unblock)
+
+
+def _ob(activity: str, until: Optional[float] = None, target: Optional[str] = None, tc: Optional[str] = None):
+    """Tells the service (and so the app) what the outbound loop is doing."""
+    if svc is not None:
+        svc.outbound_update(activity, until=until, target=target, tc=tc)
+
+
+def _ob_event(kind: str, target: Optional[str] = None, tc: Optional[str] = None, detail: str = ""):
+    if svc is not None:
+        svc.outbound_event(kind, target=target, tc=tc, detail=detail)
 
 
 def parse_outbound_tcs(spec: str) -> List[tuple]:
@@ -1236,6 +1265,9 @@ def challenge_user(client: berserk.Client,
         if status == 429:
             raise  # the loop parks itself for Retry-After
         print(f"[-] Challenge to {opponent} rejected: {e}")
+        reason = re.search(r"'error':\s*'([^']*)'", str(e))
+        _ob_event("refused", opponent, f"{clock_limit // 60 if clock_limit >= 60 else clock_limit / 60:g}+{clock_increment}",
+                  reason.group(1) if reason else str(e)[:160])
         wait = re.search(r"'seconds':\s*(\d+)", str(e))
         return False, max(OUTBOUND_COOLDOWN_SEC, int(wait.group(1)) if wait else 0), None
 
@@ -1311,6 +1343,7 @@ def outbound_challenge_loop(stop_event: threading.Event,
         try:
             now = time.time()
             if now < penalty_until:
+                _ob("backoff", until=penalty_until)
                 print(f"[outbound] penalty box. sleeping {int(penalty_until - now) + 1}s")
                 pause(penalty_until - now + 1)
                 continue
@@ -1319,19 +1352,23 @@ def outbound_challenge_loop(stop_event: threading.Event,
 
             # Only inside the configured play window / while switched on
             if svc is not None and not svc.accepting():
+                _ob("off")
                 pause(60)
                 continue
 
             # A game is running: wait for its end, then give incoming challenges a moment
             if active_counter.get() != 0:
+                _ob("playing")
                 while active_counter.get() != 0 and not stop_event.is_set():
                     time.sleep(1)
+                _ob("after-game", until=time.time() + OUTBOUND_AFTER_GAME_SEC)
                 pause(OUTBOUND_AFTER_GAME_SEC, until_game=True)
                 continue
 
             # The preferred time control first, then the others; the rating window doubles if nobody fits
             first = pick_outbound_tc()
             order = [first] + [t for t in OUTBOUND_TCS if t != first]
+            _ob("searching", tc=f"{first[0]} {first[1] // 60 if first[1] >= 60 else first[1] / 60:g}+{first[2]}")
             targets, opp = [], None
             for perf, clock_limit, increment in order:
                 for delta in (RATING_DELTA, 2 * RATING_DELTA):
@@ -1345,6 +1382,8 @@ def outbound_challenge_loop(stop_event: threading.Event,
                     break
             if not targets:
                 print(f"[outbound] no target in any time control; next look in {OUTBOUND_PERIOD_SEC}s")
+                _ob_event("no-target", detail="no fitting bot online in any time control")
+                _ob("pause", until=time.time() + OUTBOUND_PERIOD_SEC)
                 pause(OUTBOUND_PERIOD_SEC, until_game=True)
                 continue
 
@@ -1357,9 +1396,13 @@ def outbound_challenge_loop(stop_event: threading.Event,
             # OUTBOUND_COOLDOWN_SEC after their timestamp, so a later timestamp means a longer pause.
             recently_challenged[opp] = time.time() + leave_alone - OUTBOUND_COOLDOWN_SEC
             started = time.time()
+            tc_text = f"{perf} {clock_limit // 60 if clock_limit >= 60 else clock_limit / 60:g}+{increment}"
             if sent:
+                _ob_event("challenged", opp, tc_text)
+                _ob("waiting", until=started + OUTBOUND_WAIT_ACCEPT_SEC, target=opp, tc=tc_text)
                 pause(OUTBOUND_WAIT_ACCEPT_SEC, until_game=True)
                 if active_counter.get() != 0:
+                    _ob_event("accepted", opp, tc_text)
                     continue  # accepted (or another game started)
                 if challenge_id:
                     try:
@@ -1367,7 +1410,9 @@ def outbound_challenge_loop(stop_event: threading.Event,
                         print(f"[outbound] {opp} did not answer; challenge cancelled")
                     except Exception as e:
                         print(f"[outbound] cancel {challenge_id} failed: {e}")
-                BLOCKS.strike(opp, "no answer")
+                hours = BLOCKS.strike(opp, "no answer") // 3600
+                _ob_event("no-answer", opp, tc_text, f"blocked for {hours} h")
+            _ob("pause", until=started + OUTBOUND_RETRY_SEC)
             pause(max(0.0, OUTBOUND_RETRY_SEC - (time.time() - started)), until_game=True)
 
         except (berserk.exceptions.ResponseError, berserk.exceptions.ApiError) as e:
@@ -1379,6 +1424,7 @@ def outbound_challenge_loop(stop_event: threading.Event,
                 if last_target:
                     recently_challenged[last_target] = time.time() + OUTBOUND_429_TARGET_SEC - OUTBOUND_COOLDOWN_SEC
                     BLOCKS.strike(last_target, "429")
+                _ob_event("rate-limited", last_target, detail=f"Lichess 429, pause {delay} s")
                 print(f"[warn] outbound 429 (target {last_target}): {str(e)[:160]}; pausing {delay}s")
                 _GLOBAL_RL.bump(delay)
                 penalty_until = time.time() + delay
@@ -1492,7 +1538,9 @@ def run_bot():
                 challenger = ((chal.get("challenger") or {}).get("id") or "").lower()
                 dest = ((chal.get("destUser") or {}).get("id") or "").lower()
                 if challenger == me_id.lower() and dest:
-                    BLOCKS.strike(dest, "declined: " + str(chal.get("declineReasonKey") or chal.get("declineReason") or "?"))
+                    reason = str(chal.get("declineReasonKey") or chal.get("declineReason") or "?")
+                    hours = BLOCKS.strike(dest, "declined: " + reason) // 3600
+                    _ob_event("declined", dest, detail=f"{reason}; blocked for {hours} h")
 
             elif et == "gameStart":
                 game_id = event["game"]["id"]

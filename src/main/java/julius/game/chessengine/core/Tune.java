@@ -40,6 +40,16 @@ public final class Tune {
     public static int bonusSub = 139;
     public static int bonusMax = 2119;
     /**
+     * Time management of increment / sudden-death games (SearchManager.allocate): the moves still to come at the
+     * start (tmMtg) and their floor (tmMtgMin), the share of the increment spent per move (tmInc, %), and how much
+     * the root position's uncertainty stretches the time for this move (tmUnc, %: factor 1 + tmUnc / 100 * (u / 0.04
+     * - 1), clamped to 0.6 .. 1.6, u = the network's expected evaluation error as a win probability; 0 = off).
+     */
+    public static int tmMtg = 40;
+    public static int tmMtgMin = 16;
+    public static int tmInc = 80;
+    public static int tmUnc = 0;
+    /**
      * Uncertainty-aware reductions (off with uncDepth 0): at nodes with at least uncDepth plies left, the network's
      * uncertainty head rates the position; below uncLo / 1000 (the network is sure) late moves are reduced one ply
      * more, above uncHi / 1000 (unclear) one ply less. Needs core/nnue-unc.bin for the loaded network.
@@ -72,6 +82,10 @@ public final class Tune {
         add("bonusMul", bonusMul, 50, 400, 15);
         add("bonusSub", bonusSub, 0, 300, 15);
         add("bonusMax", bonusMax, 800, 4000, 150);
+        add("tmMtg", tmMtg, 20, 80, 4);
+        add("tmMtgMin", tmMtgMin, 8, 40, 2);
+        add("tmInc", tmInc, 40, 100, 5);
+        add("tmUnc", tmUnc, 0, 100, 8);
         add("uncDepth", uncDepth, 0, 20, 1);
         add("uncLo", uncLo, 0, 100, 4);
         add("uncHi", uncHi, 20, 200, 6);
@@ -119,6 +133,10 @@ public final class Tune {
             case "bonusMul" -> bonusMul = v;
             case "bonusSub" -> bonusSub = v;
             case "bonusMax" -> bonusMax = v;
+            case "tmMtg" -> tmMtg = v;
+            case "tmMtgMin" -> tmMtgMin = v;
+            case "tmInc" -> tmInc = v;
+            case "tmUnc" -> tmUnc = v;
             case "uncDepth" -> uncDepth = v;
             case "uncLo" -> uncLo = v;
             case "uncHi" -> uncHi = v;

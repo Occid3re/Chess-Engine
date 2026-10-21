@@ -149,3 +149,40 @@ def test_blocked_bots_are_not_challenged(bot, monkeypatch):
     cache = bot.LichessCache(Client(), "alieknek")
     assert bot.find_similar_bots(cache, "alieknek", "blitz", exclude=["b"]) == ["a"]
     assert bot.find_similar_bots(cache, "alieknek", "blitz", exclude=["a", "b"]) == []
+
+
+def test_the_app_sees_blocks_and_can_lift_them(bot, tmp_path):
+    blocks = bot.OutboundBlocks(tmp_path / "outbound-blocks.json")
+    blocks.strike("slowbot", "no answer")
+    blocks.strike("rudebot", "declined: generic")
+    blocks.strike("rudebot", "declined: generic")
+    rows = blocks.snapshot()
+    assert [r["id"] for r in rows] == ["slowbot", "rudebot"]  # soonest to expire first
+    assert rows[1]["strikes"] == 2 and rows[1]["until"] > time.time() * 1000 + 6 * 86400_000
+    assert blocks.unblock("RudeBot") and not blocks.unblock("rudebot")
+    assert [r["id"] for r in bot.OutboundBlocks(tmp_path / "outbound-blocks.json").snapshot()] == ["slowbot"]
+
+
+def test_service_reports_the_outbound_loop_and_unblocks(tmp_path, monkeypatch):
+    svc = importlib.import_module("alieknek_service")
+    monkeypatch.setattr(svc, "_outbound", {"activity": "starting", "since": None, "until": None, "target": None,
+                                           "tc": None, "lastChallengeAt": None, "history": []})
+    monkeypatch.setattr(svc, "_outbound_hooks", {"blocks": None, "unblock": None})
+    assert svc._outbound_view()["blocks"] == [] and not svc.unblock("somebot")  # no list registered yet
+
+    lifted = []
+    svc.register_outbound_blocks(lambda: [{"id": "somebot", "strikes": 1, "until": 1, "reason": "no answer"}],
+                                 lambda b: lifted.append(b) or b == "somebot")
+    svc.outbound_update("waiting", until=time.time() + 45, target="somebot", tc="blitz 3+2")
+    svc.outbound_event("challenged", "somebot", "blitz 3+2")
+    view = svc._outbound_view()
+    assert view["activity"] == "waiting" and view["target"] == "somebot" and view["until"] > view["since"]
+    assert view["lastChallengeAt"] and view["history"][0]["kind"] == "challenged"
+    assert view["blocks"][0]["id"] == "somebot"
+
+    assert not svc.unblock("../etc") and lifted == []  # ids are validated before the bot sees them
+    assert svc.unblock("somebot") and svc._outbound_view()["history"][0]["kind"] == "unblocked"
+    assert not svc.unblock("otherbot")
+    for i in range(20):
+        svc.outbound_event("no-target")
+    assert len(svc._outbound_view()["history"]) == 15
