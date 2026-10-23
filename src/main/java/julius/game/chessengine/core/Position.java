@@ -434,7 +434,7 @@ public final class Position {
 
         side = them;
         if (us == BLACK) fullmove++;
-        checkers = attackersTo(kingSquare(them), all) & occ[us];
+        checkers = attackersBy(kingSquare(them), us);
         pinnedValid = false;
     }
 
@@ -525,14 +525,30 @@ public final class Position {
                 | (Attacks.KING[sq] & (pieces[KING] | pieces[6 + KING]));
     }
 
+    /**
+     * The pieces of color {@code by} attacking sq on the current board: attackersTo(sq, all) & occ[by], but the
+     * magic lookups only run when a slider of that color stands on a line through sq.
+     */
+    long attackersBy(int sq, int by) {
+        int b = by * 6;
+        long result = (Attacks.PAWN[by ^ 1][sq] & pieces[b + PAWN])
+                | (Attacks.KNIGHT[sq] & pieces[b + KNIGHT])
+                | (Attacks.KING[sq] & pieces[b + KING]);
+        long bq = (pieces[b + BISHOP] | pieces[b + QUEEN]) & Attacks.BISHOP_PSEUDO[sq];
+        if (bq != 0L) result |= Attacks.bishop(sq, all) & bq;
+        long rq = (pieces[b + ROOK] | pieces[b + QUEEN]) & Attacks.ROOK_PSEUDO[sq];
+        if (rq != 0L) result |= Attacks.rook(sq, all) & rq;
+        return result;
+    }
+
     public boolean isAttacked(int sq, int byColor, long occupied) {
         int b = byColor * 6;
         if ((Attacks.PAWN[byColor ^ 1][sq] & pieces[b + PAWN]) != 0L) return true;
         if ((Attacks.KNIGHT[sq] & pieces[b + KNIGHT]) != 0L) return true;
         if ((Attacks.KING[sq] & pieces[b + KING]) != 0L) return true;
-        long bq = pieces[b + BISHOP] | pieces[b + QUEEN];
+        long bq = (pieces[b + BISHOP] | pieces[b + QUEEN]) & Attacks.BISHOP_PSEUDO[sq];
         if (bq != 0L && (Attacks.bishop(sq, occupied) & bq) != 0L) return true;
-        long rq = pieces[b + ROOK] | pieces[b + QUEEN];
+        long rq = (pieces[b + ROOK] | pieces[b + QUEEN]) & Attacks.ROOK_PSEUDO[sq];
         return rq != 0L && (Attacks.rook(sq, occupied) & rq) != 0L;
     }
 
@@ -646,18 +662,21 @@ public final class Position {
         int eksq = kingSquare(them);
         int pt = type(board[from]);
         if ((flag & Move.PROMO_N) != 0) pt = KNIGHT + (flag & 3);
-        long occAfter = (all ^ (1L << from)) | (1L << to);
-        if (flag == Move.EP_CAPTURE) occAfter ^= 1L << (to ^ 8);
-        // direct check
-        long direct = switch (pt) {
-            case PAWN -> Attacks.PAWN[us][to];
-            case KNIGHT -> Attacks.KNIGHT[to];
-            case BISHOP -> Attacks.bishop(to, occAfter);
-            case ROOK -> Attacks.rook(to, occAfter);
-            case QUEEN -> Attacks.queen(to, occAfter);
-            default -> 0L;
+        long vacated = 1L << from;
+        if (flag == Move.EP_CAPTURE) vacated |= 1L << (to ^ 8);
+        long occAfter = (all ^ vacated) | (1L << to);
+        // direct check: a slider on `to` checks when it is on the king's line and nothing stands between
+        long ek = 1L << eksq;
+        boolean direct = switch (pt) {
+            case PAWN -> (Attacks.PAWN[us][to] & ek) != 0L;
+            case KNIGHT -> (Attacks.KNIGHT[to] & ek) != 0L;
+            case BISHOP -> (Attacks.BISHOP_PSEUDO[to] & ek) != 0L && (Attacks.BETWEEN[to][eksq] & occAfter) == 0L;
+            case ROOK -> (Attacks.ROOK_PSEUDO[to] & ek) != 0L && (Attacks.BETWEEN[to][eksq] & occAfter) == 0L;
+            case QUEEN -> ((Attacks.ROOK_PSEUDO[to] | Attacks.BISHOP_PSEUDO[to]) & ek) != 0L
+                    && (Attacks.BETWEEN[to][eksq] & occAfter) == 0L;
+            default -> false;
         };
-        if ((direct & (1L << eksq)) != 0L) return true;
+        if (direct) return true;
         // discovered check (also covers ep and castling-rook checks through sliders)
         int b = us * 6;
         long rq = pieces[b + ROOK] | pieces[b + QUEEN];
@@ -669,9 +688,16 @@ public final class Position {
             long rooks = (pieces[b + ROOK] ^ (1L << to)) | (1L << rookTo) | pieces[b + QUEEN];
             return (Attacks.rook(eksq, occC) & rooks) != 0L || (Attacks.bishop(eksq, occC) & bq) != 0L;
         }
+        // A discovered check needs a vacated square (the mover's or the ep-captured pawn's) on a line from the king
+        // to one of our sliders: in a legal position nothing of ours attacks the king before the move, and the
+        // piece arriving on `to` can only block lines.
         long movedMask = ~(1L << from);
-        if ((Attacks.rook(eksq, occAfter) & rq & movedMask) != 0L) return true;
-        return (Attacks.bishop(eksq, occAfter) & bq & movedMask) != 0L;
+        long rookLine = Attacks.ROOK_PSEUDO[eksq];
+        rq &= rookLine & movedMask;
+        if (rq != 0L && (rookLine & vacated) != 0L && (Attacks.rook(eksq, occAfter) & rq) != 0L) return true;
+        long bishopLine = Attacks.BISHOP_PSEUDO[eksq];
+        bq &= bishopLine & movedMask;
+        return bq != 0L && (bishopLine & vacated) != 0L && (Attacks.bishop(eksq, occAfter) & bq) != 0L;
     }
 
     // ------------------------------------------------------------------ SEE

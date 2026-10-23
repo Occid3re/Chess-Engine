@@ -38,6 +38,12 @@ public final class Attacks {
     /** Squares in front of sq on adjacent files (where enemy pawns could attack the pawn's path). */
     public static final long[][] ATTACK_SPAN = new long[2][64];
     public static final int[][] DISTANCE = new int[64][64];
+    /**
+     * Rook / bishop attacks on an empty board: a slider can only attack sq from these squares, so a check test can
+     * skip the magic lookup when none of the attacker's sliders stands on them.
+     */
+    public static final long[] ROOK_PSEUDO = new long[64];
+    public static final long[] BISHOP_PSEUDO = new long[64];
 
     private static final long[] ROOK_MASK = new long[64];
     private static final long[] BISHOP_MASK = new long[64];
@@ -115,6 +121,10 @@ public final class Attacks {
         for (int sq = 0; sq < 64; sq++) {
             ROOK_MAGIC[sq] = findMagic(sq, ROOK_MASK[sq], ROOK_SHIFT[sq], ROOK_DIRS, ROOK_TABLE, ROOK_OFFSET[sq], seed);
             BISHOP_MAGIC[sq] = findMagic(sq, BISHOP_MASK[sq], BISHOP_SHIFT[sq], BISHOP_DIRS, BISHOP_TABLE, BISHOP_OFFSET[sq], seed);
+        }
+        for (int sq = 0; sq < 64; sq++) {
+            ROOK_PSEUDO[sq] = slidingAttack(sq, 0L, ROOK_DIRS);
+            BISHOP_PSEUDO[sq] = slidingAttack(sq, 0L, BISHOP_DIRS);
         }
 
         for (int a = 0; a < 64; a++) {
