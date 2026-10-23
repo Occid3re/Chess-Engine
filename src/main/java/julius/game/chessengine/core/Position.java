@@ -73,9 +73,16 @@ public final class Position {
 
     private long pinned;
     private boolean pinnedValid;
+    /** pinnedHist entry of a ply whose pin set was not computed yet (no real pin set holds every square). */
+    private static final long PINS_UNKNOWN = -1L;
 
     // Undo stack
     private int histPly;
+    /**
+     * The side to move's pin set before each move (or PINS_UNKNOWN): unmake restores it, so the parent's next
+     * isLegal does not recompute the pins after every child search.
+     */
+    private final long[] pinnedHist = new long[MAX_HISTORY];
     private final long[] keyHist = new long[MAX_HISTORY];
     private final long[] pawnKeyHist = new long[MAX_HISTORY];
     private final long[] checkersHist = new long[MAX_HISTORY];
@@ -117,8 +124,10 @@ public final class Position {
         System.arraycopy(o.castleEmpty, 0, castleEmpty, 0, 4);
         System.arraycopy(o.castleKingPath, 0, castleKingPath, 0, 4);
         System.arraycopy(o.castleMask, 0, castleMask, 0, 64);
-        pinnedValid = false;
+        pinned = o.pinned;
+        pinnedValid = o.pinnedValid;
         histPly = o.histPly;
+        System.arraycopy(o.pinnedHist, 0, pinnedHist, 0, histPly);
         System.arraycopy(o.keyHist, 0, keyHist, 0, histPly);
         System.arraycopy(o.pawnKeyHist, 0, pawnKeyHist, 0, histPly);
         System.arraycopy(o.checkersHist, 0, checkersHist, 0, histPly);
@@ -373,6 +382,7 @@ public final class Position {
         int from = Move.from(move), to = Move.to(move), flag = Move.flag(move);
         int us = side, them = us ^ 1;
         int h = histPly++;
+        pinnedHist[h] = pinnedValid ? pinned : PINS_UNKNOWN;
         keyHist[h] = key;
         pawnKeyHist[h] = pawnKey;
         checkersHist[h] = checkers;
@@ -471,11 +481,19 @@ public final class Position {
         ep = epHist[h];
         halfmove = halfmoveHist[h];
         pliesFromNull = nullHist[h];
-        pinnedValid = false;
+        restorePins(h);
+    }
+
+    /** The pin set the position had before the move at history index h (unknown pins are recomputed on demand). */
+    private void restorePins(int h) {
+        long p = pinnedHist[h];
+        pinned = p;
+        pinnedValid = p != PINS_UNKNOWN;
     }
 
     public void makeNull() {
         int h = histPly++;
+        pinnedHist[h] = pinnedValid ? pinned : PINS_UNKNOWN;
         keyHist[h] = key;
         pawnKeyHist[h] = pawnKey;
         checkersHist[h] = checkers;
@@ -506,7 +524,7 @@ public final class Position {
         ep = epHist[h];
         halfmove = halfmoveHist[h];
         pliesFromNull = nullHist[h];
-        pinnedValid = false;
+        restorePins(h);
     }
 
     /** Captured piece of the most recent move (NO_PIECE if none). */
