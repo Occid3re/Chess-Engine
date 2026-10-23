@@ -615,8 +615,10 @@ public final class Position {
             int csq = Long.numberOfTrailingZeros(checkers);
             if (to != csq && (Attacks.BETWEEN[ksq][csq] & (1L << to)) == 0L) return false;
         }
-        if ((pinned() & (1L << from)) != 0L) {
-            return (Attacks.LINE[ksq][from] & (1L << to)) != 0L;
+        // Only a piece on a line through its king can be pinned: the pin set is not needed (nor computed) otherwise.
+        long line = Attacks.LINE[ksq][from];
+        if (line != 0L && (pinned() & (1L << from)) != 0L) {
+            return (line & (1L << to)) != 0L;
         }
         return true;
     }
