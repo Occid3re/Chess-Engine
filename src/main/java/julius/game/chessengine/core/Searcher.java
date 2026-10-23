@@ -52,6 +52,12 @@ public final class Searcher {
     private final short[] uncValues = new short[1 << 15];
     /** Doubt extensions (Tune.doubtThr) on the path to each ply. */
     private final int[] doubtPath = new int[MAX_PLY + 8];
+    /**
+     * Null-move verification guard: while a verification search runs, the verifying side ({@link #nmpColor}) may
+     * not try a null move before this ply, so another null move cannot confirm the first one. 0 = no verification.
+     */
+    private int nmpMinPly;
+    private int nmpColor;
 
     long nodes;
     int selDepth;
@@ -107,6 +113,7 @@ public final class Searcher {
         bestScore = -INF;
         bestPvLength = 0;
         rootHistPly = pos.historyPly();
+        nmpMinPly = 0;
         acc = mgr.useNnue ? accumulatorsFor(Network.loadDefault()) : null;
         netUnc = acc != null && cachedNet.hasUncertainty();
         uncHead = acc != null && !netUnc && (Tune.uncDepth > 0 || Tune.doubtThr > 0)
@@ -483,6 +490,7 @@ public final class Searcher {
             // Null move pruning
             if (depth >= 3 && evalv >= beta && staticEval >= beta - Tune.nmpDepthMargin * depth + Tune.nmpBaseMargin
                     && ply > 0 && moveStack[ply - 1] != Move.NONE
+                    && (ply >= nmpMinPly || pos.side != nmpColor)
                     && pos.hasNonPawnMaterial(pos.side) && beta > -TB_BOUND) {
                 int r = 4 + depth / 4 + Math.min(3, (evalv - beta) / Tune.nmpEvalDiv);
                 moveStack[ply] = Move.NONE;
@@ -494,9 +502,14 @@ public final class Searcher {
                 if (mgr.stop) return 0;
                 if (v >= beta) {
                     if (v >= TB_BOUND) v = beta;
-                    if (depth < 14) return v;
-                    // Verification search at high depth (zugzwang safety)
+                    // no verification below depth 14 and none nested inside another verification
+                    if (nmpMinPly != 0 || depth < 14) return v;
+                    // Verification search at high depth (zugzwang safety): the side to move has to hold beta with
+                    // real moves, without null moves of its own for the first 3/4 of the verification depth
+                    nmpMinPly = ply + 3 * (depth - r) / 4;
+                    nmpColor = pos.side;
                     int vv = search(beta - 1, beta, depth - r, ply, false);
+                    nmpMinPly = 0;
                     if (vv >= beta) return v;
                 }
             }
