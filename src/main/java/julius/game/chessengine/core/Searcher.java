@@ -605,7 +605,7 @@ public final class Searcher {
             moveStack[ply] = m;
             pieceStack[ply] = pc;
             if (acc != null) acc.push(pos, m, ply);
-            pos.makeMove(m);
+            pos.makeMove(m, givesCheck);
             int newDepth = depth - 1 + ext;
             int score = 0;
             if (depth >= 2 && moveCount > 1 + (root ? 1 : 0) && (quiet || scores[i] < 0)) {

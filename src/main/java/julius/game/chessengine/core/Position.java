@@ -85,6 +85,16 @@ public final class Position {
     private final int[] halfmoveHist = new int[MAX_HISTORY];
     private final int[] nullHist = new int[MAX_HISTORY];
 
+    // Check info per history slot (givesCheck), valid while ciKey[slot] == key: the squares from which a pawn /
+    // knight / bishop / rook of the side to move attacks the enemy king, and the side to move's pieces that stand
+    // alone between one of its sliders and that king (moving one off the line uncovers a check).
+    private final long[] ciKey = new long[MAX_HISTORY + 1];
+    private final long[] ciPawn = new long[MAX_HISTORY + 1];
+    private final long[] ciKnight = new long[MAX_HISTORY + 1];
+    private final long[] ciBishop = new long[MAX_HISTORY + 1];
+    private final long[] ciRook = new long[MAX_HISTORY + 1];
+    private final long[] ciDiscover = new long[MAX_HISTORY + 1];
+
     public Position() {
         setFen(START_FEN);
     }
@@ -370,6 +380,14 @@ public final class Position {
     // ------------------------------------------------------------------ make / unmake
 
     public void makeMove(int move) {
+        makeMove(move, true);
+    }
+
+    /**
+     * makeMove for a caller that already knows {@code givesCheck(move)}: when it is false the new position's
+     * checkers are empty without a search for them.
+     */
+    public void makeMove(int move, boolean givesCheck) {
         int from = Move.from(move), to = Move.to(move), flag = Move.flag(move);
         int us = side, them = us ^ 1;
         int h = histPly++;
@@ -434,7 +452,7 @@ public final class Position {
 
         side = them;
         if (us == BLACK) fullmove++;
-        checkers = attackersBy(kingSquare(them), us);
+        checkers = givesCheck ? attackersBy(kingSquare(them), us) : 0L;
         pinnedValid = false;
     }
 
@@ -655,8 +673,62 @@ public final class Position {
         return (Attacks.pieceAttacks(pt, from, all) & (1L << to)) != 0L;
     }
 
-    /** Whether the move (pseudo-legal, legal) gives check. Uses make/unmake-free detection. */
+    /**
+     * Whether the move (pseudo-legal, legal) gives check. Ordinary moves are answered from the position's check
+     * info (computed once per position, see {@link #checkInfo}): the moved piece lands on a checking square, or it
+     * leaves a line between one of our sliders and the enemy king. Promotions, en passant and castling, which change
+     * the piece or move a second one, take the full test.
+     */
     public boolean givesCheck(int move) {
+        int flag = Move.flag(move);
+        if (flag >= Move.PROMO_N || flag == Move.EP_CAPTURE || flag == Move.KING_CASTLE || flag == Move.QUEEN_CASTLE) {
+            return givesCheckSpecial(move);
+        }
+        int h = checkInfo();
+        int from = Move.from(move);
+        long toBit = 1L << Move.to(move);
+        long squares = switch (type(board[from])) {
+            case PAWN -> ciPawn[h];
+            case KNIGHT -> ciKnight[h];
+            case BISHOP -> ciBishop[h];
+            case ROOK -> ciRook[h];
+            case QUEEN -> ciBishop[h] | ciRook[h];
+            default -> 0L;
+        };
+        if ((squares & toBit) != 0L) return true;
+        return (ciDiscover[h] & (1L << from)) != 0L && (Attacks.LINE[kingSquare(side ^ 1)][from] & toBit) == 0L;
+    }
+
+    /**
+     * Fills the check info of the current position (if this history slot does not already hold it) and returns its
+     * slot. A slot is keyed by the position key, so it survives the children searched below it.
+     */
+    private int checkInfo() {
+        int h = histPly;
+        if (ciKey[h] == key) return h;
+        int us = side, them = us ^ 1;
+        int eksq = kingSquare(them);
+        int b = us * 6;
+        ciPawn[h] = Attacks.PAWN[them][eksq];
+        ciKnight[h] = Attacks.KNIGHT[eksq];
+        ciBishop[h] = Attacks.bishop(eksq, all);
+        ciRook[h] = Attacks.rook(eksq, all);
+        long snipers = (Attacks.ROOK_PSEUDO[eksq] & (pieces[b + ROOK] | pieces[b + QUEEN]))
+                | (Attacks.BISHOP_PSEUDO[eksq] & (pieces[b + BISHOP] | pieces[b + QUEEN]));
+        long discover = 0L;
+        while (snipers != 0L) {
+            int s = Long.numberOfTrailingZeros(snipers);
+            snipers &= snipers - 1;
+            long between = Attacks.BETWEEN[eksq][s] & all;
+            if (between != 0L && (between & (between - 1)) == 0L) discover |= between & occ[us];
+        }
+        ciDiscover[h] = discover;
+        ciKey[h] = key;
+        return h;
+    }
+
+    /** givesCheck for promotions, en passant and castling: tests the position after the move directly. */
+    private boolean givesCheckSpecial(int move) {
         int from = Move.from(move), to = Move.to(move), flag = Move.flag(move);
         int us = side, them = us ^ 1;
         int eksq = kingSquare(them);
