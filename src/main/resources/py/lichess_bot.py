@@ -1611,6 +1611,41 @@ def run_bot():
             pass
 
 
+RECONNECT_MAX_RETRIES = 50
+# A run that stayed up this long counts as recovered: the next drop is attempt 1 again. Lichess drops the event
+# stream every few hours, so without the reset a bot that plays all day used up its 50 attempts within days and
+# exited (mid-game, if one was running).
+RECONNECT_STABLE_SEC = 600
+
+
+def run_with_reconnect(run, sleep=time.sleep, clock=time.monotonic):
+    """Resilient run loop: auto-reconnect on stream disconnect or transient errors."""
+    attempt = 0
+    while attempt < RECONNECT_MAX_RETRIES:
+        started = clock()
+        try:
+            run()
+            return  # clean exit
+        except (requests.exceptions.ChunkedEncodingError,
+                requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout) as e:
+            attempt = 1 if clock() - started >= RECONNECT_STABLE_SEC else attempt + 1
+            wait = min(30, 5 * attempt)
+            print(f"[!] Stream disconnected (attempt {attempt}/{RECONNECT_MAX_RETRIES}): {type(e).__name__}: {e}")
+            print(f"[!] Reconnecting in {wait}s...")
+            sleep(wait)
+        except KeyboardInterrupt:
+            print("[!] KeyboardInterrupt — shutting down.")
+            return
+        except Exception as e:
+            attempt = 1 if clock() - started >= RECONNECT_STABLE_SEC else attempt + 1
+            wait = min(60, 10 * attempt)
+            print(f"[!] Unexpected error (attempt {attempt}/{RECONNECT_MAX_RETRIES}): {type(e).__name__}: {e}")
+            print(f"[!] Reconnecting in {wait}s...")
+            sleep(wait)
+    print(f"[!] Max retries ({RECONNECT_MAX_RETRIES}) exhausted. Exiting.")
+
+
 if __name__ == "__main__":
     if platform.system().lower() == "windows":
         import msvcrt  # noqa: F401
@@ -1629,26 +1664,4 @@ if __name__ == "__main__":
         while not svc.enabled():
             svc.set_state("disabled")
             time.sleep(30)
-    # Resilient run loop: auto-reconnect on stream disconnect or transient errors.
-    MAX_RETRIES = 50
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            run_bot()
-            break  # clean exit
-        except (requests.exceptions.ChunkedEncodingError,
-                requests.exceptions.ConnectionError,
-                requests.exceptions.Timeout) as e:
-            wait = min(30, 5 * attempt)
-            print(f"[!] Stream disconnected (attempt {attempt}/{MAX_RETRIES}): {type(e).__name__}: {e}")
-            print(f"[!] Reconnecting in {wait}s...")
-            time.sleep(wait)
-        except KeyboardInterrupt:
-            print("[!] KeyboardInterrupt — shutting down.")
-            break
-        except Exception as e:
-            wait = min(60, 10 * attempt)
-            print(f"[!] Unexpected error (attempt {attempt}/{MAX_RETRIES}): {type(e).__name__}: {e}")
-            print(f"[!] Reconnecting in {wait}s...")
-            time.sleep(wait)
-    else:
-        print(f"[!] Max retries ({MAX_RETRIES}) exhausted. Exiting.")
+    run_with_reconnect(run_bot)

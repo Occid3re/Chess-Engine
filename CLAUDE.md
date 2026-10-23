@@ -208,6 +208,9 @@ etsest-unc.bin`, retrained on every promotion).
   the blitz rating with their 960 ratings: "0 fit"); a decline is the challenge's only strike (4.1.8/4.1.9 added
   a "no answer" strike 45 s later: one refusal blocked for 7 days) and ends the wait at once; "nobot" declines
   block for 30 days right away.
+  4.2.1: the run loop (`run_with_reconnect`) counts only drops in a row towards its 50 attempts: a run that stayed
+  up 10 minutes (`RECONNECT_STABLE_SEC`) starts the count again. Before, every routine stream drop since the start
+  counted, and a bot playing all day exited after two or three days.
   Rating-aware contempt exists (`BOT_CONTEMPT_PER_100`) but is OFF until a match shows it helps.
 - `/alieknek/nnue.json` + `/alieknek/nnue.bin` on the public watch port: the engine's network for the app's
   network view (read from the jar once, ETag-revalidated); costs nothing during play.
