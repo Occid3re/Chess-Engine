@@ -220,6 +220,11 @@ etsest-unc.bin`, retrained on every promotion).
   counted, and a bot playing all day exited after two or three days.
   4.2.2: the engine reports the line it plays when a search stops mid-iteration (see SearchManager above): the lag
   meter no longer counts the unreported rest of the search as network lag, and the bot also ponders after those moves.
+  4.2.3: games without increment were lost on time (12 of 25 since 4.2.0, several of them won): the time management
+  paced the bare clock and the ~0.2 s a move the bot needs beyond the search (event, UCI, POST) flagged it at the end.
+  `allocate` now keeps the Move Overhead back for every move still to come where the increment does not cover it,
+  and the bot sets Move Overhead per move from the measured lag (`_LagMeter.overhead_ms`: lag * 1.2 + 50 ms in
+  100 ms steps, floor BOT_MOVE_OVERHEAD_MS = 150, cap 1000). Bench unchanged (depth-limited searches do not allocate).
   Rating-aware contempt exists (`BOT_CONTEMPT_PER_100`) but is OFF until a match shows it helps.
 - `/alieknek/nnue.json` + `/alieknek/nnue.bin` on the public watch port: the engine's network for the app's
   network view (read from the jar once, ETag-revalidated); costs nothing during play.

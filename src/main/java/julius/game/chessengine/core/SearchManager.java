@@ -138,18 +138,21 @@ public final class SearchManager {
      * ones eating it; the optimum stays under a fifth of the clock, the maximum under 40 %. Under ten
      * seconds a move gets a twentieth of the clock (at most an eighth) plus most of the increment, so a
      * bullet scramble never runs the flag down.
+     * Every move costs the overhead (the GUI or bot handling the move and posting it) on top of the search:
+     * it is kept back for this move and, as far as the increment does not pay for it, for all the moves still
+     * to come. Paced by the bare clock, a sudden-death game flagged on the overhead of its last moves (on
+     * Lichess about 0.2 s a move: 12 of 25 games without increment were lost on time, several of them won).
      */
     static long[] allocate(long time, long inc, int movestogo, int fullmove, int moveOverhead) {
-        long left = Math.max(1, time - moveOverhead);
         inc = Math.max(0, inc);
+        int mtg = movestogo > 0 ? Math.min(movestogo, 50) : Math.max(Tune.tmMtgMin, Tune.tmMtg - Math.max(0, fullmove - 1) / 2);
+        long left = Math.max(1, time - moveOverhead - Math.max(0, moveOverhead - inc) * mtg);
         double opt, max;
         if (movestogo > 0) {
-            int mtg = Math.min(movestogo, 50);
             opt = (double) left / mtg + inc * 0.75;
             opt = Math.min(opt, left * (mtg == 1 ? 0.8 : 0.6));
             max = Math.min(opt * 3.0, left * 0.8);
         } else {
-            int mtg = Math.max(Tune.tmMtgMin, Tune.tmMtg - Math.max(0, fullmove - 1) / 2);
             opt = (double) left / mtg + inc * (Tune.tmInc / 100.0);
             opt = Math.min(opt, left * 0.20);
             max = Math.min(opt * 3.0, left * 0.40);

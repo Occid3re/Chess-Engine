@@ -284,7 +284,9 @@ def _is_in_game_request(args, kwargs) -> bool:
 
 class _LagMeter:
     """What a move costs beyond the engine's own search: handling the event, the UCI round trip and the
-    POST to Lichess. The engine gets that much less clock, so it never plans with time that is already gone.
+    POST to Lichess. The engine gets that much less clock, so it never plans with time that is already gone,
+    and (Move Overhead, 4.2.3) keeps that much back for every move still to come, so a game without increment
+    is not flagged by the overhead of its last moves.
     An exponential average, floored by the per-game base and capped so one hiccup cannot starve the search."""
 
     def __init__(self, ceiling: float = 1.5):
@@ -299,6 +301,13 @@ class _LagMeter:
         if self.ema is None:
             return base
         return max(base, min(self.ceiling, self.ema * 1.5 + 0.05))
+
+    def overhead_ms(self, base_ms: int) -> int:
+        """The engine's Move Overhead: the measured lag with a margin, in steps of 100 ms (a changed option
+        ends python-chess's ponderhit), never under the configured base and at most a second."""
+        if self.ema is None:
+            return base_ms
+        return int(min(1000, max(base_ms, round((self.ema * 1.2 + 0.05) * 10) * 100)))
 
 
 def _mount_adapter(obj, adapter: HTTPAdapter, prefix: Optional[str] = None):
@@ -763,6 +772,8 @@ def play_game(client: berserk.Client,
                 print(f"[experience] ply {current_board.ply()} vs {who['opponent']}: penalties {penalties}")
         if CONTEMPT_PER_100 and "Contempt" in engine.options and who["me"] and who["them"]:
             options["Contempt"] = max(0, min(CONTEMPT_MAX, round((who["me"] - who["them"]) * CONTEMPT_PER_100 / 100)))
+        if "Move Overhead" in engine.options:
+            options["Move Overhead"] = lag.overhead_ms(ENGINE_MOVE_OVERHEAD_MS)
         return options
 
     def _think_and_send(current_board: chess.Board, current_state: dict, base_slack: float):

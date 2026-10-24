@@ -79,3 +79,18 @@ def test_lag_meter_floors_caps_and_smooths(bot):
         lag.record(9.0)
     assert lag.slack(0.1) == 1.5, "one hiccup cannot starve the search"
     assert lag.slack(2.0) == 2.0, "the per-game base is a floor"
+
+
+def test_move_overhead_follows_the_lag_in_coarse_steps(bot):
+    lag = bot._LagMeter()
+    assert lag.overhead_ms(150) == 150, "nothing measured yet: the configured base"
+    lag.record(0.08)
+    assert lag.overhead_ms(150) == 150, "a lag below the base keeps the base"
+    lag = bot._LagMeter()
+    lag.record(0.3)
+    assert lag.overhead_ms(150) == 400, "0.3 s of lag: 0.3 * 1.2 + 0.05 = 0.41 -> 400 ms"
+    lag.record(0.3)
+    assert lag.overhead_ms(150) == 400
+    for _ in range(10):
+        lag.record(9.0)
+    assert lag.overhead_ms(150) == 1000, "at most a second"

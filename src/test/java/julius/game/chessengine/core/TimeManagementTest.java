@@ -2,6 +2,7 @@ package julius.game.chessengine.core;
 
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -33,9 +34,9 @@ class TimeManagementTest {
 
     @Test
     void bulletNeverRunsTheFlagDown() {
-        // 60+0 at the start: 1.5 seconds, at most 4.5.
-        assertEquals(1499, opt(60_000, 0, 1));
-        assertEquals(4497, max(60_000, 0, 1));
+        // 60+0 at the start: about 1.5 seconds, at most 4.4 (40 moves' overhead of 30 ms kept back).
+        assertEquals(1469, opt(60_000, 0, 1));
+        assertEquals(4407, max(60_000, 0, 1));
         // Eight seconds left: a twentieth, at most an eighth.
         assertTrue(opt(8000, 0, 40) <= 400);
         assertTrue(max(8000, 0, 40) <= 1000);
@@ -63,10 +64,24 @@ class TimeManagementTest {
     }
 
     @Test
+    void suddenDeathKeepsTheOverheadOfEveryMoveStillToCome() {
+        // 60+0 with 250 ms a move beyond the search (Lichess): the start keeps 40 moves' worth back ...
+        assertEquals((60_000 - 250 - 250 * 40) / 40, SearchManager.allocate(60_000, 0, 0, 1, 250)[0]);
+        // ... and four seconds for sixteen more moves are for posting them, not for searching.
+        long[] end = SearchManager.allocate(4000, 0, 0, 60, 250);
+        assertEquals(1, end[0]);
+        assertEquals(1, end[1]);
+        // Before, the same clock still bought a search of a sixth of a second a move - and the flag fell.
+        assertTrue(SearchManager.allocate(4000, 0, 0, 60, 30)[0] >= 160);
+        // An increment that covers the overhead needs nothing kept back beyond this move.
+        assertArrayEquals(SearchManager.allocate(59_750, 1000, 0, 1, 0), SearchManager.allocate(60_000, 1000, 0, 1, 250));
+    }
+
+    @Test
     void movesToGoSharesTheClockEvenly() {
         long[] b = SearchManager.allocate(60_000, 0, 20, 10, 30);
-        assertEquals(2998, b[0]);
-        assertEquals(8995, b[1]);
+        assertEquals(2968, b[0]);
+        assertEquals(8905, b[1]);
         // The last move before the control may use most of what is left.
         long[] last = SearchManager.allocate(5000, 0, 1, 40, 30);
         assertTrue(last[0] <= 4000 && last[1] <= 4000);
