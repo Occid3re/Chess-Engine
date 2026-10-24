@@ -61,6 +61,11 @@ public final class Searcher {
     int bestMove;
     int bestScore;
     int rootUpdatedMove;
+    /** PV, score and bound of rootUpdatedMove: what a stopped iteration last found, reported before bestmove. */
+    final int[] rootUpdatedPv = new int[MAX_PLY + 1];
+    int rootUpdatedPvLength;
+    int rootUpdatedScore;
+    boolean rootUpdatedLower;
     int[] bestPv = new int[MAX_PLY + 1];
     int bestPvLength;
     long tbHits;
@@ -643,7 +648,14 @@ public final class Searcher {
                         System.arraycopy(pvTable[ply + 1], ply + 1, row, ply + 1, len - ply - 1);
                         pvLength[ply] = Math.max(len, ply + 1);
                     }
-                    if (root) rootUpdatedMove = m;
+                    if (root) {
+                        rootUpdatedMove = m;
+                        rootUpdatedScore = score;
+                        rootUpdatedLower = score >= beta;
+                        rootUpdatedPvLength = pvNode ? pvLength[0] : 1;
+                        if (pvNode) System.arraycopy(pvTable[0], 0, rootUpdatedPv, 0, rootUpdatedPvLength);
+                        else rootUpdatedPv[0] = m;
+                    }
                     if (score >= beta) break;
                     alpha = score;
                 }

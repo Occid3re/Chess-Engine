@@ -173,7 +173,7 @@ public final class SearchManager {
     }
 
     void onIterationComplete(Searcher s, boolean bestChanged) {
-        printInfo(s);
+        printInfo(s, s.completedDepth, s.bestScore, false, s.bestPv, s.bestPvLength);
         if (limits.depth > 0 && s.completedDepth >= limits.depth) {
             stop = true;
             return;
@@ -203,18 +203,43 @@ public final class SearchManager {
         if (elapsed >= optimumMs * factor || elapsed >= maximumMs * 0.9) stop = true;
     }
 
-    private void printInfo(Searcher s) {
+    private void printInfo(Searcher s, int depth, int score, boolean lowerbound, int[] pv, int pvLength) {
         long elapsed = Math.max(1, elapsedMs());
         long nodes = totalNodes();
         StringBuilder sb = new StringBuilder(256);
-        sb.append("info depth ").append(s.completedDepth).append(" seldepth ").append(s.selDepth);
-        sb.append(" multipv 1 score ").append(formatScore(s.bestScore));
+        sb.append("info depth ").append(depth).append(" seldepth ").append(s.selDepth);
+        sb.append(" multipv 1 score ").append(formatScore(score));
+        if (lowerbound) sb.append(" lowerbound");
         sb.append(" nodes ").append(nodes).append(" nps ").append(nodes * 1000 / elapsed);
         sb.append(" hashfull ").append(tt.hashfull());
         if (tablebases != null) sb.append(" tbhits ").append(totalTbHits());
         sb.append(" time ").append(elapsed).append(" pv");
-        for (int i = 0; i < s.bestPvLength; i++) sb.append(' ').append(Move.toUci(s.bestPv[i], chess960));
+        for (int i = 0; i < pvLength; i++) sb.append(' ').append(Move.toUci(pv[i], chess960));
         out.accept(sb.toString());
+    }
+
+    /**
+     * When the search stopped inside an iteration, the move it plays may come from that iteration (a root move that
+     * raised alpha or failed high), newer than the PV of the last completed one. Report the line the move came from
+     * before bestmove, so the last PV starts with the move played and its time is the real search time.
+     */
+    private void reportStopped(Searcher main, int best) {
+        if (main.rootDepth <= main.completedDepth) return;
+        if (main.rootUpdatedMove == best && main.rootUpdatedPvLength > 0 && main.rootUpdatedPv[0] == best) {
+            printInfo(main, main.rootDepth, main.rootUpdatedScore, main.rootUpdatedLower, main.rootUpdatedPv, main.rootUpdatedPvLength);
+        } else if (main.bestPvLength > 0 && main.bestPv[0] == best) {
+            printInfo(main, main.completedDepth, main.bestScore, false, main.bestPv, main.bestPvLength);
+        }
+    }
+
+    /**
+     * The expected reply: from the last completed PV when it starts with the move played (as always), otherwise from
+     * the stopped iteration's line for that move – which a fail-high often leaves without a reply.
+     */
+    private static int ponderMove(Searcher main, int best) {
+        if (main.bestPvLength > 1 && main.bestPv[0] == best) return main.bestPv[1];
+        if (main.rootUpdatedMove == best && main.rootUpdatedPvLength > 1 && main.rootUpdatedPv[0] == best) return main.rootUpdatedPv[1];
+        return Move.NONE;
     }
 
     static String formatScore(int score) {
@@ -311,8 +336,10 @@ public final class SearchManager {
                 }
             }
             int best = main.bestMove != Move.NONE ? main.bestMove : fallback;
+            reportStopped(main, best);
             StringBuilder sb = new StringBuilder("bestmove ").append(Move.toUci(best, chess960));
-            if (main.bestPvLength > 1 && main.bestPv[0] == best) sb.append(" ponder ").append(Move.toUci(main.bestPv[1], chess960));
+            int ponder = ponderMove(main, best);
+            if (ponder != Move.NONE) sb.append(" ponder ").append(Move.toUci(ponder, chess960));
             if (uncertainty != null) output.accept(uncertainty);
             output.accept(sb.toString());
         }, "search-main");

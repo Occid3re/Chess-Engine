@@ -185,6 +185,27 @@ class CoreEngineTest {
         assertTrue(best.equals("a2a3") || best.equals("h2h3"), best);
     }
 
+    @ParameterizedTest
+    @CsvSource(delimiter = ';', value = {
+            // 4.2.1 stopped these searches inside an iteration that had found a new best move and reported only the
+            // older PV (fastchess: "Bestmove does not match beginning of last PV").
+            "r2qk2r/ppp2ppp/2n1bn2/2b5/8/3P1N1P/PPPBBPP1/RN1QK2R b KQkq - 4 8;363813",
+            "rnbqkb1r/1p3ppp/p4n2/2Pp4/1P6/4B3/P1P2PPP/RN1QKBNR w KQkq - 0 7;192361",
+            "r2qk1nr/1b2bppp/p1n1p3/1pppP3/3P4/P1P2N2/1P2BPPP/RNBQ1RK1 w kq - 1 9;246411",
+    })
+    void theLastReportedPvStartsWithTheMovePlayed(String fen, int nodes) throws InterruptedException {
+        java.util.List<String> out = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        Uci uci = new Uci(out::add);
+        uci.handle("setoption name Hash value 64");
+        uci.handle("ucinewgame");
+        uci.handle("position fen " + fen);
+        java.util.List<String> lines = goAndWait(uci, out, "go nodes " + nodes);
+        String best = bestmove(lines);
+        String pv = null;
+        for (String line : lines) if (line.startsWith("info ") && line.contains(" pv ")) pv = line;
+        assertTrue(pv != null && pv.substring(pv.indexOf(" pv ") + 4).split(" ")[0].equals(best), best + " after " + pv);
+    }
+
     @Test
     void rootPenaltyMakesTheEngineDeviateOnlyWhenItIsLarge() throws InterruptedException {
         java.util.List<String> out = java.util.Collections.synchronizedList(new java.util.ArrayList<>());

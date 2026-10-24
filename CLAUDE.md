@@ -37,6 +37,13 @@ No dependencies (plain `javac` builds it), ~0.8-1M nps per thread.
 
 - Position/MoveGen/Attacks (magic bitboards, perft-verified), Searcher (negamax PVS, int centipawns, TT, NMP,
   LMR, RFP, ProbCut, singular ext., history/continuation history), SearchManager (Lazy SMP, time management)
+- A search stopped inside an iteration plays that iteration's newest root result (a move that raised alpha or failed
+  high) and, since 4.2.2, reports it before `bestmove` (`info depth <that iteration> ... [lowerbound] pv <move> ...`),
+  so the last PV always starts with the move played and its `time` is the whole search. The ponder move stays the
+  completed PV's reply when that PV starts with the move played (a fail-high line often has no reply), otherwise it
+  is the reply from the stopped iteration's line (before: none). Before, only completed iterations were reported
+  (fastchess: "Bestmove does not match beginning of last PV"). Search and move choice are unchanged: bench and
+  node-limited bestmoves are identical to 4.2.1.
 - Search constants live in `core/Tune.java` (name, default, min, max, SPSA step). With `-Dcore.tune=true` they
   are UCI spin options; `scripts/tuning/spsa.py` reads them from that file, so add new tunables there.
 - Eval: tapered hand-crafted eval, weights in `src/main/resources/core/eval-weights.txt`,
@@ -211,6 +218,8 @@ etsest-unc.bin`, retrained on every promotion).
   4.2.1: the run loop (`run_with_reconnect`) counts only drops in a row towards its 50 attempts: a run that stayed
   up 10 minutes (`RECONNECT_STABLE_SEC`) starts the count again. Before, every routine stream drop since the start
   counted, and a bot playing all day exited after two or three days.
+  4.2.2: the engine reports the line it plays when a search stops mid-iteration (see SearchManager above): the lag
+  meter no longer counts the unreported rest of the search as network lag, and the bot also ponders after those moves.
   Rating-aware contempt exists (`BOT_CONTEMPT_PER_100`) but is OFF until a match shows it helps.
 - `/alieknek/nnue.json` + `/alieknek/nnue.bin` on the public watch port: the engine's network for the app's
   network view (read from the jar once, ETag-revalidated); costs nothing during play.
